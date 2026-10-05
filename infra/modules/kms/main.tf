@@ -155,7 +155,7 @@ data "aws_iam_policy_document" "audit_key" {
   }
 
   statement {
-    sid     = "CloudWatchLogsEncryption"
+    sid = "CloudWatchLogsEncryption"
     actions = [
       "kms:Encrypt*",
       "kms:Decrypt*",

@@ -6,7 +6,7 @@ locals {
 
 # SC-12, SC-13, SC-28: customer-managed keys with yearly rotation.
 module "kms" {
-  source    = "./modules/kms"
+  source = "./modules/kms"
   providers = {
     aws    = aws
     aws.dr = aws.dr
@@ -18,7 +18,7 @@ module "kms" {
 
 # Data lake with versioning, encryption, and cross-region replication (CP-6, CP-9, SC-28).
 module "data_lake" {
-  source    = "./modules/data_lake"
+  source = "./modules/data_lake"
   providers = {
     aws    = aws
     aws.dr = aws.dr
@@ -142,9 +142,13 @@ module "user_prefs" {
 module "jobs" {
   source = "./modules/jobs"
 
-  name                       = local.name
-  image_uri                  = var.jobs_image_uri
-  jobs                       = var.jobs
+  name      = local.name
+  image_uri = var.jobs_image_uri
+  jobs = {
+    for job_name, job in var.jobs : job_name => job_name == "backfill" ? merge(job, {
+      schedule = var.backfill_resume_schedule
+    }) : job
+  }
   lake_bucket_name           = module.data_lake.lake_bucket_name
   lake_bucket_arn            = module.data_lake.lake_bucket_arn
   data_key_arn               = module.kms.data_key_arn

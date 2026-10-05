@@ -86,7 +86,7 @@ locals {
   job_source   = "${var.name}.jobs"
 
   scheduled = { for k, j in local.enabled_jobs : k => j if j.schedule != "" }
-  triggers  = merge([
+  triggers = merge([
     for k, j in local.enabled_jobs : {
       for t in j.triggers : "${k}--${replace(replace(t, ":", "-"), "*", "any")}" => { job = k, trigger = t }
     }
@@ -293,11 +293,11 @@ resource "aws_iam_role" "scheduler" {
 }
 
 resource "aws_iam_role_policy" "scheduler" {
-  count  = length(local.scheduled) > 0 ? 1 : 0
-  name   = "invoke-scheduled-jobs"
-  role   = aws_iam_role.scheduler[0].id
+  count = length(local.scheduled) > 0 ? 1 : 0
+  name  = "invoke-scheduled-jobs"
+  role  = aws_iam_role.scheduler[0].id
   policy = jsonencode({
-    Version   = "2012-10-17"
+    Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
       Action   = "lambda:InvokeFunction"
@@ -328,9 +328,9 @@ resource "aws_scheduler_schedule" "job" {
 }
 
 resource "aws_cloudwatch_event_rule" "trigger" {
-  for_each      = local.triggers
-  name          = "${var.name}-${each.key}"
-  description   = "Start ${each.value.job} on ${each.value.trigger}"
+  for_each    = local.triggers
+  name        = "${var.name}-${each.key}"
+  description = "Start ${each.value.job} on ${each.value.trigger}"
   event_pattern = each.value.trigger == "ticker-added" ? jsonencode({
     source        = [var.prefs_event_source]
     "detail-type" = ["TickerAdded"]

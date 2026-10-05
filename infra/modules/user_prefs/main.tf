@@ -196,8 +196,8 @@ data "aws_iam_policy_document" "api" {
     }
   }
   statement {
-    sid       = "ReadDashboardServingObjects"
-    actions   = ["s3:GetObject"]
+    sid     = "ReadDashboardServingObjects"
+    actions = ["s3:GetObject"]
     resources = [
       "${var.lake_bucket_arn}/serving/dashboard.json",
       "${var.lake_bucket_arn}/serving/status.json",
@@ -337,7 +337,7 @@ resource "aws_apigatewayv2_stage" "default" {
 
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.api_access.arn
-    format          = jsonencode({
+    format = jsonencode({
       requestId = "$context.requestId", ip = "$context.identity.sourceIp", sub = "$context.authorizer.claims.sub",
       route     = "$context.routeKey", status = "$context.status", latencyMs = "$context.responseLatency",
       error     = "$context.authorizer.error", time = "$context.requestTime"
