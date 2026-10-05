@@ -21,7 +21,7 @@ from pathlib import Path
 
 import boto3
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "functions" / "q1_fundamentals"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "functions" / "q1_fundamentals"))
 from fundamentals import ManualRowError, parse_manual_csv
 
 KEY = "manual/fundamentals/fundamentals_manual.csv"

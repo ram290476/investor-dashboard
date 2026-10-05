@@ -243,7 +243,7 @@ resource "aws_iam_role_policy" "api" {
 
 data "archive_file" "api" {
   type        = "zip"
-  source_file = "${path.module}/../../functions/prefs_api/prefs_api.py"
+  source_file = "${path.root}/../../services/data-jobs/src/functions/prefs_api/prefs_api.py"
   output_path = "${path.module}/.build/prefs_api.zip"
 }
 

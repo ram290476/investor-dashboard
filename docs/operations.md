@@ -29,7 +29,7 @@ document's proposed TypeScript/Vite/Svelte implementation.
 The currently wired data jobs are daily Alpaca prices (`daily-prices`, emitted job ID `D4`),
 Yahoo historical prices (`backfill`), trend metrics, quarterly fundamentals, short interest,
 options, status-feed updates and dashboard snapshot building. The key-rotation checker is a
-separate Lambda. The job map and schedules live in `infra/variables.tf`.
+separate Lambda. The job map and schedules live in `infra/terraform/variables.tf`.
 
 This is not yet the complete source catalog implementation: the architecture lists additional
 hourly, macro, release-day, regulatory, weekly and annual collectors that are not wired here.
@@ -48,13 +48,13 @@ not long-lived IAM user keys.
 
 ### Terraform variables and secrets
 
-1. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars`. Set at least the alert
+1. Copy `infra/terraform/terraform.tfvars.example` to `infra/terraform/terraform.tfvars`. Set at least the alert
    recipient email addresses and a valid SEC contact User-Agent before enabling SEC collectors.
 2. For remote state, create a versioned, encrypted, private S3 state bucket, then copy
-   `infra/backend.tf.example` to `infra/backend.tf` and fill in the bucket and region. Enable S3
+   `infra/terraform/backend.tf.example` to `infra/terraform/backend.tf` and fill in the bucket and region. Enable S3
    native locking as shown. Do not commit either generated file.
 3. API credentials are not Terraform variables and must not be put in the static site or Git.
-   Provision them with `infra/scripts/rotate-key.sh <key-name>`; the script stores values in
+   Provision them with `infra/terraform/scripts/rotate-key.sh <key-name>`; the script stores values in
    SSM Parameter Store as SecureStrings. Grant the job roles access only to their declared keys.
 4. `api_keys` in Terraform is metadata (provider, source IDs and rotation interval), not secret
    values. The static site's `config.json` contains only the API URL and public Cognito client
@@ -66,7 +66,7 @@ resources.
 
 ## Provision and update infrastructure
 
-From `infra/`:
+From `infra/terraform/`:
 
 ```sh
 terraform fmt -recursive
@@ -123,7 +123,7 @@ scope carefully.
 
 The deployment performs a base Terraform apply only when the ECR repository is not yet in state,
 builds/pushes an immutable arm64 image, applies the job Lambdas with that image, writes the
-runtime configuration to an ignored `Web/site/config.json`, publishes the static site and
+runtime configuration to an ignored `apps/web/config.json`, publishes the static site and
 invalidates CloudFront. It then checks the site and generated configuration over HTTPS.
 No application secrets are printed or shipped to the browser.
 
@@ -177,8 +177,8 @@ Verify the earliest and latest `date` values in each ticker's parquet data and i
 
 ## Regular data refresh and manual runs
 
-The default schedules are configured in `infra/variables.tf` and use
-`America/New_York` in `infra/modules/jobs/main.tf`. Currently wired schedules include:
+The default schedules are configured in `infra/terraform/variables.tf` and use
+`America/New_York` in `infra/terraform/modules/jobs/main.tf`. Currently wired schedules include:
 
 | Job | Schedule / trigger | Notes |
 | --- | --- | --- |
@@ -197,19 +197,19 @@ Use a one-off Lambda invocation for manual refreshes, for example:
 aws lambda invoke --function-name invdash-daily-prices --payload '{}' /tmp/daily-prices.json
 ```
 
-To change schedules, update the relevant job entry in `infra/variables.tf`, inspect
+To change schedules, update the relevant job entry in `infra/terraform/variables.tf`, inspect
 `terraform plan`, then apply. Do not create a second schedule manually for the same job.
 Check `/status` in the signed-in dashboard or `serving/status.json` for the latest run and
 failure state. The `/dashboard` and `/status` API routes require a Cognito access token.
 
 ## Build, run and verify the web application
 
-For local UI work, create a local runtime config based on `Web/site/config.example.json` or
+For local UI work, create a local runtime config based on `apps/web/config.example.json` or
 generate it from deployed Terraform outputs:
 
 ```sh
-terraform -chdir=infra output -json site_runtime_config > Web/site/config.json
-python3 -m http.server 8080 --directory Web/site
+terraform -chdir=infra/terraform output -json site_runtime_config > apps/web/config.json
+python3 -m http.server 8080 --directory apps/web
 ```
 
 Ensure `http://localhost:8080/` is in the Cognito callback/logout and API CORS settings for local

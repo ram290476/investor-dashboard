@@ -101,7 +101,7 @@ resource "aws_ssm_parameter" "key" {
 # ---------------------------------------------------------------------------
 data "archive_file" "checker" {
   type        = "zip"
-  source_file = "${path.module}/../../functions/key_rotation_check/key_rotation_check.py"
+  source_file = "${path.root}/../../services/data-jobs/src/functions/key_rotation_check/key_rotation_check.py"
   output_path = "${path.module}/.build/key_rotation_check.zip"
 }
 

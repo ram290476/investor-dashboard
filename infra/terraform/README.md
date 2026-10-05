@@ -5,7 +5,7 @@ logging, monitoring, alerting, backup/security controls, private CloudFront site
 Cognito sign-in, preferences/data API and container-image jobs. These controls are not a
 FedRAMP authorization; see the scope note below.
 
-See the root [deployment and operations guide](../OPERATIONS.md) for the UI, API, historical
+See the [deployment and operations guide](../../docs/operations.md) for the UI, API, historical
 backfill, scheduled refreshes, CI/CD setup, monitoring and troubleshooting.
 
 Expected cost: **about $21-35 a month** in year 1 (see the architecture doc's cost table). Use the
@@ -26,19 +26,19 @@ Expected cost: **about $21-35 a month** in year 1 (see the architecture doc's co
 | `site` | Private, versioned S3 static-site bucket; CloudFront Origin Access Control, HTTPS, SPA routing and security headers | SC-8, SC-28 |
 | `user_prefs` | DynamoDB `user_prefs` table; site API `GET/PUT /prefs`, authenticated `GET /dashboard` and `/status`; Cognito JWT authorizer; per-user isolation via session-tagged role and `dynamodb:LeadingKeys`; 5xx alarm | AC-3, AC-6, SC-28, CP-9 |
 | `jobs` | Container-image job Lambdas with per-job roles, schedules and event triggers: daily prices, trends, fundamentals, short interest, options, five-year backfill, dashboard build and status feed; failures go to the dead-letter queue. Created once `jobs_image_uri` is set | AC-6, SI-11, CP-10 |
-| `app/observability.py` | Powertools helper: JSON logs with `run_id`/`source_id`, X-Ray subsegments and custom metrics. A public `health.json` publisher is not yet wired. | AU-3, AU-8, SI-4 |
-| `app/api_keys.py` | Reads keys with a 5-minute cache, so rotations apply without a redeploy | IA-5 |
-| `scripts/rotate-key.sh` | Stores a regenerated key without it touching shell history or the process list | IA-5(h) |
-| `app/http_client.py` | httpx client that refuses any host outside the provider allowlist (compensating control for SC-7(5)) | SC-7, AC-4 |
-| `app/universe.py` | Ticker union from all users (capped at `max_user_tickers`), index ETF proxies, Alpha Vantage sentiment rotation | |
-| `app/status_feed.py` | Builds `serving/status.json` (job, status, last/next run) with S3 conditional writes | SI-4 |
-| `app/collectors/` | Alpaca bars and options, FINRA short interest, Kalshi odds, Atlanta/Cleveland Fed, Yahoo backfill (parsers tested with fixtures) | |
-| `functions/` | Handlers for collectors, price backfill, dashboard snapshot, authenticated API, status feed and key rotation | |
-| `Dockerfile`, `requirements-jobs.txt` | One arm64 job image; each function picks its handler | CM-2 |
-| `tests/` | Pytest coverage for trend math, fundamentals, API, collectors, retries, status, backfill and dashboard snapshot | SA-11 |
-| `scripts/add_fundamental.py` | Adds a reviewed deliveries / FSD-subscriber row to the manual fundamentals file | SI-10 |
-| `canary/index.js` | Checks `health.json` through CloudFront for HTTP 200, data age and stale P1 sources | SI-4, CP-2 |
-| `.github/workflows/ci.yml`, `deploy.yml` | CI validation and protected production deployment via GitHub OIDC; requires repository/environment setup described in [OPERATIONS.md](../OPERATIONS.md) | CM-3, RA-5, SA-11, IA-5 |
+| `services/data-jobs/src/app/observability.py` | Powertools helper: JSON logs with `run_id`/`source_id`, X-Ray subsegments and custom metrics. A public `health.json` publisher is not yet wired. | AU-3, AU-8, SI-4 |
+| `services/data-jobs/src/app/api_keys.py` | Reads keys with a 5-minute cache, so rotations apply without a redeploy | IA-5 |
+| `infra/terraform/scripts/rotate-key.sh` | Stores a regenerated key without it touching shell history or the process list | IA-5(h) |
+| `services/data-jobs/src/app/http_client.py` | httpx client that refuses any host outside the provider allowlist (compensating control for SC-7(5)) | SC-7, AC-4 |
+| `services/data-jobs/src/app/universe.py` | Ticker union from all users (capped at `max_user_tickers`), index ETF proxies, Alpha Vantage sentiment rotation | |
+| `services/data-jobs/src/app/status_feed.py` | Builds `serving/status.json` (job, status, last/next run) with S3 conditional writes | SI-4 |
+| `services/data-jobs/src/app/collectors/` | Alpaca bars and options, FINRA short interest, Kalshi odds, Atlanta/Cleveland Fed, Yahoo backfill (parsers tested with fixtures) | |
+| `services/data-jobs/src/functions/` | Handlers for collectors, price backfill, dashboard snapshot, authenticated API, status feed and key rotation | |
+| `infra/docker/Dockerfile`, `services/data-jobs/requirements-jobs.txt` | One arm64 job image; each function picks its handler | CM-2 |
+| `services/data-jobs/tests/` | Pytest coverage for trend math, fundamentals, API, collectors, retries, status, backfill and dashboard snapshot | SA-11 |
+| `services/data-jobs/scripts/add_fundamental.py` | Adds a reviewed deliveries / FSD-subscriber row to the manual fundamentals file | SI-10 |
+| `infra/terraform/canary/index.js` | Checks `health.json` through CloudFront for HTTP 200, data age and stale P1 sources | SI-4, CP-2 |
+| `.github/workflows/ci.yml`, `deploy.yml` | CI validation and protected production deployment via GitHub OIDC; requires repository/environment setup described in [the operations guide](../../docs/operations.md) | CM-3, RA-5, SA-11, IA-5 |
 
 ## Before you apply
 
@@ -72,7 +72,7 @@ Then confirm the SNS subscription emails (one per topic per address).
 
 The jobs module sets Lambda environments, X-Ray tracing, per-job IAM, retry/DLQ behavior and
 configured schedules. The site/API/Cognito modules are part of the same Terraform root. Follow
-the [Operations guide](../OPERATIONS.md) to configure the protected GitHub deployment environment,
+the [Operations guide](../../docs/operations.md) to configure the protected GitHub deployment environment,
 publish the UI and run the initial history load.
 
 The CloudFront distribution is created with HTTPS redirection and security headers; CloudFront

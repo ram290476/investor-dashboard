@@ -84,7 +84,7 @@ output "site" {
 }
 
 output "site_runtime_config" {
-  description = "Write this JSON object to Web/site/config.json before publishing the static site."
+  description = "Write this JSON object to apps/web/config.json before publishing the static site."
   value = {
     apiBaseUrl    = module.user_prefs.api_endpoint
     cognitoDomain = module.site_auth.hosted_ui_url
