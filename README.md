@@ -34,3 +34,36 @@ architecture document's proposed TypeScript/Vite/Svelte stack.
 Validate Terraform and run tests before deployment. AWS provisioning, provider access and
 production browser behavior require the corresponding AWS account and credentials; successful
 local validation alone does not establish production readiness.
+
+## Next Steps: Start the AWS deployment
+
+The deployment workflow is already defined. It is not live in AWS yet; the AWS state bucket and GitHub OIDC role/environment must be configured first. Follow the detailed `operations guide`.
+
+1. **Prepare Terraform state.** Create a private, versioned, encrypted S3 bucket with public access blocked. Copy `backend.tf.example` to `infra/backend.tf` and fill in the bucket and region. The state bucket must exist before Terraform can initialize.
+
+2. **Set up GitHub OIDC and production protections.** In the AWS account, configure GitHub's OIDC provider and a deployment role trusted only for `repo:<OWNER>/<REPO>:environment:production` with audience `sts.amazonaws.com`. Give that role the permissions needed for this Terraform stack, ECR image publication, site-bucket upload, and CloudFront invalidation. In GitHub, create the `production` environment and require reviewer approval; otherwise the environment is not an approval gate.
+
+3. **Add GitHub environment values** under Settings → Environments → `production`:
+   - Variable `AWS_REGION`, matching the Terraform `region`.
+   - Secret `AWS_DEPLOY_ROLE_ARN`.
+   - Secret `TF_BACKEND_CONFIG`, containing the complete S3 backend block.
+   - Secret `TERRAFORM_TFVARS`, containing the non-secret Terraform settings (for example project, region, and alert email). Do not put provider API credentials in it.
+
+   See `terraform.tfvars.example` for the configuration shape. Provider credentials belong in SSM SecureString using `rotate-key.sh`, not in GitHub runtime config or the static site.
+
+4. **Start deployment.** Open **Actions → Deploy production → Run workflow**, select `main`, and run it. Or merge a PR to `main`: `CI` must pass first, then `Deploy production` waits for the production environment approval. On the first run it provisions the base stack if needed, builds/pushes the arm64 job image, applies the job Lambdas, generates the ignored `Web/site/config.json`, publishes the site, invalidates CloudFront, and checks the public site/config URLs.
+
+5. **Verify and invite yourself.** From `infra/`, run `terraform output -json site` for the CloudFront URL and `terraform output -json cognito` for the user-pool ID. Invite a user with `aws cognito-idp admin-create-user --user-pool-id <user-pool-id> --username <your-email>`, then open the CloudFront URL and complete sign-in/MFA.
+
+6. **Start the initial price history load.** After the workflow has deployed the `backfill` Lambda, invoke it with the project prefix (default `invdash`):
+   ```sh
+   aws lambda invoke \
+     --function-name invdash-backfill \
+     --cli-binary-format raw-in-base64-out \
+     --payload '{"tickers":["TSLA","SPCX"]}' \
+     /tmp/backfill-result.json
+   cat /tmp/backfill-result.json
+   ```
+   Monitor `/aws/lambda/invdash-backfill` and `curated/prices_daily/_backfill/state.json` in the lake bucket. The scheduled 15-minute run resumes incomplete batches.
+
+**Scope note:** this deploys the implemented platform path, not every collector in the architecture catalog. Five-year history is currently for daily prices; M1 and additional macro/news/regulatory/annual collectors remain outstanding, and the freshness canary is disabled until a safe public health document is implemented. The operations guide records these limits and troubleshooting steps.
