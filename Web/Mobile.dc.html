@@ -1,0 +1,1518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Investor Dashboard · Mobile</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#7DB4FF}
+button:focus-visible{outline:2px solid #7DB4FF;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #0B0E13; color: #E6EAF0; font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+
+<header style="position: relative; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #1A2029; background: #0B0E13">
+<div style="display: flex; flex-direction: column; min-width: 0"><h1 style="margin: 0; font-size: 16px; font-weight: 600">Investor Dashboard</h1><span style="font-size: 11px; color: #9BA6B5">{{marketStatus}}</span></div>
+<div style="position: relative">
+<sc-if value="{{signedIn}}" hint-placeholder-val="{{ true }}">
+<button onClick="{{toggleUm}}" aria-expanded="{{umExp}}" aria-haspopup="menu" aria-label="{{umLabel}}" style="position: relative; width: 44px; height: 44px; padding: 0; border-radius: 50%; border: 1px solid #2A323E; background: #25344A; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="5.5" r="3" style="fill: none; stroke: #C5CDD8; stroke-width: 1.4"></circle><path d="M2.5 14 C3.5 10.8 12.5 10.8 13.5 14" style="fill: none; stroke: #C5CDD8; stroke-width: 1.4"></path></svg><span style="position: absolute; right: 1px; bottom: 1px; width: 12px; height: 12px; border-radius: 50%; background: {{jobDot}}; border: 2px solid #0B0E13"></span></button>
+</sc-if>
+<sc-if value="{{signedOut}}" hint-placeholder-val="{{ false }}">
+<button onClick="{{signIn}}" style="display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: 999px; border: 1px solid #3B5578; background: #16202E; color: #E6EAF0; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="5.5" r="3" style="fill: none; stroke: #C5CDD8; stroke-width: 1.4"></circle><path d="M2.5 14 C3.5 10.8 12.5 10.8 13.5 14" style="fill: none; stroke: #C5CDD8; stroke-width: 1.4"></path></svg>Sign in</button>
+</sc-if>
+<sc-if value="{{umOpen}}" hint-placeholder-val="{{ false }}">
+<div role="menu" aria-label="Account" style="position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; width: 300px; background: #12161D; border: 1px solid #2A3A52; border-radius: 12px; box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55); display: flex; flex-direction: column; overflow: hidden">
+<div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #1A2029">
+<span style="width: 38px; height: 38px; flex: none; border-radius: 50%; background: #25344A; display: flex; align-items: center; justify-content: center"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="5.5" r="3" style="fill: none; stroke: #C5CDD8; stroke-width: 1.4"></circle><path d="M2.5 14 C3.5 10.8 12.5 10.8 13.5 14" style="fill: none; stroke: #C5CDD8; stroke-width: 1.4"></path></svg></span>
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 13px; font-weight: 500">Signed in</span><span style="font-size: 11px; color: #9BA6B5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">[email] · Cognito session active</span></span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #1A2029">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px"><span style="font-size: 10px; color: #8B96A6; text-transform: uppercase; letter-spacing: 0.08em">Data refresh</span><span style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #C5CDD8"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{jobDot}}"></span>{{jobSum}}</span></div>
+<sc-for list="{{keyJobs}}" as="j" hint-placeholder-count="3">
+<div title="{{j.src}}" style="display: grid; grid-template-columns: 12px 30px minmax(0, 1fr) auto; gap: 6px; align-items: center; font-size: 11px">
+<span style="width: 7px; height: 7px; border-radius: 50%; background: {{j.dot}}"></span><span style="font-family: 'IBM Plex Mono', monospace">{{j.id}}</span><span style="color: #9BA6B5">{{j.name}}</span><span style="font-family: 'IBM Plex Mono', monospace; color: #8B96A6">{{j.last}} → {{j.next}}</span>
+</div>
+</sc-for>
+<button role="menuitem" onClick="{{openRefresh}}" style="align-self: flex-start; min-height: 30px; padding: 0; border: 0; background: transparent; color: #7DB4FF; font: inherit; font-size: 12px; cursor: pointer">All refresh jobs →</button>
+</div>
+<div style="display: flex; flex-direction: column; padding: 6px">
+<button role="menuitem" onClick="{{openTickers}}" style="display: flex; justify-content: space-between; align-items: center; min-height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #E6EAF0; font: inherit; font-size: 13px; text-align: left; cursor: pointer">My tickers<span style="font-size: 11px; color: #8B96A6">add · pin · reorder</span></button>
+<button role="menuitem" onClick="{{openDisplay}}" style="display: flex; justify-content: space-between; align-items: center; min-height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #E6EAF0; font: inherit; font-size: 13px; text-align: left; cursor: pointer">Display<span style="font-size: 11px; color: #8B96A6">time zone · colors</span></button>
+<button role="menuitem" onClick="{{signOut}}" style="display: flex; align-items: center; min-height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #F0A6A6; font: inherit; font-size: 13px; text-align: left; cursor: pointer">Sign out</button>
+</div>
+</div>
+</sc-if>
+</div>
+</header>
+
+<div style="padding: 10px 14px 0">
+<div style="display: flex; align-items: stretch; gap: 8px; min-width: 0">
+<div role="group" aria-label="My tickers: pick a stock" style="flex: 1; min-width: 0; display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px">
+<sc-for list="{{strip}}" as="t" hint-placeholder-count="5">
+<sc-if value="{{t.divider}}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="flex: none; width: 1px; margin: 8px 2px; background: #2A323E"></span></sc-if>
+<button onClick="{{t.go}}" aria-pressed="{{t.pressed}}" title="{{t.name}} · {{t.stateTxt}}" style="flex: {{t.flex}}; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 64px; gap: 2px 10px; align-items: center; padding: 8px 12px; min-height: 58px; border-radius: 10px; border: 1px solid {{t.bd}}; background: {{t.bg}}; color: #E6EAF0; font: inherit; text-align: left; cursor: pointer">
+<span style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span style="display: flex; align-items: center; gap: 6px; min-width: 0"><span style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: {{t.dot}}"></span><span style="font-size: 14px; font-weight: 600">{{t.sym}}</span><sc-if value="{{t.pinned}}" hint-placeholder-val="{{ true }}"><svg viewBox="0 0 12 12" width="11" height="11" aria-label="Pinned"><path d="M6 1 L7.5 4.3 L11 4.6 L8.3 6.9 L9.2 10.4 L6 8.5 L2.8 10.4 L3.7 6.9 L1 4.6 L4.5 4.3 Z" style="fill: #E3B341; stroke: #E3B341; stroke-width: 1"></path></svg></sc-if><span style="font-size: 11px; color: #9BA6B5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{t.name}}</span></span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; white-space: nowrap">{{t.last}} <span style="color: {{t.color}}">{{t.chg}}</span></span>
+</span>
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" style="width: 100%; height: 30px"><path d="{{t.spark}}" style="fill: none; stroke: {{t.color}}; stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+</button>
+</sc-for>
+</div>
+<button onClick="{{openTickers}}" aria-label="Add or pin tickers in My tickers" style="flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 100px; padding: 0 12px; border-radius: 10px; border: 1px dashed #3B5578; background: transparent; color: #C5CDD8; font: inherit; font-size: 12px; cursor: pointer">
+<span style="display: flex; align-items: center; gap: 6px"><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" style="stroke: currentColor; stroke-width: 1.5"></path></svg>Add / pin</span>
+<span style="font-size: 10px; color: #8B96A6">My tickers</span>
+</button>
+</div>
+</div>
+
+<main style="flex: 1; overflow-y: auto; padding: 12px 14px 16px; display: flex; flex-direction: column; gap: 12px">
+<sc-if value="{{isChart}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; color: #9BA6B5">{{name}} · {{sym}} · {{barNote}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 500; line-height: 1.1">{{hdr.last}}</span>
+<span style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px"><span style="padding: 1px 8px; border-radius: 999px; border: 1px solid {{trBd}}; color: {{trFg}}; background: {{trBg}}">{{trendTxt}}</span><span style="color: #9BA6B5">vs 20-day avg <span style="font-family: 'IBM Plex Mono', monospace; color: {{vsMaC}}">{{vsMa}}</span></span></span>
+</div>
+<div role="group" aria-label="Period: return over each period; select one to chart it" style="display: flex; gap: 4px; overflow-x: auto; max-width: 100%; padding-bottom: 2px">
+<sc-for list="{{pers}}" as="p" hint-placeholder-count="8"><button onClick="{{p.pick}}" aria-pressed="{{p.pressed}}" title="{{p.tip}}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; flex: none; min-width: 58px; min-height: 44px; padding: 3px 8px; border-radius: 8px; border: 1px solid {{p.bd}}; background: {{p.bg}}; color: #C5CDD8; font: inherit; cursor: pointer"><span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em">{{p.l}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: {{p.c}}">{{p.v}}</span></button></sc-for>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid #222A35; border-radius: 10px; background: #0F1319">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px">
+<div role="tablist" aria-label="Overlay groups" style="display: flex; gap: 4px; overflow-x: auto; max-width: 100%; padding-bottom: 2px">
+<span style="align-self: center; margin-right: 4px; font-size: 11px; color: #8B96A6">Overlays</span>
+<sc-for list="{{ogTabs}}" as="g" hint-placeholder-count="6"><button role="tab" aria-selected="{{g.pressed}}" onClick="{{g.pick}}" style="flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid {{g.bd}}; background: {{g.bg}}; color: {{g.fg}}; font: inherit; font-size: 12px; cursor: pointer">{{g.k}}<sc-if value="{{g.hasCnt}}" hint-placeholder-val="{{ false }}"><span style="min-width: 16px; padding: 0 4px; border-radius: 999px; background: #2C4466; color: #E6EAF0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-align: center">{{g.cnt}}</span></sc-if></button></sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 11px; color: #8B96A6">{{ovCount}}</span><sc-if value="{{hasOv}}" hint-placeholder-val="{{ true }}"><button onClick="{{clearOv}}" style="min-height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid #2A323E; background: transparent; color: #C5CDD8; font: inherit; font-size: 11px; cursor: pointer">Clear all</button></sc-if></div>
+</div>
+<div role="group" aria-label="{{og}} overlays" style="display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 2px">
+<button onClick="{{groupAll.pick}}" style="flex: none; white-space: nowrap; min-height: 28px; padding: 0 10px; border-radius: 999px; border: 1px dashed #4A5A72; background: transparent; color: #C5CDD8; font: inherit; font-size: 11px; cursor: pointer">{{groupAll.label}}</button>
+<sc-for list="{{ovChips}}" as="o" hint-placeholder-count="5">
+<button onClick="{{o.pick}}" aria-pressed="{{o.pressed}}" title="{{o.tip}}" style="flex: none; white-space: nowrap; display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid {{o.bd}}; background: {{o.bg}}; color: {{o.fg}}; font: inherit; font-size: 11px; cursor: pointer"><span style="width: 14px; height: 0; border-top: 2px {{o.ls}} {{o.sw}}"></span>{{o.l}}</button>
+</sc-for>
+</div>
+<span style="font-size: 10px; color: #8B96A6">{{ogNote}}</span>
+</div>
+
+<div style="padding-right: 40px">
+<div style="position: relative; height: 190px">
+<sc-for list="{{yt}}" as="y" hint-placeholder-count="4">
+<div style="position: absolute; left: 0; right: 0; top: {{y.top}}; border-top: 1px solid #1C232D"><span style="position: absolute; right: -40px; top: -8px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8B96A6">{{y.l}}</span></div>
+</sc-for>
+<svg viewBox="0 0 1000 252" preserveAspectRatio="none" aria-hidden="true" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%">
+<path d="{{ov1.d}}" style="fill: none; stroke: {{ov1.c}}; stroke-width: 1.5; stroke-dasharray: {{ov1.dash}}; vector-effect: non-scaling-stroke"></path>
+<path d="{{ov2.d}}" style="fill: none; stroke: {{ov2.c}}; stroke-width: 1.5; stroke-dasharray: {{ov2.dash}}; vector-effect: non-scaling-stroke"></path>
+<path d="{{ov3.d}}" style="fill: none; stroke: {{ov3.c}}; stroke-width: 1.5; stroke-dasharray: {{ov3.dash}}; vector-effect: non-scaling-stroke"></path>
+<path d="{{ov4.d}}" style="fill: none; stroke: {{ov4.c}}; stroke-width: 1.5; stroke-dasharray: {{ov4.dash}}; vector-effect: non-scaling-stroke"></path>
+<path d="{{ov5.d}}" style="fill: none; stroke: {{ov5.c}}; stroke-width: 1.5; stroke-dasharray: {{ov5.dash}}; vector-effect: non-scaling-stroke"></path>
+<path d="{{lineA}}" style="fill: none; stroke: {{col}}; stroke-width: 2.25; vector-effect: non-scaling-stroke"></path>
+</svg>
+<sc-for list="{{marks}}" as="mk" hint-placeholder-count="6">
+<div style="position: absolute; top: 0; bottom: 0; left: {{mk.left}}; width: 0; border-left: 1px dashed {{mk.line}}">
+<button onClick="{{mk.pick}}" aria-label="{{mk.label}}" title="{{mk.label}}" style="position: absolute; top: 0; left: 0; transform: translate(-50%, -50%); width: {{mk.size}}; height: {{mk.size}}; padding: 0; border-radius: 50%; border: 2px solid #12161D; background: {{mk.color}}; cursor: pointer"></button>
+</div>
+</sc-for>
+</div>
+<sc-for list="{{lanes}}" as="ln" hint-placeholder-count="2">
+<div style="position: relative; height: 52px; margin-top: 8px; border-top: 1px solid #1C232D">
+<svg viewBox="0 0 1000 52" preserveAspectRatio="none" aria-label="{{ln.label}}: {{ln.stat}}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%">
+<path d="{{ln.p1.d}}" style="fill: {{ln.p1.f}}; fill-opacity: {{ln.p1.fo}}; stroke: {{ln.p1.s}}; stroke-width: {{ln.p1.w}}; stroke-dasharray: {{ln.p1.da}}; vector-effect: non-scaling-stroke"></path>
+<path d="{{ln.p2.d}}" style="fill: {{ln.p2.f}}; fill-opacity: {{ln.p2.fo}}; stroke: {{ln.p2.s}}; stroke-width: {{ln.p2.w}}; stroke-dasharray: {{ln.p2.da}}; vector-effect: non-scaling-stroke"></path>
+<path d="{{ln.p3.d}}" style="fill: {{ln.p3.f}}; fill-opacity: {{ln.p3.fo}}; stroke: {{ln.p3.s}}; stroke-width: {{ln.p3.w}}; stroke-dasharray: {{ln.p3.da}}; vector-effect: non-scaling-stroke"></path>
+<path d="{{ln.p4.d}}" style="fill: {{ln.p4.f}}; fill-opacity: {{ln.p4.fo}}; stroke: {{ln.p4.s}}; stroke-width: {{ln.p4.w}}; stroke-dasharray: {{ln.p4.da}}; vector-effect: non-scaling-stroke"></path>
+</svg>
+<span title="{{ln.note}}" style="position: absolute; left: 0; top: 2px; padding-right: 6px; background: #12161D; font-size: 10px; color: #8B96A6; text-transform: uppercase; letter-spacing: 0.06em">{{ln.label}}</span>
+<span style="position: absolute; right: 0; top: 2px; padding-left: 6px; background: #12161D; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: {{ln.statC}}">{{ln.stat}}</span>
+<span style="position: absolute; right: -40px; top: 2px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8B96A6">{{ln.hiL}}</span>
+<span style="position: absolute; right: -40px; bottom: 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8B96A6">{{ln.loL}}</span>
+</div>
+</sc-for>
+<div style="position: relative; height: 16px; margin-top: 6px">
+<sc-for list="{{xt}}" as="x" hint-placeholder-count="6"><span style="position: absolute; left: {{x.left}}; transform: {{x.tf}}; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8B96A6; white-space: nowrap">{{x.l}}</span></sc-for>
+</div>
+</div>
+
+<div role="group" aria-label="Lanes under the chart" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+<span style="font-size: 11px; color: #8B96A6">Under the chart</span>
+<sc-for list="{{laneOpts}}" as="o" hint-placeholder-count="4"><button onClick="{{o.pick}}" aria-pressed="{{o.pressed}}" style="min-height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid {{o.bd}}; background: {{o.bg}}; color: {{o.fg}}; font: inherit; font-size: 11px; cursor: pointer">{{o.k}}</button></sc-for>
+<sc-if value="{{hasRangeNote}}" hint-placeholder-val="{{ false }}"><span style="margin-left: auto; font-size: 11px; color: #E3C05C">{{rangeNote}}</span></sc-if>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 11px; color: #9BA6B5">
+<span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 2px; background: {{col}}"></span>{{legA}}</span>
+<sc-for list="{{ovLines}}" as="ol" hint-placeholder-count="1"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; border-top: 2px {{ol.ls}} {{ol.c}}"></span>{{ol.leg}}</span></sc-for>
+</div>
+
+<sc-if value="{{hasSel}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 10px; border: 1px solid #2A323E; border-radius: 8px; background: #0F1319; font-size: 12px">
+<span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 2px; background: {{sel.color}}"></span><span style="color: #9BA6B5">{{sel.cat}} · {{sel.date}} · {{sel.src}}</span></span>
+<span style="font-weight: 500">{{sel.title}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace">{{sym}} 1h <span style="color: {{sel.c1h}}">{{sel.m1h}}</span> · 1d <span style="color: {{sel.c1d}}">{{sel.m1d}}</span></span>
+</div>
+</sc-if>
+
+<div role="group" aria-label="Event categories shown" style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{cats}}" as="c" hint-placeholder-count="6"><button onClick="{{c.pick}}" aria-pressed="{{c.pressed}}" style="display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid {{c.bd}}; background: {{c.bg}}; color: {{c.fg}}; font: inherit; font-size: 11px; cursor: pointer"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{c.dot}}"></span>{{c.k}}</button></sc-for>
+</div>
+</div>
+<div aria-label="Overlay detail cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px">
+<sc-if value="{{cM.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Market comparison" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Market comparison</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">Index ETFs · H1/D4</span><sc-for list="{{cM.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cM.off}}" aria-label="{{cM.offLabel}}" title="{{cM.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<span style="font-size: 13px; font-weight: 500">{{cM.headline}}</span>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 64px 76px 44px 44px; gap: 8px; font-size: 10px; color: #8B96A6; text-transform: uppercase; letter-spacing: 0.06em; padding-bottom: 4px; border-bottom: 1px solid #1A2029"><span>Index · {{cM.rgL}}</span><span style="text-align: right">Return</span><span style="text-align: right">{{sym}} vs</span><span style="text-align: right">ρ</span><span style="text-align: right">β</span></div>
+<sc-for list="{{cM.rows}}" as="r" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 64px 76px 44px 44px; gap: 8px; align-items: center; padding: 3px 0; border-bottom: 1px solid #1A2029">
+<span style="display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px"><span style="width: 14px; height: 0; flex: none; border-top: 2px solid {{r.c}}"></span><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.l}}</span></span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; color: {{r.retC}}">{{r.ret}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; color: {{r.relC}}">{{r.rel}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; color: #C5CDD8">{{r.rho}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; color: #C5CDD8">{{r.beta}}</span>
+</div>
+</sc-for>
+<span style="font-size: 10px; color: #8B96A6">{{cM.foot}}</span>
+</section>
+</sc-if>
+<sc-if value="{{cA.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Moving averages" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Moving averages</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">From daily closes</span><sc-for list="{{cA.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cA.off}}" aria-label="{{cA.offLabel}}" title="{{cA.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<span style="font-size: 13px; font-weight: 500">{{cA.headline}}</span>
+<sc-if value="{{cA.hasCross}}" hint-placeholder-val="{{ true }}"><span style="font-size: 12px; color: #E3C05C">{{cA.cross}}</span></sc-if>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 76px 92px 120px; gap: 8px; font-size: 10px; color: #8B96A6; text-transform: uppercase; letter-spacing: 0.06em; padding-bottom: 4px; border-bottom: 1px solid #1A2029"><span>Average</span><span style="text-align: right">Level</span><span style="text-align: right">{{sym}} vs</span><span style="text-align: right">Slope</span></div>
+<sc-for list="{{cA.rows}}" as="r" hint-placeholder-count="2">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 76px 92px 120px; gap: 8px; align-items: center; padding: 3px 0; border-bottom: 1px solid #1A2029">
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px"><span style="width: 14px; height: 0; flex: none; border-top: 2px solid {{r.c}}"></span>{{r.l}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right">{{r.val}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; color: {{r.distC}}">{{r.dist}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; color: {{r.slopeC}}">{{r.slope}}</span>
+</div>
+</sc-for>
+<span style="font-size: 10px; color: #8B96A6">{{cA.foot}}</span>
+</section>
+</sc-if>
+<sc-if value="{{cR.on}}" hint-placeholder-val="{{ true }}">
+<section aria-label="Rates" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Rates &amp; yields</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">DS-14 · DS-88 · DS-89</span><sc-for list="{{cR.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cR.off}}" aria-label="{{cR.offLabel}}" title="{{cR.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><span style="font-size: 13px; font-weight: 500">{{curveShape}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #9BA6B5">{{curveNote}}</span></div>
+<div>
+<svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-label="Treasury yield curve, today versus one month ago" style="width: 100%; height: 90px">
+<path d="{{curveFill}}" style="fill: #6CA6FF; fill-opacity: 0.12; stroke: none"></path>
+<path d="{{curvePrev}}" style="fill: none; stroke: #6B7686; stroke-width: 1.25; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke"></path>
+<path d="{{curveNow}}" style="fill: none; stroke: #6CA6FF; stroke-width: 2; vector-effect: non-scaling-stroke"></path>
+</svg>
+<div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #8B96A6"><sc-for list="{{tenors}}" as="tn" hint-placeholder-count="11"><span>{{tn}}</span></sc-for></div>
+<div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 9px"><sc-for list="{{tenorChg}}" as="tc" hint-placeholder-count="11"><span style="color: {{tc.c}}">{{tc.v}}</span></sc-for></div>
+<div style="display: flex; gap: 12px; margin-top: 4px; font-size: 10px; color: #9BA6B5"><span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; height: 2px; background: #6CA6FF"></span>Today</span><span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; border-top: 2px dashed #6B7686"></span>1M ago</span><span>bp change per tenor</span></div>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 10px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; justify-content: space-between; font-size: 11px"><span style="color: #C5CDD8">Oct 28 FOMC · Kalshi</span><span style="font-family: 'IBM Plex Mono', monospace; color: #9BA6B5">{{cutTrend}}</span></div>
+<div style="display: flex; height: 18px; border-radius: 4px; overflow: hidden"><sc-for list="{{fedOdds}}" as="f" hint-placeholder-count="3"><div title="{{f.l}} {{f.p}}%" style="width: {{f.w}}; background: {{f.c}}; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #F1F4F8; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; overflow: hidden">{{f.txt}}</div></sc-for></div>
+</div>
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="Cut odds, last 30 days" style="width: 100%; height: 34px"><path d="{{cutSpark}}" style="fill: none; stroke: #6CA6FF; stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; justify-content: space-between; font-size: 11px"><span style="color: #C5CDD8">Implied policy path · Atlanta Fed</span><span style="font-family: 'IBM Plex Mono', monospace; color: #9BA6B5">{{pathNote}}</span></div>
+<div style="display: flex; align-items: flex-end; gap: 8px; height: 64px">
+<sc-for list="{{path}}" as="p" hint-placeholder-count="5">
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #C5CDD8">{{p.v}}</span><span style="position: relative; width: 100%; height: {{p.h}}"><span style="position: absolute; left: 0; right: 0; bottom: 0; height: {{p.hp}}; border-top: 1px dashed #6B7686"></span><span style="position: absolute; left: 20%; right: 20%; bottom: 0; top: 0; background: #2C4466; border-top: 2px solid #6CA6FF; border-radius: 2px 2px 0 0"></span></span><span style="font-size: 10px; color: #8B96A6">{{p.q}}</span></div>
+</sc-for>
+</div>
+</div>
+</section>
+</sc-if>
+<sc-if value="{{cI.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Inflation" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Inflation surprise</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">DS-21 · DS-90</span><sc-for list="{{cI.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cI.off}}" aria-label="{{cI.offLabel}}" title="{{cI.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><span style="font-size: 13px; font-weight: 500">{{cpiState}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #9BA6B5">{{cpiStreak}}</span></div>
+<div style="display: flex; gap: 8px; align-items: flex-end">
+<sc-for list="{{cpi}}" as="c" hint-placeholder-count="6">
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px">
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #C5CDD8">{{c.av}}</span>
+<div style="position: relative; width: 100%; height: 96px">
+<div style="position: absolute; left: 18%; right: 18%; bottom: 0; height: {{c.ah}}; background: {{c.fill}}; border: 1px {{c.bs}} #6CA6FF; border-radius: 2px 2px 0 0; box-sizing: border-box"></div>
+<div title="Nowcast {{c.nv}}" style="position: absolute; left: 4%; right: 4%; bottom: {{c.nh}}; border-top: 2px dashed #F2A33A"></div>
+</div>
+<span style="font-size: 10px; color: #8B96A6">{{c.m}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: {{c.sc}}">{{c.s}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 10px; color: #9BA6B5"><span style="display: flex; align-items: center; gap: 4px"><span style="width: 10px; height: 10px; background: #2C4466; border: 1px solid #6CA6FF"></span>CPI YoY (BLS)</span><span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; border-top: 2px dashed #F2A33A"></span>Cleveland Fed nowcast</span></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; background: #0F1319; border: 1px solid #222A35">
+<div style="display: flex; flex-direction: column; gap: 2px; font-size: 12px"><span>Sep nowcast <span style="font-family: 'IBM Plex Mono', monospace">2.88%</span> <span style="font-family: 'IBM Plex Mono', monospace; color: #F2A33A">{{nowTrend}}</span></span><span style="font-size: 11px; color: #8B96A6">Kalshi P(≥ 3.0%) 34% · release [BLS date] {{cpiTime}}</span></div>
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="Sep CPI nowcast, last 2 weeks" style="width: 100%; height: 30px"><path d="{{nowSpark}}" style="fill: none; stroke: #F2A33A; stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+</div>
+</section>
+</sc-if>
+<sc-if value="{{cV.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Volatility" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Volatility</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">DS-45 · D1</span><sc-for list="{{cV.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cV.off}}" aria-label="{{cV.offLabel}}" title="{{cV.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<span style="font-size: 13px; font-weight: 500">{{cV.headline}}</span>
+<sc-for list="{{cV.rows}}" as="d" hint-placeholder-count="1">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid #222A35; border-radius: 8px; background: #0F1319">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><span style="display: flex; align-items: center; gap: 6px; font-size: 12px"><span style="width: 14px; height: 0; border-top: 2px dashed {{d.c}}"></span>{{d.l}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 16px">{{d.lvl}}</span></div>
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="{{d.l}}, last 3 months" style="width: 100%; height: 38px"><path d="{{d.spark}}" style="fill: none; stroke: {{d.c}}; stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{d.hz}}" as="h" hint-placeholder-count="3"><span title="{{h.tip}}" style="display: flex; flex-direction: column; align-items: center; padding: 3px 2px; border-radius: 4px; background: {{h.bg}}"><span style="font-size: 9px; color: #C5CDD8; text-transform: uppercase">{{h.l}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #F1F4F8">{{h.v}}</span></span></sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6; white-space: nowrap">1Y range</span><span style="position: relative; flex: 1; height: 4px; border-radius: 2px; background: #1C232D"><span style="position: absolute; top: -3px; width: 3px; height: 10px; border-radius: 1px; left: {{d.pctL}}; background: #E6EAF0"></span></span><span style="font-size: 10px; color: #9BA6B5; white-space: nowrap">{{d.pctTxt}}</span></div>
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 11px"><span style="color: #C5CDD8">{{d.state}}</span><span title="{{d.e.tip}}" style="color: {{d.e.c}}">{{d.e.w}} for {{d.sym}}</span></div>
+</div>
+</sc-for>
+<span style="font-size: 10px; color: #8B96A6">{{cV.foot}}</span>
+</section>
+</sc-if>
+<sc-if value="{{cF.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Dollar and oil" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Dollar &amp; oil</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">DS-45 · D1</span><sc-for list="{{cF.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cF.off}}" aria-label="{{cF.offLabel}}" title="{{cF.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<span style="font-size: 13px; font-weight: 500">{{cF.headline}}</span>
+<sc-for list="{{cF.rows}}" as="d" hint-placeholder-count="1">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid #222A35; border-radius: 8px; background: #0F1319">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><span style="display: flex; align-items: center; gap: 6px; font-size: 12px"><span style="width: 14px; height: 0; border-top: 2px dashed {{d.c}}"></span>{{d.l}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 16px">{{d.lvl}}</span></div>
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="{{d.l}}, last 3 months" style="width: 100%; height: 38px"><path d="{{d.spark}}" style="fill: none; stroke: {{d.c}}; stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{d.hz}}" as="h" hint-placeholder-count="3"><span title="{{h.tip}}" style="display: flex; flex-direction: column; align-items: center; padding: 3px 2px; border-radius: 4px; background: {{h.bg}}"><span style="font-size: 9px; color: #C5CDD8; text-transform: uppercase">{{h.l}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #F1F4F8">{{h.v}}</span></span></sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6; white-space: nowrap">1Y range</span><span style="position: relative; flex: 1; height: 4px; border-radius: 2px; background: #1C232D"><span style="position: absolute; top: -3px; width: 3px; height: 10px; border-radius: 1px; left: {{d.pctL}}; background: #E6EAF0"></span></span><span style="font-size: 10px; color: #9BA6B5; white-space: nowrap">{{d.pctTxt}}</span></div>
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 11px"><span style="color: #C5CDD8">{{d.state}}</span><span title="{{d.e.tip}}" style="color: {{d.e.c}}">{{d.e.w}} for {{d.sym}}</span></div>
+</div>
+</sc-for>
+</section>
+</sc-if>
+<sc-if value="{{cG.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Tariffs and geopolitics" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Tariffs &amp; geopolitics</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">H2 · H3 · D2 · W1</span><sc-for list="{{cG.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cG.off}}" aria-label="{{cG.offLabel}}" title="{{cG.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{geoSparks}}" as="g" hint-placeholder-count="2">
+<div style="padding: 8px; border: 1px solid #222A35; border-radius: 8px; background: #0F1319; display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 10px; color: #9BA6B5">{{g.l}}</span>
+<span style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">{{g.v}}</span><span style="font-size: 10px; padding: 1px 6px; border-radius: 4px; background: {{g.zBg}}; color: {{g.zFg}}">{{g.z}}</span></span>
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" style="width: 100%; height: 26px"><path d="{{g.base}}" style="fill: none; stroke: #4A5361; stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke"></path><path d="{{g.spark}}" style="fill: none; stroke: {{g.c}}; stroke-width: 1.25; vector-effect: non-scaling-stroke"></path></svg>
+<span style="font-size: 10px; color: #8B96A6">{{g.src}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; justify-content: space-between; font-size: 11px"><span style="color: #C5CDD8">Official trade actions / week</span><span style="font-family: 'IBM Plex Mono', monospace; color: #9BA6B5">{{actTrend}}</span></div>
+<div style="display: flex; align-items: flex-end; gap: 4px; height: 40px">
+<sc-for list="{{actWeeks}}" as="w" hint-placeholder-count="8"><span title="{{w.tip}}" style="flex: 1; height: {{w.h}}; background: {{w.c}}; border-radius: 2px 2px 0 0"></span></sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{actions}}" as="a" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: 76px minmax(0, 1fr) 44px; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid #1A2029">
+<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #2A1E2A; color: #F0A6C4; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{a.ag}}</span>
+<span style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{a.t}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8B96A6; text-align: right">{{a.d}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+</sc-if>
+<sc-if value="{{cT.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Tesla robotaxi trends" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Tesla · robotaxi</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">D2 · W1</span><sc-for list="{{cT.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cT.off}}" aria-label="{{cT.offLabel}}" title="{{cT.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 10px; align-items: center; padding: 8px; border: 1px solid #222A35; border-radius: 8px; background: #0F1319">
+<div style="display: flex; flex-direction: column"><span style="font-size: 10px; color: #9BA6B5">TX AV-registered Teslas</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 18px">476 <span style="font-size: 11px; color: {{fleet.c}}">{{fleet.wk}}</span></span><span style="font-size: 10px; color: #8B96A6">{{fleet.note}}</span></div>
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="Texas fleet, weekly" style="width: 100%; height: 40px"><path d="{{fleet.spark}}" style="fill: none; stroke: #39C5B0; stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<sc-for list="{{states}}" as="s" hint-placeholder-count="5">
+<div style="display: grid; grid-template-columns: 28px 42px minmax(0, 1fr) 74px; gap: 8px; align-items: center; font-size: 12px">
+<span style="font-family: 'IBM Plex Mono', monospace; font-weight: 500">{{s.st}}</span>
+<span style="display: flex; gap: 3px"><span style="width: 10px; height: 6px; border-radius: 1px; background: {{s.l1}}"></span><span style="width: 10px; height: 6px; border-radius: 1px; background: {{s.l2}}"></span><span style="width: 10px; height: 6px; border-radius: 1px; background: {{s.l3}}"></span></span>
+<span style="color: #C5CDD8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{s.status}}</span>
+<span style="font-size: 10px; color: {{s.mc}}; text-align: right">{{s.move}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; justify-content: space-between; font-size: 11px"><span style="color: #C5CDD8">EU FSD (Supervised) approvals, cumulative</span><span style="color: #8B96A6">8 as of Sep 29 · DS-58</span></div>
+<div style="display: flex; align-items: flex-end; gap: 3px; height: 34px"><sc-for list="{{euSteps}}" as="e" hint-placeholder-count="8"><span title="{{e.tip}}" style="flex: 1; height: {{e.h}}; background: #1E5A50; border-top: 2px solid #39C5B0"></span></sc-for></div>
+<div style="display: flex; flex-wrap: wrap; gap: 4px"><sc-for list="{{eu}}" as="e" hint-placeholder-count="8"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: #13302B; color: #7FE0CF">{{e}}</span></sc-for></div>
+</div>
+<span style="font-size: 11px; color: #9BA6B5">NHTSA open probes [n] · SGO ADS crash reports [n] vs prior month [Δ] · DS-46/47</span>
+</section>
+</sc-if>
+<sc-if value="{{cQ.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Tesla fundamentals trends" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Tesla · fundamentals</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">Q1 · quarterly</span><sc-for list="{{cQ.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cQ.off}}" aria-label="{{cQ.offLabel}}" title="{{cQ.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<sc-for list="{{tq}}" as="x" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 10px; align-items: center; padding: 8px; border: 1px solid #222A35; border-radius: 8px; background: #0F1319">
+<div style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 10px; color: #9BA6B5">{{x.l}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">{{x.v}} <span style="font-size: 11px; color: {{x.c}}">{{x.t}}</span></span><span style="font-size: 10px; color: #8B96A6">{{x.src}}</span></div>
+<div style="display: flex; align-items: flex-end; gap: 3px; height: 38px"><sc-for list="{{x.bars}}" as="b" hint-placeholder-count="6"><span title="{{b.tip}}" style="flex: 1; height: {{b.h}}; background: {{b.c}}; border-radius: 2px 2px 0 0"></span></sc-for></div>
+</div>
+</sc-for>
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: #9BA6B5"><span>Chart lines step on each release</span><span>Next: Q3 earnings [date] · DS-13</span></div>
+</section>
+</sc-if>
+<sc-if value="{{cS.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="SpaceX trends" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">SpaceX · ops &amp; contracts</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">H3 · D2 · D5</span><sc-for list="{{cS.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cS.off}}" aria-label="{{cS.offLabel}}" title="{{cS.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<sc-for list="{{sx}}" as="x" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 10px; align-items: center; padding: 8px; border: 1px solid #222A35; border-radius: 8px; background: #0F1319">
+<div style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 10px; color: #9BA6B5">{{x.l}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">{{x.v}} <span style="font-size: 11px; color: {{x.c}}">{{x.t}}</span></span><span style="font-size: 10px; color: #8B96A6">{{x.src}}</span></div>
+<div style="display: flex; align-items: flex-end; gap: 3px; height: 38px"><sc-for list="{{x.bars}}" as="b" hint-placeholder-count="6"><span title="{{b.tip}}" style="flex: 1; height: {{b.h}}; background: {{b.c}}; border-radius: 2px 2px 0 0"></span></sc-for></div>
+</div>
+</sc-for>
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: #9BA6B5"><span>Listed Jun 12, 2026 · lock-up ends [S-1 date]</span><span>FAA Starship: [status]</span></div>
+</section>
+</sc-if>
+<sc-if value="{{cN.on}}" hint-placeholder-val="{{ false }}">
+<section aria-label="{{sym}} news sentiment" style="min-width: 0; background: #12161D; border: 1px solid #222A35; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">{{sym}} news sentiment</h2><span style="display: flex; align-items: center; gap: 8px"><span style="font-size: 10px; color: #8B96A6">H2 · 7-day rolling</span><sc-for list="{{cN.sw}}" as="w" hint-placeholder-count="1"><span title="{{w.l}} is on the chart" style="width: 16px; height: 0; border-top: 2px {{w.ls}} {{w.c}}"></span></sc-for><button onClick="{{cN.off}}" aria-label="{{cN.offLabel}}" title="{{cN.offLabel}}" style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #9BA6B5; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button></span></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 10px; align-items: center">
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="Sentiment, last 4 weeks" style="width: 100%; height: 40px"><path d="M0 14 L100 14" style="stroke: #2A323E; stroke-width: 1; vector-effect: non-scaling-stroke"></path><path d="{{sent.spark}}" style="fill: none; stroke: {{sent.c}}; stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+<span style="display: flex; flex-direction: column; align-items: flex-end"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 15px; color: {{sent.c}}">{{sent.v}} {{sent.d}}</span><span style="font-size: 10px; color: #8B96A6">{{sent.vol}}</span></span>
+</div>
+<div style="display: flex; flex-direction: column; border-top: 1px solid #1A2029">
+<sc-for list="{{news}}" as="n" hint-placeholder-count="4">
+<a href="#" style="display: grid; grid-template-columns: 44px minmax(0, 1fr) 46px; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid #1A2029; text-decoration: none; color: #E6EAF0">
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; padding: 2px 4px; border-radius: 4px; background: #1C232D; color: #C5CDD8; text-align: center">{{n.tk}}</span>
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{n.h}}</span><span style="font-size: 10px; color: #8B96A6">{{n.src}} · {{n.age}}</span></span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; color: {{n.sc}}">{{n.s}}</span>
+</a>
+</sc-for>
+</div>
+</section>
+</sc-if>
+</div>
+<sc-if value="{{noCards}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 14px; border: 1px dashed #2A323E; border-radius: 10px; color: #9BA6B5; font-size: 12px; text-align: center">No overlays on the chart. Pick a group above the chart and turn overlays on to see their cards here.</div>
+</sc-if>
+</div>
+</sc-if>
+<sc-if value="{{isSig}}" hint-placeholder-val="{{ false }}">
+<aside aria-label="{{sym}} signals" style="min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px; border-radius: 10px; background: #0F1319">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Net macro pressure</h2><span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: {{pr.color}}">{{pr.word}} {{pr.val}}</span></div>
+<span style="position: relative; height: 10px; border-radius: 5px; background: #1C232D"><span style="position: absolute; top: -3px; bottom: -3px; left: 50%; width: 1px; background: #4A5361"></span><span style="position: absolute; top: 0; bottom: 0; left: {{pr.left}}; width: {{pr.width}}; border-radius: 5px; background: {{pr.color}}"></span></span>
+<span style="font-size: 11px; color: #9BA6B5">{{pr.note}}</span>
+<div style="display: flex; flex-wrap: wrap; gap: 5px">
+<sc-for list="{{regime}}" as="r" hint-placeholder-count="7"><span title="{{r.tip}}" style="display: flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 999px; border: 1px solid {{r.bd}}; font-size: 10px"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{r.dot}}"></span><span style="color: #9BA6B5">{{r.l}}</span><span>{{r.s}}</span></span></sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column">
+<h2 style="margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Top drivers for {{sym}}</h2>
+<sc-for list="{{top}}" as="d" hint-placeholder-count="5">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 56px 84px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid #1A2029">
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{d.l}}</span><span style="font-size: 10px; color: #8B96A6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{d.lvl}} · {{d.state}}</span></span>
+<span title="{{d.m.tip}}" style="height: 26px; border-radius: 4px; background: {{d.m.bg}}; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #F1F4F8">{{d.m.v}}</span>
+<span title="{{d.e.tip}}" style="display: flex; align-items: center; justify-content: flex-end; gap: 5px"><span style="display: flex; gap: 2px"><span style="width: 4px; height: 11px; background: {{d.e.b1}}"></span><span style="width: 4px; height: 11px; background: {{d.e.b2}}"></span><span style="width: 4px; height: 11px; background: {{d.e.b3}}"></span></span><span style="font-size: 10px; color: {{d.e.c}}">{{d.e.w}}</span></span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Catalyst sensitivity · avg |1d|</h2>
+<sc-for list="{{sens}}" as="x" hint-placeholder-count="6">
+<div style="display: grid; grid-template-columns: 78px minmax(0, 1fr) 38px 96px; gap: 8px; align-items: center">
+<span style="font-size: 11px; color: #C5CDD8">{{x.k}} <span style="color: #8B96A6">({{x.n}})</span></span>
+<span style="height: 6px; width: {{x.w}}; background: {{x.col}}; border-radius: 2px"></span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #9BA6B5; text-align: right">{{x.v}}</span>
+<span style="font-size: 10px; color: {{x.trC}}; text-align: right">{{x.tr}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column">
+<h2 style="margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5">Recent {{sym}} catalysts</h2>
+<div style="max-height: 196px; overflow-y: auto">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<button onClick="{{r.pick}}" style="display: grid; grid-template-columns: 46px minmax(0, 1fr) 56px; gap: 8px; align-items: center; width: 100%; padding: 5px 4px; border: 0; border-bottom: 1px solid #1A2029; background: {{r.bg}}; color: #E6EAF0; font: inherit; text-align: left; cursor: pointer">
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #9BA6B5">{{r.date}}</span>
+<span style="display: flex; align-items: center; gap: 6px; min-width: 0"><span style="width: 6px; height: 6px; flex: none; border-radius: 2px; background: {{r.color}}"></span><span style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.title}}</span></span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: {{r.c}}; text-align: right">{{r.m}}</span>
+</button>
+</sc-for>
+</div>
+</div>
+</aside>
+</sc-if>
+<sc-if value="{{isMore}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<section aria-label="{{dCal.title}}" style="background: #12161D; border: 1px solid #222A35; border-radius: 10px">
+<button onClick="{{dCal.toggle}}" aria-expanded="{{dCal.exp}}" style="width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; border: 0; background: transparent; color: #E6EAF0; font: inherit; text-align: left; cursor: pointer">
+<span style="display: flex; align-items: baseline; gap: 12px; min-width: 0"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5; white-space: nowrap">{{dCal.title}}</span><span style="font-size: 11px; color: #8B96A6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{dCal.sum}}</span></span>
+<span style="font-size: 12px; color: #9BA6B5; white-space: nowrap">{{dCal.icon}}</span>
+</button>
+
+<sc-if value="{{dCal.open}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 0 14px 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 6px 16px">
+<sc-for list="{{cal}}" as="c" hint-placeholder-count="6">
+<div style="display: grid; grid-template-columns: 4px 88px minmax(0, 1fr); gap: 10px; padding: 6px 0; border-top: 1px solid #1A2029">
+<span style="border-radius: 2px; background: {{c.color}}"></span>
+<span style="display: flex; flex-direction: column"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px">{{c.d}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8B96A6">{{c.t}}</span></span>
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 12px">{{c.w}}</span><span style="font-size: 10px; color: #9BA6B5">{{c.imp}}</span></span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</section>
+<section aria-label="{{dDrv.title}}" style="background: #12161D; border: 1px solid #222A35; border-radius: 10px">
+<button onClick="{{dDrv.toggle}}" aria-expanded="{{dDrv.exp}}" style="width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; border: 0; background: transparent; color: #E6EAF0; font: inherit; text-align: left; cursor: pointer">
+<span style="display: flex; align-items: baseline; gap: 12px; min-width: 0"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5; white-space: nowrap">{{dDrv.title}}</span><span style="font-size: 11px; color: #8B96A6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{dDrv.sum}}</span></span>
+<span style="font-size: 12px; color: #9BA6B5; white-space: nowrap">{{dDrv.icon}}</span>
+</button>
+
+<sc-if value="{{dDrv.open}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 0 14px 14px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+<span style="font-size: 10px; color: #8B96A6">cell shade = size of move in σ · effect on {{sym}} = ρ(90D) × 1M z</span>
+<div role="group" aria-label="Sort drivers" style="display: flex; align-items: center; border: 1px solid #2A323E; border-radius: 6px; overflow: hidden"><span style="padding: 0 8px; font-size: 11px; color: #8B96A6">Sort</span><sc-for list="{{sortOpts}}" as="o" hint-placeholder-count="2"><button onClick="{{o.pick}}" aria-pressed="{{o.pressed}}" style="min-height: 28px; padding: 0 9px; border: 0; background: {{o.bg}}; color: {{o.fg}}; font: inherit; font-size: 11px; cursor: pointer">{{o.k}}</button></sc-for></div>
+</div>
+<div style="overflow-x: auto">
+<div style="min-width: 760px; display: flex; flex-direction: column">
+<div style="display: grid; grid-template-columns: minmax(140px, 1.3fr) 130px repeat(3, 62px) minmax(140px, 1fr) 110px; gap: 8px; padding: 0 4px 6px; font-size: 10px; color: #8B96A6; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #1A2029">
+<span>Driver</span><span>Level · 1Y range</span><span style="text-align: center">1W</span><span style="text-align: center">1M</span><span style="text-align: center">3M</span><span>Trend</span><span>{{sym}} effect</span>
+</div>
+<sc-for list="{{drivers}}" as="d" hint-placeholder-count="14">
+<div style="display: grid; grid-template-columns: minmax(140px, 1.3fr) 130px repeat(3, 62px) minmax(140px, 1fr) 110px; gap: 8px; align-items: center; padding: 5px 4px; border-bottom: 1px solid #1A2029; background: {{d.bg}}">
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #E3B341">{{d.rank}}</span> {{d.l}}</span><span style="font-size: 10px; color: #8B96A6">{{d.g}} · {{d.src}}</span></span>
+<span style="display: flex; flex-direction: column; gap: 3px"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px">{{d.lvl}}</span><span style="position: relative; height: 4px; border-radius: 2px; background: #1C232D"><span style="position: absolute; top: -3px; width: 3px; height: 10px; border-radius: 1px; left: {{d.pctL}}; background: #E6EAF0"></span></span></span>
+<sc-for list="{{d.hz}}" as="h" hint-placeholder-count="3"><span title="{{h.tip}}" style="height: 28px; border-radius: 4px; background: {{h.bg}}; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #F1F4F8">{{h.v}}</span></sc-for>
+<span style="display: flex; align-items: center; gap: 6px; min-width: 0"><svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" style="width: 52px; height: 20px; flex: none"><path d="{{d.spark}}" style="fill: none; stroke: #9BA6B5; stroke-width: 1.25; vector-effect: non-scaling-stroke"></path></svg><span style="font-size: 11px; color: #C5CDD8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{d.state}}</span></span>
+<span title="{{d.e.tip}}" style="display: flex; align-items: center; gap: 6px"><span style="display: flex; gap: 2px"><span style="width: 5px; height: 12px; border-radius: 1px; background: {{d.e.b1}}"></span><span style="width: 5px; height: 12px; border-radius: 1px; background: {{d.e.b2}}"></span><span style="width: 5px; height: 12px; border-radius: 1px; background: {{d.e.b3}}"></span></span><span style="font-size: 11px; color: {{d.e.c}}">{{d.e.w}}</span></span>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+</section>
+<section aria-label="{{dCorr.title}}" style="background: #12161D; border: 1px solid #222A35; border-radius: 10px">
+<button onClick="{{dCorr.toggle}}" aria-expanded="{{dCorr.exp}}" style="width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; border: 0; background: transparent; color: #E6EAF0; font: inherit; text-align: left; cursor: pointer">
+<span style="display: flex; align-items: baseline; gap: 12px; min-width: 0"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5; white-space: nowrap">{{dCorr.title}}</span><span style="font-size: 11px; color: #8B96A6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{dCorr.sum}}</span></span>
+<span style="font-size: 12px; color: #9BA6B5; white-space: nowrap">{{dCorr.icon}}</span>
+</button>
+
+<sc-if value="{{dCorr.open}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 0 14px 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 0 20px">
+<sc-for list="{{drift}}" as="r" hint-placeholder-count="9">
+<div style="display: grid; grid-template-columns: 110px minmax(0, 1fr) 44px 54px 92px; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid #1A2029">
+<span style="font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.l}}</span>
+<svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" style="width: 100%; height: 24px"><path d="M0 14 L100 14" style="stroke: #2A323E; stroke-width: 1; vector-effect: non-scaling-stroke"></path><path d="{{r.spark}}" style="fill: none; stroke: {{r.c}}; stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; color: {{r.c}}">{{r.now}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-align: right; color: #9BA6B5">{{r.d}}</span>
+<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; text-align: center; background: {{r.fBg}}; color: {{r.fFg}}; white-space: nowrap">{{r.flag}}</span>
+</div>
+</sc-for>
+<span style="grid-column: 1 / -1; padding-top: 8px; font-size: 10px; color: #8B96A6">6-month rolling 30-day ρ with {{sym}} daily returns. Blue = moves with the stock, orange = against. Flags fire when the 30D link shifts ≥ 0.08 from 90D or changes sign.</span>
+</div>
+</sc-if>
+</section>
+<section aria-label="{{dAbout.title}}" style="background: #12161D; border: 1px solid #222A35; border-radius: 10px">
+<button onClick="{{dAbout.toggle}}" aria-expanded="{{dAbout.exp}}" style="width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; border: 0; background: transparent; color: #E6EAF0; font: inherit; text-align: left; cursor: pointer">
+<span style="display: flex; align-items: baseline; gap: 12px; min-width: 0"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA6B5; white-space: nowrap">{{dAbout.title}}</span><span style="font-size: 11px; color: #8B96A6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{dAbout.sum}}</span></span>
+<span style="font-size: 12px; color: #9BA6B5; white-space: nowrap">{{dAbout.icon}}</span>
+</button>
+
+<sc-if value="{{dAbout.open}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 0 14px 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px 20px; font-size: 12px; color: #C5CDD8; line-height: 1.5">
+<p style="margin: 0"><span style="color: #9BA6B5">Prices.</span> Hourly bars from Alpaca (free IEX feed, DS-02), checked daily against Massive (DS-01). Volume is IEX-only, so it shows trend, not totals.</p>
+<p style="margin: 0"><span style="color: #9BA6B5">Trend state.</span> Uptrend when price is above its 20-day average and that is above the 50-day; downtrend the reverse; otherwise range. The day count is how long the state has held.</p>
+<p style="margin: 0"><span style="color: #9BA6B5">Effect and pressure.</span> Each driver's 1-month move in σ times its 90-day correlation with the stock. Net pressure squashes the sum to −1…+1.</p>
+<p style="margin: 0"><span style="color: #9BA6B5">Sample data.</span> Values here are illustrative. Dated facts (Texas fleet 476 on Sep 21, Nevada permit Aug 21, 8 EU approvals Sep 29, SPCX listing Jun 12, FOMC dates) are real.</p>
+</div>
+</sc-if>
+</section>
+</div>
+</sc-if>
+</main>
+
+<nav aria-label="Sections" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #222A35; background: #0F1319; padding-bottom: 12px">
+<sc-for list="{{mtabs}}" as="t" hint-placeholder-count="3"><button onClick="{{t.pick}}" aria-pressed="{{t.pressed}}" style="min-height: 52px; border: 0; border-top: 2px solid {{t.bar}}; background: transparent; color: {{t.fg}}; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer">{{t.k}}</button></sc-for>
+</nav>
+<sc-if value="{{stOpen}}" hint-placeholder-val="{{ false }}">
+<div style="position: absolute; inset: 0; z-index: 40; background: #0B0E13; display: flex; overflow-y: auto">
+<div role="dialog" aria-modal="true" aria-label="Account settings" style="width: 100%; min-height: 100%; background: #12161D; border: 0; border-radius: 0; display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 0">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Account settings</h2>
+<button onClick="{{closeSt}}" aria-label="Close settings" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #C5CDD8; cursor: pointer"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button>
+</div>
+<div role="tablist" aria-label="Settings sections" style="display: flex; gap: 4px; padding: 8px 16px 0; border-bottom: 1px solid #1A2029">
+<sc-for list="{{stTabs}}" as="t" hint-placeholder-count="3"><button role="tab" aria-selected="{{t.pressed}}" onClick="{{t.pick}}" style="min-height: 40px; padding: 0 12px; border: 0; border-bottom: 2px solid {{t.bd}}; background: transparent; color: {{t.fg}}; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer">{{t.k}}</button></sc-for>
+</div>
+
+<sc-if value="{{isTk}}" hint-placeholder-val="{{ true }}">
+<div style="padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px"><span style="font-size: 13px; font-weight: 500">My tickers <span style="font-weight: 400; color: #9BA6B5">· {{myCount}}</span></span><span style="font-size: 11px; color: #8B96A6">Pinned tickers come first in the ticker bar. The order here is the bar order.</span></div>
+<div style="display: flex; flex-direction: column; border-top: 1px solid #1A2029">
+<sc-for list="{{myRows}}" as="r" hint-placeholder-count="5">
+<div style="display: grid; grid-template-columns: 34px minmax(0, 1fr) 74px 30px 30px 30px; gap: 8px; align-items: center; min-height: 48px; border-bottom: 1px solid #1A2029">
+<button onClick="{{r.togglePin}}" aria-pressed="{{r.pinPressed}}" aria-label="{{r.pinLabel}}" title="{{r.pinLabel}}" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer"><svg viewBox="0 0 12 12" width="15" height="15" aria-hidden="true"><path d="M6 1 L7.5 4.3 L11 4.6 L8.3 6.9 L9.2 10.4 L6 8.5 L2.8 10.4 L3.7 6.9 L1 4.6 L4.5 4.3 Z" style="fill: {{r.pinFill}}; stroke: {{r.pinStroke}}; stroke-width: 1"></path></svg></button>
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 13px; font-weight: 600">{{r.sym}} <span style="font-weight: 400; color: #C5CDD8">{{r.name}}</span></span><span style="font-size: 10px; color: #8B96A6">{{r.g}} <span style="color: #E3B341">{{r.pinTag}}</span></span></span>
+<span style="display: flex; flex-direction: column; align-items: flex-end"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px">{{r.last}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: {{r.color}}">{{r.chg}}</span></span>
+<button onClick="{{r.up}}" aria-disabled="{{r.upDis}}" aria-label="{{r.upLabel}}" title="{{r.upLabel}}" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #C5CDD8; cursor: pointer; opacity: {{r.upOp}}"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2.5 7.5 L6 4 L9.5 7.5" style="fill: none; stroke: currentColor; stroke-width: 1.5"></path></svg></button>
+<button onClick="{{r.dn}}" aria-disabled="{{r.dnDis}}" aria-label="{{r.dnLabel}}" title="{{r.dnLabel}}" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #C5CDD8; cursor: pointer; opacity: {{r.dnOp}}"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2.5 4.5 L6 8 L9.5 4.5" style="fill: none; stroke: currentColor; stroke-width: 1.5"></path></svg></button>
+<button onClick="{{r.rm}}" aria-disabled="{{r.rmDis}}" aria-label="{{r.rmLabel}}" title="{{r.rmLabel}}" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border-radius: 6px; border: 1px solid #2A323E; background: transparent; color: #C5CDD8; cursor: pointer; opacity: {{r.rmOp}}"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" style="stroke: currentColor; stroke-width: 1.5; fill: none"></path></svg></button>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid #222A35; border-radius: 10px; background: #0F1319">
+<span style="font-size: 13px; font-weight: 500">Add tickers</span>
+<input type="search" value="{{aq}}" onChange="{{onAq}}" onKeyDown="{{onAqKey}}" placeholder="Search ticker or company · Enter adds the top match" aria-label="Search tickers to add" style="min-height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #2A323E; background: #12161D; color: #E6EAF0; font: inherit; font-size: 13px">
+<div style="display: flex; flex-direction: column; max-height: 240px; overflow-y: auto">
+<sc-for list="{{addRes}}" as="r" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 74px 58px; gap: 8px; align-items: center; min-height: 44px; border-bottom: 1px solid #1A2029">
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 13px; font-weight: 600">{{r.sym}} <span style="font-weight: 400; color: #C5CDD8">{{r.name}}</span></span><span style="font-size: 10px; color: #8B96A6">{{r.g}}</span></span>
+<span style="display: flex; flex-direction: column; align-items: flex-end"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px">{{r.last}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: {{r.color}}">{{r.chg}}</span></span>
+<button onClick="{{r.add}}" aria-label="{{r.addLabel}}" style="min-height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid #3B5578; background: #16202E; color: #E6EAF0; font: inherit; font-size: 12px; cursor: pointer">Add</button>
+</div>
+</sc-for>
+<sc-if value="{{noAdd}}" hint-placeholder-val="{{ false }}"><div style="padding: 12px; text-align: center; font-size: 12px; color: #9BA6B5">No more tickers to add for this search.</div></sc-if>
+</div>
+<span style="font-size: 10px; color: #8B96A6">{{uniNote}} Adding a ticker starts its price, news and filings collectors on their next run.</span>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isRf}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px"><span style="font-size: 13px; font-weight: 500">Data refresh <span style="font-weight: 400; color: #9BA6B5">· {{jobSum}}</span></span><span style="font-size: 11px; color: #8B96A6">Times in {{tz}} · weekends and market or federal holidays are skipped</span></div>
+<div style="overflow-x: auto"><div style="min-width: 620px">
+<div style="display: grid; grid-template-columns: 14px 34px 120px 150px 70px minmax(0, 1fr); gap: 8px; font-size: 10px; color: #8B96A6; text-transform: uppercase; letter-spacing: 0.06em; padding-bottom: 4px; border-bottom: 1px solid #1A2029"><span></span><span>Job</span><span>Name</span><span>Last → next</span><span>Status</span><span>Sources</span></div>
+<sc-for list="{{jobs}}" as="j" hint-placeholder-count="10">
+<div style="display: grid; grid-template-columns: 14px 34px 120px 150px 70px minmax(0, 1fr); gap: 8px; align-items: center; min-height: 32px; border-bottom: 1px solid #1A2029; font-size: 12px">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{j.dot}}"></span>
+<span style="font-family: 'IBM Plex Mono', monospace">{{j.id}}</span>
+<span>{{j.name}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #9BA6B5">{{j.last}} → {{j.next}}</span>
+<span style="font-size: 11px; color: {{j.statC}}">{{j.stat}}</span>
+<span style="font-size: 11px; color: #9BA6B5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis" title="{{j.src}}">{{j.src}}</span>
+</div>
+</sc-for>
+</div></div>
+</div>
+</sc-if>
+
+<sc-if value="{{isDp}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px"><span style="display: flex; flex-direction: column"><span style="font-size: 13px; font-weight: 500">Time zone</span><span style="font-size: 11px; color: #8B96A6">Used for job times, the calendar and intraday axis labels.</span></span>
+<div role="group" aria-label="Time zone" style="display: flex; border: 1px solid #2A323E; border-radius: 8px; overflow: hidden"><sc-for list="{{tzOpts}}" as="o" hint-placeholder-count="2"><button onClick="{{o.pick}}" aria-pressed="{{o.pressed}}" style="min-height: 34px; padding: 0 14px; border: 0; background: {{o.bg}}; color: {{o.fg}}; font: inherit; font-size: 12px; cursor: pointer">{{o.k}}</button></sc-for></div></div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px"><span style="display: flex; flex-direction: column"><span style="font-size: 13px; font-weight: 500">Up / down colors</span><span style="font-size: 11px; color: #8B96A6">Blue / orange is easier to tell apart for red-green color blindness.</span></span>
+<div role="group" aria-label="Up and down colors" style="display: flex; border: 1px solid #2A323E; border-radius: 8px; overflow: hidden"><sc-for list="{{palOpts}}" as="o" hint-placeholder-count="2"><button onClick="{{o.pick}}" aria-pressed="{{o.pressed}}" style="min-height: 34px; padding: 0 14px; border: 0; background: {{o.bg}}; color: {{o.fg}}; font: inherit; font-size: 12px; cursor: pointer">{{o.k}}</button></sc-for></div></div>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"palette":{"editor":"enum","options":["Green / Red","Blue / Orange"],"default":"Green / Red"},"timeZone":{"editor":"enum","options":["PT","ET"],"default":"PT"},"watchlist":{"editor":"enum","options":["Demo (14)","Current (2)"],"default":"Demo (14)"},"session":{"editor":"enum","options":["Signed in","Signed out"],"default":"Signed in"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  mk(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  walk2(seed, n, end, d1, d2, vol, n2) {
+    var r = this.mk(seed), o = [], v = 0;
+    for (var i = 0; i < n; i++) { v += (i >= n - n2 ? d2 : d1) + (r() - 0.5) * vol; o.push(v); }
+    var s = end - o[n - 1];
+    return o.map(function (x) { return x + s; });
+  }
+  spark(arr, lo, hi) {
+    if (lo == null) { lo = Math.min.apply(null, arr); hi = Math.max.apply(null, arr); }
+    var sp = (hi - lo) || 1;
+    return arr.map(function (v, i) {
+      var y = 25 - (Math.max(lo, Math.min(hi, v)) - lo) / sp * 22;
+      return (i ? 'L' : 'M') + (i / (arr.length - 1) * 100).toFixed(2) + ' ' + y.toFixed(2);
+    }).join(' ');
+  }
+  mean(a) { return a.reduce(function (x, y) { return x + y; }, 0) / a.length; }
+  sd(a) { var m = this.mean(a); return Math.sqrt(this.mean(a.map(function (x) { return (x - m) * (x - m); }))) || 1e-9; }
+  stats(v, freq) {
+    var self = this, n = v.length, d = [];
+    for (var i = 1; i < n; i++) d.push(v[i] - v[i - 1]);
+    var s = this.sd(d);
+    var ch = function (h) { return h != null && h < n ? v[n - 1] - v[n - 1 - h] : null; };
+    var z = function (h) { var c = ch(h); return c == null ? null : c / (s * Math.sqrt(h)); };
+    var H = freq === 'M' ? { w: null, m: 1, q: 3 } : { w: 5, m: 21, q: 62 };
+    var ma = function (k, t) { return self.mean(v.slice(t - k + 1, t + 1)); };
+    var lo = Math.min.apply(null, v), hi = Math.max.apply(null, v);
+    var st, streak = 0;
+    if (freq === 'M') {
+      var c3 = ch(3);
+      st = c3 > s * 1.2 ? 'Rising' : (c3 < -s * 1.2 ? 'Falling' : 'Flat');
+      for (var k = n - 1; k > 0; k--) {
+        var dd = v[k] - v[k - 1];
+        if ((st === 'Rising' && dd >= 0) || (st === 'Falling' && dd <= 0) || (st === 'Flat' && Math.abs(dd) <= s * 1.5)) streak++; else break;
+      }
+    } else {
+      var S = function (t) { var a = v[t], m20 = ma(20, t), m50 = ma(50, t); return a > m20 && m20 > m50 ? 'Uptrend' : (a < m20 && m20 < m50 ? 'Downtrend' : 'Range'); };
+      st = S(n - 1);
+      for (var t = n - 1; t >= 49 && S(t) === st; t--) streak++;
+    }
+    return { v: v, last: v[n - 1], cw: ch(H.w), cm: ch(H.m), cq: ch(H.q), zw: z(H.w), zm: z(H.m), zq: z(H.q), pct: (v[n - 1] - lo) / ((hi - lo) || 1), state: st, streak: streak, sdev: s, ma20: ma(Math.min(20, n), n - 1) };
+  }
+  build() {
+    var self = this;
+    var MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var hol = { '2026-07-03': 1, '2026-09-07': 1 };
+    var days = [], t = Date.UTC(2026, 9, 2);
+    while (days.length < 63) {
+      var d = new Date(t), k = d.toISOString().slice(0, 10), w = d.getUTCDay();
+      if (w !== 0 && w !== 6 && !hol[k]) days.unshift({ key: k, label: MN[d.getUTCMonth()] + ' ' + d.getUTCDate() });
+      t -= 86400000;
+    }
+    var bars = [];
+    days.forEach(function (d) { for (var h = 10; h <= 16; h++) bars.push({ key: d.key, label: d.label, hour: h }); });
+    var N = bars.length;
+    var idxOf = function (k, h) { for (var i = 0; i < N; i++) if (bars[i].key === k && bars[i].hour === h) return i; return N - 1; };
+    var ev = [
+      ['2026-07-15', 11, 'Geopolitics', 'OFAC sanctions action — [program]', 'DS-37', -0.010, -0.006],
+      ['2026-07-29', 14, 'Rates', 'FOMC statement (Jul 28–29 meeting)', 'DS-18', 0.012, 0.018],
+      ['2026-08-05', 11, 'Tariffs', 'Federal Register tariff notice — [document title]', 'DS-27', -0.012, -0.004],
+      ['2026-08-12', 10, 'Inflation', 'CPI (Jul) release', 'DS-21', 0.009, 0.011],
+      ['2026-08-13', 16, 'Filings', 'SPCX 10-Q filed', 'DS-75', 0.0, 0.031],
+      ['2026-08-21', 13, 'Robotaxi', 'Nevada AVNC permit approved (up to 5,000 vehicles)', 'DS-55', 0.018, 0.0],
+      ['2026-08-26', 12, 'SpaceX', 'Starship flight [N] — [outcome]', 'DS-08', 0.004, 0.038],
+      ['2026-09-03', 11, 'Geopolitics', 'GDELT tone spike — [theme]', 'DS-35', -0.014, -0.011],
+      ['2026-09-09', 15, 'SpaceX', 'NASA contract award — [title]', 'DS-72', 0.002, 0.024],
+      ['2026-09-11', 10, 'Inflation', 'CPI (Aug) release', 'DS-21', -0.016, -0.018],
+      ['2026-09-16', 14, 'Rates', 'FOMC statement + SEP (Sep 15–16 meeting)', 'DS-18', 0.018, 0.022],
+      ['2026-09-21', 11, 'Robotaxi', 'TxDMV: 476 Tesla AV-registered vehicles', 'DS-54', 0.025, 0.0],
+      ['2026-09-24', 12, 'Tariffs', 'USTR press release — [Section 301 action]', 'DS-29', -0.027, -0.005],
+      ['2026-09-25', 10, 'Inflation', 'PCE (Aug) release', 'DS-24', 0.005, 0.004],
+      ['2026-09-29', 11, 'Robotaxi', 'FSD (Supervised) approved in 8th EU country', 'DS-58', 0.016, 0.0],
+      ['2026-10-02', 10, 'Filings', 'Tesla Q3 production & deliveries — [figures]', 'DS-12', -0.024, -0.003]
+    ];
+    var events = ev.map(function (e, i) { return { id: 'e' + i, idx: idxOf(e[0], e[1]), cat: e[2], title: e[3], src: e[4], shT: e[5], shS: e[6], rel: e[2] === 'Robotaxi' ? 'TSLA' : (e[2] === 'SpaceX' ? 'SPCX' : (e[2] === 'Filings' ? (e[3].indexOf('SPCX') === 0 ? 'SPCX' : 'TSLA') : 'both')) }; });
+    var shT = [], shS = [];
+    for (var i = 0; i < N; i++) { shT.push(0); shS.push(0); }
+    var shM = [];
+    for (var i2 = 0; i2 < N; i2++) shM.push(0);
+    events.forEach(function (e) { shT[e.idx] += e.shT; shS[e.idx] += e.shS; if (e.rel === 'both') shM[e.idx] += (e.shT + e.shS) / 2; });
+    var r = this.mk(7), a = 312, b = 148, tsla = [], spcx = [];
+    for (var j = 0; j < N; j++) {
+      a *= 1 + 0.0004 + (r() - 0.5) * 0.014 + shT[j];
+      b *= 1 + 0.0003 + (r() - 0.5) * 0.02 + shS[j];
+      tsla.push(a); spcx.push(b);
+    }
+    events.forEach(function (e) {
+      var p = Math.max(e.idx - 1, 0), q = Math.min(e.idx + 7, N - 1);
+      e.t1h = tsla[e.idx] / tsla[p] - 1; e.s1h = spcx[e.idx] / spcx[p] - 1;
+      e.t1d = tsla[q] / tsla[p] - 1; e.s1d = spcx[q] / spcx[p] - 1;
+      e.date = bars[e.idx].label;
+    });
+    var STK = [
+      { sym: 'TSLA', name: 'Tesla', g: 'EV & autos' },
+      { sym: 'SPCX', name: 'SpaceX', g: 'Space & defense' },
+      { sym: 'RIVN', name: 'Rivian', g: 'EV & autos', p0: 12.4, vol: 0.026, beta: 1.2, drift: 0.0002, seed: 501 },
+      { sym: 'LCID', name: 'Lucid', g: 'EV & autos', p0: 2.9, vol: 0.03, beta: 1.3, drift: -0.0004, seed: 502 },
+      { sym: 'NIO', name: 'NIO', g: 'EV & autos', p0: 6.1, vol: 0.028, beta: 1.1, drift: 0.0003, seed: 503 },
+      { sym: 'F', name: 'Ford', g: 'EV & autos', p0: 10.8, vol: 0.012, beta: 0.6, drift: 0.0001, seed: 504 },
+      { sym: 'GM', name: 'General Motors', g: 'EV & autos', p0: 51.5, vol: 0.012, beta: 0.6, drift: 0.0003, seed: 505 },
+      { sym: 'RKLB', name: 'Rocket Lab', g: 'Space & defense', p0: 24.0, vol: 0.03, beta: 1.3, drift: 0.0009, seed: 506 },
+      { sym: 'ASTS', name: 'AST SpaceMobile', g: 'Space & defense', p0: 31.0, vol: 0.034, beta: 1.4, drift: 0.0006, seed: 507 },
+      { sym: 'LMT', name: 'Lockheed Martin', g: 'Space & defense', p0: 468, vol: 0.008, beta: 0.3, drift: 0.0001, seed: 508 },
+      { sym: 'NVDA', name: 'NVIDIA', g: 'Autonomy & AI', p0: 168, vol: 0.016, beta: 1.0, drift: 0.0005, seed: 509 },
+      { sym: 'GOOGL', name: 'Alphabet (Waymo)', g: 'Autonomy & AI', p0: 188, vol: 0.011, beta: 0.7, drift: 0.0004, seed: 510 },
+      { sym: 'UBER', name: 'Uber', g: 'Autonomy & AI', p0: 88, vol: 0.014, beta: 0.8, drift: 0.0002, seed: 511 },
+      { sym: 'AMZN', name: 'Amazon (Zoox)', g: 'Autonomy & AI', p0: 219, vol: 0.011, beta: 0.7, drift: 0.0002, seed: 512 }
+    ];
+    var arr = { TSLA: tsla, SPCX: spcx };
+    STK.forEach(function (st) {
+      if (arr[st.sym]) return;
+      var rr = self.mk(st.seed), v = st.p0, o = [];
+      for (var j2 = 0; j2 < N; j2++) { v *= 1 + st.drift + (rr() - 0.5) * st.vol + shM[j2] * st.beta; o.push(v); }
+      arr[st.sym] = o;
+    });
+    events.forEach(function (e) {
+      var p = Math.max(e.idx - 1, 0), q = Math.min(e.idx + 7, N - 1);
+      e.mv = {};
+      Object.keys(arr).forEach(function (k) { var a2 = arr[k]; e.mv[k] = { h: a2[e.idx] / a2[p] - 1, d: a2[q] / a2[p] - 1 }; });
+    });
+    var daily = function (arr) { var o = []; for (var i = 6; i < N; i += 7) o.push(arr[i]); return o; };
+
+    var FD = [
+      { k: '10Y', l: '10Y yield', g: 'Rates', f: 'D', u: 'y', src: 'DS-14', w: [202, 4.18, -0.0005, -0.0035, 0.07, 45], cT: [-0.42, -0.51], cS: [-0.35, -0.28] },
+      { k: '2Y', l: '2Y yield', g: 'Rates', f: 'D', u: 'y', src: 'DS-14', w: [222, 3.61, -0.0005, -0.011, 0.06, 45], cT: [-0.38, -0.44], cS: [-0.30, -0.36] },
+      { k: 'SPR', l: '10Y–2Y spread', g: 'Rates', f: 'D', u: 'bp', src: 'DS-15', cT: [0.12, 0.20], cS: [0.10, 0.15] },
+      { k: 'REAL', l: '10Y real yield', g: 'Rates', f: 'D', u: 'y', src: 'DS-15', w: [232, 1.86, 0, -0.005, 0.05, 45], cT: [-0.47, -0.39], cS: [-0.41, -0.30] },
+      { k: 'FF', l: 'Fed funds (upper)', g: 'Rates', f: 'M', u: 'y', src: 'DS-16', m: [4.50, 4.50, 4.50, 4.50, 4.50, 4.50, 4.50, 4.25, 4.25, 4.25, 4.25, 4.00, 4.00], cT: [-0.20, -0.22], cS: [-0.18, -0.20] },
+      { k: 'CPI', l: 'CPI YoY', g: 'Inflation', f: 'M', u: 'pp', src: 'DS-21', m: [2.7, 2.8, 2.9, 3.0, 2.9, 3.0, 3.0, 2.9, 3.0, 2.9, 3.1, 2.8, 2.9], cT: [-0.25, -0.27], cS: [-0.22, -0.20] },
+      { k: 'CORE', l: 'Core CPI YoY', g: 'Inflation', f: 'M', u: 'pp', src: 'DS-21', m: [3.2, 3.1, 3.1, 3.0, 3.0, 3.1, 3.0, 3.0, 3.0, 3.1, 3.0, 3.1, 3.1], cT: [-0.28, -0.30], cS: [-0.24, -0.25] },
+      { k: 'VIX', l: 'VIX', g: 'Risk', f: 'D', u: 'n1', src: 'DS-45', w: [781, 17.4, -0.01, 0.06, 1.6, 25], cT: [-0.55, -0.61], cS: [-0.48, -0.52] },
+      { k: 'DXY', l: 'Dollar (broad)', g: 'Risk', f: 'D', u: 'n1', src: 'DS-45', w: [878, 119.8, 0, -0.06, 0.6, 50], cT: [-0.21, -0.33], cS: [-0.12, -0.09] },
+      { k: 'WTI', l: 'WTI crude', g: 'Risk', f: 'D', u: 'usd', src: 'DS-45', w: [353, 64.2, -0.02, 0.09, 1.2, 35], cT: [0.08, 0.15], cS: [-0.05, 0.02] },
+      { k: 'GPR', l: 'Geopolitical risk', g: 'Geopolitics', f: 'D', u: 'n0', src: 'DS-38', w: [1072, 128, 0, 0.6, 9, 30], cT: [-0.18, -0.25], cS: [-0.10, -0.14] },
+      { k: 'EPU', l: 'Policy uncertainty', g: 'Geopolitics', f: 'D', u: 'n0', src: 'DS-39', w: [252, 210, 0.2, -1.3, 14, 45], cT: [-0.29, -0.22], cS: [-0.18, -0.25] },
+      { k: 'TONE', l: 'GDELT tone', g: 'Geopolitics', f: 'D', u: 'n1', src: 'DS-35', w: [1266, -2.4, 0, -0.012, 0.22, 30], cT: [0.31, 0.40], cS: [0.22, 0.18] },
+      { k: 'TAR', l: 'Tariff news / hr', g: 'Tariffs', f: 'D', u: 'hr', src: 'DS-35', w: [1363, 38, 0, 0.45, 6, 25], cT: [-0.26, -0.34], cS: [-0.08, -0.12] }
+    ];
+    var by = {};
+    FD.forEach(function (f) { if (f.w) f.series = self.walk2(f.w[0], 260, f.w[1], f.w[2], f.w[3], f.w[4], f.w[5]); else if (f.m) f.series = f.m; by[f.k] = f; });
+    by.SPR.series = by['10Y'].series.map(function (v, i) { return v - by['2Y'].series[i]; });
+    FD.forEach(function (f) { f.st = self.stats(f.series, f.f); });
+
+    var rc = this.mk(999);
+    STK.forEach(function (st) {
+      FD.forEach(function (f) {
+        var key = 'c_' + st.sym;
+        if (st.sym === 'TSLA') f[key] = f.cT;
+        else if (st.sym === 'SPCX') f[key] = f.cS;
+        else {
+          var base = st.g === 'Space & defense' ? f.cS : f.cT, cl = function (x) { return Math.max(-0.9, Math.min(0.9, x)); };
+          f[key] = [cl(base[0] * st.beta * 0.85 + (rc() - 0.5) * 0.12), cl(base[1] * st.beta * 0.85 + (rc() - 0.5) * 0.18)];
+        }
+      });
+    });
+    var dailyF = FD.filter(function (f) { return f.f === 'D' && f.k !== 'SPR'; });
+    var pressHist = function (key) {
+      var out = [];
+      for (var t = 260 - 63; t < 260; t++) {
+        var sc = 0;
+        dailyF.forEach(function (f) { var v = f.series; sc += f[key][0] * (v[t] - v[t - 21]) / (f.st.sdev * Math.sqrt(21)); });
+        out.push(Math.tanh(sc / 3));
+      }
+      return out;
+    };
+    var mid = 0; while (mid < N && bars[mid].key < '2026-08-25') mid++;
+    var dailyM = {}, PM = {};
+    STK.forEach(function (st) { dailyM[st.sym] = daily(arr[st.sym]); PM[st.sym] = pressHist('c_' + st.sym); });
+    var LD = 1260, daysL = [], tL = Date.UTC(2026, 9, 2);
+    while (daysL.length < LD) {
+      var dL = new Date(tL), kL = dL.toISOString().slice(0, 10), wL = dL.getUTCDay();
+      if (wL !== 0 && wL !== 6 && !hol[kL]) daysL.unshift({ key: kL, label: MN[dL.getUTCMonth()] + ' ' + dL.getUTCDate(), mon: MN[dL.getUTCMonth()] + " '" + String(dL.getUTCFullYear()).slice(2) });
+      tL -= 86400000;
+    }
+    var off63 = LD - 63;
+    var gauss = function (r) { return (r() + r() + r() - 1.5) * 2; };
+    var rm = this.mk(4242), mret = [];
+    for (var a3 = 0; a3 < LD; a3++) mret.push(0.00045 + gauss(rm) * 0.0105);
+    var MKB = { SPX: [1, 0], DJI: [0.85, 0.004], NDX: [1.2, 0.006], RUT: [1.1, 0.008], XLY: [1.1, 0.007], ITA: [0.8, 0.007], SMH: [1.5, 0.012] };
+    var MKT = {};
+    Object.keys(MKB).forEach(function (k, ki) {
+      var r = self.mk(4300 + ki), v = 100, o = [];
+      for (var a = 0; a < LD; a++) { v *= 1 + (k === 'SPX' ? mret[a] : MKB[k][0] * mret[a] + gauss(r) * MKB[k][1] - 0.0001); o.push(v); }
+      var tgt = { SPX: 1.78, DJI: 1.55, NDX: 2.05, RUT: 1.30, XLY: 1.45, ITA: 1.60, SMH: 3.2 }[k], ratio = tgt / (o[LD - 1] / o[0]);
+      MKT[k] = o.map(function (v, t) { return v * Math.pow(ratio, t / (LD - 1)); });
+    });
+    var L = {}, IPO = {};
+    STK.forEach(function (st, si) {
+      var dd = dailyM[st.sym], r = self.mk(6000 + si);
+      var dv = st.sym === 'TSLA' || st.sym === 'SPCX' ? 0.024 : st.vol * 0.8, bm = st.sym === 'TSLA' ? 1.6 : (st.sym === 'SPCX' ? 1.2 : (st.beta || 1) * 1.1);
+      var o = []; for (var i = 0; i < LD; i++) o.push(null);
+      for (var i3 = 0; i3 < 63; i3++) o[off63 + i3] = dd[i3];
+      var ipo = 0;
+      if (st.sym === 'SPCX') { while (ipo < LD && daysL[ipo].key < '2026-06-12') ipo++; }
+      IPO[st.sym] = ipo;
+      var v = dd[0];
+      for (var t = off63 - 1; t >= ipo; t--) { v = v / (1 + bm * mret[t + 1] + gauss(r) * dv * 0.8 + 0.0004); o[t] = v; }
+      L[st.sym] = o;
+    });
+    var VH = {}, VD = {}, SI = {}, PCR = {}, IV = {};
+    var siBase = { TSLA: 2.9, SPCX: 4.6, RIVN: 17, LCID: 24, NIO: 11, F: 3.2, GM: 2.4, RKLB: 13, ASTS: 19, LMT: 1.3, NVDA: 1.1, GOOGL: 0.9, UBER: 2.6, AMZN: 0.8 };
+    var ivBase = { TSLA: 54, SPCX: 61, RIVN: 68, LCID: 80, NIO: 72, F: 34, GM: 33, RKLB: 85, ASTS: 98, LMT: 22, NVDA: 46, GOOGL: 30, UBER: 38, AMZN: 31 };
+    var ushape = [1.6, 1.05, 0.85, 0.8, 0.85, 1.0, 1.45];
+    STK.forEach(function (st, si) {
+      var r = self.mk(7000 + si), a = arr[st.sym], vh = [];
+      for (var i = 0; i < N; i++) { var ret = i ? Math.abs(a[i] / a[i - 1] - 1) : 0; vh.push(ushape[i % 7] * (1 + ret * 40) * (0.7 + r() * 0.6)); }
+      VH[st.sym] = vh;
+      var l = L[st.sym], vd = [], ipo = IPO[st.sym];
+      for (var t = 0; t < LD; t++) {
+        if (l[t] == null) { vd.push(null); continue; }
+        var rt = t && l[t - 1] != null ? Math.abs(l[t] / l[t - 1] - 1) : 0, boost = st.sym === 'SPCX' && t - ipo < 5 ? 4 - (t - ipo) * 0.6 : 1;
+        vd.push((1 + rt * 30) * (0.7 + r() * 0.6) * boost);
+      }
+      VD[st.sym] = vd;
+      var si0 = siBase[st.sym] || 3, sv = si0, siA = [], pc0 = 0.9, pcA = [], ib = ivBase[st.sym] || 45, iv = ib, ivA = [];
+      for (var t2 = 0; t2 < LD; t2++) {
+        if (l[t2] == null) { siA.push(null); pcA.push(null); ivA.push(null); continue; }
+        if (t2 % 10 === 0) sv = Math.max(0.3, sv * (1 + (r() - 0.5) * 0.16) + (si0 - sv) * 0.08);
+        siA.push(sv);
+        var live = st.sym !== 'SPCX' || t2 >= ipo + 3;
+        pc0 = Math.max(0.4, Math.min(1.8, pc0 + (r() - 0.5) * 0.08 + (0.9 - pc0) * 0.06));
+        iv = Math.max(10, iv + (r() - 0.5) * 2.4 + (ib - iv) * 0.04);
+        pcA.push(live ? pc0 : null); ivA.push(live ? iv : null);
+      }
+      SI[st.sym] = siA; PCR[st.sym] = pcA; IV[st.sym] = ivA;
+    });
+    var floorK = { '10Y': 0.2, '2Y': 0.1, REAL: -1.5, VIX: 9, DXY: 80, WTI: 20, GPR: 40, EPU: 40, TONE: -9, TAR: 2 };
+    FD.forEach(function (f, fi) {
+      if (f.f !== 'D' || f.k === 'SPR') return;
+      var pre = self.walk2(9000 + fi, LD - 260 + 1, f.series[0], 0, 0, f.w[4], 0);
+      f.long = pre.slice(0, LD - 260).map(function (v) { return Math.max(floorK[f.k], v); }).concat(f.series);
+    });
+    by.SPR.long = by['10Y'].long.map(function (v, i) { return v - by['2Y'].long[i]; });
+    var PL = {};
+    STK.forEach(function (st) {
+      var key = 'c_' + st.sym, o = [];
+      for (var t = 0; t < LD; t++) {
+        if (t < 21) { o.push(null); continue; }
+        var sc = 0;
+        dailyF.forEach(function (f) { var v = f.long; sc += f[key][0] * (v[t] - v[t - 21]) / (f.st.sdev * Math.sqrt(21)); });
+        o.push(Math.tanh(sc / 3));
+      }
+      PL[st.sym] = o;
+    });
+    return { LD: LD, daysL: daysL, off63: off63, MKT: MKT, L: L, IPO: IPO, VH: VH, VD: VD, SI: SI, PCR: PCR, IV: IV, PL: PL, STK: STK, arr: arr, daily: dailyM, P: PM, mid: mid, bars: bars, N: N, tsla: tsla, spcx: spcx, events: events, FD: FD, by: by, dT: daily(tsla), dS: daily(spcx), pT: pressHist('cT'), pS: pressHist('cS') };
+  }
+  computeAll() {
+    if (!this._d) this._d = this.build();
+    var self = this, D = this._d, N = D.N;
+    var s = Object.assign({ sym: 'TSLA', rg: '1M', ovs: ['MA50', '10Y'], og: 'Market', lanes: null, so: 'Impact', sel: null, off: {}, dr: {}, pk: false, q: '', pg: 'All', ps: 'Day move', pins: null }, this.state || {});
+    var set = function (o) { self.setState(o); };
+    var blue = (s.palP || this.props.palette || 'Green / Red') === 'Blue / Orange';
+    var UP = blue ? '#58A6FF' : '#3FB950', DN = blue ? '#F0883E' : '#F85149', NEU = '#9BA6B5';
+    var tz = s.tzP || this.props.timeZone || 'PT';
+    var demo = (this.props.watchlist ?? 'Demo (14)') !== 'Current (2)';
+    var UNI = demo ? D.STK : D.STK.slice(0, 2);
+    var myT = (s.myT || (demo ? ['TSLA', 'SPCX', 'RIVN', 'RKLB', 'NVDA'] : ['TSLA', 'SPCX'])).filter(function (p) { return UNI.some(function (x) { return x.sym === p; }); });
+    if (!myT.length) myT = [UNI[0].sym];
+    var cur0 = UNI.filter(function (x) { return x.sym === (myT.indexOf(s.sym) >= 0 ? s.sym : myT[0]); })[0];
+    var isS = cur0.sym === 'SPCX', isT = cur0.sym === 'TSLA';
+    var K = { sym: cur0.sym, name: cur0.name, arr: D.arr[cur0.sym], d: D.daily[cur0.sym], p: D.P[cur0.sym], ck: 'c_' + cur0.sym, col: '#6CA6FF' };
+    var sg = function (v) { return v >= 0 ? UP : DN; };
+    var pc = function (v, d) { return (v >= 0 ? '+' : '') + (v * 100).toFixed(d == null ? 1 : d) + '%'; };
+    var pa = function (v) { return (v >= 0 ? '▲ +' : '▼ ') + (v * 100).toFixed(2) + '%'; };
+    var DNm = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    var tm = function (day, m) {
+      if (tz === 'PT') { m -= 180; if (m < 0) { m += 1440; if (day != null) day = (day + 6) % 7; } }
+      return (day == null ? '' : DNm[day] + ' ') + String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    };
+    var ALLC = [
+      { k: 'Rates', c: '#6CA6FF' }, { k: 'Inflation', c: '#F2A33A' }, { k: 'Tariffs', c: '#EC7BA6' },
+      { k: 'Geopolitics', c: '#B392F0' }, { k: 'Robotaxi', c: '#39C5B0' }, { k: 'SpaceX', c: '#D2D8E0' }, { k: 'Filings', c: '#E3C05C' }
+    ];
+    var cmap = {}; ALLC.forEach(function (c) { cmap[c.k] = c.c; });
+    var CATS = ALLC.filter(function (c) { return (c.k !== 'Robotaxi' || isT) && (c.k !== 'SpaceX' || isS); });
+    var relevant = function (e) { return e.rel === 'both' || e.rel === K.sym; };
+    var opt = function (list, cur, key) {
+      return list.map(function (k) {
+        var on = cur === k;
+        return { k: k, pressed: on ? 'true' : 'false', bg: on ? '#25344A' : 'transparent', fg: on ? '#E6EAF0' : '#9BA6B5', pick: function () { var o = {}; o[key] = k; set(o); } };
+      });
+    };
+    var sgn = function (c) { return c > 0 ? '+' : (c < 0 ? '−' : ''); };
+    var fmtL = function (u, v) {
+      if (u === 'y') return v.toFixed(2) + '%';
+      if (u === 'bp') return (v >= 0 ? '+' : '−') + Math.abs(Math.round(v * 100)) + ' bp';
+      if (u === 'pp') return v.toFixed(1) + '%';
+      if (u === 'n1') return v.toFixed(1);
+      if (u === 'usd') return '$' + v.toFixed(2);
+      if (u === 'hr') return Math.round(v) + '/hr';
+      return String(Math.round(v));
+    };
+    var fmtC = function (u, c) {
+      if (c == null) return '—';
+      var a = Math.abs(c);
+      if (u === 'y' || u === 'bp') return sgn(Math.round(c * 100)) + Math.round(a * 100) + 'bp';
+      if (u === 'pp' || u === 'n1') return sgn(+c.toFixed(1)) + a.toFixed(1);
+      if (u === 'usd') return sgn(c) + a.toFixed(2);
+      return sgn(Math.round(c)) + Math.round(a);
+    };
+    var heat = function (z) { return z == null ? '#161B23' : 'rgba(139,156,255,' + (Math.min(Math.abs(z) / 3, 1) * 0.75 + 0.06).toFixed(2) + ')'; };
+    var effect = function (score) {
+      var a = Math.abs(score), lv = a < 0.15 ? 0 : (a < 0.45 ? 1 : (a < 0.9 ? 2 : 3));
+      var c = lv === 0 ? NEU : (score > 0 ? UP : DN);
+      return { w: lv === 0 ? 'Neutral' : (score > 0 ? 'Tailwind' : 'Headwind'), c: c, b1: lv >= 1 ? c : '#2A323E', b2: lv >= 2 ? c : '#2A323E', b3: lv >= 3 ? c : '#2A323E', score: score };
+    };
+    var stateLabel = function (f) {
+      var st = f.st.state;
+      if (f.f === 'M') {
+        if (f.k === 'FF') st = st === 'Falling' ? 'Easing' : (st === 'Rising' ? 'Tightening' : 'On hold');
+        else st = st === 'Flat' ? 'Sticky' : (st === 'Rising' ? 'Re-accelerating' : 'Cooling');
+        return st + ' · 3M ' + fmtC(f.u, f.st.cq);
+      }
+      return st + ' · ' + f.st.streak + 'd';
+    };
+    var stChip = function (st) {
+      if (st === 'Uptrend') return { bg: UP + '1F', bd: UP + '88', fg: UP };
+      if (st === 'Downtrend') return { bg: DN + '1F', bd: DN + '88', fg: DN };
+      return { bg: '#1C232D', bd: '#2A323E', fg: NEU };
+    };
+    var drawer = function (key, title, sum) {
+      var open = !!s.dr[key];
+      return { title: title, sum: sum, open: open, exp: open ? 'true' : 'false', icon: open ? '▾ Hide' : '▸ Show', toggle: function () { var o = Object.assign({}, s.dr); o[key] = !open; set({ dr: o }); } };
+    };
+
+    var jobsRaw = [
+      ['H1', 'Prices', 4, 965, 0, 605, 'ok', 'Alpaca IEX hourly bars · NYSE trading days'],
+      ['H2', 'News', 4, 1395, 0, 15, 'ok', 'GDELT, Alpha Vantage, Finnhub, Google News, SNAPI'],
+      ['H3', 'Filings & regs', 4, 1345, 0, 385, 'ok', 'EDGAR, Fed RSS, Federal Register, White House, USTR, NASA, LL2'],
+      ['D1', 'Macro AM', 4, 420, 0, 420, 'ok', 'FRED yields & rates, VIX, DXY, WTI, EPU, Atlanta Fed'],
+      ['D2', 'Ops sweep', 4, 450, 0, 450, 'ok', 'NHTSA, FAA, CelesTrak, FCC, OFAC, BIS, CBP'],
+      ['D3', 'Overnight rates', 4, 555, 0, 555, 'ok', 'NY Fed EFFR & SOFR'],
+      ['D4', 'Close', 4, 1005, 0, 1005, 'warn', 'Treasury curve, Massive close check, Kalshi, Cleveland Fed (sample: one retry)'],
+      ['D5', 'Contracts', 4, 1065, 0, 1065, 'ok', 'USAspending, SAM.gov, DoD contracts']
+    ];
+    var jobs = jobsRaw.map(function (j) { return { id: j[0], name: j[1], last: tm(j[2], j[3]), next: tm(j[4], j[5]), dot: j[6] === 'ok' ? '#57C78F' : '#E3B341', tip: j[0] + ' · ' + j[7] + ' · status: ' + j[6] }; });
+    jobs.push({ id: 'W1', name: 'Weekly', last: 'Sep 28', next: tm(0, 480), dot: '#57C78F', tip: 'W1 · state AV programs, HTS tariffs, GPR, trackers · status: ok' });
+    jobs.push({ id: 'M1', name: 'Releases', last: 'PCE Sep 25', next: 'CPI [BLS date]', dot: '#57C78F', tip: 'M1 · fires on release days from the D1 calendar · status: ok' });
+    jobs.forEach(function (j) { var parts = j.tip.split(' · '); j.src = parts.slice(1, -1).join(' · '); j.stat = j.dot === '#57C78F' ? 'OK' : 'Retried'; j.statC = j.dot; });
+    var warn = jobs.filter(function (j) { return j.dot !== '#57C78F'; }).length;
+
+    var stockCard = function (C) {
+      var c = C.arr[N - 1] / C.arr[N - 8] - 1, st = self.stats(C.d, 'D'), chip = stChip(st.state);
+      return { st: st, last: '$' + C.arr[N - 1].toFixed(2), chg: pa(c), color: sg(c), state: st.state + ' · ' + st.streak + 'd', stBg: chip.bg, stBd: chip.bd, stFg: chip.fg, spark: self.spark(C.d.slice(C.d.length - 30)) };
+    };
+    var pins = (s.pins || ['TSLA', 'SPCX']).filter(function (p) { return myT.indexOf(p) >= 0; });
+    var stripSyms = pins.concat(myT.filter(function (p) { return pins.indexOf(p) < 0; }));
+    var Q = {};
+    UNI.forEach(function (st) {
+      var a2 = D.arr[st.sym], d2 = D.daily[st.sym], c = a2[N - 1] / a2[N - 8] - 1, m1 = d2[d2.length - 1] / d2[d2.length - 22] - 1, ts = self.stats(d2, 'D'), ch = stChip(ts.state), pv2 = D.P[st.sym][D.P[st.sym].length - 1];
+      Q[st.sym] = { sym: st.sym, name: st.name, g: st.g, c: c, m1: m1, pv: pv2, last: '$' + a2[N - 1].toFixed(2), chg: pa(c), color: sg(c), m1s: pc(m1), m1c: sg(m1), stateTxt: ts.state + ' · ' + ts.streak + 'd', stBg: ch.bg, stBd: ch.bd, stFg: ch.fg, dot: ch.fg, spark: self.spark(d2.slice(d2.length - 30)), pin: pins.indexOf(st.sym) >= 0, on: st.sym === K.sym };
+    });
+    var goTo = function (sym) { return function () { set({ sym: sym, sel: null, off: {}, pk: false, q: '' }); }; };
+    var wide = myT.length <= 4;
+    var strip = stripSyms.map(function (sym, i) { var q = Q[sym]; return Object.assign({}, q, { pinned: pins.indexOf(sym) >= 0, divider: i > 0 && pins.indexOf(sym) < 0 && pins.indexOf(stripSyms[i - 1]) >= 0, flex: wide ? '1 1 260px' : '0 0 188px', pressed: q.on ? 'true' : 'false', bd: q.on ? '#6CA6FF' : '#222A35', bg: q.on ? '#16202E' : '#12161D', go: goTo(sym) }); });
+    var showAll = UNI.length > 4;
+    var groups = ['All'];
+    UNI.forEach(function (x) { if (groups.indexOf(x.g) < 0) groups.push(x.g); });
+    var qs = (s.q || '').trim().toLowerCase();
+    var plist = UNI.filter(function (x) { return (s.pg === 'All' || x.g === s.pg) && (!qs || x.sym.toLowerCase().indexOf(qs) >= 0 || x.name.toLowerCase().indexOf(qs) >= 0); }).map(function (x) { return Q[x.sym]; });
+    var sorters = { 'Day move': function (a, b) { return b.c - a.c; }, '1M': function (a, b) { return b.m1 - a.m1; }, 'Pressure': function (a, b) { return b.pv - a.pv; }, 'A–Z': function (a, b) { return a.sym < b.sym ? -1 : 1; } };
+    plist.sort(sorters[s.ps] || sorters['Day move']);
+    plist = plist.map(function (q) {
+      var w2 = Math.abs(q.pv) * 50;
+      return Object.assign({}, q, {
+        go: goTo(q.sym), rowBg: q.on ? '#16202E' : 'transparent', pinLabel: (q.pin ? 'Unpin ' : 'Pin ') + q.sym + (q.pin ? ' from' : ' to') + ' the watchlist bar',
+        pinFill: q.pin ? '#E3B341' : 'none', pinStroke: q.pin ? '#E3B341' : '#8B96A6', pressed: q.pin ? 'true' : 'false',
+        togglePin: function () { var p2 = pins.slice(), k2 = p2.indexOf(q.sym); if (k2 >= 0) p2.splice(k2, 1); else p2.push(q.sym); set({ pins: p2 }); },
+        pl: (q.pv >= 0 ? 50 : 50 - w2).toFixed(1) + '%', pw: w2.toFixed(1) + '%', pcol: Math.abs(q.pv) < 0.1 ? NEU : sg(q.pv), pvTxt: (q.pv >= 0 ? '+' : '') + q.pv.toFixed(2)
+      });
+    });
+    var pkOpen = !!s.pk && showAll;
+    var MAXPIN = 6, jobSum = (jobs.length - warn) + ' jobs ok' + (warn ? ' · ' + warn + ' retry' : '');
+    var signedIn = !s.out && (this.props.session ?? 'Signed in') !== 'Signed out';
+    var umOpen = !!s.um && signedIn;
+    var openSt = function (tab) { return function () { set({ st: tab, um: false }); }; };
+    var stTab = signedIn ? s.st : null;
+    var stTabs = [['tickers', 'My tickers'], ['refresh', 'Data refresh'], ['display', 'Display']].map(function (x) {
+      var on = stTab === x[0];
+      return { k: x[1], pressed: on ? 'true' : 'false', bd: on ? '#6CA6FF' : 'transparent', fg: on ? '#E6EAF0' : '#9BA6B5', pick: openSt(x[0]) };
+    });
+    var setMy = function (a2, extra) { set(Object.assign({ myT: a2 }, extra || {})); };
+    var myRows = myT.map(function (sym, i) {
+      var q = Q[sym], pin = pins.indexOf(sym) >= 0, last = i === myT.length - 1, only = myT.length === 1;
+      return Object.assign({}, q, {
+        pinFill: pin ? '#E3B341' : 'none', pinStroke: pin ? '#E3B341' : '#8B96A6', pinPressed: pin ? 'true' : 'false',
+        pinLabel: pin ? 'Unpin ' + sym : (pins.length >= MAXPIN ? 'Pin limit reached (6). Unpin one first.' : 'Pin ' + sym + ' to the front of the ticker bar'),
+        togglePin: function () { var p2 = pins.slice(), k2 = p2.indexOf(sym); if (k2 >= 0) p2.splice(k2, 1); else if (p2.length < MAXPIN) p2.push(sym); set({ pins: p2 }); },
+        upOp: i === 0 ? '0.3' : '1', dnOp: last ? '0.3' : '1', rmOp: only ? '0.3' : '1', upDis: i === 0 ? 'true' : 'false', dnDis: last ? 'true' : 'false', rmDis: only ? 'true' : 'false',
+        up: function () { if (i === 0) return; var a2 = myT.slice(); a2.splice(i - 1, 0, a2.splice(i, 1)[0]); setMy(a2); },
+        dn: function () { if (last) return; var a2 = myT.slice(); a2.splice(i + 1, 0, a2.splice(i, 1)[0]); setMy(a2); },
+        rm: function () { if (only) return; setMy(myT.filter(function (x) { return x !== sym; }), { pins: pins.filter(function (x) { return x !== sym; }) }); },
+        upLabel: 'Move ' + sym + ' up', dnLabel: 'Move ' + sym + ' down', rmLabel: 'Remove ' + sym + ' from My tickers', pinTag: pin ? 'Pinned' : ''
+      });
+    });
+    var aq = (s.aq || '').trim().toLowerCase();
+    var addRes = UNI.filter(function (x) { return myT.indexOf(x.sym) < 0 && (!aq || x.sym.toLowerCase().indexOf(aq) >= 0 || x.name.toLowerCase().indexOf(aq) >= 0); }).map(function (x) {
+      return Object.assign({}, Q[x.sym], { add: function () { setMy(myT.concat([x.sym])); }, addLabel: 'Add ' + x.sym + ' to My tickers' });
+    });
+    var cur = stockCard(K), dd = K.d, dn = dd.length;
+    var hc = function (l, v) { return { l: l, v: pc(v), c: sg(v), bg: v >= 0 ? UP + '14' : DN + '14' }; };
+    var hdr = { last: cur.last, chg: cur.chg, color: cur.color, hz: [hc('1W', dd[dn - 1] / dd[dn - 6] - 1), hc('1M', dd[dn - 1] / dd[dn - 22] - 1), hc('3M', dd[dn - 1] / dd[0] - 1), hc('vs MA20', dd[dn - 1] / cur.st.ma20 - 1), { l: 'Trend', v: cur.state, c: cur.stFg, bg: cur.stBg }] };
+
+    var FD = D.FD, by = D.by, fx = {};
+    FD.forEach(function (f) { fx[f.k] = f[K.ck][0] * f.st.zm; });
+    var dailyKeys = FD.filter(function (f) { return f.f === 'D' && f.k !== 'SPR'; });
+    var pv = K.p[K.p.length - 1], pd20 = pv - K.p[K.p.length - 21], pw = Math.abs(pv) * 50, pcol = Math.abs(pv) < 0.1 ? NEU : sg(pv);
+    var ranked = dailyKeys.map(function (f) { return { f: f, e: fx[f.k] }; }).sort(function (a, b) { return Math.abs(b.e) - Math.abs(a.e); });
+    var pr = {
+      val: (pv >= 0 ? '+' : '') + pv.toFixed(2), word: Math.abs(pv) < 0.1 ? 'Neutral' : (pv > 0 ? 'Tailwind' : 'Headwind'), color: pcol,
+      left: (pv >= 0 ? 50 : 50 - pw).toFixed(1) + '%', width: pw.toFixed(1) + '%',
+      note: 'Biggest: ' + ranked.slice(0, 2).map(function (x) { return x.f.l + ' ' + (x.f.st.zm > 0 ? '▲' : '▼') + ' (' + (x.e > 0 ? 'tailwind' : 'headwind') + ')'; }).join(', ') + ' · ' + (pd20 >= 0 ? 'improving ' : 'worsening ') + (pd20 >= 0 ? '+' : '') + pd20.toFixed(2) + ' over 1M'
+    };
+    var pill = function (l, st, k) { var e = effect(fx[k] || 0); return { l: l, s: st, dot: e.c, bd: e.c === NEU ? '#2A323E' : e.c + '66', tip: l + ': ' + st + ' — ' + e.w.toLowerCase() + ' for ' + K.sym }; };
+    var z10 = by['10Y'].st.zm, dSpr = by.SPR.st.cm, d2 = by['2Y'].st.cm, d10 = by['10Y'].st.cm;
+    var curveShape = dSpr > 0 ? (d2 < 0 ? 'Bull steepening' : 'Bear steepening') : (d2 > 0 ? 'Bear flattening' : 'Bull flattening');
+    var regime = [
+      pill('Rates', z10 < -0.5 ? 'Easing ▼' : (z10 > 0.5 ? 'Tightening ▲' : 'Range-bound'), '10Y'),
+      pill('Curve', curveShape, 'SPR'),
+      pill('Inflation', stateLabel(by.CORE).split(' · ')[0], 'CORE'),
+      pill('Volatility', by.VIX.st.zw > 0.5 ? 'Rising ▲' : (by.VIX.st.zw < -0.5 ? 'Falling ▼' : 'Calm'), 'VIX'),
+      pill('Dollar', by.DXY.st.zm < -0.5 ? 'Weakening ▼' : (by.DXY.st.zm > 0.5 ? 'Strengthening ▲' : 'Flat'), 'DXY'),
+      pill('Trade tension', by.TAR.st.zm > 1 ? 'Elevated ▲' : (by.TAR.st.zm < -1 ? 'Easing ▼' : 'Normal'), 'TAR'),
+      pill('Geo tone', by.TONE.st.zm < -0.5 ? 'Souring ▼' : (by.TONE.st.zm > 0.5 ? 'Improving ▲' : 'Stable'), 'TONE')
+    ];
+
+    var drivers = FD.map(function (f) {
+      var st = f.st, e = effect(fx[f.k]);
+      e.tip = K.sym + ': ρ90 ' + f[K.ck][0].toFixed(2) + ' × 1M z ' + st.zm.toFixed(2) + ' = ' + fx[f.k].toFixed(2);
+      var tail = f.f === 'M' ? f.series : f.series.slice(260 - 63);
+      var hz = [['1W', st.cw, st.zw], ['1M', st.cm, st.zm], ['3M', st.cq, st.zq]].map(function (h) { return { v: fmtC(f.u, h[1]), bg: heat(h[2]), tip: h[0] + ': ' + fmtC(f.u, h[1]) + (h[2] == null ? '' : ' (' + h[2].toFixed(1) + 'σ)') }; });
+      return { imp: Math.abs(fx[f.k]), l: f.l, g: f.g + (f.f === 'M' ? ' · monthly' : ''), src: f.src, lvl: fmtL(f.u, st.last), pctL: 'calc(' + (st.pct * 100).toFixed(0) + '% - 1px)', hz: hz, m: hz[1], spark: self.spark(tail), state: stateLabel(f), e: e };
+    });
+    var byImp = drivers.slice().sort(function (a, b) { return b.imp - a.imp; });
+    if (s.so === 'Impact') drivers = byImp;
+    drivers.forEach(function (d, i) { var t = s.so === 'Impact' && i < 3; d.rank = t ? '#' + (i + 1) : ''; d.bg = t ? '#161D27' : 'transparent'; });
+    var top = byImp.slice(0, 5);
+
+    var driftKeys = ['10Y', '2Y', 'REAL', 'VIX', 'DXY', 'WTI', 'TONE', 'EPU', 'TAR'];
+    var nStr = 0, nFlip = 0;
+    var drift = driftKeys.map(function (k, i) {
+      var f = by[k], c = f[K.ck], c90 = c[0], c30 = c[1];
+      var ser = self.walk2(400 + i * 31 + (K.sym.charCodeAt(0) % 13), 26, c30, (c90 - c30) * -0.01, (c30 - c90) / 6, 0.14, 8).map(function (x) { return Math.max(-0.95, Math.min(0.95, x)); });
+      var dd2 = c30 - c90, flag, fBg, fFg;
+      if ((c30 > 0) !== (c90 > 0)) { flag = 'Sign flip'; fBg = '#3A2A10'; fFg = '#E3B341'; nFlip++; }
+      else if (Math.abs(dd2) >= 0.08 && Math.abs(c30) > Math.abs(c90)) { flag = 'Strengthening'; fBg = '#1B2A40'; fFg = '#8EBBFF'; nStr++; }
+      else if (Math.abs(dd2) >= 0.08) { flag = 'Weakening'; fBg = '#1C232D'; fFg = '#9BA6B5'; }
+      else { flag = 'Stable'; fBg = '#161B23'; fFg = '#8B96A6'; }
+      return { l: f.l, spark: self.spark(ser, -1, 1), now: (c30 >= 0 ? '+' : '') + c30.toFixed(2), d: (dd2 >= 0 ? '▲ +' : '▼ ') + dd2.toFixed(2), c: c30 >= 0 ? '#6CA6FF' : '#F0883E', flag: flag, fBg: fBg, fFg: fFg };
+    });
+
+    var LD = D.LD, off63 = D.off63, daysL = D.daysL;
+    var RGS = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '3Y', '5Y'];
+    var LD0 = D.LD, y00 = 0; while (y00 < LD0 && D.daysL[y00].key < '2026-01-01') y00++;
+    var H0 = LD0 - (D.IPO[K.sym] || 0), DAYS = { 'YTD': LD0 - y00, '1Y': 252, '3Y': 756, '5Y': LD0 }, perKeys = [], ipoKey = null;
+    RGS.forEach(function (k) { if (!DAYS[k] || DAYS[k] <= H0) perKeys.push(k); else if (!ipoKey) { ipoKey = k; perKeys.push(k); } });
+    var rg = perKeys.indexOf(s.rg) >= 0 ? s.rg : (ipoKey && DAYS[s.rg] ? ipoKey : '1M');
+    var hourly = ['1D', '5D', '1M', '3M'].indexOf(rg) >= 0;
+    var y0 = 0; while (y0 < LD && daysL[y0].key < '2026-01-01') y0++;
+    var ytdN = LD - y0;
+    var nWant = { '1D': 7, '5D': 35, '1M': 147, '3M': N, 'YTD': ytdN, '1Y': 252, '3Y': 756, '5Y': LD }[rg];
+    var ipo = D.IPO[K.sym] || 0, clipped = false, pts = [];
+    if (hourly) { for (var b = N - nWant; b < N; b++) pts.push({ hb: b, li: off63 + Math.floor(b / 7), fr: (b % 7 + 1) / 7 }); }
+    else { var s0 = LD - nWant; if (s0 < ipo) { s0 = ipo; clipped = true; } for (var t = s0; t < LD; t++) pts.push({ hb: -1, li: t, fr: 1 }); }
+    var n = pts.length, LS = D.L[K.sym];
+    var Araw = pts.map(function (p) { return p.hb >= 0 ? K.arr[p.hb] : LS[p.li]; });
+    var mw, MAraw = [];
+    if (hourly) { mw = rg === '1D' ? 3 : (rg === '5D' ? 7 : 35); pts.forEach(function (p) { var g0 = p.hb - mw + 1; MAraw.push(g0 >= 0 ? self.mean(K.arr.slice(g0, p.hb + 1)) : null); }); }
+    else { mw = rg === '3Y' || rg === '5Y' ? 200 : 50; pts.forEach(function (p) { var g0 = p.li - mw + 1; MAraw.push(g0 < ipo ? null : self.mean(LS.slice(g0, p.li + 1))); }); }
+
+    var cut63 = this.walk2(77, 63, 62, 0.15, 1.3, 2.5, 16);
+    var now63 = this.walk2(55, 63, 2.88, 0.0008, 0.005, 0.012, 15);
+    var sent63 = isS ? this.walk2(92, 63, 0.08, 0.002, -0.006, 0.05, 14) : (isT ? this.walk2(91, 63, 0.21, 0.001, 0.004, 0.05, 14) : this.walk2(700 + K.sym.charCodeAt(0), 63, 0.05, 0, 0.002, 0.05, 14));
+    var flW = [312, 330, 351, 362, 380, 398, 405, 421, 433, 447, 476], fleet63 = [];
+    for (var q0 = 0; q0 < 63; q0++) fleet63.push(flW[Math.min(10, Math.floor(q0 * 11 / 63))]);
+    var launch63 = this.walk2(301, 63, 16, 0.02, 0.06, 1.4, 30).map(function (v) { return Math.round(v); });
+    var fL = function (k) { return function (p) { return by[k].long[p.li]; }; };
+    var s63 = function (a) { return function (p) { var i = p.li - off63; return i >= 0 ? a[i] : null; }; };
+    var mL = function (k) { return function (p) { var a = D.MKT[k], c = a[p.li], pv = p.li > 0 ? a[p.li - 1] : c; return p.hb >= 0 ? pv + (c - pv) * p.fr : c; }; };
+    var fc = function (k) { return by[k][K.ck][0]; };
+    var f2p = function (v) { return v.toFixed(2) + '%'; }, f1 = function (v) { return v.toFixed(1); }, f0 = function (v) { return String(Math.round(v)); };
+    var sect = cur0.g === 'Space & defense' ? ['ITA', 'Aerospace & defense (ITA)'] : (cur0.g === 'Autonomy & AI' ? ['SMH', 'Semiconductors (SMH)'] : ['XLY', 'Consumer discretionary (XLY)']);
+
+    var TQ = (function () {
+      var pad = function (n) { return (n < 10 ? '0' : '') + n; }, qs = [];
+      for (var i = 0; i < 20; i++) { var y = 2021 + Math.floor((i + 3) / 4), q = (i + 3) % 4 + 1;
+        qs.push({ l: 'Q' + q + " '" + String(y).slice(2), dk: q === 4 ? (y + 1) + '-01-02' : y + '-' + pad(q * 3 + 1) + '-02', ek: q === 4 ? (y + 1) + '-01-28' : y + '-' + ['04-22', '07-22', '10-21'][q - 1] }); }
+      var dv = [308600, 310048, 254695, 343830, 405278, 422875, 466140, 435059, 484507, 386810, 443956, 462890, 495570, 336681, 384122, 497099, 418227, 358020, 410240, 452610];
+      var gm = [27.3, 29.1, 25.0, 25.1, 23.8, 19.3, 18.2, 17.9, 17.6, 17.4, 18.0, 19.8, 16.3, 16.3, 17.2, 18.0, 20.1, 19.0, 19.6, null];
+      var fsd = [null, null, null, null, null, null, null, null, null, null, null, null, null, 560000, 640000, 760000, 910000, 1080000, 1240000, null];
+      var mk = function (vals, kk) { var rel = []; vals.forEach(function (v, i) { if (v != null && qs[i][kk] <= daysL[LD - 1].key) rel.push([qs[i][kk], v, qs[i].l]); }); return rel; };
+      var step = function (rel) { var a = [], j = -1; for (var t = 0; t < LD; t++) { while (j + 1 < rel.length && rel[j + 1][0] <= daysL[t].key) j++; a.push(j >= 0 ? rel[j][1] : null); } return a; };
+      var r = { DELIV: mk(dv, 'dk'), GM: mk(gm, 'ek'), FSD: mk(fsd, 'ek') };
+      return { rel: r, DELIV: step(r.DELIV), GM: step(r.GM), FSD: step(r.FSD) };
+    })();
+    var qL = function (k) { return function (p) { return TQ[k][p.li]; }; };
+    var fK = function (v) { return v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : Math.round(v / 1000) + 'k'; };
+    var OV = [
+      { k: 'SPX', l: 'S&P 500', g: 'Market', card: 'M', c: '#E6EAF0', dash: 'none', mk: true, get: mL('SPX') },
+      { k: 'DJI', l: 'Dow Jones', g: 'Market', card: 'M', c: '#F2A33A', dash: 'none', mk: true, get: mL('DJI') },
+      { k: 'NDX', l: 'Nasdaq-100', g: 'Market', card: 'M', c: '#39C5B0', dash: 'none', mk: true, get: mL('NDX') },
+      { k: 'RUT', l: 'Russell 2000', g: 'Market', card: 'M', c: '#EC7BA6', dash: 'none', mk: true, get: mL('RUT') },
+      { k: 'SECT', l: sect[1], g: 'Market', card: 'M', c: '#B392F0', dash: 'none', mk: true, get: mL(sect[0]) },
+      { k: 'MA10', l: '10-day', g: 'Moving averages', card: 'A', c: '#7DD3FC', dash: 'none', ma: 10 },
+      { k: 'MA20', l: '20-day', g: 'Moving averages', card: 'A', c: '#FDE68A', dash: 'none', ma: 20 },
+      { k: 'MA50', l: '50-day', g: 'Moving averages', card: 'A', c: '#FB923C', dash: 'none', ma: 50 },
+      { k: 'MA100', l: '100-day', g: 'Moving averages', card: 'A', c: '#F9A8D4', dash: 'none', ma: 100 },
+      { k: 'MA200', l: '200-day', g: 'Moving averages', card: 'A', c: '#A5B4FC', dash: 'none', ma: 200 },
+      { k: '10Y', l: '10Y yield', g: 'Rates', card: 'R', c: '#E3B341', dash: '6 4', get: fL('10Y'), corr: fc('10Y'), fmt: f2p },
+      { k: 'REAL', l: 'Real yield', g: 'Rates', card: 'R', c: '#FDBA74', dash: '2 3', get: fL('REAL'), corr: fc('REAL'), fmt: f2p },
+      { k: 'CUT', l: 'Fed cut odds', g: 'Rates', card: 'R', c: '#8EBBFF', dash: '8 3', get: s63(cut63), corr: isS ? 0.30 : 0.35, fmt: function (v) { return Math.round(v) + '%'; } },
+      { k: 'NOW', l: 'CPI nowcast', g: 'Inflation', card: 'I', c: '#FF8FA3', dash: '4 2', get: s63(now63), corr: isS ? -0.18 : -0.22, fmt: f2p },
+      { k: 'VIX', l: 'VIX', g: 'Risk', card: 'V', c: '#C084FC', dash: '6 3', get: fL('VIX'), corr: fc('VIX'), fmt: f1 },
+      { k: 'DXY', l: 'Dollar', g: 'Risk', card: 'F', c: '#5EEAD4', dash: '6 4', get: fL('DXY'), corr: fc('DXY'), fmt: f1 },
+      { k: 'WTI', l: 'Oil (WTI)', g: 'Risk', card: 'F', c: '#A3E635', dash: '3 3', get: fL('WTI'), corr: fc('WTI'), fmt: function (v) { return '$' + v.toFixed(2); } },
+      { k: 'TAR', l: 'Tariff news', g: 'Policy & geo', card: 'G', c: '#F472B6', dash: '6 4', get: fL('TAR'), corr: fc('TAR'), fmt: function (v) { return Math.round(v) + '/hr'; } },
+      { k: 'TONE', l: 'Geo tone', g: 'Policy & geo', card: 'G', c: '#E879F9', dash: '2 2', get: fL('TONE'), corr: fc('TONE'), fmt: f1 },
+      { k: 'EPU', l: 'Policy uncertainty', g: 'Policy & geo', card: 'G', c: '#FCA5A5', dash: '8 4', get: fL('EPU'), corr: fc('EPU'), fmt: f0 },
+      isS ? { k: 'LAUNCH', l: 'Launch cadence', g: K.sym, card: 'S', c: '#39C5B0', dash: '6 4', get: s63(launch63), corr: 0.31, fmt: function (v) { return Math.round(v) + '/30d'; } }
+          : (isT ? { k: 'FLEET', l: 'Robotaxi fleet (TX)', g: K.sym, card: 'T', c: '#39C5B0', dash: '6 4', get: s63(fleet63), corr: 0.28, fmt: f0 } : null),
+      isT ? { k: 'DELIV', l: 'Deliveries', g: K.sym, card: 'Q', c: '#60A5FA', dash: '6 3', get: qL('DELIV'), corr: 0.33, fmt: fK } : null,
+      isT ? { k: 'GM', l: 'Gross margin', g: K.sym, card: 'Q', c: '#FACC15', dash: '3 2', get: qL('GM'), corr: 0.29, fmt: function (v) { return v.toFixed(1) + '%'; } } : null,
+      isT ? { k: 'FSD', l: 'FSD subscribers', g: K.sym, card: 'Q', c: '#FB7185', dash: '8 3', get: qL('FSD'), corr: 0.24, fmt: fK } : null,
+      { k: 'SENT', l: 'News sentiment', g: K.sym, card: 'N', c: '#A78BFA', dash: '4 3', get: s63(sent63), corr: isS ? 0.36 : 0.42, fmt: function (v) { return (v >= 0 ? '+' : '') + v.toFixed(2); } }
+    ].filter(function (o) { return !!o; });
+    var ovBy = {}; OV.forEach(function (o) { ovBy[o.k] = o; });
+    var MAXO = 5;
+    var ovs = (s.ovs || []).filter(function (k) { return !!ovBy[k]; }).slice(0, MAXO);
+    var setO = function (a2) { set({ ovs: a2 }); };
+    var OG = []; OV.forEach(function (o) { if (OG.indexOf(o.g) < 0) OG.push(o.g); });
+    var og = OG.indexOf(s.og) >= 0 ? s.og : 'Market';
+    var ogTabs = OG.map(function (g) {
+      var cnt = ovs.filter(function (k) { return ovBy[k].g === g; }).length, on = g === og;
+      return { k: g, cnt: String(cnt), hasCnt: cnt > 0, pressed: on ? 'true' : 'false', bg: on ? '#25344A' : 'transparent', bd: on ? '#3B5578' : '#2A323E', fg: on ? '#E6EAF0' : '#9BA6B5', pick: function () { set({ og: g }); } };
+    });
+    var members = OV.filter(function (o) { return o.g === og; });
+    var allOn = members.every(function (o) { return ovs.indexOf(o.k) >= 0; });
+    var groupAll = {
+      label: allOn ? 'Remove all ' + og : 'Show all ' + og,
+      pick: function () {
+        var keep = ovs.filter(function (k) { return ovBy[k].g !== og; });
+        if (allOn) { setO(keep); return; }
+        var add = members.map(function (o) { return o.k; }).slice(0, MAXO), room = MAXO - add.length;
+        setO((room > 0 ? keep.slice(Math.max(0, keep.length - room)) : []).concat(add));
+      }
+    };
+    var ovChips = members.map(function (o) {
+      var on = ovs.indexOf(o.k) >= 0;
+      return {
+        l: o.l, pressed: on ? 'true' : 'false', sw: on ? o.c : '#4A5361', ls: o.mk ? 'solid' : 'dashed',
+        bd: on ? o.c + '99' : '#2A323E', bg: on ? o.c + '1A' : 'transparent', fg: on ? '#E6EAF0' : '#9BA6B5',
+        tip: on ? 'Remove ' + o.l + ' from the chart' : 'Add ' + o.l + ' to the chart and show its card',
+        pick: function () { var cur = ovs.slice(), j2 = cur.indexOf(o.k); if (j2 >= 0) cur.splice(j2, 1); else { cur.push(o.k); if (cur.length > MAXO) cur.shift(); } setO(cur); }
+      };
+    });
+    var pctMode = ovs.some(function (k) { return ovBy[k].mk; });
+    var firstNN = function (a) { for (var i = 0; i < a.length; i++) if (a[i] != null) return a[i]; return null; };
+    var lastNN = function (a) { for (var i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
+    var base0 = firstNN(Araw);
+    var reb = function (a) { var b0 = firstNN(a); return a.map(function (v) { return v == null || b0 == null ? null : (v / b0 - 1) * 100; }); };
+    var A = pctMode ? Araw.map(function (v) { return v == null ? null : (v / base0 - 1) * 100; }) : Araw;
+    var MA = pctMode ? MAraw.map(function (v) { return v == null ? null : (v / base0 - 1) * 100; }) : MAraw;
+    var maAt = function (p, w) {
+      var li = p.li; if (li - w + 1 < ipo) return null;
+      var sum = 0, cnt = 0, end = p.hb >= 0 ? li - 1 : li;
+      for (var q = li - w + 1; q <= end; q++) { sum += LS[q]; cnt++; }
+      if (p.hb >= 0) { sum += K.arr[p.hb]; cnt++; }
+      return sum / cnt;
+    };
+    var toAx = function (v) { return v == null ? null : (pctMode ? (v / base0 - 1) * 100 : v); };
+    var maRaw = {}, maVals = {};
+    ovs.forEach(function (k) { if (ovBy[k].ma) { maRaw[k] = pts.map(function (p) { return maAt(p, ovBy[k].ma); }); maVals[k] = maRaw[k].map(toAx); } });
+    var mkVals = {};
+    ovs.forEach(function (k) { if (ovBy[k].mk) mkVals[k] = reb(pts.map(ovBy[k].get)); });
+    var allV = A.slice(); if (rg !== '1D' && rg !== '5D') Object.keys(maVals).forEach(function (k) { allV = allV.concat(maVals[k]); }); Object.keys(mkVals).forEach(function (k) { allV = allV.concat(mkVals[k]); });
+    allV = allV.filter(function (v) { return v != null; });
+    var lo = Math.min.apply(null, allV), hi = Math.max.apply(null, allV), pd = (hi - lo) * 0.1 || 1;
+    lo -= pd; hi += pd;
+    var Y = function (v) { return 8 + (1 - (v - lo) / (hi - lo)) * 236; };
+    var Xp = function (i, len) { return (len > 1 ? i / (len - 1) * 1000 : 500).toFixed(1); };
+    var pathOf = function (vals, yf) { var o = '', pen = false; vals.forEach(function (v, i) { if (v == null) { pen = false; return; } o += (pen ? 'L' : 'M') + Xp(i, vals.length) + ' ' + yf(v).toFixed(1) + ' '; pen = true; }); return o.trim(); };
+    var P = function (a) { return pathOf(a, Y); };
+    var lineA = P(A);
+    var stockRet = lastNN(Araw) / base0 - 1;
+    var ovLines = ovs.map(function (k) {
+      var o = ovBy[k];
+      if (o.ma) {
+        var mr = maRaw[k], mlast = lastNN(mr), plast = lastNN(Araw), dist = mlast == null ? null : plast / mlast - 1;
+        return { k: k, l: o.l, c: o.c, dash: 'none', ls: 'solid', card: o.card, d: P(maVals[k]),
+          leg: o.l + ' average' + (mlast == null ? ' · not enough history' : ' $' + mlast.toFixed(2) + ' · price ' + (dist >= 0 ? 'above by ' : 'below by ') + Math.abs(dist * 100).toFixed(1) + '%') };
+      }
+      if (o.mk) {
+        var mv0 = mkVals[k], ir = lastNN(mv0) / 100, rel = (stockRet - ir) * 100;
+        return { k: k, l: o.l, c: o.c, dash: 'none', ls: 'solid', card: o.card, d: P(mv0), ret: ir, rel: rel,
+          leg: o.l + ' ' + pc(ir) + ' · ' + K.sym + ' ' + (rel >= 0 ? 'ahead by ' : 'behind by ') + Math.abs(rel).toFixed(1) + ' pp' };
+      }
+      var raw = pts.map(o.get), nn = raw.filter(function (v) { return v != null; });
+      var olo = Math.min.apply(null, nn), ohi = Math.max.apply(null, nn), flat = ohi === olo, osp = (ohi - olo) || 1, inv = o.corr < 0, hs = nn.length < pts.length ? daysL[pts[pts.length - nn.length].li] : null;
+      return { k: k, l: o.l, c: o.c, dash: o.dash, ls: 'dashed', card: o.card,
+        d: pathOf(raw, function (v) { var q = flat ? 0.5 : (v - olo) / osp; if (inv && !flat) q = 1 - q; return 8 + (1 - (0.1 + q * 0.8)) * 236; }),
+        leg: o.l + (inv ? ' — inverted, ρ ' : ' — ρ ') + o.corr.toFixed(2) + ' · ' + (flat ? o.fmt(olo) + ' · unchanged in this range' : o.fmt(olo) + '–' + o.fmt(ohi)) + (hs ? ' · history starts ' + hs.label + ' ' + hs.key.slice(0, 4) : '') + (flat ? '' : ' (own scale)') };
+    });
+    var slot = function (i) { return ovLines[i] || { d: '', c: 'transparent', dash: 'none' }; };
+    var card = function (id) {
+      var ls = ovLines.filter(function (x) { return x.card === id; });
+      return {
+        on: ls.length > 0, sw: ls.map(function (x) { return { c: x.c, l: x.l, ls: x.ls }; }),
+        offLabel: 'Remove ' + ls.map(function (x) { return x.l; }).join(' and ') + ' from the chart',
+        off: function () { setO(ovs.filter(function (k) { return ovBy[k].card !== id; })); }
+      };
+    };
+    var frow = function (k, c) {
+      var f = by[k], st = f.st;
+      var hz = [['1W', st.cw, st.zw], ['1M', st.cm, st.zm], ['3M', st.cq, st.zq]].map(function (h) { return { l: h[0], v: fmtC(f.u, h[1]), bg: heat(h[2]), tip: h[0] + ': ' + fmtC(f.u, h[1]) + (h[2] == null ? '' : ' (' + h[2].toFixed(1) + 'σ)') }; });
+      var e = effect(fx[k]); e.tip = K.sym + ': ρ90 ' + f[K.ck][0].toFixed(2) + ' × 1M z ' + st.zm.toFixed(2);
+      return { l: f.l, lvl: fmtL(f.u, st.last), spark: self.spark(f.series.slice(260 - 63)), c: c, hz: hz, state: stateLabel(f), e: e, sym: K.sym, pctL: 'calc(' + (st.pct * 100).toFixed(0) + '% - 1px)', pctTxt: Math.round(st.pct * 100) + '% of range' };
+    };
+    var vixL = by.VIX.st.last, vixBand = vixL < 15 ? 'Calm' : (vixL < 20 ? 'Normal' : (vixL < 25 ? 'Elevated' : 'Stressed'));
+    var dz = by.DXY.st.zm, wz = by.WTI.st.zm;
+    var cR = card('R'), cI = card('I'), cG = card('G'), cT = card('T'), cQ = card('Q'), cS = card('S'), cN = card('N');
+    var cV = Object.assign(card('V'), { headline: vixBand + ' regime · ' + stateLabel(by.VIX), foot: 'Bands: calm < 15 · normal 15–20 · elevated 20–25 · stressed > 25', rows: [frow('VIX', '#C084FC')] });
+    var cF = Object.assign(card('F'), { headline: 'Dollar ' + (dz < -0.5 ? 'weakening' : (dz > 0.5 ? 'strengthening' : 'flat')) + ' · oil ' + (wz > 0.5 ? 'rising' : (wz < -0.5 ? 'falling' : 'flat')), rows: [frow('DXY', '#5EEAD4'), frow('WTI', '#A3E635')] });
+    var rets = function (a, nn) { var o = []; for (var i = a.length - nn; i < a.length; i++) { if (a[i] == null || a[i - 1] == null) { o.push(null); continue; } o.push(a[i] / a[i - 1] - 1); } return o; };
+    var sR = rets(LS, 90);
+    var mkRows = ovLines.filter(function (x) { return ovBy[x.k].mk; }).map(function (x) {
+      var o = ovBy[x.k], key = x.k === 'SECT' ? sect[0] : x.k, iR = rets(D.MKT[key], 90), xs = [], ys = [];
+      sR.forEach(function (v, i) { if (v != null && iR[i] != null) { xs.push(iR[i]); ys.push(v); } });
+      var mx2 = self.mean(xs), my = self.mean(ys), cov = 0, vx = 0, vy = 0;
+      xs.forEach(function (xv, i) { cov += (xv - mx2) * (ys[i] - my); vx += (xv - mx2) * (xv - mx2); vy += (ys[i] - my) * (ys[i] - my); });
+      return { l: o.l, c: x.c, ret: pc(x.ret), retC: sg(x.ret), rel: (x.rel >= 0 ? '+' : '−') + Math.abs(x.rel).toFixed(1) + ' pp', relC: sg(x.rel), rho: (cov / Math.sqrt(vx * vy)).toFixed(2), beta: (cov / vx).toFixed(2), sym: K.sym };
+    });
+    var best = mkRows.slice().sort(function (a, b) { return parseFloat(b.rel.replace('−', '-')) - parseFloat(a.rel.replace('−', '-')); });
+    var maDaily = function (w, li) { if (li - w + 1 < ipo) return null; var sm = 0; for (var q = li - w + 1; q <= li; q++) sm += LS[q]; return sm / w; };
+    var lastP = LS[LD - 1];
+    var maRows = ovLines.filter(function (x) { return ovBy[x.k].ma; }).map(function (x) {
+      var w = ovBy[x.k].ma, now = maDaily(w, LD - 1), ago = maDaily(w, LD - 22);
+      if (now == null) return { l: x.l, c: x.c, val: '—', dist: 'n/a', distC: NEU, slope: 'needs ' + w + ' days', slopeC: NEU };
+      var dist = lastP / now - 1, sl = ago == null ? null : now / ago - 1;
+      return { l: x.l, c: x.c, val: '$' + now.toFixed(2), dist: (dist >= 0 ? 'above ' : 'below ') + Math.abs(dist * 100).toFixed(1) + '%', distC: sg(dist), slope: sl == null ? '—' : (sl >= 0 ? '▲ rising ' : '▼ falling ') + Math.abs(sl * 100).toFixed(1) + '% 1M', slopeC: sl == null ? NEU : sg(sl) };
+    });
+    var crossNote = '';
+    var maOn = function (k) { return ovs.indexOf(k) >= 0; };
+    var pairs = [['MA50', 'MA200', '50-day', '200-day'], ['MA20', 'MA50', '20-day', '50-day'], ['MA10', 'MA20', '10-day', '20-day']];
+    for (var pi = 0; pi < pairs.length && !crossNote; pi++) {
+      var pr2 = pairs[pi];
+      if (!maOn(pr2[0]) || !maOn(pr2[1]) || maDaily(ovBy[pr2[1]].ma, LD - 1) == null) continue;
+      var wf = ovBy[pr2[0]].ma, wsl = ovBy[pr2[1]].ma, prevSign = null, crossLi = null;
+      for (var li2 = Math.max(ipo + wsl - 1, LD - 756); li2 < LD; li2++) { var df = maDaily(wf, li2) - maDaily(wsl, li2), sgn2 = df >= 0; if (prevSign !== null && sgn2 !== prevSign) crossLi = li2; prevSign = sgn2; }
+      var aboveNow = maDaily(wf, LD - 1) >= maDaily(wsl, LD - 1);
+      crossNote = pr2[2] + (aboveNow ? ' above ' : ' below ') + pr2[3] + (crossLi == null ? (prevSign === null ? '' : ' for the whole period') : ' since ' + D.daysL[crossLi].label + ' ' + D.daysL[crossLi].key.slice(0, 4)) + (pr2[0] === 'MA50' && crossLi != null ? (aboveNow ? ' (golden cross)' : ' (death cross)') : '');
+    }
+    var aboveCnt = maRows.filter(function (r) { return r.distC === UP; }).length;
+    var cA = Object.assign(card('A'), {
+      rows: maRows, cross: crossNote, hasCross: !!crossNote,
+      headline: maRows.length ? 'Price above ' + aboveCnt + ' of ' + maRows.length + ' selected averages' : '',
+      foot: 'Simple averages of daily closes. On intraday ranges the current bar counts as today\'s close.'
+    });
+    var cM = Object.assign(card('M'), {
+      rows: mkRows, rgL: rg + (clipped ? ' (since IPO)' : ''), symRet: pc(stockRet), symRetC: sg(stockRet),
+      headline: mkRows.length ? K.sym + ' ' + pc(stockRet) + ' over ' + rg + (clipped ? ' (since IPO)' : '') + (mkRows.every(function (r) { return r.relC === UP; }) ? ' · ahead of every index shown' : (mkRows.every(function (r) { return r.relC === DN; }) ? ' · behind every index shown' : ' · mixed vs indexes')) : '',
+      foot: 'ρ and β use the last 90 daily returns' + (isS ? ' (fewer since the Jun 12 IPO)' : '') + '. Index data: free ETF proxies (SPY, DIA, QQQ, IWM, sector ETF) from the same Alpaca call, or FRED daily closes.'
+    });
+    var dd2 = K.d, dn2 = dd2.length, lastL = LS[LD - 1];
+    var retOf = function (k) {
+      if (k === '1D') return K.arr[N - 1] / K.arr[N - 8] - 1;
+      if (k === '5D') return dd2[dn2 - 1] / dd2[dn2 - 6] - 1;
+      if (k === '1M') return dd2[dn2 - 1] / dd2[dn2 - 22] - 1;
+      if (k === '3M') return dd2[dn2 - 1] / dd2[0] - 1;
+      if (k === ipoKey) return lastL / LS[ipo] - 1;
+      return lastL / LS[LD - DAYS[k]] - 1;
+    };
+    var pers = perKeys.map(function (k) {
+      var r = retOf(k), on = k === rg, lab = k === ipoKey ? 'Since IPO' : k;
+      return { l: lab, v: pc(r), c: sg(r), pressed: on ? 'true' : 'false', bg: on ? '#1E2C40' : 'transparent', bd: on ? '#6CA6FF' : '#2A323E', tip: lab + ' return ' + pc(r) + (on ? ' · shown on the chart' : ' · click to show this period on the chart'), pick: function () { set({ rg: k }); } };
+    });
+
+    var laneSel = s.lanes || ['VOL', 'PRESS'];
+    var LN = [['VOL', 'Volume'], ['SI', 'Short interest'], ['OPT', 'Options'], ['PRESS', 'Macro pressure']];
+    var laneOpts = LN.map(function (x) {
+      var on = laneSel.indexOf(x[0]) >= 0;
+      return { k: x[1], pressed: on ? 'true' : 'false', bg: on ? '#25344A' : 'transparent', fg: on ? '#E6EAF0' : '#9BA6B5', bd: on ? '#3B5578' : '#2A323E', pick: function () { var c2 = laneSel.slice(), j3 = c2.indexOf(x[0]); if (j3 >= 0) c2.splice(j3, 1); else c2.push(x[0]); set({ lanes: LN.map(function (z) { return z[0]; }).filter(function (z) { return c2.indexOf(z) >= 0; }) }); } };
+    });
+    var E = { d: '', f: 'none', fo: '0', s: 'none', w: '1', da: 'none' };
+    var ly = function (lo2, hi2) { return function (v) { return 4 + (1 - (v - lo2) / ((hi2 - lo2) || 1)) * 44; }; };
+    var bw = n <= 40 ? 6 : (n <= 160 ? 3 : (n <= 320 ? 2 : 1));
+    var lanes = laneSel.map(function (key) {
+      if (key === 'VOL') {
+        var vv = pts.map(function (p) { return p.hb >= 0 ? D.VH[K.sym][p.hb] : D.VD[K.sym][p.li]; }), mxv = Math.max.apply(null, vv.filter(function (v) { return v != null; })) * 1.05;
+        var up = '', dn = '', av = [];
+        vv.forEach(function (v, i) { if (v == null) { av.push(null); return; } var seg = 'M' + Xp(i, n) + ' 52 V' + (52 - v / mxv * 46).toFixed(1) + ' '; if (i && Araw[i] < Araw[i - 1]) dn += seg; else up += seg; var w20 = vv.slice(Math.max(0, i - 19), i + 1).filter(function (z) { return z != null; }); av.push(self.mean(w20)); });
+        var lv = lastNN(vv), la = lastNN(av), rr = lv / la;
+        return { label: 'Volume (IEX)', note: 'Free IEX feed: a small share of total volume, so read it as relative activity.', stat: rr.toFixed(1) + '× ' + (hourly ? '20-bar' : '20-day') + ' avg', statC: rr > 1.5 ? '#E3B341' : '#C5CDD8', hiL: '', loL: '',
+          p1: Object.assign({}, E, { d: up.trim(), s: UP, w: String(bw), fo: '0' }), p2: Object.assign({}, E, { d: dn.trim(), s: DN, w: String(bw) }), p3: Object.assign({}, E, { d: pathOf(av, function (v) { return 52 - v / mxv * 46; }), s: '#C5CDD8', w: '1' }), p4: E };
+      }
+      if (key === 'SI') {
+        var sv = pts.map(function (p) { return D.SI[K.sym][p.li]; }), nn2 = sv.filter(function (v) { return v != null; }), sl = Math.min.apply(null, nn2) * 0.9, sh = Math.max.apply(null, nn2) * 1.1;
+        var sl1 = lastNN(sv), s1m = D.SI[K.sym][LD - 22], dS = s1m == null ? null : sl1 - s1m;
+        return { label: 'Short interest', note: 'FINRA short interest, % of float, reported twice a month (new free source).', stat: sl1.toFixed(1) + '% of float' + (dS == null ? '' : ' · ' + (dS >= 0 ? '▲ +' : '▼ ') + Math.abs(dS).toFixed(1) + ' pp 1M') + ' · ' + (sl1 / 1.3).toFixed(1) + ' days to cover', statC: dS != null && dS > 0.3 ? '#E3B341' : '#C5CDD8', hiL: sh.toFixed(1) + '%', loL: sl.toFixed(1) + '%',
+          p1: Object.assign({}, E, { d: pathOf(sv, ly(sl, sh)), s: '#E3B341', w: '1.5' }), p2: E, p3: E, p4: E };
+      }
+      if (key === 'OPT') {
+        var pv3 = pts.map(function (p) { return D.PCR[K.sym][p.li]; }), nn3 = pv3.filter(function (v) { return v != null; });
+        if (!nn3.length) return { label: 'Options', note: 'No listed options in this window.', stat: 'options not yet listed', statC: '#8B96A6', hiL: '', loL: '', p1: E, p2: E, p3: E, p4: E };
+        var ol = Math.min(0.5, Math.min.apply(null, nn3)), oh = Math.max(1.3, Math.max.apply(null, nn3)), yo = ly(ol, oh);
+        var pl = lastNN(pv3), ivN = D.IV[K.sym][LD - 1], iv1 = D.IV[K.sym][LD - 22], dIv = iv1 == null ? 0 : ivN - iv1;
+        return { label: 'Options · put/call', note: 'Put/call volume ratio (5-day) and 30-day implied volatility. Alpaca indicative options feed (free, new source).', stat: 'P/C ' + pl.toFixed(2) + (pl > 1 ? ' put-heavy' : ' call-heavy') + ' · IV30 ' + ivN.toFixed(0) + '% ' + (dIv >= 0 ? '▲' : '▼') + Math.abs(dIv).toFixed(0) + ' 1M', statC: pl > 1 ? DN : '#C5CDD8', hiL: oh.toFixed(1), loL: ol.toFixed(1),
+          p1: Object.assign({}, E, { d: 'M0 ' + yo(1).toFixed(1) + ' L1000 ' + yo(1).toFixed(1), s: '#4A5361', w: '1', da: '4 3' }), p2: Object.assign({}, E, { d: pathOf(pv3, yo), s: '#A78BFA', w: '1.5' }), p3: E, p4: E };
+      }
+      var pv4 = pts.map(function (p) { return D.PL[K.sym][p.li]; }), yp = function (v) { return 26 - v * 22; };
+      var fillP = function (fn) { var o = ''; pv4.forEach(function (v, i) { if (v == null) return; o += (o ? 'L' : 'M0 26 L') + Xp(i, n) + ' ' + yp(fn(v)).toFixed(1) + ' '; }); return o ? o + 'L1000 26 Z' : ''; };
+      var pl4 = lastNN(pv4);
+      return { label: 'Macro pressure', note: 'Net macro tailwind (+) or headwind (−) for ' + K.sym + ', −1 to +1.', stat: (pl4 >= 0 ? 'tailwind +' : 'headwind ') + pl4.toFixed(2), statC: Math.abs(pl4) < 0.1 ? NEU : sg(pl4), hiL: '+1', loL: '−1',
+        p1: Object.assign({}, E, { d: 'M0 26 L1000 26', s: '#2A323E', w: '1' }), p2: Object.assign({}, E, { d: fillP(function (v) { return Math.max(v, 0); }), f: UP, fo: '0.35' }), p3: Object.assign({}, E, { d: fillP(function (v) { return Math.min(v, 0); }), f: DN, fo: '0.35' }), p4: Object.assign({}, E, { d: pathOf(pv4, yp), s: '#C5CDD8', w: '1.25' }) };
+    });
+
+    var yt = [0, 1, 2, 3].map(function (j) { var v = hi - pd - (hi - lo - 2 * pd) * j / 3; return { top: (Y(v) / 252 * 100).toFixed(2) + '%', l: pctMode ? (v >= 0 ? '+' : '') + v.toFixed(v > -10 && v < 10 ? 1 : 0) + '%' : '$' + v.toFixed(0) }; });
+    var xt = [0, 1, 2, 3, 4, 5].map(function (k) {
+      var i = Math.round(k * (n - 1) / 5), p = pts[i], lbl;
+      if (p.hb >= 0) { var bb = D.bars[p.hb]; lbl = rg === '1D' ? (tz === 'PT' ? bb.hour - 3 : bb.hour) + ':05' : bb.label; }
+      else lbl = n > 300 ? daysL[p.li].mon : daysL[p.li].label;
+      return { left: (i / (n - 1) * 100).toFixed(2) + '%', tf: k === 0 ? 'none' : (k === 5 ? 'translateX(-100%)' : 'translateX(-50%)'), l: lbl };
+    });
+    var evs = D.events.filter(relevant);
+    var mv = function (e, h) { return e.mv[K.sym][h]; };
+    var posOf = function (e) { return hourly ? e.idx - pts[0].hb : off63 + Math.floor(e.idx / 7) - pts[0].li; };
+    var marks = evs.filter(function (e) { var p = posOf(e); return p >= 0 && p < n && !s.off[e.cat]; }).map(function (e) {
+      var on = s.sel === e.id;
+      return { left: (posOf(e) / (n - 1) * 100).toFixed(2) + '%', color: cmap[e.cat], line: cmap[e.cat] + (on ? 'E6' : '55'), size: on ? '14px' : '10px', label: e.cat + ': ' + e.title + ' (' + e.date + ')', pick: function () { set({ sel: on ? null : e.id }); } };
+    });
+    var cats = CATS.map(function (c) {
+      var on = !s.off[c.k];
+      return { k: c.k, pressed: on ? 'true' : 'false', bg: on ? c.c + '1F' : 'transparent', bd: on ? c.c + '99' : '#2A323E', fg: on ? '#E6EAF0' : '#8B96A6', dot: on ? c.c : '#4A5361', pick: function () { var o = Object.assign({}, s.off); o[c.k] = !o[c.k]; set({ off: o }); } };
+    });
+    var rows = evs.filter(function (e) { return !s.off[e.cat]; }).slice().reverse().map(function (e) {
+      var on = s.sel === e.id, v = mv(e, 'd');
+      return { date: e.date, color: cmap[e.cat], title: e.title, m: pc(v), c: sg(v), bg: on ? '#1B2533' : 'transparent', pick: function () { set({ sel: on ? null : e.id }); } };
+    });
+    var selE = null;
+    evs.forEach(function (e) { if (e.id === s.sel) selE = e; });
+    var sel = selE ? { color: cmap[selE.cat], cat: selE.cat, date: selE.date, src: selE.src, title: selE.title, m1h: pc(mv(selE, 'h'), 2), c1h: sg(mv(selE, 'h')), m1d: pc(mv(selE, 'd'), 2), c1d: sg(mv(selE, 'd')) } : {};
+
+    var avg = function (a) { return a.length ? self.mean(a) : null; };
+    var sensRaw = CATS.map(function (c) {
+      var es = evs.filter(function (e) { return e.cat === c.k; });
+      var ab = function (list) { return avg(list.map(function (e) { return Math.abs(mv(e, 'd')); })); };
+      var early = es.filter(function (e) { return e.idx < D.mid; }), late = es.filter(function (e) { return e.idx >= D.mid; });
+      var tr = '—', trC = '#8B96A6';
+      if (early.length && late.length) {
+        var ea = ab(early), la = ab(late);
+        if (la > ea * 1.2) { tr = '▲ intensifying'; trC = '#E3B341'; } else if (la < ea * 0.8) { tr = '▼ fading'; trC = '#8EBBFF'; } else { tr = '→ stable'; trC = '#9BA6B5'; }
+      } else tr = late.length ? 'new since Aug 25' : 'quiet since Aug 25';
+      return { k: c.k, n: es.length, a: ab(es) || 0, tr: tr, trC: trC };
+    });
+    var mx = Math.max.apply(null, sensRaw.map(function (x) { return x.a; })) || 1;
+    var sens = sensRaw.filter(function (x) { return x.n > 0; }).map(function (x) { return { k: x.k, n: x.n, w: (x.a / mx * 100).toFixed(0) + '%', v: (x.a * 100).toFixed(1) + '%', tr: x.tr, trC: x.trC, col: K.col }; });
+    var sensBy = {}; sensRaw.forEach(function (x) { sensBy[x.k] = x; });
+    var imp = function (k, extra) { var x = sensBy[k]; return (x && x.n ? 'expected ' + K.sym + ' move ±' + (x.a * 100).toFixed(1) + '% (past avg)' : 'no past ' + K.sym + ' events to size the move') + ' · ' + extra; };
+
+    var tenors = ['1M','3M','6M','1Y','2Y','3Y','5Y','7Y','10Y','20Y','30Y'];
+    var now = [4.05, 3.98, 3.85, 3.70, 3.61, 3.62, 3.70, 3.86, 4.18, 4.62, 4.70];
+    var prev = [4.30, 4.24, 4.12, 3.97, 3.83, 3.80, 3.85, 4.00, 4.33, 4.73, 4.79];
+    var cy = function (v) { return 92 - (v - 3.45) / 1.45 * 84; };
+    var cv = function (arr) { return arr.map(function (v, i) { return (i ? 'L' : 'M') + (i / 10 * 300).toFixed(1) + ' ' + cy(v).toFixed(1); }).join(' '); };
+    var fillPath = cv(now) + ' ' + prev.slice().reverse().map(function (v, i) { return 'L' + ((10 - i) / 10 * 300).toFixed(1) + ' ' + cy(v).toFixed(1); }).join(' ') + ' Z';
+    var tenorChg = now.map(function (v, i) { var d = Math.round((v - prev[i]) * 100); return { v: (d > 0 ? '+' : '') + d, c: d < 0 ? '#8EBBFF' : (d > 0 ? '#F2A33A' : '#8B96A6') }; });
+    var cutSer = cut63.slice(33), cutD = Math.round(62 - cutSer[cutSer.length - 15]);
+    var fedOdds = [{ l: 'Cut 25 bp', p: 62, c: '#2F5E9E' }, { l: 'Hold', p: 36, c: '#3A4352' }, { l: 'Hike', p: 2, c: '#8A5A1C' }].map(function (f) { return { l: f.l, p: f.p, c: f.c, w: f.p + '%', txt: f.p >= 12 ? f.l + ' ' + f.p + '%' : '' }; });
+    var path = [['Now', 4.00, 4.00], ["Dec '26", 3.71, 3.84], ["Mar '27", 3.52, 3.66], ["Jun '27", 3.40, 3.53], ["Sep '27", 3.33, 3.45]].map(function (p) { var h = function (v) { return (v - 3.0) / 1.0 * 40 + 6; }; return { q: p[0], v: p[1].toFixed(2), h: h(p[1]).toFixed(0) + 'px', hp: h(p[2]).toFixed(0) + 'px' }; });
+    var cpiRaw = [['Apr', 3.0, 2.94], ['May', 2.9, 2.97], ['Jun', 3.1, 2.99], ['Jul', 2.8, 2.87], ['Aug', 2.9, 2.83], ['Sep', null, 2.88]];
+    var Hc = function (v) { return ((v - 2.5) / 0.75 * 90).toFixed(0) + 'px'; }, hot = 0;
+    var cpi = cpiRaw.map(function (c) {
+      if (c[1] == null) return { m: c[0], av: 'pending', ah: Hc(c[2]), fill: 'transparent', bs: 'dashed', nh: Hc(c[2]), nv: c[2] + '%', s: '—', sc: '#8B96A6' };
+      var sp = Math.round((c[1] - c[2]) * 100); if (sp > 0) hot++;
+      return { m: c[0], av: c[1].toFixed(1) + '%', ah: Hc(c[1]), fill: '#2C4466', bs: 'solid', nh: Hc(c[2]), nv: c[2] + '%', s: (sp > 0 ? 'hot +' : 'cool ') + sp + ' bp', sc: sp > 0 ? '#F2A33A' : '#6CA6FF' };
+    });
+    var nowSer = now63.slice(48), nd = Math.round((2.88 - nowSer[0]) * 100);
+    var gT = by.TONE.st, gA = by.TAR.st;
+    var zchip = function (z, worseIfUp, badWord, goodWord) {
+      var a = Math.abs(z), bad = worseIfUp ? z > 0 : z < 0, q = a < 0.75;
+      return { z: (q ? 'Normal' : (bad ? badWord : goodWord)) + ' ' + (z >= 0 ? '+' : '−') + a.toFixed(1) + 'σ', zBg: q ? '#1C232D' : (bad ? '#3A2A10' : '#1B2A40'), zFg: q ? '#9BA6B5' : (bad ? '#E3B341' : '#8EBBFF') };
+    };
+    var sp30 = function (f) { var v = f.series.slice(260 - 30), m = self.mean(f.series.slice(260 - 60, 260 - 30)), l2 = Math.min.apply(null, v.concat([m])), h2 = Math.max.apply(null, v.concat([m])); return { spark: self.spark(v, l2, h2), base: self.spark([m, m], l2, h2) }; };
+    var g1 = sp30(by.TONE), g2 = sp30(by.TAR), z1 = zchip(gT.zm, false, 'Souring', 'Improving'), z2 = zchip(gA.zm, true, 'Elevated', 'Subsiding');
+    var geoSparks = [
+      { l: 'GDELT tone · tariff / sanctions / Taiwan', v: fmtL('n1', gT.last), c: '#B392F0', spark: g1.spark, base: g1.base, z: z1.z, zBg: z1.zBg, zFg: z1.zFg, src: '30d vs prior-30d avg (dashed) · DS-35' },
+      { l: 'Tariff-tagged articles / hr', v: fmtL('hr', gA.last), c: '#EC7BA6', spark: g2.spark, base: g2.base, z: z2.z, zBg: z2.zBg, zFg: z2.zFg, src: '30d vs prior-30d avg (dashed) · DS-35' }
+    ];
+    var wk = [1, 0, 2, 1, 1, 3, 2, 4], wl = ['Aug 10', 'Aug 17', 'Aug 24', 'Aug 31', 'Sep 7', 'Sep 14', 'Sep 21', 'Sep 28'];
+    var actWeeks = wk.map(function (v, i) { return { h: (v / 4 * 34 + 2).toFixed(0) + 'px', c: i >= 4 ? '#EC7BA6' : '#6B4A5A', tip: 'Week of ' + wl[i] + ': ' + v + ' actions' }; });
+    var actions = [{ ag: 'USTR', t: '[Press release title]', d: 'Sep 24' }, { ag: 'Fed. Register', t: '[Document title] · HTS 8703 / 8507', d: 'Sep 22' }, { ag: 'BIS', t: '[Export-control update]', d: 'Sep 18' }];
+
+    var fl = flW;
+    var fleet = { spark: this.spark(fl), wk: '▲ +' + (fl[10] - fl[9]) + ' w/w', c: UP, note: '+' + Math.round((fl[10] / fl[2] - 1) * 100) + '% in 8 wks · last point real (Sep 21) · DS-54' };
+    var lvl = function (k) { return [k >= 1 ? '#39C5B0' : '#2A323E', k >= 2 ? '#39C5B0' : '#2A323E', k >= 3 ? '#39C5B0' : '#2A323E']; };
+    var states = [
+      ['TX', 3, 'Commercial AV authorization', '▲ fleet growing', UP], ['NV', 2, 'AVNC permit · Las Vegas pending', '▲ Aug 21', UP],
+      ['AZ', 2, 'TNC permit · Phoenix prep', '→ no change', NEU], ['FL', 2, 'No state permit required', '→ no change', NEU],
+      ['CA', 1, 'Testing with driver · CPUC charter', '→ no change', NEU]
+    ].map(function (x) { var l = lvl(x[1]); return { st: x[0], status: x[2], move: x[3], mc: x[4], l1: l[0], l2: l[1], l3: l[2] }; });
+    var euC = [1, 2, 2, 3, 4, 5, 6, 8], euL = ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'early Sep', 'Sep 29'];
+    var euSteps = euC.map(function (v, i) { return { h: (v / 8 * 30 + 2).toFixed(0) + 'px', tip: euL[i] + ': ' + v + ' countries' }; });
+    var mkBars = function (vals, labels, c) { var m = Math.max.apply(null, vals); return vals.map(function (v, i) { return { h: (v / m * 34 + 2).toFixed(0) + 'px', c: i === vals.length - 1 ? c : c + '88', tip: labels[i] + ': ' + v }; }); };
+    var mo = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
+
+    var tqRow = function (k, l, src, fv, chg, c) {
+      var rel = TQ.rel[k], six = rel.slice(-6), last = rel[rel.length - 1], prev = rel[rel.length - 2], d = chg(last[1], prev[1]);
+      var mx = Math.max.apply(null, six.map(function (z) { return z[1]; })), mn = k === 'GM' ? 10 : 0;
+      return { l: l, v: fv(last[1]), t: (d >= 0 ? '▲ +' : '▼ −') + Math.abs(d).toFixed(1) + (k === 'GM' ? ' pp' : '%') + ' q/q · ' + last[2], c: d > 0 ? UP : (d < 0 ? DN : NEU), src: src,
+        bars: six.map(function (x, i) { return { h: ((x[1] - mn) / (mx - mn) * 34 + 2).toFixed(0) + 'px', c: i === six.length - 1 ? c : c + '88', tip: x[2] + ': ' + fv(x[1]) }; }) };
+    };
+    var pctChg = function (a, b) { return (a / b - 1) * 100; };
+    var tq = [
+      tqRow('DELIV', 'Deliveries per quarter', 'Tesla IR · DS-12 · posted ~2nd day after quarter end', fK, pctChg, '#60A5FA'),
+      tqRow('GM', 'Gross margin (total GAAP)', 'SEC XBRL · DS-11 · day after earnings', function (v) { return v.toFixed(1) + '%'; }, function (a, b) { return a - b; }, '#FACC15'),
+      tqRow('FSD', 'FSD active subscribers', 'Tesla shareholder deck · DS-12 · where disclosed', fK, pctChg, '#FB7185')
+    ];
+    var sx = [
+      { l: 'Launches / month', v: '16', t: '▲ +3 vs 6-mo avg', c: UP, src: 'Launch Library 2 · DS-08', bars: mkBars([12, 13, 14, 13, 15, 16], mo, '#D2D8E0') },
+      { l: 'Starlink on orbit, net adds / month', v: '[n]', t: '▲ accelerating', c: UP, src: 'CelesTrak · DS-65', bars: mkBars([180, 190, 175, 210, 220, 240], mo, '#D2D8E0') },
+      { l: 'Federal obligations / month', v: '$[amt]', t: '▼ lumpy', c: NEU, src: 'USAspending · SAM.gov · DoD · DS-67/68/70', bars: mkBars([3, 7, 2, 9, 4, 5], mo, '#E3C05C') }
+    ];
+
+    var calAll = [
+      { d: 'Mon Oct 5', t: tm(null, 480) + ' ' + tz, w: 'Weekly sweep — state AV, HTS, GPR', imp: 'W1 · robotaxi fleet trend update', color: '#5B6577', who: 'TSLA' },
+      { d: '[BLS date]', t: tm(null, 510) + ' ' + tz, w: 'CPI (Sep)', imp: imp('Inflation', 'nowcast drifting up'), color: cmap.Inflation, who: 'both' },
+      { d: '[date]', t: tm(null, 990) + ' ' + tz, w: 'Tesla Q3 earnings', imp: imp('Filings', 'DS-13'), color: cmap.Filings, who: 'TSLA' },
+      { d: 'Wed Oct 28', t: tm(null, 840) + ' ' + tz, w: 'FOMC decision · in 25 days', imp: imp('Rates', 'cut odds 62%'), color: cmap.Rates, who: 'both' },
+      { d: '[BEA date]', t: tm(null, 510) + ' ' + tz, w: 'PCE (Sep)', imp: imp('Inflation', 'DS-24'), color: cmap.Inflation, who: 'both' },
+      { d: '[date]', t: '—', w: 'SPCX Q3 earnings', imp: imp('Filings', 'DS-75'), color: cmap.SpaceX, who: 'SPCX' },
+      { d: '[date]', t: '—', w: 'Next Starship flight', imp: imp('SpaceX', 'Launch Library 2 · DS-08'), color: cmap.SpaceX, who: 'SPCX' },
+      { d: '[S-1 date]', t: '—', w: 'SPCX IPO lock-up expiry', imp: 'supply overhang · DS-06', color: cmap.SpaceX, who: 'SPCX' }
+    ];
+    if (!isS && !isT) calAll.splice(2, 0, { d: '[date]', t: '—', w: K.sym + ' Q3 earnings', imp: 'DS-13 earnings calendar', color: cmap.Filings, who: K.sym });
+    var cal = calAll.filter(function (c) { return c.who === 'both' || c.who === K.sym; });
+
+    var sentSrc = isS ? ['SPCX', 92, 0.08, -0.006, 'articles normal'] : (isT ? ['TSLA', 91, 0.21, 0.004, 'articles +1.4σ vs 30d'] : [K.sym, 0, 0.05, 0, 'articles normal']);
+    var sser = sent63.slice(35), d7 = sentSrc[2] - sser[sser.length - 8];
+    var sent = { spark: this.spark(sser, -0.6, 0.6), v: (sentSrc[2] >= 0 ? '+' : '') + sentSrc[2].toFixed(2), d: (d7 >= 0 ? '▲' : '▼') + Math.abs(d7).toFixed(2) + ' 1W', c: sg(sentSrc[2]), vol: sentSrc[4] };
+    var newsAll = [
+      ['TSLA', '[Headline · Finnhub company news]', 'Finnhub', 942, 0.31],
+      ['SPCX', '[Headline · Alpha Vantage NEWS_SENTIMENT]', 'Alpha Vantage', 850, 0.18],
+      ['TSLA', '[Headline · Google News RSS: Robotaxi]', 'Google News', 680, null],
+      ['SPCX', '[Article · Spaceflight News API]', 'SNAPI', 750, null],
+      ['SPCX', '[Headline · Google News RSS: Starlink]', 'Google News', 640, null],
+      ['TSLA', '[Headline · Alpha Vantage NEWS_SENTIMENT]', 'Alpha Vantage', 600, -0.12]
+    ];
+    var news = (function (l) { return l.length ? l : [[K.sym, '[Headline · Finnhub company news]', 'Finnhub', 900, null], [K.sym, '[Headline · Google News RSS]', 'Google News', 700, null]]; })(newsAll.filter(function (x) { return x[0] === K.sym; })).map(function (x) { return { tk: x[0], h: x[1], src: x[2], age: tm(4, x[3]), s: x[4] == null ? 'n/a' : (x[4] >= 0 ? '+' : '') + x[4].toFixed(2), sc: x[4] == null ? '#8B96A6' : sg(x[4]) }; });
+
+    return {
+      tz: tz, marketStatus: 'NYSE closed · opens ' + tm(0, 570) + ' ' + tz, jobs: jobs, jobDot: warn ? '#E3B341' : '#57C78F', jobSummary: (jobs.length - warn) + ' jobs ok' + (warn ? ' · ' + warn + ' retry' : ''),
+      dSched: drawer('sched', 'Schedule', ''), jobSum: jobSum, signedIn: signedIn, signedOut: !signedIn, umOpen: umOpen, umExp: umOpen ? 'true' : 'false',
+      umLabel: 'Account menu · signed in · data refresh: ' + jobSum, toggleUm: function () { set({ um: !s.um }); }, signOut: function () { set({ out: true, um: false, st: null }); }, signIn: function () { set({ out: false }); },
+      keyJobs: jobs.filter(function (j) { return ['H1', 'H2', 'D4'].indexOf(j.id) >= 0; }), openTickers: openSt('tickers'), openRefresh: openSt('refresh'), openDisplay: openSt('display'),
+      stOpen: !!stTab, isTk: stTab === 'tickers', isRf: stTab === 'refresh', isDp: stTab === 'display', stTabs: stTabs, closeSt: function () { set({ st: null }); },
+      myRows: myRows, myCount: myT.length + ' tickers · ' + pins.length + ' of ' + MAXPIN + ' pinned', addRes: addRes, noAdd: addRes.length === 0, aq: s.aq || '', onAq: function (ev) { set({ aq: ev && ev.target ? ev.target.value : '' }); },
+      onAqKey: function (ev) { if (ev && ev.key === 'Enter' && addRes[0]) addRes[0].add(); }, uniNote: demo ? 'Demo list of ' + UNI.length + ' tickers. In production this searches the full ticker reference list.' : 'Only TSLA and SPCX have data so far. Switch the Watchlist tweak to Demo to try adding more.',
+      tzOpts: opt(['PT', 'ET'], tz, 'tzP'), palOpts: opt(['Green / Red', 'Blue / Orange'], blue ? 'Blue / Orange' : 'Green / Red', 'palP'),
+      strip: strip, showAll: showAll, nUni: UNI.length + ' tickers', togglePk: function () { set({ pk: !s.pk }); }, pkOpen: pkOpen, pkExp: pkOpen ? 'true' : 'false', pkIcon: pkOpen ? '▾ Hide' : '▸ Browse',
+      closePk: function () { set({ pk: false }); }, q: s.q || '', onQ: function (ev) { set({ q: ev && ev.target ? ev.target.value : '' }); },
+      onKey: function (ev) { if (!ev) return; if (ev.key === 'Enter' && plist[0]) plist[0].go(); if (ev.key === 'Escape') set({ pk: false, q: '' }); },
+      pgOpts: opt(groups, s.pg, 'pg'), psOpts: opt(['Day move', '1M', 'Pressure', 'A–Z'], s.ps, 'ps'), plist: plist, noMatch: plist.length === 0, pickCount: plist.length + ' of ' + UNI.length,
+      sym: K.sym, name: K.name, col: K.col, isT: isT, isS: isS, hdr: hdr,
+      rgOpts: opt(RGS, rg, 'rg'), pers: pers, barNote: hourly ? 'hourly bars, IEX feed' : 'daily closes', trendTxt: cur.state, trBg: cur.stBg, trBd: cur.stBd, trFg: cur.stFg,
+      vsMa: pc(dd[dn - 1] / cur.st.ma20 - 1), vsMaC: sg(dd[dn - 1] / cur.st.ma20 - 1), ogTabs: ogTabs, og: og, groupAll: groupAll, ovChips: ovChips, ovLines: ovLines, hasOv: ovs.length > 0, ovCount: ovs.length + ' of ' + MAXO + ' on chart', clearOv: function () { setO([]); },
+      ogNote: og === 'Market' ? 'Market overlays switch the chart to % change from the start of the range, so returns compare directly.' : 'These use their own scale. Ones that usually move against the stock are drawn upside down so the lines move together.',
+      ov1: slot(0), ov2: slot(1), ov3: slot(2), ov4: slot(3), ov5: slot(4), cM: cM, cA: cA, lanes: lanes, laneOpts: laneOpts, rangeNote: clipped ? K.sym + ' listed Jun 12, 2026, so this range starts at the IPO.' : '', hasRangeNote: false,
+      legA: K.sym + (pctMode ? ' (% change from range start)' : ' price'), cR: cR, cI: cI, cV: cV, cF: cF, cG: cG, cT: cT, cQ: cQ, tq: tq, cS: cS, cN: cN, noCards: ovs.length === 0,
+      yt: yt, xt: xt, lineA: lineA, maPath: P(MA),
+      legMa: (hourly ? (mw === 35 ? '5-day' : (mw === 7 ? '1-day' : '3-hour')) : mw + '-day') + ' moving average',
+      upC: UP, dnC: DN,
+      marks: marks, cats: cats, rows: rows, hasSel: !!selE, sel: sel, pr: pr, regime: regime, top: top, sens: sens,
+      curveShape: curveShape, curveNote: '2Y ' + fmtC('y', d2) + ' · 10Y ' + fmtC('y', d10) + ' (1M)',
+      tenors: tenors, tenorChg: tenorChg, curveNow: cv(now), curvePrev: cv(prev), curveFill: fillPath,
+      fedOdds: fedOdds, cutSpark: this.spark(cutSer), cutTrend: 'cut ' + (cutD >= 0 ? '▲ +' : '▼ ') + cutD + ' pts / 2w', path: path, pathNote: 'repriced −12 bp vs 1M ago',
+      cpi: cpi, cpiState: 'Core ' + stateLabel(by.CORE).split(' · ')[0].toLowerCase() + ' · headline ' + stateLabel(by.CPI).split(' · ')[0].toLowerCase(), cpiStreak: hot + ' of last 5 prints hot',
+      nowSpark: this.spark(nowSer), nowTrend: (nd >= 0 ? '▲ +' : '▼ ') + nd + ' bp in 2w', cpiTime: tm(null, 510) + ' ' + tz,
+      geoSparks: geoSparks, actWeeks: actWeeks, actTrend: 'last 4 wks ' + (wk[4] + wk[5] + wk[6] + wk[7]) + ' vs ' + (wk[0] + wk[1] + wk[2] + wk[3]) + ' prior ▲', actions: actions,
+      fleet: fleet, states: states, euSteps: euSteps, eu: ['NL', 'BE', 'CZ', 'DK', 'HR', 'LT', 'SI', 'EE'], sx: sx, sent: sent, news: news,
+      cal: cal, drivers: drivers, sortOpts: opt(['Impact', 'Group'], s.so, 'so'), drift: drift,
+      dCal: drawer('cal', 'Catalyst calendar', cal.length + ' upcoming for ' + K.sym + ' · next: ' + cal[0].w + ' · ' + cal[0].d),
+      dDrv: drawer('drv', 'All driver trends', drivers.length + ' drivers · top for ' + K.sym + ': ' + byImp[0].l + ' (' + byImp[0].e.w.toLowerCase() + ')'),
+      dCorr: drawer('corr', 'Correlation drift', K.sym + ' · ' + nStr + ' strengthening · ' + nFlip + ' sign flip' + (nFlip === 1 ? '' : 's')),
+      dAbout: drawer('about', 'About this data', 'Sources, trend definitions, sample-data notice')
+    };
+  }
+  renderVals() {
+    var self = this, v = this.computeAll(), s = Object.assign({ mt: 'Chart' }, this.state || {});
+    v.strip.forEach(function (t) { t.flex = '0 0 150px'; });
+    v.mtabs = [['Chart', 'Chart'], ['Signals', 'Signals'], ['More', 'Calendar & more']].map(function (x) {
+      var on = s.mt === x[0];
+      return { k: x[1], pressed: on ? 'true' : 'false', fg: on ? '#E6EAF0' : '#8B96A6', bar: on ? '#6CA6FF' : 'transparent', pick: function () { self.setState({ mt: x[0] }); } };
+    });
+    v.isChart = s.mt === 'Chart'; v.isSig = s.mt === 'Signals'; v.isMore = s.mt === 'More';
+    return v;
+  }
+}
+</script>
+</body>
+</html>
