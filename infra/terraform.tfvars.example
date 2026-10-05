@@ -1,0 +1,19 @@
+project            = "invdash"
+region             = "us-east-1"
+dr_region          = "us-west-2"
+alert_emails       = ["you@example.com"]
+monthly_budget_usd = 40
+
+# Fill in once the dashboard is deployed behind CloudFront:
+# health_url                 = "https://dXXXXXXXXXXXX.cloudfront.net/health.json"
+# cloudfront_distribution_id = "EXXXXXXXXXXXXX"
+
+# Stricter audit lock (cannot be removed by anyone, including root, until it expires):
+# audit_object_lock_mode = "COMPLIANCE"
+
+# Site and jobs (after the first deploy of the site and the job image):
+# site_origins       = ["https://dXXXXXXXXXXXX.cloudfront.net"]
+# site_callback_urls = ["https://dXXXXXXXXXXXX.cloudfront.net/auth/callback"]
+# site_logout_urls   = ["https://dXXXXXXXXXXXX.cloudfront.net/"]
+# jobs_image_uri     = "<account>.dkr.ecr.us-east-1.amazonaws.com/invdash/jobs:<git-sha>"
+# sec_user_agent     = "investor-dashboard you@example.com"

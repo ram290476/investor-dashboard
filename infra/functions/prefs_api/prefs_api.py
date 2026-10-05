@@ -1,0 +1,211 @@
+"""Site API for per-user preferences: GET /prefs and PUT /prefs.
+
+API Gateway (HTTP API) verifies the Cognito JWT before this runs; the caller's
+identity is the token's `sub` claim. Isolation is enforced by IAM, not by this
+code: for every request the function assumes PREFS_ACCESS_ROLE_ARN with a session
+tag sub=<caller sub>, and that role may only touch DynamoDB items whose partition
+key equals ${aws:PrincipalTag/sub} (dynamodb:LeadingKeys). A bug here cannot read
+or write another user's item.
+
+Item (table user_prefs, partition key user_sub):
+    user_sub      string   Cognito sub
+    tickers       list     "My tickers", in display order (max 50)
+    pinned        list     pinned tickers, in order (max 6, each also in tickers)
+    display       map      time_zone (IANA, e.g. America/Los_Angeles), updown_palette (see PALETTES)
+    version       number   optimistic concurrency; PUT must send the version it read
+    updated_at    string   ISO-8601 UTC
+
+Adding a ticker nobody else follows publishes a TickerAdded event; the backfill
+job then loads 5 years of daily history for it.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import boto3
+from botocore.exceptions import ClientError
+
+TABLE = os.environ.get("PREFS_TABLE", "invdash-user-prefs")
+ACCESS_ROLE_ARN = os.environ.get("PREFS_ACCESS_ROLE_ARN", "")
+EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "invdash.prefs")
+MAX_TICKERS = int(os.environ.get("MAX_TICKERS_PER_USER", "50"))
+MAX_PINNED = 6
+SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+PALETTES = {"green-red", "red-green", "blue-orange"}  # up/down colours; blue-orange is colour-blind safe
+DEFAULTS = {
+    "tickers": ["TSLA", "SPCX"],
+    "pinned": ["TSLA", "SPCX"],
+    "display": {"time_zone": "America/New_York", "updown_palette": "green-red"},
+    "version": 0,
+}
+
+_sts = boto3.client("sts")
+_events = boto3.client("events")
+_session_cache: dict[str, tuple[float, object]] = {}
+
+
+class ValidationError(ValueError):
+    pass
+
+
+def validate(body: dict) -> dict:
+    """Return a clean preferences dict or raise ValidationError with a user-facing message."""
+    if not isinstance(body, dict):
+        raise ValidationError("Body must be a JSON object")
+    tickers = body.get("tickers")
+    pinned = body.get("pinned", [])
+    display = body.get("display", {})
+    if not isinstance(tickers, list) or not tickers:
+        raise ValidationError("tickers must be a non-empty list")
+    clean = [str(t).strip().upper() for t in tickers]
+    bad = [t for t in clean if not SYMBOL_RE.match(t)]
+    if bad:
+        raise ValidationError(f"Not valid ticker symbols: {', '.join(bad[:5])}")
+    if len(clean) != len(set(clean)):
+        raise ValidationError("tickers contains duplicates")
+    if len(clean) > MAX_TICKERS:
+        raise ValidationError(f"At most {MAX_TICKERS} tickers")
+    if not isinstance(pinned, list):
+        raise ValidationError("pinned must be a list")
+    pins = [str(t).strip().upper() for t in pinned]
+    if len(pins) > MAX_PINNED:
+        raise ValidationError(f"At most {MAX_PINNED} pinned tickers")
+    if len(pins) != len(set(pins)) or not set(pins) <= set(clean):
+        raise ValidationError("pinned tickers must be unique and also in tickers")
+    if not isinstance(display, dict):
+        raise ValidationError("display must be an object")
+    tz = display.get("time_zone", DEFAULTS["display"]["time_zone"])
+    try:
+        ZoneInfo(str(tz))
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValidationError(f"Unknown time zone: {tz}") from exc
+    palette = display.get("updown_palette", DEFAULTS["display"]["updown_palette"])
+    if palette not in PALETTES:
+        raise ValidationError(f"updown_palette must be one of {sorted(PALETTES)}")
+    version = body.get("version", 0)
+    if not isinstance(version, int) or version < 0:
+        raise ValidationError("version must be the non-negative integer returned by GET")
+    return {
+        "tickers": clean,
+        "pinned": pins,
+        "display": {"time_zone": str(tz), "updown_palette": palette},
+        "version": version,
+    }
+
+
+def _table_for(sub: str):
+    """DynamoDB Table bound to credentials that can only reach this sub's item (cached ~10 minutes)."""
+    cached = _session_cache.get(sub)
+    if cached and cached[0] > time.time():
+        return cached[1]
+    creds = _sts.assume_role(
+        RoleArn=ACCESS_ROLE_ARN,
+        RoleSessionName=f"prefs-{sub[:40]}",
+        DurationSeconds=900,
+        Tags=[{"Key": "sub", "Value": sub}],
+    )["Credentials"]
+    table = boto3.resource(
+        "dynamodb",
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    ).Table(TABLE)
+    if len(_session_cache) > 500:
+        _session_cache.clear()
+    _session_cache[sub] = (time.time() + 600, table)
+    return table
+
+
+def _response(status: int, body: dict) -> dict:
+    return {
+        "statusCode": status,
+        "headers": {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+        },
+        "body": json.dumps(body, default=str),
+    }
+
+
+def _public(item: dict) -> dict:
+    return {
+        "tickers": list(item.get("tickers", [])),
+        "pinned": list(item.get("pinned", [])),
+        "display": dict(item.get("display", {})),
+        "version": int(item.get("version", 0)),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def get_prefs(table, sub: str) -> dict:
+    item = table.get_item(Key={"user_sub": sub}, ConsistentRead=True).get("Item")
+    return _public(item) if item else {**DEFAULTS, "updated_at": None}
+
+
+def put_prefs(table, sub: str, prefs: dict) -> tuple[dict, list[str]]:
+    """Write with optimistic concurrency. Returns (saved prefs, tickers new to this user)."""
+    before = get_prefs(table, sub)
+    new_version = prefs["version"] + 1
+    item = {
+        "user_sub": sub,
+        "tickers": prefs["tickers"],
+        "pinned": prefs["pinned"],
+        "display": prefs["display"],
+        "version": new_version,
+        "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    cond = "attribute_not_exists(user_sub)" if prefs["version"] == 0 else "version = :v"
+    kwargs = {"Item": item, "ConditionExpression": cond}
+    if prefs["version"]:
+        kwargs["ExpressionAttributeValues"] = {":v": prefs["version"]}
+    table.put_item(**kwargs)
+    added = [t for t in prefs["tickers"] if t not in before["tickers"]]
+    return _public(item), added
+
+
+def publish_ticker_added(tickers: list[str]) -> None:
+    if not tickers:
+        return
+    _events.put_events(
+        Entries=[
+            {"Source": EVENT_SOURCE, "DetailType": "TickerAdded", "Detail": json.dumps({"ticker": t})}
+            for t in tickers[:10]
+        ]
+    )
+
+
+def handler(event, context):
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    sub = claims.get("sub")
+    if not sub:
+        return _response(401, {"error": "Not signed in"})
+    method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    table = _table_for(sub)
+    try:
+        if method == "GET":
+            return _response(200, get_prefs(table, sub))
+        if method == "PUT":
+            try:
+                prefs = validate(json.loads(event.get("body") or "{}"))
+            except (ValidationError, json.JSONDecodeError) as exc:
+                return _response(400, {"error": str(exc)})
+            try:
+                saved, added = put_prefs(table, sub, prefs)
+            except ClientError as exc:
+                if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                    return _response(409, {"error": "Preferences changed in another tab; reload and try again"})
+                raise
+            publish_ticker_added(added)
+            return _response(200, saved)
+        return _response(405, {"error": f"{method} not allowed"})
+    except ClientError:
+        print(json.dumps({"event": "prefs_error", "method": method}))
+        return _response(500, {"error": "Could not reach preferences store"})

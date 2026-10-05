@@ -1,0 +1,166 @@
+locals {
+  name                  = var.project
+  trail_name            = "${var.project}-audit-trail"
+  security_alert_emails = length(var.security_alert_emails) > 0 ? var.security_alert_emails : var.alert_emails
+}
+
+# SC-12, SC-13, SC-28: customer-managed keys with yearly rotation.
+module "kms" {
+  source    = "./modules/kms"
+  providers = {
+    aws    = aws
+    aws.dr = aws.dr
+  }
+
+  name       = local.name
+  trail_name = local.trail_name
+}
+
+# Data lake with versioning, encryption, and cross-region replication (CP-6, CP-9, SC-28).
+module "data_lake" {
+  source    = "./modules/data_lake"
+  providers = {
+    aws    = aws
+    aws.dr = aws.dr
+  }
+
+  name            = local.name
+  data_key_arn    = module.kms.data_key_arn
+  replica_key_arn = module.kms.replica_key_arn
+}
+
+# CloudTrail + AWS Config into a locked audit bucket (AU-2, AU-3, AU-9, AU-11, AU-12, CM-8).
+module "audit_logging" {
+  source = "./modules/audit_logging"
+
+  name             = local.name
+  trail_name       = local.trail_name
+  audit_key_arn    = module.kms.audit_key_arn
+  lake_bucket_arn  = module.data_lake.lake_bucket_arn
+  retention_days   = var.audit_retention_days
+  object_lock_mode = var.audit_object_lock_mode
+}
+
+# GuardDuty, Security Hub (NIST 800-53 Rev 5), Inspector, Access Analyzer, account guardrails
+# (CA-7, RA-5, SI-3, SI-4, AC-6, CM-6).
+module "security_services" {
+  source = "./modules/security_services"
+
+  name                      = local.name
+  lake_bucket_name          = module.data_lake.lake_bucket_name
+  data_key_arn              = module.kms.data_key_arn
+  enable_malware_protection = var.enable_malware_protection
+
+  depends_on = [module.audit_logging] # Security Hub controls rely on the Config recorder.
+}
+
+# SNS topics and EventBridge rules for security and ops events (IR-4, IR-5, IR-6, SI-4(5)).
+module "alerting" {
+  source = "./modules/alerting"
+
+  name                  = local.name
+  data_key_arn          = module.kms.data_key_arn
+  alert_emails          = var.alert_emails
+  security_alert_emails = local.security_alert_emails
+}
+
+# Logs, metrics, alarms, SLOs, dashboards, external canary, budget (AU-6, SI-4, CP-2, SA-9).
+module "observability" {
+  source = "./modules/observability"
+
+  name                       = local.name
+  audit_key_arn              = module.kms.audit_key_arn
+  data_key_arn               = module.kms.data_key_arn
+  function_names             = var.function_names
+  log_retention_days         = var.log_retention_days
+  metrics_namespace          = var.metrics_namespace
+  ops_topic_arn              = module.alerting.ops_topic_arn
+  dlq_name                   = module.data_lake.dlq_name
+  health_url                 = var.health_url
+  canary_runtime             = var.canary_runtime
+  canary_rate_minutes        = var.canary_rate_minutes
+  cloudfront_distribution_id = var.cloudfront_distribution_id
+  monthly_budget_usd         = var.monthly_budget_usd
+  budget_emails              = var.alert_emails
+  extra_log_group_names      = concat(module.jobs.log_group_names, module.user_prefs.log_group_names)
+}
+
+# Provider API keys in SSM (encrypted with the data key) plus a daily rotation
+# check that emails reminders before each key is due (IA-5, IA-5(h), SC-28).
+module "api_keys" {
+  source = "./modules/api_keys"
+
+  name               = local.name
+  data_key_arn       = module.kms.data_key_arn
+  audit_key_arn      = module.kms.audit_key_arn
+  security_topic_arn = module.alerting.security_topic_arn
+  log_retention_days = var.log_retention_days
+  api_keys           = var.api_keys
+  remind_days        = var.key_reminder_days
+  check_schedule     = var.key_check_schedule
+  check_timezone     = var.key_check_timezone
+
+  reserved_concurrency = var.lambda_reserved_concurrency
+}
+
+# Dashboard sign-in: invite-only Cognito pool, MFA required, PKCE web client (IA-2, AC-7, AC-12).
+module "site_auth" {
+  source = "./modules/site_auth"
+
+  name          = local.name
+  callback_urls = var.site_callback_urls
+  logout_urls   = var.site_logout_urls
+}
+
+# Per-user preferences (DynamoDB) and the site API (HTTP API + JWT authorizer), with
+# IAM-enforced per-user isolation (AC-3, AC-6, SC-28, CP-9).
+module "user_prefs" {
+  source = "./modules/user_prefs"
+
+  name                 = local.name
+  data_key_arn         = module.kms.data_key_arn
+  audit_key_arn        = module.kms.audit_key_arn
+  log_retention_days   = var.log_retention_days
+  cognito_issuer_url   = module.site_auth.issuer_url
+  cognito_client_id    = module.site_auth.client_id
+  site_origins         = var.site_origins
+  ops_topic_arn        = module.alerting.ops_topic_arn
+  reserved_concurrency = var.lambda_reserved_concurrency
+}
+
+# Container-image jobs: trend metrics, quarterly fundamentals, short interest, options,
+# ticker backfill, status feed. Created once jobs_image_uri is set.
+module "jobs" {
+  source = "./modules/jobs"
+
+  name                       = local.name
+  image_uri                  = var.jobs_image_uri
+  jobs                       = var.jobs
+  lake_bucket_name           = module.data_lake.lake_bucket_name
+  lake_bucket_arn            = module.data_lake.lake_bucket_arn
+  data_key_arn               = module.kms.data_key_arn
+  audit_key_arn              = module.kms.audit_key_arn
+  dlq_arn                    = module.data_lake.dlq_arn
+  prefs_table_name           = module.user_prefs.table_name
+  prefs_collector_policy_arn = module.user_prefs.collector_read_policy_arn
+  prefs_event_source         = module.user_prefs.event_source
+  api_key_path               = module.api_keys.key_path
+  log_retention_days         = var.log_retention_days
+  reserved_concurrency       = var.lambda_reserved_concurrency
+
+  base_environment = {
+    POWERTOOLS_SERVICE_NAME      = var.project
+    POWERTOOLS_METRICS_NAMESPACE = var.metrics_namespace
+    POWERTOOLS_LOG_LEVEL         = "INFO"
+    AWS_USE_FIPS_ENDPOINT        = "true"
+    LAKE_BUCKET                  = module.data_lake.lake_bucket_name
+  }
+
+  extra_environment = {
+    MAX_USER_TICKERS = tostring(var.max_user_tickers)
+    OPTIONS_ENABLED  = tostring(var.enable_options_daily)
+    SEC_USER_AGENT   = var.sec_user_agent
+    ATLANTA_MPT_URL  = var.atlanta_mpt_url
+    KALSHI_SERIES    = var.kalshi_series
+  }
+}
