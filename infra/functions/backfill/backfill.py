@@ -99,11 +99,11 @@ def _queue_requested_tickers(state: dict, tickers: list[str], force: bool, today
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper over collectors.yahoo
-    from lake import LAKE_BUCKET, read_json, s3, write_json, write_parquet
-    from observability import job_handler, logger, metrics, source_run
-
-    from aws_lambda_powertools.metrics import MetricUnit
     import polars as pl
+    from aws_lambda_powertools.metrics import MetricUnit
+
+    from lake import LAKE_BUCKET, read_json, write_json, write_parquet
+    from observability import job_handler, logger, metrics, source_run
 
     @job_handler("BACKFILL")
     def run(event, context):
@@ -111,7 +111,6 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
         if not bucket:
             raise RuntimeError("LAKE_BUCKET is not configured")
 
-        client = s3()
         today = datetime.now(UTC).date()
         years = int(os.getenv("BACKFILL_YEARS", str(DEFAULT_YEARS)))
         batch_days = int(os.getenv("BACKFILL_BATCH_DAYS", str(DEFAULT_BATCH_DAYS)))

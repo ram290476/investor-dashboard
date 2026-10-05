@@ -168,15 +168,19 @@ async function savePrefs(update) {
   session.prefs = body;
 }
 
+function isNumericValue(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
 function formatPrice(value) {
-  if (!Number.isFinite(Number(value))) return "—";
+  if (!isNumericValue(value)) return "—";
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(
     Number(value),
   );
 }
 
 function formatPercent(value, digits = 2) {
-  if (!Number.isFinite(Number(value))) return "—";
+  if (!isNumericValue(value)) return "—";
   const number = Number(value) * 100;
   return `${number > 0 ? "+" : ""}${number.toFixed(digits)}%`;
 }
@@ -200,6 +204,12 @@ function selectedData() {
 
 function returns(history, offset) {
   if (!history || history.length <= offset) return null;
+  if (
+    !isNumericValue(history[history.length - 1 - offset].close) ||
+    !isNumericValue(history.at(-1).close)
+  ) {
+    return null;
+  }
   const before = Number(history[history.length - 1 - offset].close);
   const latest = Number(history[history.length - 1].close);
   return before ? latest / before - 1 : null;
@@ -207,18 +217,18 @@ function returns(history, offset) {
 
 function netPressure(tickerData) {
   const rows = tickerData?.trend?.rows || [];
-  const row = rows.find((item) => Number.isFinite(Number(item.net_pressure)));
+  const row = rows.find((item) => isNumericValue(item.net_pressure));
   return row ? Number(row.net_pressure) : null;
 }
 
 function polarity(value) {
-  if (!Number.isFinite(Number(value)) || Number(value) === 0) return "neutral";
+  if (!isNumericValue(value) || Number(value) === 0) return "neutral";
   return Number(value) > 0 ? "positive" : "negative";
 }
 
 function drawChart(history, ticker) {
   if (!history?.length) return null;
-  const values = history.map((row) => Number(row.close)).filter(Number.isFinite);
+  const values = history.filter((row) => isNumericValue(row.close)).map((row) => Number(row.close));
   if (values.length < 2) return null;
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -236,7 +246,7 @@ function drawChart(history, ticker) {
   svg.setAttribute("class", "price-chart");
   svg.setAttribute("viewBox", "0 0 940 210");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `${ticker} daily closing prices over ${history.length} sessions`);
+  svg.setAttribute("aria-label", `${ticker} daily closing prices over ${values.length} sessions`);
   const title = document.createElementNS(svgNS, "title");
   title.textContent = `${ticker} daily close`;
   const desc = document.createElementNS(svgNS, "desc");
@@ -349,7 +359,7 @@ function renderWatchlist() {
 
 function renderPricePanel(tickerData) {
   const panel = node("section", "panel");
-  const history = tickerData?.price_history || [];
+  const history = (tickerData?.price_history || []).filter((row) => isNumericValue(row.close));
   const heading = sectionHeader(
     "Price history",
     tickerData?.price_as_of ? `Daily close · as of ${tickerData.price_as_of}` : "Daily close · five-year history",
@@ -421,7 +431,7 @@ function renderDrivers(tickerData) {
   panel.append(sectionHeader("Macro drivers", "Trend model · latest published observation"));
   const rows = tickerData?.trend?.rows || [];
   const drivers = [...rows]
-    .filter((row) => row.series_id && Number.isFinite(Number(row.effect)))
+    .filter((row) => row.series_id && isNumericValue(row.effect))
     .sort((a, b) => Math.abs(Number(b.effect)) - Math.abs(Number(a.effect)))
     .slice(0, 5);
   if (!drivers.length) {
@@ -465,7 +475,11 @@ function renderFundamentals() {
     const tr = node("tr");
     tr.append(node("td", "", String(row.metric).replaceAll("_", " ")));
     tr.append(node("td", "mono", row.fiscal_quarter || "—"));
-    const value = row.unit === "ratio" ? `${(Number(row.value) * 100).toFixed(1)}%` : Number(row.value).toLocaleString();
+    const value = isNumericValue(row.value)
+      ? row.unit === "ratio"
+        ? `${(Number(row.value) * 100).toFixed(1)}%`
+        : Number(row.value).toLocaleString()
+      : "—";
     tr.append(node("td", "mono", value));
     tr.append(node("td", "mono", row.release_date || "—"));
     body.append(tr);
