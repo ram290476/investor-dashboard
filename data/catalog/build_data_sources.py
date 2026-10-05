@@ -1,6 +1,6 @@
 # Regenerates investor_dashboard_data_sources.xlsx (Investor Dashboard data source catalog).
 # Requires: pip install openpyxl holidays exchange_calendars
-# Run: python build_data_sources.py, then recalculate formulas (LibreOffice/Excel) so cached totals appear.
+# Run: cd data/catalog && python build_data_sources.py, then recalculate formulas (LibreOffice/Excel) so cached totals appear.
 # Edit the rows / S (schedule) / PRI / DECLINED / IMPACT tables below, then rerun.
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
