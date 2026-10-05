@@ -19,7 +19,7 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  topics     = {
+  topics = {
     ops      = var.alert_emails
     security = var.security_alert_emails
   }
@@ -106,7 +106,7 @@ locals {
     guardduty-findings = {
       topic       = "security"
       description = "GuardDuty findings, medium severity and above"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         source        = ["aws.guardduty"]
         "detail-type" = ["GuardDuty Finding"]
         detail        = { severity = [{ numeric = [">=", 4] }] }
@@ -115,10 +115,10 @@ locals {
     securityhub-high = {
       topic       = "security"
       description = "New, active Security Hub findings rated HIGH or CRITICAL"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         source        = ["aws.securityhub"]
         "detail-type" = ["Security Hub Findings - Imported"]
-        detail        = {
+        detail = {
           findings = {
             Severity    = { Label = ["HIGH", "CRITICAL"] }
             Workflow    = { Status = ["NEW"] }
@@ -130,7 +130,7 @@ locals {
     inspector-high = {
       topic       = "security"
       description = "Inspector vulnerabilities rated HIGH or CRITICAL"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         source        = ["aws.inspector2"]
         "detail-type" = ["Inspector2 Finding"]
         detail        = { severity = ["HIGH", "CRITICAL"], status = ["ACTIVE"] }
@@ -139,9 +139,9 @@ locals {
     audit-tampering = {
       topic       = "security"
       description = "Attempts to weaken logging, monitoring or encryption (AU-5, AU-9, SI-4)"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         "detail-type" = ["AWS API Call via CloudTrail"]
-        detail        = {
+        detail = {
           eventSource = [
             "cloudtrail.amazonaws.com", "config.amazonaws.com", "guardduty.amazonaws.com",
             "securityhub.amazonaws.com", "kms.amazonaws.com", "inspector2.amazonaws.com",
@@ -160,11 +160,11 @@ locals {
     s3-exposure = {
       topic       = "security"
       description = "Bucket policy, ACL, public access or Object Lock changes (AC-3, SC-7)"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         "detail-type" = ["AWS API Call via CloudTrail"]
-        detail        = {
+        detail = {
           eventSource = ["s3.amazonaws.com"]
-          eventName   = [
+          eventName = [
             "PutBucketPolicy", "DeleteBucketPolicy", "PutBucketAcl", "PutBucketPublicAccessBlock",
             "DeleteBucketPublicAccessBlock", "PutAccountPublicAccessBlock", "DeleteAccountPublicAccessBlock",
             "PutObjectLockConfiguration", "PutBucketReplication", "DeleteBucketReplication",
@@ -175,11 +175,11 @@ locals {
     iam-changes = {
       topic       = "security"
       description = "IAM identity and permission changes (AC-2(4) automated audit actions)"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         "detail-type" = ["AWS API Call via CloudTrail"]
-        detail        = {
+        detail = {
           eventSource = ["iam.amazonaws.com"]
-          eventName   = [
+          eventName = [
             "CreateUser", "DeleteUser", "CreateAccessKey", "CreateLoginProfile", "UpdateLoginProfile",
             "AttachUserPolicy", "AttachRolePolicy", "PutUserPolicy", "PutRolePolicy",
             "CreatePolicyVersion", "SetDefaultPolicyVersion", "UpdateAssumeRolePolicy",
@@ -191,9 +191,9 @@ locals {
     risky-sign-in = {
       topic       = "security"
       description = "Root sign-in or console sign-in without MFA (IA-2(1), AC-6(9))"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         "detail-type" = ["AWS Console Sign In via CloudTrail"]
-        detail        = {
+        detail = {
           "$or" = [
             { userIdentity = { type = ["Root"] } },
             { additionalEventData = { MFAUsed = ["No"] } },
@@ -204,16 +204,16 @@ locals {
     aws-health = {
       topic       = "ops"
       description = "AWS Health events for services this account uses (CP-2, SA-9)"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         source = ["aws.health"]
       })
     }
     api-key-changed = {
       topic       = "security"
       description = "A provider API key was stored, changed or deleted (IA-5 rotation evidence, AC-2(4))"
-      pattern     = jsonencode({
+      pattern = jsonencode({
         "detail-type" = ["AWS API Call via CloudTrail"]
-        detail        = {
+        detail = {
           eventSource       = ["ssm.amazonaws.com"]
           eventName         = ["PutParameter", "DeleteParameter", "LabelParameterVersion"]
           requestParameters = { name = [{ prefix = "/${var.name}/api-keys/" }] }

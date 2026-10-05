@@ -70,7 +70,7 @@ variable "log_retention_days" {
 variable "function_names" {
   description = "Lambda function names the app will deploy. Log groups are pre-created with KMS encryption and retention."
   type        = list(string)
-  default     = [
+  default = [
     "invdash-h1-prices", "invdash-h2-news", "invdash-h3-regulatory",
     "invdash-d1-macro", "invdash-d2-sweep", "invdash-d3-rates", "invdash-d4-close", "invdash-d5-contracts",
     "invdash-w1-weekly", "invdash-m1-release", "invdash-c1-calendar", "invdash-a1-annual",
@@ -116,7 +116,7 @@ variable "enable_malware_protection" {
 
 variable "api_keys" {
   description = "Provider credentials kept in SSM, with how often each must be rotated (IA-5). Sources are catalog IDs."
-  type        = map(object({
+  type = map(object({
     provider       = string
     sources        = list(string)
     rotation_days  = number
@@ -242,7 +242,7 @@ variable "backfill_max_batches" {
 }
 
 variable "backfill_resume_schedule" {
-  description = "EventBridge Scheduler expression that resumes incomplete history loads."
+  description = "EventBridge Scheduler expression for backfill, overriding jobs.backfill.schedule."
   type        = string
   default     = "rate(15 minutes)"
 }
@@ -267,7 +267,7 @@ variable "kalshi_series" {
 
 variable "jobs" {
   description = "Container-image jobs: handler, schedule (ET), event triggers, size and least-privilege data access."
-  type        = map(object({
+  type = map(object({
     handler        = string
     schedule       = string
     triggers       = list(string)
@@ -303,12 +303,12 @@ variable "jobs" {
       reads_prefs    = true
     }
     dashboard-build = {
-      handler        = "dashboard_build.handler"
-      schedule       = ""
-      triggers       = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL"]
-      memory         = 1024
-      timeout        = 300
-      read_prefixes  = [
+      handler  = "dashboard_build.handler"
+      schedule = ""
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL"]
+      memory   = 1024
+      timeout  = 300
+      read_prefixes = [
         "curated/prices_daily/",
         "serving/trend_metrics/latest/",
         "serving/fundamentals_quarterly.json",
@@ -357,7 +357,7 @@ variable "jobs" {
     # 5-year history when a user adds a ticker nobody followed; also run once at setup (O1)
     backfill = {
       handler        = "backfill.handler"
-      schedule       = var.backfill_resume_schedule
+      schedule       = "rate(15 minutes)"
       triggers       = ["ticker-added"]
       memory         = 1024
       timeout        = 900

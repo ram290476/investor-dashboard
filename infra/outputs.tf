@@ -40,7 +40,7 @@ output "security_topic_arn" {
 
 output "lambda_environment" {
   description = "Environment variables every job Lambda should set so logs, traces and metrics line up."
-  value       = {
+  value = {
     POWERTOOLS_SERVICE_NAME      = var.project
     POWERTOOLS_METRICS_NAMESPACE = var.metrics_namespace
     POWERTOOLS_LOG_LEVEL         = "INFO"
@@ -61,7 +61,7 @@ output "key_rotation_check_function" {
 
 output "cognito" {
   description = "Values the site needs for sign-in (PKCE authorization-code flow)."
-  value       = {
+  value = {
     user_pool_id  = module.site_auth.user_pool_id
     client_id     = module.site_auth.client_id
     issuer_url    = module.site_auth.issuer_url
