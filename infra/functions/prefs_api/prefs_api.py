@@ -22,6 +22,7 @@ job then loads 5 years of daily history for it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -32,6 +33,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 TABLE = os.environ.get("PREFS_TABLE", "invdash-user-prefs")
+LAKE_BUCKET = os.environ.get("LAKE_BUCKET", "")
 ACCESS_ROLE_ARN = os.environ.get("PREFS_ACCESS_ROLE_ARN", "")
 EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "invdash.prefs")
 MAX_TICKERS = int(os.environ.get("MAX_TICKERS_PER_USER", "50"))
@@ -47,7 +49,9 @@ DEFAULTS = {
 
 _sts = boto3.client("sts")
 _events = boto3.client("events")
+_s3 = boto3.client("s3")
 _session_cache: dict[str, tuple[float, object]] = {}
+logger = logging.getLogger(__name__)
 
 
 class ValidationError(ValueError):
@@ -182,12 +186,47 @@ def publish_ticker_added(tickers: list[str]) -> None:
     )
 
 
+def _read_serving_json(key: str) -> dict | None:
+    if not LAKE_BUCKET:
+        raise RuntimeError("LAKE_BUCKET is not configured")
+    try:
+        body = _s3.get_object(Bucket=LAKE_BUCKET, Key=key)["Body"].read()
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}:
+            return None
+        raise
+    try:
+        document = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("serving_document_invalid_json", extra={"key": key})
+        raise
+    if not isinstance(document, dict):
+        raise ValueError(f"Serving document {key} must be a JSON object")
+    return document
+
+
 def handler(event, context):
     claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
     sub = claims.get("sub")
     if not sub:
         return _response(401, {"error": "Not signed in"})
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path", "/prefs")
+    if method == "GET" and path == "/dashboard":
+        dashboard = _read_serving_json("serving/dashboard.json")
+        if dashboard is None:
+            return _response(
+                503,
+                {"error": "Dashboard data has not been published yet", "code": "DASHBOARD_NOT_READY"},
+            )
+        dashboard["status"] = _read_serving_json("serving/status.json")
+        return _response(200, dashboard)
+    if method == "GET" and path == "/status":
+        status = _read_serving_json("serving/status.json")
+        if status is None:
+            return _response(503, {"error": "Refresh status has not been published yet", "code": "STATUS_NOT_READY"})
+        return _response(200, status)
+
     table = _table_for(sub)
     try:
         if method == "GET":

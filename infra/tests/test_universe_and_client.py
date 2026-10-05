@@ -50,3 +50,35 @@ def test_allowlist_blocks_unknown_hosts():
         assert c.get("https://external-api.kalshi.com/trade-api/v2/markets").status_code == 200
         with pytest.raises(http_client.HostNotAllowedError):
             c.get("https://evil.example.com/exfil")
+
+
+def test_transient_http_failure_is_retried_with_retry_after(monkeypatch):
+    calls, delays = [], []
+
+    def respond(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"Retry-After": "2"})
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(http_client.time, "sleep", delays.append)
+    monkeypatch.setattr(http_client.random, "random", lambda: 0)
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        response = http_client.request_with_retry(client, "GET", "https://data.alpaca.markets/test")
+
+    assert response.status_code == 200 and len(calls) == 2
+    assert delays == [2.0]
+
+
+def test_non_transient_http_failure_is_not_retried(monkeypatch):
+    calls = []
+    monkeypatch.setattr(http_client.time, "sleep", lambda _delay: pytest.fail("unexpected retry"))
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(400)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            http_client.request_with_retry(client, "GET", "https://data.alpaca.markets/test")
+    assert len(calls) == 1

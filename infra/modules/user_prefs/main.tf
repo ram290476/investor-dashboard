@@ -37,6 +37,14 @@ variable "site_origins" {
   type = list(string)
 }
 
+variable "lake_bucket_name" {
+  type = string
+}
+
+variable "lake_bucket_arn" {
+  type = string
+}
+
 variable "ops_topic_arn" {
   type = string
 }
@@ -188,6 +196,24 @@ data "aws_iam_policy_document" "api" {
     }
   }
   statement {
+    sid       = "ReadDashboardServingObjects"
+    actions   = ["s3:GetObject"]
+    resources = [
+      "${var.lake_bucket_arn}/serving/dashboard.json",
+      "${var.lake_bucket_arn}/serving/status.json",
+    ]
+  }
+  statement {
+    sid       = "DecryptDashboardServingObjects"
+    actions   = ["kms:Decrypt"]
+    resources = [var.data_key_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.${local.region}.amazonaws.com"]
+    }
+  }
+  statement {
     sid       = "Logs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.api_fn.arn}:*"]
@@ -243,6 +269,7 @@ resource "aws_lambda_function" "api" {
       PREFS_TABLE           = aws_dynamodb_table.prefs.name
       PREFS_ACCESS_ROLE_ARN = aws_iam_role.access.arn
       EVENT_SOURCE          = local.event_source
+      LAKE_BUCKET           = var.lake_bucket_name
       AWS_USE_FIPS_ENDPOINT = "true"
     }
   }
@@ -289,8 +316,8 @@ resource "aws_apigatewayv2_integration" "prefs" {
   payload_format_version = "2.0"
 }
 
-resource "aws_apigatewayv2_route" "prefs" {
-  for_each           = toset(["GET /prefs", "PUT /prefs"])
+resource "aws_apigatewayv2_route" "site" {
+  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status"])
   api_id             = aws_apigatewayv2_api.site.id
   route_key          = each.value
   target             = "integrations/${aws_apigatewayv2_integration.prefs.id}"
@@ -318,12 +345,13 @@ resource "aws_apigatewayv2_stage" "default" {
   }
 }
 
-resource "aws_lambda_permission" "api" {
-  statement_id  = "AllowApiGateway"
+resource "aws_lambda_permission" "api_route" {
+  for_each      = toset(["prefs", "dashboard", "status"])
+  statement_id  = "AllowApiGateway-${each.value}"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.site.execution_arn}/*/*/prefs"
+  source_arn    = "${aws_apigatewayv2_api.site.execution_arn}/*/*/${each.value}"
 }
 
 resource "aws_cloudwatch_metric_alarm" "api_5xx" {

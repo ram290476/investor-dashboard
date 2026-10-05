@@ -7,13 +7,23 @@ with no SLA: Alpaca daily bars are the fallback when it throttles.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
 
 
-def chart_params(years: int = 5) -> dict:
-    return {"interval": "1d", "range": f"{years}y", "events": "split,div", "includeAdjustedClose": "true"}
+def chart_params(years: int = 5, start: date | None = None, end: date | None = None) -> dict:
+    """Return a historical range or an explicit [start, end) batch."""
+    params = {"interval": "1d", "events": "split,div", "includeAdjustedClose": "true"}
+    if start is None and end is None:
+        return {**params, "range": f"{years}y"}
+    if start is None or end is None or start >= end:
+        raise ValueError("start and end must define a non-empty half-open date range")
+    params.update(
+        period1=int(datetime.combine(start, datetime.min.time(), tzinfo=UTC).timestamp()),
+        period2=int(datetime.combine(end, datetime.min.time(), tzinfo=UTC).timestamp()),
+    )
+    return params
 
 
 def parse_chart(payload: dict, ticker: str) -> list[dict]:

@@ -35,6 +35,37 @@ def _event(method, sub="user-a", body=None):
     }
 
 
+def test_authenticated_dashboard_and_status_routes(api, monkeypatch):
+    mod, _ = api
+    documents = {
+        "serving/dashboard.json": {"schema_version": 1, "tickers": {"TSLA": {"price_history": []}}},
+        "serving/status.json": {"jobs": [{"job": "D4", "status": "ok"}]},
+    }
+    monkeypatch.setattr(mod, "_read_serving_json", lambda key: documents.get(key))
+
+    dashboard_event = _event("GET")
+    dashboard_event["rawPath"] = "/dashboard"
+    dashboard = json.loads(mod.handler(dashboard_event, None)["body"])
+    assert dashboard["schema_version"] == 1
+    assert dashboard["status"]["jobs"][0]["job"] == "D4"
+
+    status_event = _event("GET")
+    status_event["rawPath"] = "/status"
+    status = json.loads(mod.handler(status_event, None)["body"])
+    assert status["jobs"][0]["status"] == "ok"
+
+
+def test_dashboard_route_reports_not_ready_instead_of_fake_data(api, monkeypatch):
+    mod, _ = api
+    monkeypatch.setattr(mod, "_read_serving_json", lambda _key: None)
+    event = _event("GET")
+    event["rawPath"] = "/dashboard"
+
+    response = mod.handler(event, None)
+    assert response["statusCode"] == 503
+    assert json.loads(response["body"])["code"] == "DASHBOARD_NOT_READY"
+
+
 def test_get_defaults_then_put_and_read_back(api):
     mod, sent = api
     r = mod.handler(_event("GET"), None)

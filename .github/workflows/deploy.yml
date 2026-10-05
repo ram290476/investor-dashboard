@@ -1,0 +1,112 @@
+name: Deploy production
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: investor-dashboard-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Prepare Terraform configuration
+        working-directory: infra
+        env:
+          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG }}
+          TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS }}
+        run: |
+          set -euo pipefail
+          test -n "$TF_BACKEND_CONFIG"
+          test -n "$TERRAFORM_TFVARS"
+          printf '%s' "$TF_BACKEND_CONFIG" > backend.tf
+          printf '%s' "$TERRAFORM_TFVARS" > terraform.tfvars
+
+      - name: Initialize and provision base infrastructure
+        working-directory: infra
+        run: |
+          set -euo pipefail
+          terraform init
+          if ! terraform state list | grep -q '^module\.data_lake\.aws_ecr_repository\.jobs$'; then
+            terraform apply -auto-approve -var='jobs_image_uri='
+          fi
+          echo "ECR_REPOSITORY=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and publish the job image
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          image_uri="${ECR_REPOSITORY}:${DEPLOY_SHA}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --platform linux/arm64 \
+            --provenance=false \
+            --push \
+            --tag "$image_uri" \
+            infra
+          echo "JOBS_IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+
+      - name: Deploy job functions and generate site configuration
+        working-directory: infra
+        run: |
+          set -euo pipefail
+          terraform apply -auto-approve -var="jobs_image_uri=${JOBS_IMAGE_URI}"
+          terraform output -json site_runtime_config > ../Web/site/config.json
+          site_output="$(terraform output -json site)"
+          echo "SITE_BUCKET=$(jq -r '.bucket_name' <<< "$site_output")" >> "$GITHUB_ENV"
+          echo "CLOUDFRONT_DISTRIBUTION_ID=$(jq -r '.distribution_id' <<< "$site_output")" >> "$GITHUB_ENV"
+
+      - name: Publish static dashboard
+        run: |
+          set -euo pipefail
+          aws s3 sync Web/site "s3://${SITE_BUCKET}" \
+            --delete \
+            --exclude config.example.json
+          aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --paths '/*'
+
+      - name: Verify deployed site
+        working-directory: infra
+        run: |
+          set -euo pipefail
+          site_url="$(terraform output -json site | jq -r '.url')"
+          curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors \
+            "${site_url}/"
+          curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors \
+            "${site_url}/config.json" | jq -e '.apiBaseUrl and .clientId and .callbackUrl'

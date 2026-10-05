@@ -70,8 +70,28 @@ output "cognito" {
 }
 
 output "site_api_endpoint" {
-  description = "Base URL for GET/PUT /prefs (send the Cognito access token as Bearer)."
+  description = "Base URL for the authenticated /prefs, /dashboard and /status routes."
   value       = module.user_prefs.api_endpoint
+}
+
+output "site" {
+  description = "Private S3/CloudFront static dashboard hosting."
+  value = {
+    url             = module.site_hosting.url
+    bucket_name     = module.site_hosting.bucket_name
+    distribution_id = module.site_hosting.distribution_id
+  }
+}
+
+output "site_runtime_config" {
+  description = "Write this JSON object to Web/site/config.json before publishing the static site."
+  value = {
+    apiBaseUrl    = module.user_prefs.api_endpoint
+    cognitoDomain = module.site_auth.hosted_ui_url
+    clientId      = module.site_auth.client_id
+    callbackUrl   = "${module.site_hosting.url}/auth/callback"
+    logoutUrl     = "${module.site_hosting.url}/"
+  }
 }
 
 output "user_prefs_table" {

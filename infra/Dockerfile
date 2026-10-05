@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-jobs.txt
 COPY app/ ${LAMBDA_TASK_ROOT}/
 COPY functions/trend_metrics/ functions/q1_fundamentals/ functions/short_interest/ ${LAMBDA_TASK_ROOT}/
 COPY functions/options_daily/ functions/backfill/ functions/status_feed/ ${LAMBDA_TASK_ROOT}/
+COPY functions/daily_prices/ functions/dashboard_build/ ${LAMBDA_TASK_ROOT}/
 
 # Lambda always runs the code as its own unprivileged user and checks health itself.
 # checkov:skip=CKV_DOCKER_2: Lambda manages function health; HEALTHCHECK is ignored by the runtime

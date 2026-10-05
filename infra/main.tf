@@ -79,7 +79,7 @@ module "observability" {
   health_url                 = var.health_url
   canary_runtime             = var.canary_runtime
   canary_rate_minutes        = var.canary_rate_minutes
-  cloudfront_distribution_id = var.cloudfront_distribution_id
+  cloudfront_distribution_id = var.cloudfront_distribution_id != "" ? var.cloudfront_distribution_id : module.site_hosting.distribution_id
   monthly_budget_usd         = var.monthly_budget_usd
   budget_emails              = var.alert_emails
   extra_log_group_names      = concat(module.jobs.log_group_names, module.user_prefs.log_group_names)
@@ -108,8 +108,15 @@ module "site_auth" {
   source = "./modules/site_auth"
 
   name          = local.name
-  callback_urls = var.site_callback_urls
-  logout_urls   = var.site_logout_urls
+  callback_urls = distinct(concat(var.site_callback_urls, ["${module.site_hosting.url}/auth/callback"]))
+  logout_urls   = distinct(concat(var.site_logout_urls, ["${module.site_hosting.url}/"]))
+}
+
+module "site_hosting" {
+  source = "./modules/site"
+
+  name   = local.name
+  region = var.region
 }
 
 # Per-user preferences (DynamoDB) and the site API (HTTP API + JWT authorizer), with
@@ -123,7 +130,9 @@ module "user_prefs" {
   log_retention_days   = var.log_retention_days
   cognito_issuer_url   = module.site_auth.issuer_url
   cognito_client_id    = module.site_auth.client_id
-  site_origins         = var.site_origins
+  site_origins         = distinct(concat(var.site_origins, [module.site_hosting.url]))
+  lake_bucket_name     = module.data_lake.lake_bucket_name
+  lake_bucket_arn      = module.data_lake.lake_bucket_arn
   ops_topic_arn        = module.alerting.ops_topic_arn
   reserved_concurrency = var.lambda_reserved_concurrency
 }
@@ -157,10 +166,13 @@ module "jobs" {
   }
 
   extra_environment = {
-    MAX_USER_TICKERS = tostring(var.max_user_tickers)
-    OPTIONS_ENABLED  = tostring(var.enable_options_daily)
-    SEC_USER_AGENT   = var.sec_user_agent
-    ATLANTA_MPT_URL  = var.atlanta_mpt_url
-    KALSHI_SERIES    = var.kalshi_series
+    MAX_USER_TICKERS     = tostring(var.max_user_tickers)
+    OPTIONS_ENABLED      = tostring(var.enable_options_daily)
+    SEC_USER_AGENT       = var.sec_user_agent
+    ATLANTA_MPT_URL      = var.atlanta_mpt_url
+    KALSHI_SERIES        = var.kalshi_series
+    BACKFILL_YEARS       = tostring(var.backfill_years)
+    BACKFILL_BATCH_DAYS  = tostring(var.backfill_batch_days)
+    BACKFILL_MAX_BATCHES = tostring(var.backfill_max_batches)
   }
 }

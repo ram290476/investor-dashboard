@@ -85,7 +85,7 @@ variable "metrics_namespace" {
 }
 
 variable "health_url" {
-  description = "Public HTTPS URL of serving/health.json behind CloudFront (exempt from sign-in). Leave empty until the site exists; the canary and its alarms are skipped while empty."
+  description = "Public HTTPS URL of the non-sensitive freshness health document consumed by the canary. Leave empty until a publisher and public endpoint are configured."
   type        = string
   default     = ""
 }
@@ -169,19 +169,19 @@ variable "key_check_timezone" {
 variable "site_origins" {
   description = "Origins allowed to call the site API (CORS), e.g. the CloudFront URL. Local dev origin is for testing only."
   type        = list(string)
-  default     = ["http://localhost:5173"]
+  default     = ["http://localhost:8080"]
 }
 
 variable "site_callback_urls" {
-  description = "Cognito redirect URLs after sign-in (the site's /auth/callback)."
+  description = "Additional local Cognito sign-in redirect URLs; the CloudFront callback URL is added automatically."
   type        = list(string)
-  default     = ["http://localhost:5173/auth/callback"]
+  default     = ["http://localhost:8080/"]
 }
 
 variable "site_logout_urls" {
   description = "Cognito redirect URLs after sign-out."
   type        = list(string)
-  default     = ["http://localhost:5173/"]
+  default     = ["http://localhost:8080/"]
 }
 
 variable "jobs_image_uri" {
@@ -206,6 +206,45 @@ variable "enable_options_daily" {
   description = "Turn on the options_daily job after a manual run confirms the free Alpaca indicative feed returns snapshots (and whether they include IV)."
   type        = bool
   default     = false
+}
+
+variable "backfill_years" {
+  description = "Historical price lookback. The initial backfill and new-ticker loads use this range."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.backfill_years >= 1 && var.backfill_years <= 20
+    error_message = "backfill_years must be between 1 and 20."
+  }
+}
+
+variable "backfill_batch_days" {
+  description = "Calendar days per Yahoo historical request; smaller batches make recovery more granular."
+  type        = number
+  default     = 90
+
+  validation {
+    condition     = var.backfill_batch_days >= 1 && var.backfill_batch_days <= 365
+    error_message = "backfill_batch_days must be between 1 and 365."
+  }
+}
+
+variable "backfill_max_batches" {
+  description = "Maximum historical requests per backfill invocation; remaining batches resume on the schedule."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.backfill_max_batches >= 1 && var.backfill_max_batches <= 100
+    error_message = "backfill_max_batches must be between 1 and 100."
+  }
+}
+
+variable "backfill_resume_schedule" {
+  description = "EventBridge Scheduler expression that resumes incomplete history loads."
+  type        = string
+  default     = "rate(15 minutes)"
 }
 
 variable "sec_user_agent" {
@@ -252,6 +291,33 @@ variable "jobs" {
       api_keys       = []
       reads_prefs    = true
     }
+    daily-prices = {
+      handler        = "daily_prices.handler"
+      schedule       = "cron(45 16 ? * MON-FRI *)"
+      triggers       = []
+      memory         = 1024
+      timeout        = 300
+      read_prefixes  = []
+      write_prefixes = ["curated/prices_daily/"]
+      api_keys       = ["alpaca-key-id", "alpaca-secret-key"]
+      reads_prefs    = true
+    }
+    dashboard-build = {
+      handler        = "dashboard_build.handler"
+      schedule       = ""
+      triggers       = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL"]
+      memory         = 1024
+      timeout        = 300
+      read_prefixes  = [
+        "curated/prices_daily/",
+        "serving/trend_metrics/latest/",
+        "serving/fundamentals_quarterly.json",
+        "serving/status.json",
+      ]
+      write_prefixes = ["serving/dashboard.json"]
+      api_keys       = []
+      reads_prefs    = true
+    }
     # Weekly safety net; D1 also schedules a one-off run the day after earnings
     q1-fundamentals = {
       handler        = "fundamentals.handler"
@@ -291,7 +357,7 @@ variable "jobs" {
     # 5-year history when a user adds a ticker nobody followed; also run once at setup (O1)
     backfill = {
       handler        = "backfill.handler"
-      schedule       = ""
+      schedule       = var.backfill_resume_schedule
       triggers       = ["ticker-added"]
       memory         = 1024
       timeout        = 900

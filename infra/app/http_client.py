@@ -13,6 +13,8 @@ architecture doc's source catalog together.
 from __future__ import annotations
 
 import os
+import random
+import time
 
 import httpx
 
@@ -109,6 +111,9 @@ class HostNotAllowedError(RuntimeError):
     """Raised when a collector tries to reach a host outside ALLOWED_HOSTS."""
 
 
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
 def _check_host(request: httpx.Request) -> None:
     host = request.url.host
     if host not in ALLOWED_HOSTS:
@@ -124,3 +129,41 @@ def get_client(timeout_s: float = 30.0, **kwargs) -> httpx.Client:
         event_hooks={"request": [_check_host]},
         **kwargs,
     )
+
+
+def request_with_retry(
+    client: httpx.Client,
+    method: str,
+    url: str,
+    *,
+    max_attempts: int = 4,
+    base_delay_s: float = 0.5,
+    **kwargs,
+) -> httpx.Response:
+    """Retry transient network/upstream failures with bounded exponential backoff and jitter."""
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be positive")
+    for attempt in range(max_attempts):
+        try:
+            response = client.request(method, url, **kwargs)
+        except (httpx.TimeoutException, httpx.NetworkError):
+            if attempt + 1 == max_attempts:
+                raise
+            delay = min(base_delay_s * (2**attempt) * (0.5 + random.random()), 30.0)
+            time.sleep(delay)
+            continue
+
+        if response.status_code not in RETRYABLE_STATUS_CODES:
+            response.raise_for_status()
+            return response
+        if attempt + 1 == max_attempts:
+            response.raise_for_status()
+
+        try:
+            retry_after = float(response.headers.get("Retry-After", ""))
+        except ValueError:
+            retry_after = 0.0
+        delay = min(max(retry_after, base_delay_s * (2**attempt) * (0.5 + random.random())), 30.0)
+        time.sleep(delay)
+
+    raise RuntimeError("request retry loop ended unexpectedly")
