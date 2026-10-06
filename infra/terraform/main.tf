@@ -195,3 +195,16 @@ module "jobs" {
     BACKFILL_MAX_BATCHES = tostring(var.backfill_max_batches)
   }
 }
+
+# GitHub Actions deploy role via OIDC, limited to this repository's production environment
+# (IA-2, AC-6, CM-3). Changes to this module must be applied by an administrator.
+module "github_deploy" {
+  source = "./modules/github_deploy"
+  count  = var.enable_github_deploy ? 1 : 0
+
+  name                 = local.name
+  github_repository    = var.github_repository
+  github_environment   = var.github_environment
+  create_oidc_provider = var.github_oidc_provider_arn == ""
+  oidc_provider_arn    = var.github_oidc_provider_arn
+}
