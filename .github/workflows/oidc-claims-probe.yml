@@ -1,0 +1,27 @@
+# TEMPORARY: prints the non-secret claims of this repository's GitHub OIDC token (never the token
+# itself) to confirm the exact claim formats for the AWS trust policy. Removed before merge.
+name: OIDC claims probe (temporary)
+
+on:
+  push:
+    branches: [infra/github-oidc-immutable-sub]
+    paths: [.github/workflows/oidc-claims-probe.yml]
+
+permissions: {}
+
+jobs:
+  claims:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    steps:
+      - name: Print non-secret token claims
+        run: |
+          set -euo pipefail
+          token="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r .value)"
+          echo "::add-mask::${token}"
+          payload="$(cut -d. -f2 <<< "$token" | tr '_-' '/+')"
+          while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="${payload}="; done
+          base64 -d <<< "$payload" | jq '{sub, aud, ref, ref_type, event_name, environment, repository, repository_id, repository_owner, repository_owner_id, workflow, workflow_ref, job_workflow_ref}'
