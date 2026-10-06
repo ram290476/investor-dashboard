@@ -68,21 +68,36 @@ module "alerting" {
 module "observability" {
   source = "./modules/observability"
 
+  name                  = local.name
+  audit_key_arn         = module.kms.audit_key_arn
+  data_key_arn          = module.kms.data_key_arn
+  function_names        = var.function_names
+  log_retention_days    = var.log_retention_days
+  metrics_namespace     = var.metrics_namespace
+  ops_topic_arn         = module.alerting.ops_topic_arn
+  dlq_name              = module.data_lake.dlq_name
+  health_url            = var.health_url
+  canary_runtime        = var.canary_runtime
+  canary_rate_minutes   = var.canary_rate_minutes
+  monthly_budget_usd    = var.monthly_budget_usd
+  budget_emails         = var.alert_emails
+  extra_log_group_names = concat(module.jobs.log_group_names, module.user_prefs.log_group_names)
+}
+
+# What must live in us-east-1: the CloudFront 5xx alarm (with its own topic and key) and
+# forwarding of IAM and root/global sign-in events to this region's alerting rules (SI-4, AC-2(4)).
+module "us_east_1" {
+  source = "./modules/us_east_1"
+  providers = {
+    aws = aws.us_east_1
+  }
+
   name                       = local.name
-  audit_key_arn              = module.kms.audit_key_arn
-  data_key_arn               = module.kms.data_key_arn
-  function_names             = var.function_names
-  log_retention_days         = var.log_retention_days
-  metrics_namespace          = var.metrics_namespace
-  ops_topic_arn              = module.alerting.ops_topic_arn
-  dlq_name                   = module.data_lake.dlq_name
-  health_url                 = var.health_url
-  canary_runtime             = var.canary_runtime
-  canary_rate_minutes        = var.canary_rate_minutes
+  alert_emails               = var.alert_emails
+  enable_cloudfront_alarms   = var.enable_cloudfront_alarms
   cloudfront_distribution_id = var.cloudfront_distribution_id != "" ? var.cloudfront_distribution_id : module.site_hosting.distribution_id
-  monthly_budget_usd         = var.monthly_budget_usd
-  budget_emails              = var.alert_emails
-  extra_log_group_names      = concat(module.jobs.log_group_names, module.user_prefs.log_group_names)
+  primary_region             = var.region
+  forward_event_patterns     = module.alerting.global_event_patterns
 }
 
 # Provider API keys in SSM (encrypted with the data key) plus a daily rotation

@@ -8,7 +8,9 @@ FedRAMP authorization; see the scope note below.
 See the [deployment and operations guide](../../docs/operations.md) for the UI, API, historical
 backfill, scheduled refreshes, CI/CD setup, monitoring and troubleshooting.
 
-Expected cost: **about $21-35 a month** in year 1 (see the cost table in the [architecture doc](../../docs/architecture-infrastructure.md#cost-estimate)). Use the
+Everything deploys to `us-west-1` by default (DR copy in `us-west-2`); the `us_east_1` module adds the few pieces AWS only offers in us-east-1.
+
+Expected cost: **about $22-36 a month** in year 1 (see the cost table in the [architecture doc](../../docs/architecture-infrastructure.md#cost-estimate)). Use the
 30-day GuardDuty and Security Hub trials and the 15-day Inspector trial to see your real numbers.
 
 ## What it deploys
@@ -19,7 +21,8 @@ Expected cost: **about $21-35 a month** in year 1 (see the cost table in the [ar
 | `data_lake` | Versioned, KMS-encrypted lake bucket replicated to `us-west-2`; job dead-letter queue; ECR repo with immutable tags | CP-6, CP-9, CP-10, SC-8, SC-28, SI-11 |
 | `audit_logging` | Multi-Region CloudTrail (management + lake data events + Lambda invokes, integrity validation, Insights); AWS Config continuous recording; Object-Locked audit bucket kept 30 months | AU-2, AU-3, AU-6, AU-9, AU-11, AU-12, CM-2, CM-8 |
 | `security_services` | GuardDuty (S3 + Lambda protection, malware scanning of `raw/`); Security Hub with the NIST 800-53 Rev 5 standard; Inspector for ECR and Lambda; Access Analyzer; account public-access block; EBS default encryption; IAM password policy | CA-7, RA-5, SI-2, SI-3, SI-4, AC-3, AC-6, CM-6, IA-5 |
-| `alerting` | Encrypted ops and security SNS topics with email subscriptions; 8 EventBridge rules (GuardDuty, Security Hub, Inspector, audit tampering, S3 exposure, IAM changes, risky sign-in, AWS Health) | IR-4, IR-5, IR-6, AU-5, SI-4(5), AC-2(4) |
+| `alerting` | Encrypted ops and security SNS topics with email subscriptions; 9 EventBridge rules (GuardDuty, Security Hub, Inspector, audit tampering, S3 exposure, IAM changes, risky sign-in, AWS Health, API key changes) | IR-4, IR-5, IR-6, AU-5, SI-4(5), AC-2(4) |
+| `us_east_1` | What AWS only offers in us-east-1: the CloudFront 5xx alarm with its own KMS-encrypted topic (same alert emails, confirmed separately), and rules that forward IAM-change and root/global sign-in events to the primary region's bus, where `alerting` sends them to the security topic. Each event reaches one region's bus, so alerts are not doubled | SI-4, IR-6, AC-2(4), IA-2(1) |
 | `observability` | KMS-encrypted log groups (400-day retention); saved Logs Insights queries; alarms incl. SLO burn rates; ops and SLO dashboards; optional external Synthetics canary; monthly budget | AU-4, AU-6, SI-4, CP-2, SA-9 |
 | `api_keys` | 12 provider credentials as SSM SecureStrings (data key), each tagged with its rotation period; daily check (8:00 PT) that emails reminders 14, 7, 3, 1 and 0 days before a key is due, daily when overdue | IA-5, IA-5(h), SC-28 |
 | `site_auth` | Invite-only Cognito user pool (Plus tier, MFA required, 15-char passwords), public PKCE web client with 1-hour tokens and 12-hour refresh, hosted sign-in domain | IA-2(1), IA-2(2), IA-5, AC-7, AC-12 |

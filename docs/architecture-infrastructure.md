@@ -203,7 +203,7 @@ Each job has its own role: read and write only its listed lake prefixes, read on
 
 ## Compute and storage resources
 
-Everything runs in one AWS region (us-east-1, closest to the ET-based release times) with no always-on compute.
+Everything runs in one AWS region, us-west-1 (N. California), with no always-on compute. Schedules still use the America/New_York time zone, so release-time capture is unchanged. Two small pieces live in us-east-1 because AWS only offers them there: the CloudFront 5xx alarm (CloudFront metrics are published only in us-east-1) and forwarding of IAM and root sign-in events, which reach only the us-east-1 event bus.
 
 | Resource | Service | Size and settings | Expected load |
 |----|----|----|----|
@@ -224,17 +224,17 @@ Why not Fargate or EC2: a t4g.small or Fargate task running 24/7 costs more than
 
 ## Cost estimate
 
-The full stack, **including monitoring, alerting and health dashboards**, costs about **\$0.25 a month**, or about \$1.60 with a custom domain. Prices are us-east-1 list prices from AWS pricing pages, checked on 3 Oct 2026; usage figures are estimates from the catalog's call counts.
+The full stack, **including monitoring, alerting and health dashboards**, costs about **\$0.25 a month**, or about \$1.60 with a custom domain. Prices are us-west-1 list prices (AWS Price List API, checked 6 Oct 2026); usage figures are estimates from the catalog's call counts. Compared with us-east-1 only S3 is dearer (about 13%); Lambda, KMS, Config and the free allowances are the same.
 
-This table is the base stack. With the FedRAMP Moderate controls the total is about \$21–35 a month; see "Cost of the Moderate controls".
+This table is the base stack. With the FedRAMP Moderate controls the total is about \$22–36 a month; see "Cost of the Moderate controls".
 
 | Component | Price and free allowance | Our monthly use | Est. \$/month |
 |----|----|----|----|
 | **Collection and hosting** |  |  |  |
 | Lambda (collectors + builds) | 1M requests + 400,000 GB-s free each month ([pricing](https://aws.amazon.com/lambda/pricing/)) | ~1,300 requests, ~24,000 GB-s | 0.00 |
 | EventBridge Scheduler | 14M invocations free ([pricing](https://aws.amazon.com/eventbridge/pricing/)) | ~1,300 | 0.00 |
-| S3 storage | \$0.023/GB-month ([pricing](https://aws.amazon.com/s3/pricing/)) | \<2 GB in year 1, ~6 GB by year 3 | 0.05 (0.14 in year 3) |
-| S3 requests | \$0.005 per 1,000 PUTs, \$0.0004 per 1,000 GETs | ~15,000 PUTs, ~50,000 GETs | 0.10 |
+| S3 storage | \$0.026/GB-month ([pricing](https://aws.amazon.com/s3/pricing/)) | \<2 GB in year 1, ~6 GB by year 3 | 0.05 (0.16 in year 3) |
+| S3 requests | \$0.0055 per 1,000 PUTs, \$0.00044 per 1,000 GETs | ~15,000 PUTs, ~50,000 GETs | 0.10 |
 | CloudFront | Flat-rate Free plan, \$0: 1M requests, 100 GB, WAF, DNS ([pricing](https://aws.amazon.com/cloudfront/pricing/)) | \<20,000 requests | 0.00 |
 | Sign-in check at the edge (Lambda@Edge) | \$0.60 per 1M requests, **no free tier** ([pricing](https://aws.amazon.com/lambda/pricing/)) | ~15,000 requests | 0.01 |
 | Cognito sign-in | 10,000 monthly users free ([pricing](https://aws.amazon.com/cognito/pricing/)) | 1–5 users | 0.00 |
@@ -329,17 +329,17 @@ Monitoring is sized to stay inside CloudWatch's free 10 metrics, 10 alarms and 3
 
 ## FedRAMP Moderate alignment
 
-Meeting the FedRAMP Moderate technical controls (NIST SP 800-53 Rev 5) raises the monthly bill from about \$0.25 to **about \$21–35 (typically ~\$27)**. Most of that is Security Hub, Inspector, AWS Config, encryption keys and an external health check. The Terraform starter below sets all of it up.
+Meeting the FedRAMP Moderate technical controls (NIST SP 800-53 Rev 5) raises the monthly bill from about \$0.25 to **about \$22–36 (typically ~\$28)**. Most of that is Security Hub, Inspector, AWS Config, encryption keys and an external health check. The Terraform starter below sets all of it up.
 
 What changes from the base design:
 
 - **Security monitoring:** GuardDuty, Security Hub with the NIST 800-53 Rev 5 standard, Inspector, AWS Config, and CloudTrail data events with Insights.
 
-- **Encryption keys:** customer-managed KMS keys (data, audit, DR replica) replace AWS-managed keys. This reverses the base design's "cost trap" choice, because SC-12 and SC-28 call for keys you control.
+- **Encryption keys:** customer-managed KMS keys (data, audit, DR replica, and a small us-east-1 key for the CloudFront alarm topic) replace AWS-managed keys. This reverses the base design's "cost trap" choice, because SC-12 and SC-28 call for keys you control.
 
 - **Audit records:** kept 30 months in an Object-Locked bucket. That is 12 months searchable plus 18 months cold.
 
-- **Disaster recovery:** the data lake is replicated to us-west-2.
+- **Disaster recovery:** the data lake is replicated from us-west-1 to us-west-2.
 
 - **Sign-in:** people sign in to AWS through IAM Identity Center with MFA, and dashboard sign-in requires MFA too. The 12 provider API keys rotate every 90–365 days, with emailed reminders.
 
@@ -347,7 +347,7 @@ Scope notes:
 
 - **Technical controls only.** A FedRAMP authorization also needs a System Security Plan, policies, a 3PAO assessment and monthly continuous-monitoring reports. Those don't apply to a personal system.
 
-- **Region:** in us-east-1 every service used is FedRAMP Moderate authorized, except Security Hub and Budgets. AWS lists those two as "FedRAMP not required" management tools; they hold no dashboard data. CloudFront is listed with an exclusion for Embedded PoPs ([AWS services in scope](https://aws.amazon.com/compliance/services-in-scope/FedRAMP/)).
+- **Region:** us-west-1 is in AWS's US East/West FedRAMP Moderate boundary (with us-east-1, us-east-2 and us-west-2), where every service used is FedRAMP Moderate authorized, except Security Hub and Budgets. AWS lists those two as "FedRAMP not required" management tools; they hold no dashboard data. CloudFront is listed with an exclusion for Embedded PoPs ([AWS services in scope](https://aws.amazon.com/compliance/services-in-scope/FedRAMP/)).
 
 - **Log retention:** FedRAMP's AU-11 parameter points to OMB M-21-31 (12 months active, 18 months cold) ([AU-11](https://ce.prod.cloudaware.com/frameworks/fedramp-moderate-security-controls/au/11)). [OMB M-26-14](https://axoflow.com/blog/omb-m-26-14-what-federal-agencies-need-to-know-about-the-new-logging-mandate), signed 22 May 2026, replaced M-21-31 with 6 months searchable plus 12 months cold. Keeping 30 months meets both.
 
@@ -367,9 +367,9 @@ Every signal carries the same run_id and source_id, so one job run can be follow
 
 Alerts go to two email topics: **ops** for reliability and **security** for incident response.
 
-- **Ops (8–11 CloudWatch alarms):** Lambda errors, throttles, dead-letter queue not empty, failed runs, stale P1 source, quota headroom under 20%, freshness SLO burn, canary failing, availability SLO fast and slow burn, CloudFront 5xx.
+- **Ops (8–11 CloudWatch alarms):** Lambda errors, throttles, dead-letter queue not empty, failed runs, stale P1 source, quota headroom under 20%, freshness SLO burn, canary failing, availability SLO fast and slow burn, CloudFront 5xx (in us-east-1, with its own topic).
 
-- **Security (8 EventBridge rules, free):** GuardDuty findings rated medium or higher, high or critical Security Hub and Inspector findings, attempts to stop or weaken logging, monitoring or keys, S3 exposure changes, IAM changes, root or no-MFA sign-ins, and any API key change.
+- **Security (8 EventBridge rules, free):** GuardDuty findings rated medium or higher, high or critical Security Hub and Inspector findings, attempts to stop or weaken logging, monitoring or keys, S3 exposure changes, IAM changes, root or no-MFA sign-ins, and any API key change. IAM and global sign-in events arrive only in us-east-1, so two rules there forward them to the primary region's bus (no extra alerts: each event reaches one region).
 
 - **AWS Health events** go to the ops topic.
 
@@ -392,7 +392,7 @@ Recovery targets (CP-2, CP-9, CP-10):
 | Bad data or deleted file | 0 (every version kept 90 days) | 30 min | Restore the prior S3 object version, rebuild serving files |
 | Source outage | 0 (watermark catch-up) | Next run | Failover chain to backup source; catch-up when the primary returns |
 | Bad deploy | 0 | 10 min | Re-point Lambda aliases to the previous immutable image tag |
-| us-east-1 regional outage | Minutes (replication lag) | 4 h | terraform apply with region set to us-west-2, using the replica bucket and replica key |
+| us-west-1 regional outage | Minutes (replication lag) | 4 h | terraform apply with region set to us-west-2 (and dr_region set to another region, e.g. us-east-2), using the replica bucket and replica key |
 
 Practices built into the jobs:
 
@@ -533,6 +533,8 @@ The table maps each relevant Moderate control to how it is met and where it is b
 
 AWS list prices, us-east-1, checked 3 Oct 2026 · usage estimated from the data catalog
 
+The chart uses us-east-1 prices. In us-west-1 only S3 costs more (cents at this size); the us-east-1 alerts key adds \$1, giving \$22–36.
+
 Security Hub and Config costs scale with how often resources change, so batching deploys keeps them near the low end. Updated levers: hourly canary checks save ~\$2.50; turning off malware scanning saves ~\$1.10 but leaves an SI-3 gap. The \$40 budget alert gives headroom above the high estimate.
 
 Price sources: [GuardDuty](https://aws.amazon.com/guardduty/pricing/), [Security Hub CSPM](https://aws.amazon.com/security-hub/cspm/pricing/), [Config](https://aws.amazon.com/config/pricing/), [Inspector](https://aws.amazon.com/inspector/pricing/), [KMS](https://aws.amazon.com/kms/pricing/), [CloudTrail](https://aws.amazon.com/cloudtrail/pricing/), [Synthetics](https://aws.amazon.com/blogs/aws/new-use-cloudwatch-synthetics-to-monitor-sites-api-endpoints-web-workflows-and-more/), [X-Ray](https://lumigo.io/learn/what-is-aws-x-ray/), [EventBridge](https://aws.amazon.com/eventbridge/pricing/), [Cognito](https://aws.amazon.com/cognito/pricing/).
@@ -548,6 +550,7 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 | audit_logging | CloudTrail with data events, validation and Insights; AWS Config; Object-Locked audit bucket |
 | security_services | GuardDuty with S3, Lambda and malware protection; Security Hub NIST 800-53 Rev 5; Inspector; Access Analyzer; account guardrails |
 | alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes |
+| us_east_1 | CloudFront 5xx alarm with its own encrypted topic and key; forwarding of IAM and root sign-in events to the primary region |
 | observability | Log groups, saved queries, alarms with SLO burn rates, 2 dashboards, canary, \$40 budget |
 | api_keys | 14 SSM SecureStrings with rotation periods (now including FINRA); daily 8:00 PT check that emails reminders |
 | site_auth | Invite-only Cognito user pool (Plus, MFA required) and PKCE web client |

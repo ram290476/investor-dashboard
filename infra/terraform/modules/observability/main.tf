@@ -59,10 +59,6 @@ variable "canary_rate_minutes" {
   type = number
 }
 
-variable "cloudfront_distribution_id" {
-  type = string
-}
-
 variable "monthly_budget_usd" {
   type = number
 }
@@ -76,13 +72,12 @@ data "aws_partition" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  account_id    = data.aws_caller_identity.current.account_id
-  partition     = data.aws_partition.current.partition
-  region        = data.aws_region.current.region
-  ns            = var.metrics_namespace
-  canary_on     = var.health_url != ""
-  canary_name   = substr("${var.name}-health", 0, 21)
-  cloudfront_on = var.cloudfront_distribution_id != ""
+  account_id  = data.aws_caller_identity.current.account_id
+  partition   = data.aws_partition.current.partition
+  region      = data.aws_region.current.region
+  ns          = var.metrics_namespace
+  canary_on   = var.health_url != ""
+  canary_name = substr("${var.name}-health", 0, 21)
 
   # Service-level objectives (see the architecture doc, Reliability section).
   slo_availability = 99.5 # % of canary checks that pass, per 30 days
@@ -209,20 +204,9 @@ locals {
     }
   }
 
-  cloudfront_alarm_defs = {
-    cloudfront-5xx = {
-      description = "CloudFront 5xx error rate above 5% for 15 minutes"
-      namespace   = "AWS/CloudFront", metric = "5xxErrorRate", stat = "Average"
-      dims        = jsonencode({ DistributionId = var.cloudfront_distribution_id, Region = "Global" })
-      period      = 300, evals = 3, datapoints = 3
-      op          = "GreaterThanThreshold", threshold = 5, missing = "notBreaching"
-    }
-  }
-
   # for-filters instead of conditionals keep the object types consistent.
-  canary_alarms     = { for k, v in local.canary_alarm_defs : k => v if local.canary_on }
-  cloudfront_alarms = { for k, v in local.cloudfront_alarm_defs : k => v if local.cloudfront_on }
-  alarms            = merge(local.base_alarms, local.canary_alarms, local.cloudfront_alarms)
+  canary_alarms = { for k, v in local.canary_alarm_defs : k => v if local.canary_on }
+  alarms        = merge(local.base_alarms, local.canary_alarms)
 }
 
 resource "aws_cloudwatch_metric_alarm" "this" {

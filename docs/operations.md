@@ -93,7 +93,9 @@ terraform output -raw ecr_repository_url
 Confirm infrastructure health in the AWS Console or with the relevant AWS CLI services:
 CloudFormation/Terraform state, CloudFront distribution status, S3 public-access blocks,
 Lambda state, EventBridge schedules, Cognito pool status, CloudWatch alarms, and the SNS
-subscription confirmation emails.
+subscription confirmation emails. Each alert address gets three: the ops and security topics in the
+primary region and the CloudFront alarm topic in us-east-1 (`terraform output cloudfront_alarm_topic_arn`).
+The CloudFront alarm and the IAM/sign-in forwarding rules are in us-east-1, so look there in the console.
 
 ## GitHub Actions CI/CD
 
@@ -108,7 +110,7 @@ Configure:
 
 | GitHub production environment value | Purpose |
 | --- | --- |
-| Variable `AWS_REGION` | AWS deployment region; must match the Terraform `region`. |
+| Variable `AWS_REGION` | AWS deployment region; must match the Terraform `region` (default `us-west-1`). |
 | Secret `AWS_DEPLOY_ROLE_ARN` | IAM role assumed using GitHub OIDC. |
 | Secret `TF_BACKEND_CONFIG` | Complete Terraform `backend "s3"` block used in `backend.tf`. |
 | Secret `TERRAFORM_TFVARS` | Full non-secret Terraform variable configuration, including alert recipients. Do not place provider credentials here. |
