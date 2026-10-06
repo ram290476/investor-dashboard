@@ -82,3 +82,10 @@ def test_non_transient_http_failure_is_not_retried(monkeypatch):
         with pytest.raises(httpx.HTTPStatusError):
             http_client.request_with_retry(client, "GET", "https://data.alpaca.markets/test")
     assert len(calls) == 1
+
+
+def test_get_client_merges_caller_headers_with_user_agent():
+    # daily_prices and options_daily pass Alpaca auth headers; this used to raise TypeError.
+    with http_client.get_client(headers={"APCA-API-KEY-ID": "k"}) as client:
+        assert client.headers["APCA-API-KEY-ID"] == "k"
+        assert client.headers["User-Agent"] == http_client.USER_AGENT

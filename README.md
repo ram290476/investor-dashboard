@@ -58,12 +58,12 @@ The deployment workflow is already defined. It is not live in AWS yet; the AWS s
 
 5. **Verify and invite yourself.** From `infra/`, run `terraform output -json site` for the CloudFront URL and `terraform output -json cognito` for the user-pool ID. Invite a user with `aws cognito-idp admin-create-user --user-pool-id <user-pool-id> --username <your-email>`, then open the CloudFront URL and complete sign-in/MFA.
 
-6. **Start the initial price history load.** After the workflow has deployed the `backfill` Lambda, invoke it with the project prefix (default `invdash`):
+6. **Start the initial price history load.** After the workflow has deployed the `backfill` Lambda, invoke it with the project prefix (default `invdash`). Include the index ETF proxies; `trend_metrics` uses them as drivers:
    ```sh
    aws lambda invoke \
      --function-name invdash-backfill \
      --cli-binary-format raw-in-base64-out \
-     --payload '{"tickers":["TSLA","SPCX"]}' \
+     --payload '{"tickers":["TSLA","SPCX","SPY","DIA","QQQ","IWM","XLY","ITA","SMH"]}' \
      /tmp/backfill-result.json
    cat /tmp/backfill-result.json
    ```
