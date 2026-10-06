@@ -8,7 +8,7 @@ FedRAMP authorization; see the scope note below.
 See the [deployment and operations guide](../../docs/operations.md) for the UI, API, historical
 backfill, scheduled refreshes, CI/CD setup, monitoring and troubleshooting.
 
-Expected cost: **about $21-35 a month** in year 1 (see the architecture doc's cost table). Use the
+Expected cost: **about $21-35 a month** in year 1 (see the cost table in the [architecture doc](../../docs/architecture-infrastructure.md#cost-estimate)). Use the
 30-day GuardDuty and Security Hub trials and the 15-day Inspector trial to see your real numbers.
 
 ## What it deploys

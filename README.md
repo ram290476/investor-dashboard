@@ -32,7 +32,7 @@ The wired data path includes daily prices, Yahoo five-year daily-price backfill,
 fundamentals, short interest, options, status and dashboard snapshot serving. The architecture's
 full source catalog is not yet implemented; the Operations guide lists current schedules,
 assumptions and known gaps. The dashboard currently uses zero-build JavaScript rather than the
-architecture document's proposed TypeScript/Vite/Svelte stack.
+[architecture document](docs/architecture-infrastructure.md)'s proposed TypeScript/Vite/Svelte stack.
 
 Validate Terraform and run tests before deployment. AWS provisioning, provider access and
 production browser behavior require the corresponding AWS account and credentials; successful
