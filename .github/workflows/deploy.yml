@@ -94,7 +94,19 @@ jobs:
         run: |
           set -euo pipefail
           terraform init -input=false
-          if ! terraform state list | grep -q '^module\.data_lake\.aws_ecr_repository\.jobs$'; then
+          # Snapshot state once. Do NOT use `terraform state list | grep -q` under pipefail:
+          # when grep -q exits early on a match, state list gets SIGPIPE, the pipeline fails,
+          # and `if ! …` treats "ECR exists" as "ECR missing", then applies with an empty
+          # jobs_image_uri and destroys every job Lambda/schedule (Deploy 37496345092).
+          mapfile -t TF_STATE < <(terraform state list)
+          state_has() { printf '%s\n' "${TF_STATE[@]}" | grep -qx "$1"; }
+          if state_has 'module.data_lake.aws_ecr_repository.jobs'; then
+            echo "ECR repository already in state; skipping bootstrap apply."
+          elif printf '%s\n' "${TF_STATE[@]}" | grep -q '^module\.jobs\.aws_lambda_function\.job\['; then
+            echo "::error::Job Lambdas exist in state but the ECR repository does not; refusing empty jobs_image_uri apply."
+            exit 1
+          else
+            echo "First-time bootstrap: creating base stack (no job image yet)."
             terraform apply -input=false -auto-approve -var='jobs_image_uri='
           fi
           echo "ECR_REPOSITORY=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
@@ -120,6 +132,11 @@ jobs:
         working-directory: infra/terraform
         run: |
           set -euo pipefail
+          # The image just pushed. Never fall back to empty: empty destroys the jobs module.
+          if [ -z "${JOBS_IMAGE_URI:-}" ]; then
+            echo "::error::JOBS_IMAGE_URI is empty; refusing terraform apply."
+            exit 1
+          fi
           terraform apply -input=false -auto-approve -var="jobs_image_uri=${JOBS_IMAGE_URI}"
           terraform output -json site_runtime_config > ../../apps/web/config.json
           site_output="$(terraform output -json site)"

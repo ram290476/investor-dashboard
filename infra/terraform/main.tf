@@ -140,8 +140,6 @@ module "api_keys" {
 module "site_auth" {
   source = "./modules/site_auth"
 
-  permissions_boundary_arn = module.workload_boundary.arn
-
   name          = local.name
   callback_urls = distinct(concat(var.site_callback_urls, ["${module.site_hosting.url}/auth/callback"]))
   logout_urls   = distinct(concat(var.site_logout_urls, ["${module.site_hosting.url}/"]))

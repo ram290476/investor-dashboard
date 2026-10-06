@@ -236,7 +236,6 @@ data "aws_iam_policy_document" "iam_for_stack" {
       values = [
         "lambda.amazonaws.com", "scheduler.amazonaws.com", "config.amazonaws.com", "s3.amazonaws.com",
         "events.amazonaws.com", "malware-protection-plan.guardduty.amazonaws.com", "synthetics.amazonaws.com",
-        "cognito-idp.amazonaws.com",
       ]
     }
   }
