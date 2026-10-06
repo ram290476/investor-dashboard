@@ -25,8 +25,9 @@ def build_snapshot(
             if day and isinstance(close, (int, float)):
                 unique[day] = {
                     "date": day,
-                    "close": float(close),
-                    "adj_close": row.get("adj_close"),
+                    "close": float(close),  # split-adjusted
+                    "close_raw": row.get("close_raw"),  # actual traded close; null on older rows
+                    "adj_close": row.get("adj_close"),  # split- and dividend-adjusted; charts use this
                     "volume": row.get("volume"),
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]

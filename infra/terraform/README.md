@@ -25,7 +25,7 @@ Expected cost: **about $21-35 a month** in year 1 (see the architecture doc's co
 | `site_auth` | Invite-only Cognito user pool (Plus tier, MFA required, 15-char passwords), public PKCE web client with 1-hour tokens and 12-hour refresh, hosted sign-in domain | IA-2(1), IA-2(2), IA-5, AC-7, AC-12 |
 | `site` | Private, versioned S3 static-site bucket; CloudFront Origin Access Control, HTTPS, SPA routing and security headers | SC-8, SC-28 |
 | `user_prefs` | DynamoDB `user_prefs` table; site API `GET/PUT /prefs`, authenticated `GET /dashboard` and `/status`; Cognito JWT authorizer; per-user isolation via session-tagged role and `dynamodb:LeadingKeys`; 5xx alarm | AC-3, AC-6, SC-28, CP-9 |
-| `jobs` | Container-image job Lambdas with per-job roles, schedules and event triggers: daily prices, trends, fundamentals, short interest, options, five-year backfill, dashboard build and status feed; failures go to the dead-letter queue. Created once `jobs_image_uri` is set | AC-6, SI-11, CP-10 |
+| `jobs` | Container-image job Lambdas with per-job roles, schedules and event triggers: daily prices, split/dividend reconcile, trends, fundamentals, short interest, options, five-year backfill, dashboard build and status feed; failures go to the dead-letter queue. Created once `jobs_image_uri` is set | AC-6, SI-11, CP-10 |
 | `services/data-jobs/src/app/observability.py` | Powertools helper: JSON logs with `run_id`/`source_id`, X-Ray subsegments and custom metrics. A public `health.json` publisher is not yet wired. | AU-3, AU-8, SI-4 |
 | `services/data-jobs/src/app/api_keys.py` | Reads keys with a 5-minute cache, so rotations apply without a redeploy | IA-5 |
 | `infra/terraform/scripts/rotate-key.sh` | Stores a regenerated key without it touching shell history or the process list | IA-5(h) |
@@ -106,6 +106,7 @@ Evidence for an assessor: the daily `key_rotation_status` log lines (kept 400 da
 | Contract | Location | Fields |
 | --- | --- | --- |
 | Preferences API | `GET/PUT {site_api_endpoint}/prefs`, `Authorization: Bearer <Cognito access token>` | `tickers` (ordered, max 50), `pinned` (max 6, subset of tickers), `display.time_zone` (IANA), `display.updown_palette` (`green-red`, `red-green`, `blue-orange`), `version` (send back on PUT; 409 if stale), `updated_at` |
+| Daily prices | `curated/prices_daily/ticker=<T>/year=<YYYY>/prices.parquet`; `serving/dashboard.json` `tickers.<T>.price_history` | `ticker, date, close` (split-adjusted), `close_raw` (traded), `adj_close` (split + dividend adjusted; charts and trends), `volume, source_id`. `close_raw`/`adj_close` may be null on rows written before price-reconcile ran |
 | Trend metrics | `serving/trend_metrics/ticker=<T>/trend_metrics.parquet`, `serving/trend_metrics/latest/<T>.json` | `series_id, ticker, date, value, chg_1w, chg_1m, chg_3m, z_1w, z_1m, z_3m, range_pct_1y, trend_state, days_in_state, corr_30d, corr_90d, effect, net_pressure` |
 | Fundamentals | `serving/fundamentals_quarterly.json` | `ticker, metric (gross_margin_gaap, revenue_gaap, gross_profit_gaap, deliveries, fsd_subscribers), fiscal_quarter, release_date, value, unit, source_id` |
 | Refresh status | `serving/status.json` | `generated_at`, `jobs[]: job, name, status (ok, partial, failed, never_run), last_run, last_outcome, failed_sources, next_run` |

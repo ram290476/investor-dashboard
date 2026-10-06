@@ -172,6 +172,19 @@ function isNumericValue(value) {
   return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 }
 
+// Charts and returns use adj_close (split- and dividend-adjusted, continuous across corporate
+// actions); displayed prices use close_raw (the actual traded close). Both fall back to close,
+// which older rows carry alone.
+function chartValue(row) {
+  if (!row) return null;
+  return isNumericValue(row.adj_close) ? Number(row.adj_close) : isNumericValue(row.close) ? Number(row.close) : null;
+}
+
+function displayPrice(row) {
+  if (!row) return null;
+  return isNumericValue(row.close_raw) ? Number(row.close_raw) : isNumericValue(row.close) ? Number(row.close) : null;
+}
+
 function formatPrice(value) {
   if (!isNumericValue(value)) return "—";
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(
@@ -204,14 +217,9 @@ function selectedData() {
 
 function returns(history, offset) {
   if (!history || history.length <= offset) return null;
-  if (
-    !isNumericValue(history[history.length - 1 - offset].close) ||
-    !isNumericValue(history.at(-1).close)
-  ) {
-    return null;
-  }
-  const before = Number(history[history.length - 1 - offset].close);
-  const latest = Number(history[history.length - 1].close);
+  const before = chartValue(history[history.length - 1 - offset]);
+  const latest = chartValue(history.at(-1));
+  if (before === null || latest === null) return null;
   return before ? latest / before - 1 : null;
 }
 
@@ -228,7 +236,7 @@ function polarity(value) {
 
 function drawChart(history, ticker) {
   if (!history?.length) return null;
-  const values = history.filter((row) => isNumericValue(row.close)).map((row) => Number(row.close));
+  const values = history.map(chartValue).filter((value) => value !== null);
   if (values.length < 2) return null;
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -248,9 +256,9 @@ function drawChart(history, ticker) {
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${ticker} daily closing prices over ${values.length} sessions`);
   const title = document.createElementNS(svgNS, "title");
-  title.textContent = `${ticker} daily close`;
+  title.textContent = `${ticker} daily close, adjusted for splits and dividends`;
   const desc = document.createElementNS(svgNS, "desc");
-  desc.textContent = `Price range ${formatPrice(min)} to ${formatPrice(max)}. Most recent close ${formatPrice(values.at(-1))}.`;
+  desc.textContent = `Adjusted price range ${formatPrice(min)} to ${formatPrice(max)}. Most recent close ${formatPrice(displayPrice(history.at(-1)))}.`;
   svg.append(title, desc);
 
   const defs = document.createElementNS(svgNS, "defs");
@@ -339,7 +347,7 @@ function renderWatchlist() {
     const button = node("button", "ticker-button");
     button.type = "button";
     button.setAttribute("aria-pressed", String(ticker === session.selected));
-    button.setAttribute("aria-label", `${ticker}, ${latest ? formatPrice(latest.close) : "no price data"}`);
+    button.setAttribute("aria-label", `${ticker}, ${latest ? formatPrice(displayPrice(latest)) : "no price data"}`);
     button.addEventListener("click", () => {
       session.selected = ticker;
       renderDashboard();
@@ -349,7 +357,7 @@ function renderWatchlist() {
       node(
         "span",
         `ticker-meta ${polarity(returns(history, 1))}`,
-        latest ? `${formatPrice(latest.close)} · ${formatPercent(returns(history, 1))}` : "Waiting for history",
+        latest ? `${formatPrice(displayPrice(latest))} · ${formatPercent(returns(history, 1))}` : "Waiting for history",
       ),
     );
     list.append(button);
@@ -359,7 +367,7 @@ function renderWatchlist() {
 
 function renderPricePanel(tickerData) {
   const panel = node("section", "panel");
-  const history = (tickerData?.price_history || []).filter((row) => isNumericValue(row.close));
+  const history = (tickerData?.price_history || []).filter((row) => chartValue(row) !== null);
   const heading = sectionHeader(
     "Price history",
     tickerData?.price_as_of ? `Daily close · as of ${tickerData.price_as_of}` : "Daily close · five-year history",
@@ -367,7 +375,7 @@ function renderPricePanel(tickerData) {
   const latest = history.at(-1);
   if (latest) {
     const summary = node("div", "price-summary");
-    summary.append(node("strong", "", formatPrice(latest.close)));
+    summary.append(node("strong", "", formatPrice(displayPrice(latest))));
     summary.append(node("span", `mono ${polarity(returns(history, 1))}`, `${formatPercent(returns(history, 1))} 1D`));
     heading.append(summary);
   }
@@ -384,7 +392,7 @@ function renderPricePanel(tickerData) {
         node(
           "span",
           "",
-          `${formatPrice(Math.min(...history.map((row) => Number(row.close))))} – ${formatPrice(Math.max(...history.map((row) => Number(row.close))))}`,
+          `Adjusted ${formatPrice(Math.min(...history.map(chartValue)))} – ${formatPrice(Math.max(...history.map(chartValue)))}`,
         ),
       );
       panel.append(legend);
@@ -413,7 +421,7 @@ function renderStats(tickerData) {
   const grid = node("section", "stats-grid");
   grid.setAttribute("aria-label", "Selected ticker summary");
   grid.append(
-    statCard("LAST CLOSE", history.length ? formatPrice(history.at(-1).close) : "—", tickerData?.price_as_of || "No data"),
+    statCard("LAST CLOSE", history.length ? formatPrice(displayPrice(history.at(-1))) : "—", tickerData?.price_as_of || "No data"),
     statCard("1D CHANGE", formatPercent(oneDay), "Previous session", polarity(oneDay)),
     statCard("1M CHANGE", formatPercent(oneMonth), "21 trading sessions", polarity(oneMonth)),
     statCard(

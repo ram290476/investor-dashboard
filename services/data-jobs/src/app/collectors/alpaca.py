@@ -20,13 +20,23 @@ CHAIN_PATH = "/v1beta1/options/snapshots/{underlying}"
 OCC_RE = re.compile(r"^(?P<root>[A-Z.]{1,6})(?P<ymd>\d{6})(?P<cp>[CP])(?P<strike>\d{8})$")
 
 
-def bars_params(symbols: list[str], start: str, end: str | None = None, timeframe: str = "1Hour") -> list[dict]:
-    """One request per 100 symbols; follow next_page_token within each."""
+def bars_params(
+    symbols: list[str],
+    start: str,
+    end: str | None = None,
+    timeframe: str = "1Hour",
+    adjustment: str = "split",
+) -> list[dict]:
+    """One request per 100 symbols; follow next_page_token within each.
+
+    adjustment: "raw" (traded prices), "split", "dividend" or "all" (split + dividend), each
+    relative to the request date.
+    """
     out = []
     for i in range(0, len(symbols), 100):
         p = {"symbols": ",".join(symbols[i : i + 100]), "timeframe": timeframe, "start": start, "feed": "iex"}
         p["limit"] = 10000
-        p["adjustment"] = "split"
+        p["adjustment"] = adjustment
         if end:
             p["end"] = end
         out.append(p)

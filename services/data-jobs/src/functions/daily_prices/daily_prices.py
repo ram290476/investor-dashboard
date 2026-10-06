@@ -1,4 +1,12 @@
-"""D4: collect recent Alpaca daily bars for the ticker universe and the index ETF proxies."""
+"""D4: collect recent Alpaca daily bars for the ticker universe and the index ETF proxies.
+
+Each run requests the last 7 days three times, once per Alpaca adjustment, and stores per day:
+    close_raw   adjustment=raw    the actual traded close
+    close       adjustment=split  split-adjusted as of today (same meaning as Yahoo's close)
+    adj_close   adjustment=all    split- and dividend-adjusted as of today (Yahoo's adjclose)
+Rows older than the window are re-adjusted by the nightly price_reconcile job when a split or
+dividend appears.
+"""
 
 from __future__ import annotations
 
@@ -32,11 +40,39 @@ def normalize_daily_bars(payload: dict) -> list[dict]:
                     "ticker": ticker.upper(),
                     "date": stamp.astimezone(UTC).date(),
                     "close": float(bar["c"]),
-                    "adj_close": float(bar["c"]),
                     "volume": int(bar["v"]),
                     "source_id": "DS-02",
                 }
             )
+    return rows
+
+
+# Alpaca adjustment -> stored column
+ADJUSTMENTS: dict[str, str] = {"raw": "close_raw", "split": "close", "all": "adj_close"}
+
+
+def combine_daily_bars(raw: list[dict], split: list[dict], adjusted: list[dict]) -> list[dict]:
+    """Merge one normalized row list per adjustment into stored rows keyed by (ticker, date).
+
+    The raw call defines which days exist (and the traded volume). A failed split call falls back
+    to the raw close; a failed "all" call leaves adj_close null for the reconcile job to fill.
+    """
+    split_close = {(r["ticker"], r["date"]): r["close"] for r in split}
+    adj_close = {(r["ticker"], r["date"]): r["close"] for r in adjusted}
+    rows = []
+    for r in raw:
+        key = (r["ticker"], r["date"])
+        rows.append(
+            {
+                "ticker": r["ticker"],
+                "date": r["date"],
+                "close": split_close.get(key, r["close"]),
+                "close_raw": r["close"],
+                "adj_close": adj_close.get(key),
+                "volume": r["volume"],
+                "source_id": r["source_id"],
+            }
+        )
     return rows
 
 
@@ -66,34 +102,39 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         end = (today + timedelta(days=1)).isoformat()
         stored = 0
         failed_pages = 0
+        by_adjustment: dict[str, list[dict]] = {a: [] for a in ADJUSTMENTS}
 
         with get_client(headers=headers) as http:
-            for params in alpaca.bars_params(tickers, start, end, timeframe="1Day"):
-                page_token = None
-                while True:
-                    page_params = {**params}
-                    if page_token:
-                        page_params["page_token"] = page_token
-                    payload = {}
-                    with source_run("DS-02") as record:
-                        response = request_with_retry(
-                            http,
-                            "GET",
-                            f"{alpaca.DATA}{alpaca.BARS_PATH}",
-                            params=page_params,
-                        )
-                        payload = response.json()
-                        rows = normalize_daily_bars(payload)
-                        if rows:
-                            upsert_prices(pl.DataFrame(rows))  # ticker=<T>/year=<YYYY>/prices.parquet
+            for adjustment in ADJUSTMENTS:
+                for params in alpaca.bars_params(tickers, start, end, timeframe="1Day", adjustment=adjustment):
+                    page_token = None
+                    while True:
+                        page_params = {**params}
+                        if page_token:
+                            page_params["page_token"] = page_token
+                        payload = {}
+                        with source_run("DS-02") as record:
+                            response = request_with_retry(
+                                http,
+                                "GET",
+                                f"{alpaca.DATA}{alpaca.BARS_PATH}",
+                                params=page_params,
+                            )
+                            payload = response.json()
+                            rows = normalize_daily_bars(payload)
+                            by_adjustment[adjustment].extend(rows)
                             record["rows"] = len(rows)
-                            stored += len(rows)
-                    if record["outcome"] == "failure":
-                        failed_pages += 1
-                        break
-                    page_token = payload.get("next_page_token")
-                    if not page_token:
-                        break
+                        if record["outcome"] == "failure":
+                            failed_pages += 1
+                            break
+                        page_token = payload.get("next_page_token")
+                        if not page_token:
+                            break
+
+        rows = combine_daily_bars(by_adjustment["raw"], by_adjustment["split"], by_adjustment["all"])
+        if rows:
+            upsert_prices(pl.DataFrame(rows))  # ticker=<T>/year=<YYYY>/prices.parquet
+            stored = len(rows)
 
         if failed_pages:
             raise RuntimeError(f"Alpaca daily-bar collection failed for {failed_pages} page(s)")

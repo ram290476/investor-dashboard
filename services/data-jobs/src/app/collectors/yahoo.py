@@ -26,6 +26,38 @@ def chart_params(years: int = 5, start: date | None = None, end: date | None = N
     return params
 
 
+def _local_date(ts: int, offset: timedelta) -> date:
+    return (datetime.fromtimestamp(int(ts), tz=UTC) + offset).date()
+
+
+def parse_events(payload: dict) -> list[dict]:
+    """Splits and dividends in the response window, by exchange-local ex-date, oldest first.
+
+    split:    {"type": "split", "date", "ratio": numerator / denominator, "label": "N:D"}
+              (prices before the ex-date divide by ratio to become split-adjusted)
+    dividend: {"type": "dividend", "date", "amount"}  (split-adjusted cash amount)
+    Requires events=split,div in the request (chart_params sets it).
+    """
+    result = ((payload.get("chart") or {}).get("result") or [{}])[0]
+    offset = timedelta(seconds=int(result.get("meta", {}).get("gmtoffset", 0)))
+    events = result.get("events") or {}
+    out = []
+    for split in (events.get("splits") or {}).values():
+        num, den = float(split["numerator"]), float(split["denominator"])
+        if num > 0 and den > 0:
+            out.append(
+                {
+                    "type": "split",
+                    "date": _local_date(split["date"], offset),
+                    "ratio": num / den,
+                    "label": split.get("splitRatio") or f"{num:g}:{den:g}",
+                }
+            )
+    for div in (events.get("dividends") or {}).values():
+        out.append({"type": "dividend", "date": _local_date(div["date"], offset), "amount": float(div["amount"])})
+    return sorted(out, key=lambda e: (e["date"], e["type"]))
+
+
 def parse_chart(payload: dict, ticker: str) -> list[dict]:
     """Rows for curated/prices_daily: ticker, date (exchange-local), close, adj_close, volume, source_id."""
     result = (payload.get("chart") or {}).get("result") or []

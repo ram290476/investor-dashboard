@@ -283,7 +283,7 @@ variable "jobs" {
     trend-metrics = {
       handler        = "trend_metrics.handler"
       schedule       = ""
-      triggers       = ["job:D4", "job:M1"]
+      triggers       = ["job:D4", "job:M1", "job:RECONCILE"]
       memory         = 2048
       timeout        = 600
       read_prefixes  = ["curated/prices_daily/", "curated/macro_daily/"]
@@ -305,7 +305,7 @@ variable "jobs" {
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE"]
       memory   = 1024
       timeout  = 300
       read_prefixes = [
@@ -365,6 +365,18 @@ variable "jobs" {
       write_prefixes = ["curated/prices_daily/"]
       api_keys       = []
       reads_prefs    = false
+    }
+    # Weekday evenings: Yahoo split/dividend check; rewrites a ticker's adjusted history on a new event
+    price-reconcile = {
+      handler        = "price_reconcile.handler"
+      schedule       = "cron(15 19 ? * MON-FRI *)"
+      triggers       = []
+      memory         = 1024
+      timeout        = 900
+      read_prefixes  = ["curated/prices_daily/"]
+      write_prefixes = ["curated/prices_daily/"]
+      api_keys       = []
+      reads_prefs    = true
     }
     # Rebuilds serving/status.json after every job
     status-feed = {

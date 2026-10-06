@@ -11,6 +11,8 @@ def test_alpaca_bars_chunking_and_parse():
     syms = [f"T{i}" for i in range(150)]
     params = alpaca.bars_params(syms, "2026-10-01")
     assert len(params) == 2 and params[0]["feed"] == "iex" and params[1]["symbols"].count(",") == 49
+    assert params[0]["adjustment"] == "split"
+    assert alpaca.bars_params(syms[:2], "2026-10-01", adjustment="raw")[0]["adjustment"] == "raw"
     rows = alpaca.parse_bars(
         {"bars": {"SPY": [{"t": "2026-10-02T14:00:00Z", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 100}]}}
     )
