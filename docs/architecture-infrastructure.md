@@ -337,7 +337,7 @@ What changes from the base design:
 
 - **Encryption keys:** customer-managed KMS keys (data, audit, DR replica, and a small us-east-1 key for the CloudFront alarm topic) replace AWS-managed keys. This reverses the base design's "cost trap" choice, because SC-12 and SC-28 call for keys you control.
 
-- **Audit records:** kept 30 months in an Object-Locked bucket. That is 12 months searchable plus 18 months cold.
+- **Audit records:** kept 30 months; 12 months searchable plus 18 months cold. CloudTrail logs are in an Object-Locked bucket. AWS Config history is in a separate versioned bucket with the same key, delete-deny policy and retention, because AWS Config cannot deliver to a bucket with Object Lock default retention.
 
 - **Disaster recovery:** the data lake is replicated from us-west-1 to us-west-2.
 
@@ -362,7 +362,7 @@ Every signal carries the same run_id and source_id, so one job run can be follow
 | Traces | One X-Ray segment per job, one subsegment per source call | X-Ray (within free 100,000 traces) | 30 days |
 | External check | Synthetics canary every 15 min fetches health.json through CloudFront: HTTP 200, data under 90 min old in market hours, no stale P1 source | CloudWatch Synthetics | Artifacts 31 days |
 | API audit trail | All management events, lake object reads and writes, Lambda invocations; integrity-validated log files; Insights on unusual call or error rates | CloudTrail → Object-Locked S3 | 30 months |
-| Configuration history | Every resource change, continuously | AWS Config → audit bucket | 30 months |
+| Configuration history | Every resource change, continuously | AWS Config → config bucket (versioned, KMS, delete-deny; no Object Lock, which Config does not support) | 30 months |
 | Threats and vulnerabilities | GuardDuty findings (incl. malware scans of raw/), Inspector CVEs, Security Hub NIST 800-53 control results | Security Hub | 90 days of findings |
 
 Alerts go to two email topics: **ops** for reliability and **security** for incident response.
@@ -509,7 +509,7 @@ The table maps each relevant Moderate control to how it is met and where it is b
 | AU-3, AU-8 | Record content, time stamps | JSON schema: who, what, when (UTC), source, outcome, run_id | app/observability.py |
 | AU-5 | Response to logging failure | Alert on StopLogging, DeleteTrail, recorder stop, key disable | alerting |
 | AU-6 | Review and analysis | Security Hub, CloudTrail Insights, saved Logs Insights queries, weekly review | security_services, audit_logging, observability |
-| AU-9, AU-9(4) | Protect audit records | Object Lock; separate audit key; deny-delete policy; log-file validation | audit_logging, kms |
+| AU-9, AU-9(4) | Protect audit records | Object Lock (CloudTrail); versioning and deny-delete/deny-unversion policy (Config); separate audit key; log-file validation | audit_logging, kms |
 | AU-11 | Retention | 400 days in CloudWatch; 30 months in S3 | audit_logging, observability |
 | CA-7 | Continuous monitoring | Security Hub NIST 800-53 Rev 5 standard over AWS Config data | security_services |
 | CM-2, CM-3, CM-6 | Baseline, change control, settings | Terraform; pull request + CI + approval gate; Checkov policy scan | all modules, ci.yml |
@@ -533,7 +533,7 @@ The table maps each relevant Moderate control to how it is met and where it is b
 
 AWS list prices, us-east-1, checked 3 Oct 2026 · usage estimated from the data catalog
 
-The chart uses us-east-1 prices. In us-west-1 only S3 costs more (cents at this size); the us-east-1 alerts key adds \$1, giving \$22–36.
+The chart uses us-east-1 prices. In us-west-1 only S3 costs more (cents at this size); the us-east-1 alerts key adds \$1, giving \$22–36. The separate AWS Config bucket adds well under \$0.10 a month (a few MB of history a month at \$0.026/GB, with a bucket key keeping KMS requests negligible).
 
 Security Hub and Config costs scale with how often resources change, so batching deploys keeps them near the low end. Updated levers: hourly canary checks save ~\$2.50; turning off malware scanning saves ~\$1.10 but leaves an SI-3 gap. The \$40 budget alert gives headroom above the high estimate.
 
@@ -547,7 +547,7 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 |----|----|
 | kms | Data key (multi-Region, with a us-west-2 replica) and a separate audit key, rotated yearly |
 | data_lake | Lake bucket with versioning, KMS and TLS-only access, replicated to us-west-2; job dead-letter queue; ECR repo with immutable tags |
-| audit_logging | CloudTrail with data events, validation and Insights; AWS Config; Object-Locked audit bucket |
+| audit_logging | CloudTrail with data events, validation and Insights into an Object-Locked audit bucket; AWS Config into its own versioned config bucket |
 | security_services | GuardDuty with S3, Lambda and malware protection; Security Hub NIST 800-53 Rev 5; Inspector; Access Analyzer; account guardrails |
 | alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes |
 | us_east_1 | CloudFront 5xx alarm with its own encrypted topic and key; forwarding of IAM and root sign-in events to the primary region |

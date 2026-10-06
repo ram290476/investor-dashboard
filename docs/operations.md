@@ -305,7 +305,7 @@ JWT authorizer to troubleshoot a browser sign-in issue.
 
 Use CloudWatch dashboards, alarms and the SNS ops topic from Terraform outputs to review Lambda
 errors/throttles, API 5xx responses, data freshness/job status, dead-letter messages, CloudFront
-errors and deployment health. The audit bucket and CloudTrail retain infrastructure events.
+errors and deployment health. The audit bucket (CloudTrail) and the config bucket (AWS Config history) retain infrastructure events.
 CloudFront hosting and the API are monitored; the Synthetics freshness canary remains off until
 the pipeline exposes a deliberately public, non-sensitive health document.
 

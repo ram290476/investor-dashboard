@@ -154,6 +154,32 @@ data "aws_iam_policy_document" "audit_key" {
     }
   }
 
+  # AWS Config writes configuration history to the config bucket (SSE-KMS with a bucket key, so
+  # the encryption context is the bucket ARN, or the object ARN without a bucket key). The recorder
+  # role is also allowed through IAM; this grant covers service-principal delivery.
+  statement {
+    sid       = "ConfigEncryptRecords"
+    actions   = ["kms:GenerateDataKey", "kms:Decrypt"]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "kms:EncryptionContext:aws:s3:arn"
+      values = [
+        "arn:${local.partition}:s3:::${var.name}-config-${local.account_id}",
+        "arn:${local.partition}:s3:::${var.name}-config-${local.account_id}/*",
+      ]
+    }
+  }
+
   statement {
     sid = "CloudWatchLogsEncryption"
     actions = [
