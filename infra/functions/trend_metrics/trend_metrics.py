@@ -162,12 +162,47 @@ def ticker_metrics(ticker: str, ticker_px: pl.DataFrame, drivers: dict[str, pl.D
     return df.select(OUTPUT_COLUMNS).sort(["date", "series_id"])
 
 
+# daily_prices (D4, Alpaca) rows win over backfill (DS-05, Yahoo) rows for the same ticker and date.
+PREFERRED_PRICE_SOURCE = "DS-02"
+MACRO_COLUMNS = {"series_id", "obs_date", "value"}
+
+
+def dedupe_prices(prices: pl.DataFrame) -> pl.DataFrame:
+    """One row per (ticker, date).
+
+    Backfill batches and daily_prices partitions overlap in curated/prices_daily/. When both exist,
+    keep the daily_prices row (source_id DS-02); otherwise keep the last row read.
+    """
+    if prices.is_empty() or not {"ticker", "date"} <= set(prices.columns):
+        return prices
+    preferred = (
+        (pl.col("source_id") == PREFERRED_PRICE_SOURCE).fill_null(False)
+        if "source_id" in prices.columns
+        else pl.lit(False)
+    )
+    return (
+        prices.with_row_index("_row")
+        .with_columns(preferred.cast(pl.Int8).alias("_preferred"))
+        .sort(["_preferred", "_row"])
+        .unique(subset=["ticker", "date"], keep="last")
+        .sort("_row")
+        .drop("_row", "_preferred")
+    )
+
+
 def split_inputs(prices_daily: pl.DataFrame, macro_daily: pl.DataFrame, etfs: list[str]):
-    """prices_daily: (ticker, date, close). macro_daily: (series_id, obs_date, value)."""
+    """prices_daily: (ticker, date, close). macro_daily: (series_id, obs_date, value).
+
+    Either frame may be empty or column-less (read_parquet_prefix on an empty prefix, e.g. before
+    the M1 macro collector exists); the missing drivers are simply skipped.
+    """
     drivers: dict[str, pl.DataFrame] = {}
-    for (sid,), frame in macro_daily.group_by(["series_id"]):
-        if sid in DRIVERS:
-            drivers[sid] = frame.select(pl.col("obs_date").alias("date"), pl.col("value").cast(pl.Float64))
+    if not macro_daily.is_empty() and MACRO_COLUMNS <= set(macro_daily.columns):
+        for (sid,), frame in macro_daily.group_by(["series_id"]):
+            if sid in DRIVERS:
+                drivers[sid] = frame.select(pl.col("obs_date").alias("date"), pl.col("value").cast(pl.Float64))
+    if prices_daily.is_empty() or not {"ticker", "date", "close"} <= set(prices_daily.columns):
+        return drivers
     for etf in etfs:
         f = prices_daily.filter(pl.col("ticker") == etf)
         if not f.is_empty():
@@ -183,10 +218,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     @job_handler("TREND")
     def run(event, context):
         uni = collection_universe(user_ticker_union())
-        prices = read_parquet_prefix("curated/prices_daily/")
+        prices = dedupe_prices(read_parquet_prefix("curated/prices_daily/"))
         macro = read_parquet_prefix("curated/macro_daily/")
         drivers = split_inputs(prices, macro, uni["etfs"])
         written = 0
+        if prices.is_empty() or "ticker" not in prices.columns:
+            return {"tickers": 0, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": uni["dropped"]}
         for t in uni["equities"]:
             px = prices.filter(pl.col("ticker") == t).select("date", pl.col("close").cast(pl.Float64))
             out = ticker_metrics(t, px, drivers)
