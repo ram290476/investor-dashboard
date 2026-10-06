@@ -284,7 +284,7 @@ data "aws_iam_policy_document" "replication" {
   }
 
   statement {
-    sid     = "ReadSourceObjects"
+    sid = "ReadSourceObjects"
     actions = [
       "s3:GetObjectVersionForReplication",
       "s3:GetObjectVersionAcl",
@@ -430,11 +430,11 @@ resource "aws_ecr_repository" "jobs" {
 
 resource "aws_ecr_lifecycle_policy" "jobs" {
   repository = aws_ecr_repository.jobs.name
-  policy     = jsonencode({
+  policy = jsonencode({
     rules = [{
       rulePriority = 1
       description  = "Keep the 10 newest images for rollback"
-      selection    = {
+      selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
         countNumber = 10

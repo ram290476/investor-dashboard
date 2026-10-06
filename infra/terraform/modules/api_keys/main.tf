@@ -231,10 +231,10 @@ resource "aws_iam_role" "scheduler" {
 }
 
 resource "aws_iam_role_policy" "scheduler" {
-  name   = "invoke-key-rotation-check"
-  role   = aws_iam_role.scheduler.id
+  name = "invoke-key-rotation-check"
+  role = aws_iam_role.scheduler.id
   policy = jsonencode({
-    Version   = "2012-10-17"
+    Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
       Action   = "lambda:InvokeFunction"

@@ -179,7 +179,7 @@ data "aws_iam_policy_document" "audit_bucket" {
     condition {
       test     = "StringNotLike"
       variable = "aws:PrincipalArn"
-      values   = [
+      values = [
         "arn:${local.partition}:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/*AdministratorAccess*",
         "arn:${local.partition}:iam::${local.account_id}:role/${var.name}-terraform-deploy",
       ]

@@ -387,8 +387,8 @@ resource "aws_synthetics_canary" "health" {
   }
 
   run_config {
-    timeout_in_seconds    = 60
-    active_tracing        = true
+    timeout_in_seconds = 60
+    active_tracing     = true
     environment_variables = {
       HEALTH_URL  = var.health_url
       MAX_AGE_MIN = "90"
@@ -412,42 +412,42 @@ locals {
 
   ops_widgets = concat([
     {
-      type       = "alarm", x = 0, y = 0, width = 24, height = 3
+      type = "alarm", x = 0, y = 0, width = 24, height = 3
       properties = {
         title  = "Alarm status"
         alarms = [for a in aws_cloudwatch_metric_alarm.this : a.arn]
       }
     },
     {
-      type       = "metric", x = 0, y = 3, width = 8, height = 6
+      type = "metric", x = 0, y = 3, width = 8, height = 6
       properties = {
         title   = "Job runs (all functions)", region = local.region, stat = "Sum", period = 3600, view = "timeSeries"
         metrics = [["AWS/Lambda", "Invocations"], [".", "Errors"], [".", "Throttles"]]
       }
     },
     {
-      type       = "metric", x = 8, y = 3, width = 8, height = 6
+      type = "metric", x = 8, y = 3, width = 8, height = 6
       properties = {
         title   = "Job duration p95 (ms)", region = local.region, stat = "p95", period = 3600, view = "timeSeries"
         metrics = [["AWS/Lambda", "Duration"]]
       }
     },
     {
-      type       = "metric", x = 16, y = 3, width = 8, height = 6
+      type = "metric", x = 16, y = 3, width = 8, height = 6
       properties = {
         title   = "Failed runs and rows written", region = local.region, stat = "Sum", period = 3600, view = "timeSeries"
         metrics = [[local.ns, "FailedRuns", "service", var.name], [".", "RowsWritten", ".", ".", { yAxis = "right" }]]
       }
     },
     {
-      type       = "metric", x = 0, y = 9, width = 8, height = 6
+      type = "metric", x = 0, y = 9, width = 8, height = 6
       properties = {
         title   = "Stale sources", region = local.region, stat = "Maximum", period = 3600, view = "timeSeries"
         metrics = [[local.ns, "StaleP1Sources", "service", var.name], [".", "StaleSources", ".", "."]]
       }
     },
     {
-      type       = "metric", x = 8, y = 9, width = 8, height = 6
+      type = "metric", x = 8, y = 9, width = 8, height = 6
       properties = {
         title       = "Lowest free-tier headroom (%)", region = local.region, stat = "Minimum", period = 3600, view = "timeSeries"
         metrics     = [[local.ns, "RateLimitHeadroomPct", "service", var.name]]
@@ -455,7 +455,7 @@ locals {
       }
     },
     {
-      type       = "metric", x = 16, y = 9, width = 8, height = 6
+      type = "metric", x = 16, y = 9, width = 8, height = 6
       properties = {
         title   = "Dead-letter queue", region = local.region, stat = "Maximum", period = 300, view = "timeSeries"
         metrics = [["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", var.dlq_name]]
@@ -465,13 +465,13 @@ locals {
 
   slo_widgets = concat([
     {
-      type       = "text", x = 0, y = 0, width = 24, height = 3
+      type = "text", x = 0, y = 0, width = 24, height = 3
       properties = {
         markdown = "## SLOs\n**Availability** ${local.slo_availability}% of health checks pass (30 days, ~3.6 h error budget). **Freshness** ${local.slo_freshness * 100}% of P1 sources within max age during business hours. **Release capture** every CPI, PCE and FOMC release stored within 15 minutes (each miss is reviewed)."
       }
     },
     {
-      type       = "metric", x = 0, y = 3, width = 12, height = 6
+      type = "metric", x = 0, y = 3, width = 12, height = 6
       properties = {
         title       = "Freshness: share of P1 sources current", region = local.region, stat = "Average", period = 3600, view = "timeSeries"
         metrics     = [[local.ns, "FreshP1Ratio", "service", var.name]]
@@ -480,15 +480,15 @@ locals {
       }
     },
     ], [for w in [
-    {
-      type       = "metric", x = 12, y = 3, width = 12, height = 6
-      properties = {
-        title       = "Availability: health checks passing (%)", region = local.region, stat = "Average", period = 3600, view = "timeSeries"
-        metrics     = [["CloudWatchSynthetics", "SuccessPercent", "CanaryName", local.canary_name]]
-        yAxis       = { left = { min = 90, max = 100 } }
-        annotations = { horizontal = [{ value = local.slo_availability, label = "SLO" }] }
-      }
-    },
+      {
+        type = "metric", x = 12, y = 3, width = 12, height = 6
+        properties = {
+          title       = "Availability: health checks passing (%)", region = local.region, stat = "Average", period = 3600, view = "timeSeries"
+          metrics     = [["CloudWatchSynthetics", "SuccessPercent", "CanaryName", local.canary_name]]
+          yAxis       = { left = { min = 90, max = 100 } }
+          annotations = { horizontal = [{ value = local.slo_availability, label = "SLO" }] }
+        }
+      },
   ] : w if local.canary_on])
 }
 
