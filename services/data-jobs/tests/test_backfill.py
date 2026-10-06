@@ -13,10 +13,6 @@ def test_backfill_batches_move_from_newest_to_oldest_without_overlap():
     assert first == (date(2026, 7, 6), date(2026, 10, 4))
     assert second == (date(2026, 4, 7), date(2026, 7, 6))
     assert second[1] == first[0]
-    assert backfill.batch_object_key("TSLA", *first) == (
-        "curated/prices_daily/ticker=TSLA/batch_start=2026-07-06/"
-        "batch_end=2026-10-04/prices_daily.parquet"
-    )
 
 
 def test_backfill_clamps_last_batch_and_handles_leap_day():

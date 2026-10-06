@@ -53,7 +53,7 @@ def build_snapshot(
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
-    from lake import read_json, read_parquet_prefix, write_json
+    from lake import read_json, read_prices, write_json
     from observability import job_handler, logger
     from universe import collection_universe, user_ticker_union
 
@@ -63,7 +63,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         price_data: dict[str, list[dict]] = {}
         trend_data: dict[str, dict | None] = {}
         for ticker in tickers:
-            frame = read_parquet_prefix(f"curated/prices_daily/ticker={ticker}/")
+            frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
             price_data[ticker] = frame.to_dicts() if not frame.is_empty() else []
             trend_data[ticker] = read_json(f"serving/trend_metrics/latest/{ticker}.json")
 

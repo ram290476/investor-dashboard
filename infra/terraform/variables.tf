@@ -297,7 +297,7 @@ variable "jobs" {
       triggers       = []
       memory         = 1024
       timeout        = 300
-      read_prefixes  = []
+      read_prefixes  = ["curated/prices_daily/"]
       write_prefixes = ["curated/prices_daily/"]
       api_keys       = ["alpaca-key-id", "alpaca-secret-key"]
       reads_prefs    = true
