@@ -553,7 +553,7 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 | us_east_1 | CloudFront 5xx alarm with its own encrypted topic and key; forwarding of IAM and root sign-in events to the primary region |
 | observability | Log groups, saved queries, alarms with SLO burn rates, 2 dashboards, canary, \$40 budget |
 | api_keys | 14 SSM SecureStrings with rotation periods (now including FINRA); daily 8:00 PT check that emails reminders |
-| site_auth | Invite-only Cognito user pool (Plus, MFA required) and PKCE web client |
+| site_auth | Invite-only Cognito user pool (Plus, MFA required: SMS or authenticator app), invdash-cognito-sms role, and PKCE web client |
 | user_prefs | DynamoDB prefs table, site API (GET/PUT /prefs, JWT authorizer), per-user isolation role, collector read policy, 5xx alarm |
 | jobs | Six container-image job Lambdas with their own roles, schedules (ET), event triggers and DLQ; created once jobs_image_uri is set |
 | workload_boundary | invdash-workload-boundary permissions boundary on every IAM role (no IAM writes; no role assumption except the prefs API hop) |

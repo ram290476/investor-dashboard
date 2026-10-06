@@ -410,6 +410,55 @@ aws cognito-idp admin-create-user --user-pool-id <user-pool-id> --username <emai
 Require the invited user to complete the temporary-password and MFA setup. Never disable the
 JWT authorizer to troubleshoot a browser sign-in issue.
 
+### MFA: authenticator app and SMS text messages
+
+MFA is required. The pool offers two factors:
+
+- **Authenticator app (TOTP).** Always available. A user who has no `phone_number` is asked to set
+  this up at first sign-in.
+- **SMS text message.** For users with a `phone_number`. Cognito assumes the
+  `invdash-cognito-sms` role and calls `sns:Publish`, which AWS End User Messaging SMS delivers
+  from the same Region (us-west-1). The role carries `invdash-workload-boundary`, only Cognito
+  can assume it (external ID, source account, and user pools in this account and Region), and
+  it can only publish SMS, not SNS topic messages.
+
+The app client gives users 15 minutes (the maximum) to finish an MFA step. The earlier 3-minute
+limit could expire while someone was scanning the QR code.
+
+**Before anyone can receive SMS codes, do these manual steps (not in Terraform):**
+
+1. **Get a US toll-free number** in AWS End User Messaging SMS, in **us-west-1**: Phone numbers →
+   Request originator → United States → Toll-free → SMS. It costs about $2 a month, charged from
+   the moment you request it. US carriers require a registered number even in the SMS sandbox.
+2. **Register the toll-free number.** Fill in and submit the registration form:
+   - company type `Sole proprietor` (no EIN needed) or your company details;
+   - use case `Two-factor authentication` or `One-time passwords`;
+   - expected monthly volume;
+   - sample message "Your Investor Dashboard sign-in code is 123456";
+   - a public privacy-policy URL and terms-and-conditions URL (required since 2026-09-15);
+   - an opt-in description, plus a PNG screenshot (400 KB maximum) of where users agree to get
+     codes.
+
+   Review takes **up to 15 business days**. A "Requires updates" result means fixing the form
+   and resubmitting, which restarts the clock. The number turns `ACTIVE` when approved.
+3. **Verify each destination phone number while the account is in the SMS sandbox.** In End User
+   Messaging → Verified destination numbers, add the number. AWS texts it a code from the active
+   toll-free number, and the phone's owner reads it back. This needs step 2 to be finished:
+   simulator numbers can't verify real phones. Up to 10 numbers are allowed. To text unverified
+   users, request production access instead.
+4. **Spend limit.** New accounts are capped at $1.00 a month. A US text costs under a cent
+   including carrier fees, which is plenty for a handful of users. To raise it, open a quota
+   increase case.
+5. **Add the user's phone number** (`phone_number`, E.164 format, for example `+14155550123`)
+   **only after steps 1–3 work for that number**:
+   `aws cognito-idp admin-update-user-attributes --user-pool-id <id> --username <email> --user-attributes Name=phone_number,Value=+1...`.
+   Once a user has a phone number, Cognito can choose SMS for them. Adding it before texts can be
+   delivered could lock them out unless they also have an authenticator registered.
+
+Check readiness with `aws pinpoint-sms-voice-v2 describe-phone-numbers` (toll-free `ACTIVE`),
+`describe-verified-destination-numbers`, `describe-spend-limits` and
+`aws sns get-sms-sandbox-account-status`.
+
 Use CloudWatch dashboards, alarms and the SNS ops topic from Terraform outputs to review Lambda
 errors/throttles, API 5xx responses, data freshness/job status, dead-letter messages, CloudFront
 errors and deployment health. The audit bucket (CloudTrail) and the config bucket (AWS Config history) retain infrastructure events.
