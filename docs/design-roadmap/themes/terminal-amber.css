@@ -1,0 +1,32 @@
+/* Terminal Amber — Classic professional market terminals (Bloomberg-style): pure black, amber/orange text, bright green/red ticks, dense high-signal look. */
+/* Generated from themes.json by render-themes.js. */
+:root[data-theme="terminal-amber"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #080706;
+  --surface-2: #15110A;
+  --border: #3D2E14;
+  --border-strong: #6E5222;
+  --grid: #261D0E;
+  --text: #FFA028;
+  --text-2: #F2C46D;
+  --text-muted: #CC8A2E;
+  --text-faint: #B07A30;
+  --accent: #FFD23F;
+  --accent-text: #FFE08A;
+  --up: #22D65F;
+  --down: #FF4136;
+  --neutral: #CC8A2E;
+  --warning: #FFE600;
+  --series-1: #FFD23F;
+  --series-2: #FF6F00;
+  --series-3: #FF5FA2;
+  --series-4: #B48CFF;
+  --series-5: #00D8FF;
+  --series-6: #F5F5F5;
+  --heat: #7A4A00;
+  --accent-subtle: #393011;
+  --up-subtle: #0C2613;
+  --down-subtle: #2D100D;
+  --warning-subtle: #393405;
+}

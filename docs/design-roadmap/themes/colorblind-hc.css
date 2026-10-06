@@ -1,0 +1,32 @@
+/* Colorblind-safe High Contrast — Accessibility-first dashboards: near-black canvas, white text, stronger borders, Okabe-Ito blue/orange up/down so direction never relies on red vs green. */
+/* Generated from themes.json by render-themes.js. */
+:root[data-theme="colorblind-hc"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #0B0D10;
+  --surface-2: #171B21;
+  --border: #5A6370;
+  --border-strong: #9AA4B1;
+  --grid: #2C333D;
+  --text: #FFFFFF;
+  --text-2: #EEF1F5;
+  --text-muted: #D0D6DE;
+  --text-faint: #BAC2CD;
+  --accent: #FFFFFF;
+  --accent-text: #FFFFFF;
+  --up: #56B4E9;
+  --down: #E69F00;
+  --neutral: #BAC2CD;
+  --warning: #F0E442;
+  --series-1: #FFFFFF;
+  --series-2: #F0E442;
+  --series-3: #CC79A7;
+  --series-4: #B9A3FF;
+  --series-5: #00B98A;
+  --series-6: #D55E00;
+  --heat: #2F6FA8;
+  --accent-subtle: #3C3D40;
+  --up-subtle: #162631;
+  --down-subtle: #2C230E;
+  --warning-subtle: #39381A;
+}

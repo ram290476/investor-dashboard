@@ -11,6 +11,7 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `desktop-signals.png` | Net macro pressure, regimes, drivers, catalyst sensitivity |
 | `desktop-macro-panels.png` | Macro / theme / news sentiment panels |
 | `mobile-glance.png` | Four-tab phone glance layout (Chart / Signals / Calendar & more) |
+| `themes/*-desktop-full.png` | Full desktop view in each proposed color theme (see [`themes/README.md`](themes/README.md)) |
 
 **Note:** Values in these shots are **design sample data** from the artboard’s inline demo generator (dated demo facts and synthetic series), **not live lake / market data**. See the [Dashboard features](https://github.com/ram290476/investor-dashboard/wiki/Dashboard-features) wiki for what ships today vs design-only.
 
