@@ -102,3 +102,8 @@ output "job_functions" {
   description = "Job Lambdas created from jobs_image_uri (empty until the image is set)."
   value       = module.jobs.function_names
 }
+
+output "cloudfront_alarm_topic_arn" {
+  description = "us-east-1 topic for the CloudFront 5xx alarm (null when enable_cloudfront_alarms is false). Recipients confirm it separately."
+  value       = module.us_east_1.cloudfront_topic_arn
+}

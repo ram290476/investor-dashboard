@@ -10,15 +10,20 @@ variable "project" {
 }
 
 variable "region" {
-  description = "Primary AWS region."
+  description = "Primary AWS region. CloudFront metrics and global-service events (IAM, root sign-in) always land in us-east-1; the us_east_1 module covers those."
   type        = string
-  default     = "us-east-1"
+  default     = "us-west-1"
 }
 
 variable "dr_region" {
-  description = "Region for the replicated data lake copy (contingency planning)."
+  description = "Region for the replicated data lake copy (contingency planning). Must differ from region."
   type        = string
   default     = "us-west-2"
+
+  validation {
+    condition     = var.dr_region != var.region
+    error_message = "dr_region must be a different region from region."
+  }
 }
 
 variable "use_fips_endpoint" {
@@ -103,9 +108,15 @@ variable "canary_rate_minutes" {
 }
 
 variable "cloudfront_distribution_id" {
-  description = "CloudFront distribution ID for the 5xx alarm. Leave empty to skip that alarm."
+  description = "Override the CloudFront distribution watched by the 5xx alarm. Leave empty to use the distribution this stack creates."
   type        = string
   default     = ""
+}
+
+variable "enable_cloudfront_alarms" {
+  description = "Create the CloudFront 5xx alarm (and its us-east-1 topic and key). A static flag, so the first plan works before the distribution exists."
+  type        = bool
+  default     = true
 }
 
 variable "enable_malware_protection" {

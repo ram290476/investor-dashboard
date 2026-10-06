@@ -42,12 +42,12 @@ local validation alone does not establish production readiness.
 
 The deployment workflow is already defined. It is not live in AWS yet; the AWS state bucket and GitHub OIDC role/environment must be configured first. Follow the detailed `operations guide`.
 
-1. **Prepare Terraform state.** Create a private, versioned, encrypted S3 bucket with public access blocked. Copy `backend.tf.example` to `infra/backend.tf` and fill in the bucket and region. The state bucket must exist before Terraform can initialize.
+1. **Prepare Terraform state.** Create a private, versioned, encrypted S3 bucket with public access blocked. Copy `infra/terraform/backend.tf.example` to `infra/terraform/backend.tf`; it is pre-filled for bucket `invdash-tfstate-308639168050` in `us-west-1`. The state bucket must exist before Terraform can initialize.
 
 2. **Set up GitHub OIDC and production protections.** In the AWS account, configure GitHub's OIDC provider and a deployment role trusted only for `repo:<OWNER>/<REPO>:environment:production` with audience `sts.amazonaws.com`. Give that role the permissions needed for this Terraform stack, ECR image publication, site-bucket upload, and CloudFront invalidation. In GitHub, create the `production` environment and require reviewer approval; otherwise the environment is not an approval gate.
 
 3. **Add GitHub environment values** under Settings → Environments → `production`:
-   - Variable `AWS_REGION`, matching the Terraform `region`.
+   - Variable `AWS_REGION`, matching the Terraform `region` (default `us-west-1`).
    - Secret `AWS_DEPLOY_ROLE_ARN`.
    - Secret `TF_BACKEND_CONFIG`, containing the complete S3 backend block.
    - Secret `TERRAFORM_TFVARS`, containing the non-secret Terraform settings (for example project, region, and alert email). Do not put provider API credentials in it.

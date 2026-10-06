@@ -102,7 +102,43 @@ resource "aws_sns_topic_subscription" "email" {
 # free, so these replace CloudWatch metric-filter alarms at no cost.
 # ---------------------------------------------------------------------------
 locals {
-  rules = {
+  # Events from global services. IAM API calls and root/global-endpoint console sign-ins are
+  # delivered only to the us-east-1 default bus; sign-ins through a regional endpoint land in that
+  # region. The us_east_1 module forwards matching us-east-1 events to this region's default bus, so
+  # these rules alert on both. Each event reaches exactly one region's bus, so nothing is doubled.
+  global_rules = {
+    iam-changes = {
+      topic       = "security"
+      description = "IAM identity and permission changes (AC-2(4) automated audit actions)"
+      pattern = jsonencode({
+        "detail-type" = ["AWS API Call via CloudTrail"]
+        detail = {
+          eventSource = ["iam.amazonaws.com"]
+          eventName = [
+            "CreateUser", "DeleteUser", "CreateAccessKey", "CreateLoginProfile", "UpdateLoginProfile",
+            "AttachUserPolicy", "AttachRolePolicy", "PutUserPolicy", "PutRolePolicy",
+            "CreatePolicyVersion", "SetDefaultPolicyVersion", "UpdateAssumeRolePolicy",
+            "DeactivateMFADevice", "DeleteVirtualMFADevice",
+          ]
+        }
+      })
+    }
+    risky-sign-in = {
+      topic       = "security"
+      description = "Root sign-in or console sign-in without MFA (IA-2(1), AC-6(9))"
+      pattern = jsonencode({
+        "detail-type" = ["AWS Console Sign In via CloudTrail"]
+        detail = {
+          "$or" = [
+            { userIdentity = { type = ["Root"] } },
+            { additionalEventData = { MFAUsed = ["No"] } },
+          ]
+        }
+      })
+    }
+  }
+
+  rules = merge(local.global_rules, {
     guardduty-findings = {
       topic       = "security"
       description = "GuardDuty findings, medium severity and above"
@@ -172,35 +208,6 @@ locals {
         }
       })
     }
-    iam-changes = {
-      topic       = "security"
-      description = "IAM identity and permission changes (AC-2(4) automated audit actions)"
-      pattern = jsonencode({
-        "detail-type" = ["AWS API Call via CloudTrail"]
-        detail = {
-          eventSource = ["iam.amazonaws.com"]
-          eventName = [
-            "CreateUser", "DeleteUser", "CreateAccessKey", "CreateLoginProfile", "UpdateLoginProfile",
-            "AttachUserPolicy", "AttachRolePolicy", "PutUserPolicy", "PutRolePolicy",
-            "CreatePolicyVersion", "SetDefaultPolicyVersion", "UpdateAssumeRolePolicy",
-            "DeactivateMFADevice", "DeleteVirtualMFADevice",
-          ]
-        }
-      })
-    }
-    risky-sign-in = {
-      topic       = "security"
-      description = "Root sign-in or console sign-in without MFA (IA-2(1), AC-6(9))"
-      pattern = jsonencode({
-        "detail-type" = ["AWS Console Sign In via CloudTrail"]
-        detail = {
-          "$or" = [
-            { userIdentity = { type = ["Root"] } },
-            { additionalEventData = { MFAUsed = ["No"] } },
-          ]
-        }
-      })
-    }
     aws-health = {
       topic       = "ops"
       description = "AWS Health events for services this account uses (CP-2, SA-9)"
@@ -220,7 +227,7 @@ locals {
         }
       })
     }
-  }
+  })
 }
 
 resource "aws_cloudwatch_event_rule" "this" {
@@ -243,4 +250,9 @@ output "ops_topic_arn" {
 
 output "security_topic_arn" {
   value = aws_sns_topic.this["security"].arn
+}
+
+output "global_event_patterns" {
+  description = "Patterns for global-service events, forwarded from us-east-1 to this region's default bus."
+  value       = { for k, v in local.global_rules : k => v.pattern }
 }

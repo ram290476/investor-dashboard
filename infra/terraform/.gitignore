@@ -3,6 +3,7 @@
 tfplan
 terraform.tfvars
 backend.tf
-modules/observability/.build/
+# archive_file outputs (Lambda and canary zips) under any module
+.build/
 __pycache__/
 .ruff_cache/

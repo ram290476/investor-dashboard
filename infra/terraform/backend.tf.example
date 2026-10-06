@@ -2,9 +2,9 @@
 # S3-native locking (use_lockfile) removes the need for a DynamoDB lock table.
 terraform {
   backend "s3" {
-    bucket       = "REPLACE-invdash-tfstate-ACCOUNT_ID"
+    bucket       = "invdash-tfstate-308639168050"
     key          = "investor-dashboard/infra.tfstate"
-    region       = "us-east-1"
+    region       = "us-west-1"
     encrypt      = true
     use_lockfile = true
   }
