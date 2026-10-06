@@ -44,7 +44,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from api_keys import api_key
     from collectors import alpaca
     from http_client import get_client, request_with_retry
-    from lake import write_parquet
+    from lake import upsert_prices
     from observability import job_handler, logger, source_run
     from universe import collection_universe, user_ticker_union
 
@@ -85,15 +85,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                         payload = response.json()
                         rows = normalize_daily_bars(payload)
                         if rows:
-                            frame = pl.DataFrame(rows)
-                            for (ticker, day), partition in frame.partition_by(
-                                ["ticker", "date"], as_dict=True
-                            ).items():
-                                day_text = day.isoformat()
-                                write_parquet(
-                                    partition,
-                                    f"curated/prices_daily/ticker={ticker}/date={day_text}/daily.parquet",
-                                )
+                            upsert_prices(pl.DataFrame(rows))  # ticker=<T>/year=<YYYY>/prices.parquet
                             record["rows"] = len(rows)
                             stored += len(rows)
                     if record["outcome"] == "failure":

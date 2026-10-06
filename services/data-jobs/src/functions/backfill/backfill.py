@@ -2,8 +2,9 @@
 
 An initial or TickerAdded event seeds S3 state. Scheduled invocations then
 retrieve bounded batches from newest to oldest until every ticker is complete.
-Each batch has a deterministic object key, so retrying a request safely replaces
-the same data instead of creating duplicates.
+Each batch is upserted into the ticker's yearly partitions (lake.upsert_prices), so
+retrying a request replaces the same rows instead of creating duplicates, and never
+overwrites a daily_prices (DS-02) close for the same day.
 """
 
 from __future__ import annotations
@@ -43,13 +44,6 @@ def batch_bounds(cursor: date, earliest: date, batch_days: int = DEFAULT_BATCH_D
     if start >= end:
         raise ValueError("cursor must be later than the historical start date")
     return start, end
-
-
-def batch_object_key(ticker: str, start: date, end: date) -> str:
-    return (
-        f"curated/prices_daily/ticker={ticker}/"
-        f"batch_start={start.isoformat()}/batch_end={end.isoformat()}/prices_daily.parquet"
-    )
 
 
 def new_backfill_state(tickers: list[str], today: date, years: int = DEFAULT_YEARS) -> dict:
@@ -102,7 +96,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
     import polars as pl
     from aws_lambda_powertools.metrics import MetricUnit
 
-    from lake import LAKE_BUCKET, read_json, write_json, write_parquet
+    from lake import LAKE_BUCKET, read_json, upsert_prices, write_json
     from observability import job_handler, logger, metrics, source_run
 
     @job_handler("BACKFILL")
@@ -173,8 +167,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                     received = len((payload.get("chart", {}).get("result") or [{}])[0].get("timestamp") or [])
                     if rows:
                         frame = pl.DataFrame(rows).sort("date")
-                        key = batch_object_key(ticker, start, end)
-                        write_parquet(frame, key, bucket)
+                        upsert_prices(frame, bucket)
                         record["rows"] = frame.height
                         stored_rows += frame.height
 

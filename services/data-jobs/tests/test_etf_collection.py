@@ -101,7 +101,8 @@ def test_daily_prices_collects_etfs_and_trend_metrics_has_etf_drivers(lake_bucke
     assert len(requested) == 1
     assert set(requested[0]) == {"TSLA", "SPCX", *universe.INDEX_PROXIES}
     for etf in universe.INDEX_PROXIES:
-        lake_bucket.head_object(Bucket="lake", Key=f"curated/prices_daily/ticker={etf}/date={D4_DAY}/daily.parquet")
+        lake_bucket.head_object(Bucket="lake", Key=lake.price_partition_key(etf, D4_DAY.year))
+    assert lake.read_prices("SPY")["date"].max() == D4_DAY  # legacy backfill batch + new yearly D4 row
 
     trend_metrics.handler({}, _Context())  # no curated/macro_daily/ yet: ETF drivers only
     latest = json.loads(

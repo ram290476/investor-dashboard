@@ -136,9 +136,11 @@ roll back. Fix the cause or revert the application commit and rerun the protecte
 The historical loader is independent of the regular daily refresh. It starts at the current
 UTC date and requests half-open date ranges backwards in 90-calendar-day batches (defaults:
 five years, five requests per invocation). Each ticker has a persisted cursor in
-`curated/prices_daily/_backfill/state.json`. Successful batch keys are deterministic, so reruns
-replace the same object instead of duplicating records. The scheduled 15-minute invocation
-continues incomplete work; individual invocations are bounded to avoid API timeouts.
+`curated/prices_daily/_backfill/state.json`. Each batch is upserted into the ticker's yearly
+partitions (see [Price storage layout](#price-storage-layout)), so reruns replace the same rows
+instead of duplicating records and never overwrite a `daily-prices` close for the same day. The
+scheduled 15-minute invocation continues incomplete work; individual invocations are bounded to
+avoid API timeouts.
 
 After the image and `backfill` Lambda are deployed, start the initial load for the base tickers
 and the index ETF proxies (`BASE_TICKERS` and `INDEX_PROXIES` in `services/data-jobs/src/app/universe.py`).
@@ -176,8 +178,44 @@ to resume. Changing `backfill_years` while a load is active is rejected; use an 
 
 The loader reports complete after reaching the five-year cutoff or an explicit provider
 no-data boundary. It cannot guarantee five years for a newly listed or unsupported symbol.
-Verify the earliest and latest `date` values in each ticker's parquet data and inspect
+Verify the earliest and latest `date` values in each ticker's yearly parquet objects and inspect
 `complete`, `earliest_date`, `no_data_before`, and `failed_tickers` in the checkpoint.
+
+## Price storage layout
+
+Daily prices are stored as one Parquet object per ticker per calendar year:
+
+```text
+curated/prices_daily/ticker=<TICKER>/year=<YYYY>/prices.parquet
+```
+
+`daily-prices` (D4) and `backfill` write through `lake.upsert_prices`, which reads the
+partition, merges the new rows, keeps one row per `(ticker, date)` and writes it back with an S3
+conditional write (`If-Match` / `If-None-Match`), retrying if another job changed it in between.
+When both sources have a day, the `daily-prices` row (`source_id` `DS-02`, Alpaca) wins over the
+backfill row (`DS-05`, Yahoo). `dashboard-build` and `trend-metrics` read with `lake.read_prices`,
+so a five-year ticker costs about six `GetObject` calls instead of one per trading day.
+
+Deployments before this layout wrote one object per ticker-day
+(`ticker=<T>/date=<D>/daily.parquet`) and one per backfill batch
+(`ticker=<T>/batch_start=<D>/batch_end=<D>/prices_daily.parquet`). Readers still include and
+dedupe those objects, so the new code is correct before and after compaction; compaction only
+restores the read savings. To compact an existing lake once, after deploying this version and
+with operator credentials (`s3:ListBucket`, `GetObject`, `PutObject`, `DeleteObject` on the lake
+and the data KMS key):
+
+```sh
+cd services/data-jobs
+pip install -r requirements-jobs.txt boto3
+python scripts/compact_price_partitions.py --bucket <lake-bucket> --dry-run        # counts only
+python scripts/compact_price_partitions.py --bucket <lake-bucket>                  # write yearly objects
+python scripts/compact_price_partitions.py --bucket <lake-bucket> --delete-legacy  # verify, then delete legacy
+```
+
+The script is idempotent and deletes legacy objects only after confirming every legacy
+`(ticker, date)` is present in the yearly objects. The lake bucket is versioned, so deleted
+objects remain recoverable as noncurrent versions. Avoid running it at the same time as a
+`backfill` or `daily-prices` run; conditional writes make that safe, but slower.
 
 ## Regular data refresh and manual runs
 
@@ -255,7 +293,7 @@ Terraform state or the data-lake checkpoint during rollback.
 | --- | --- |
 | Backfill has not advanced | Inspect checkpoint and Lambda logs; check Yahoo status/rate limits and function timeout. Retry the same event; keep state. |
 | API rate limiting / throttles | Review `429`, `Retry-After`, retry logs and per-provider schedules. Reduce batch/work-per-run settings or space runs; do not raise concurrency blindly. |
-| Missing or stale prices | Check D4 Lambda state, Alpaca SSM credentials, schedule timezone, source failures and S3 ticker/date partitions; then run the collector manually. |
+| Missing or stale prices | Check D4 Lambda state, Alpaca SSM credentials, schedule timezone, source failures and the S3 `ticker=<T>/year=<YYYY>` partitions; then run the collector manually. |
 | Dashboard API returns 503 | The dashboard build has not published `serving/dashboard.json`, or status is missing. Check build permissions/logs, upstream events and S3 serving keys. |
 | Preferences API returns 409 | Another tab updated the version; reload `/prefs` and retry. A 401 means sign-in expired; sign in again. |
 | API returns 5xx | Review API Gateway access logs and `invdash-prefs-api` Lambda logs; verify scoped DynamoDB role, KMS decrypt and S3 read permissions. |
