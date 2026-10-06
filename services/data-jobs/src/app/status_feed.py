@@ -38,6 +38,7 @@ JOBS: dict[str, tuple[str, str | None, str]] = {
     "OPTIONS": ("Options put/call and IV", "50 16 * * 1-5", "nyse"),
     "TREND": ("Trend metrics", None, "nyse"),
     "BACKFILL": ("Ticker history backfill", None, "nyse"),
+    "RECONCILE": ("Split & dividend adjustment", "15 19 * * 1-5", "nyse"),
 }
 
 

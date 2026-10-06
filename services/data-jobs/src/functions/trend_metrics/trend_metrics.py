@@ -167,6 +167,16 @@ def ticker_metrics(ticker: str, ticker_px: pl.DataFrame, drivers: dict[str, pl.D
 MACRO_COLUMNS = {"series_id", "obs_date", "value"}
 
 
+def analysis_prices(prices: pl.DataFrame) -> pl.DataFrame:
+    """Prices for return and trend math: `close` becomes adj_close (split- and dividend-adjusted)
+    where known, else the stored close (rows written before adj_close was populated)."""
+    if prices.is_empty() or "close" not in prices.columns:
+        return prices
+    close = pl.col("close").cast(pl.Float64)
+    value = pl.coalesce(pl.col("adj_close").cast(pl.Float64), close) if "adj_close" in prices.columns else close
+    return prices.with_columns(value.alias("close"))
+
+
 def split_inputs(prices_daily: pl.DataFrame, macro_daily: pl.DataFrame, etfs: list[str]):
     """prices_daily: (ticker, date, close). macro_daily: (series_id, obs_date, value).
 
@@ -195,7 +205,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     @job_handler("TREND")
     def run(event, context):
         uni = collection_universe(user_ticker_union())
-        prices = read_prices()  # yearly partitions (+ any uncompacted legacy objects), deduped
+        # yearly partitions (+ any uncompacted legacy objects), deduped; adjusted closes for the math
+        prices = analysis_prices(read_prices())
         macro = read_parquet_prefix("curated/macro_daily/")
         drivers = split_inputs(prices, macro, uni["etfs"])
         written = 0

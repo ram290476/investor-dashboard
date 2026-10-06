@@ -196,6 +196,31 @@ When both sources have a day, the `daily-prices` row (`source_id` `DS-02`, Alpac
 backfill row (`DS-05`, Yahoo). `dashboard-build` and `trend-metrics` read with `lake.read_prices`,
 so a five-year ticker costs about six `GetObject` calls instead of one per trading day.
 
+### Price columns and corporate actions
+
+| Column | Meaning | Written by |
+| --- | --- | --- |
+| `close_raw` | Actual traded close; never re-adjusted | `daily-prices` (Alpaca `adjustment=raw`); `price-reconcile` derives it for backfill rows |
+| `close` | Split-adjusted as of the last write or rebuild (Yahoo's `close`) | `daily-prices` (`adjustment=split`), `backfill`, `price-reconcile` |
+| `adj_close` | Split- and dividend-adjusted as of the last write or rebuild (Yahoo's `adjclose`) | `daily-prices` (`adjustment=all`), `backfill`, `price-reconcile` |
+
+Charts, 1-day returns and `trend-metrics` use `adj_close` (falling back to `close` on rows that
+lack it); the dashboard shows `close_raw` (falling back to `close`) as the price. `daily-prices`
+only re-adjusts its own 7-day window, so `price-reconcile` runs every weekday at 19:15 ET. For each
+collected ticker it reads the last 35 days of Yahoo split/dividend events and rebuilds the
+ticker's full history when it finds an event it has not seen that falls after the first stored
+day, or when stored rows lack `close_raw`/`adj_close` (backfill rows and rows written before these
+columns existed). A rebuild fetches Yahoo daily history from the first stored day, keeps the
+`daily-prices` `close_raw`, recomputes `close` with the split ratios and `adj_close` with Yahoo's
+dividend factor, and upserts every yearly partition of that ticker. Seen events are kept in
+`curated/prices_daily/_reconcile/state.json` (`seen_events`, `last_rebuild`, `last_reason` per
+ticker). A Yahoo failure for one ticker marks the run partial and is retried the next evening.
+To force a rebuild of one ticker, remove its entry from the state file and invoke the job:
+
+```sh
+aws lambda invoke --function-name invdash-price-reconcile --payload '{}' /tmp/price-reconcile.json
+```
+
 Deployments before this layout wrote one object per ticker-day
 (`ticker=<T>/date=<D>/daily.parquet`) and one per backfill batch
 (`ticker=<T>/batch_start=<D>/batch_end=<D>/prices_daily.parquet`). Readers still include and
@@ -224,13 +249,14 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 
 | Job | Schedule / trigger | Notes |
 | --- | --- | --- |
-| `daily-prices` | Weekdays 16:45 ET | Alpaca daily bars for base, user and index ETF proxy tickers; NYSE weekends/holidays are skipped. |
+| `daily-prices` | Weekdays 16:45 ET | Alpaca daily bars for base, user and index ETF proxy tickers (raw, split- and fully adjusted closes for the last 7 days); NYSE weekends/holidays are skipped. |
 | `q1-fundamentals` | Mondays 08:30 ET | Weekly safety refresh. |
 | `short-interest` | Weekdays 18:30 ET | FINRA only publishes on settlement cadence. |
 | `options-daily` | Weekdays 16:50 ET | Disabled by default through `enable_options_daily`; validate the feed before enabling. |
 | `backfill` | Every 15 minutes and on ticker-added events | Resumes only persisted incomplete work. |
-| `trend-metrics` | Job events from D4 or M1 | M1's collector is not yet implemented. |
-| `dashboard-build` | D4, trend, fundamentals, short-interest, options and backfill events | Publishes `serving/dashboard.json`. |
+| `price-reconcile` | Weekdays 19:15 ET | Checks Yahoo for new splits/dividends and rewrites a ticker's adjusted history when needed (job ID `RECONCILE`). |
+| `trend-metrics` | Job events from D4, M1 or RECONCILE | M1's collector is not yet implemented. |
+| `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill and reconcile events | Publishes `serving/dashboard.json`. |
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
 
 Use a one-off Lambda invocation for manual refreshes, for example:

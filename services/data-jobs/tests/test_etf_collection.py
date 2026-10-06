@@ -81,10 +81,13 @@ def _seed_backfill(n=400, seed=3):
 def test_daily_prices_collects_etfs_and_trend_metrics_has_etf_drivers(lake_bucket, monkeypatch):
     last = _seed_backfill()
     requested: list[list[str]] = []
+    adjustments: list[str] = []
 
     def alpaca(request: httpx.Request) -> httpx.Response:
-        symbols = parse_qs(request.url.query.decode())["symbols"][0].split(",")
+        query = parse_qs(request.url.query.decode())
+        symbols = query["symbols"][0].split(",")
         requested.append(symbols)
+        adjustments.append(query["adjustment"][0])
         stamp = f"{D4_DAY.isoformat()}T04:00:00Z"
         bars = {s: [{"t": stamp, "c": last.get(s, 100.0) * 1.01, "v": 10}] for s in symbols}
         return httpx.Response(200, json={"bars": bars, "next_page_token": None})
@@ -98,8 +101,8 @@ def test_daily_prices_collects_etfs_and_trend_metrics_has_etf_drivers(lake_bucke
 
     result = daily_prices.handler({}, _Context())
     assert result["status"] == "success"
-    assert len(requested) == 1
-    assert set(requested[0]) == {"TSLA", "SPCX", *universe.INDEX_PROXIES}
+    assert sorted(adjustments) == ["all", "raw", "split"]  # close_raw, close, adj_close
+    assert all(set(r) == {"TSLA", "SPCX", *universe.INDEX_PROXIES} for r in requested)
     for etf in universe.INDEX_PROXIES:
         lake_bucket.head_object(Bucket="lake", Key=lake.price_partition_key(etf, D4_DAY.year))
     assert lake.read_prices("SPY")["date"].max() == D4_DAY  # legacy backfill batch + new yearly D4 row
