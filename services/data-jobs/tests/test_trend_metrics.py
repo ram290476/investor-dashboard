@@ -85,3 +85,78 @@ def test_monthly_series_is_carried_forward():
         prices.filter(pl.col("ticker") == "TSLA").select("date", "close"), drivers["CPI_YOY"], "CPI_YOY", "level"
     )
     assert out["value"].null_count() == 0 and out.height > 500
+
+
+def test_split_inputs_tolerates_empty_macro():
+    # read_parquet_prefix returns a column-less frame when curated/macro_daily/ is empty (M1 not deployed yet).
+    prices, _ = _fixture(n=40)
+    drivers = tm.split_inputs(prices, pl.DataFrame(), ["SPY"])
+    assert set(drivers) == {"ETF:SPY"}
+    assert drivers["ETF:SPY"].columns == ["date", "value"]
+
+
+def test_split_inputs_tolerates_macro_without_series_id():
+    prices, _ = _fixture(n=40)
+    macro = pl.DataFrame({"obs_date": [date(2021, 1, 4)], "value": [1.0]})
+    assert set(tm.split_inputs(prices, macro, ["SPY"])) == {"ETF:SPY"}
+
+
+def test_empty_macro_still_yields_etf_driven_metrics():
+    prices, _ = _fixture()
+    drivers = tm.split_inputs(prices, pl.DataFrame(), ["SPY"])
+    out = tm.ticker_metrics("TSLA", prices.filter(pl.col("ticker") == "TSLA").select("date", "close"), drivers)
+    assert not out.is_empty()
+    assert set(out["series_id"].unique()) == {"ETF:SPY"}
+
+
+def test_dedupe_prices_prefers_daily_prices_over_backfill():
+    d1, d2 = date(2026, 10, 1), date(2026, 10, 2)
+    prices = pl.DataFrame(
+        {
+            "ticker": ["TSLA", "TSLA", "TSLA", "TSLA", "SPY"],
+            "date": [d1, d1, d2, d2, d1],
+            "close": [100.0, 101.0, 200.0, 202.0, 500.0],
+            # D4 (DS-02) row listed first for d1 and second for d2: source wins, not position.
+            "source_id": ["DS-02", "DS-05", "DS-05", "DS-02", "DS-05"],
+        }
+    )
+    out = tm.dedupe_prices(prices).sort(["ticker", "date"])
+    assert out.height == 3
+    tsla = out.filter(pl.col("ticker") == "TSLA")
+    assert tsla["close"].to_list() == [100.0, 202.0]
+    assert tsla["source_id"].to_list() == ["DS-02", "DS-02"]
+    assert out.filter(pl.col("ticker") == "SPY")["close"].to_list() == [500.0]
+
+
+def test_dedupe_prices_keeps_last_row_without_source_id():
+    d1 = date(2026, 10, 1)
+    prices = pl.DataFrame({"ticker": ["TSLA", "TSLA"], "date": [d1, d1], "close": [1.0, 2.0]})
+    out = tm.dedupe_prices(prices)
+    assert out.height == 1
+    assert out["close"].to_list() == [2.0]
+
+
+def test_dedupe_prices_handles_empty_frame():
+    assert tm.dedupe_prices(pl.DataFrame()).is_empty()
+
+
+def test_split_inputs_tolerates_empty_prices():
+    assert tm.split_inputs(pl.DataFrame(), pl.DataFrame(), ["SPY"]) == {}
+
+
+def test_duplicate_dates_do_not_duplicate_metric_rows():
+    prices, macro = _fixture()
+    tsla = prices.filter(pl.col("ticker") == "TSLA").with_columns(pl.lit("DS-05").alias("source_id"))
+    overlap = tsla.tail(5).with_columns(pl.lit("DS-02").alias("source_id"))
+    spy = prices.filter(pl.col("ticker") == "SPY").with_columns(pl.lit("DS-05").alias("source_id"))
+    combined = pl.concat([tsla, overlap, spy])
+    raw = tm.ticker_metrics(
+        "TSLA",
+        combined.filter(pl.col("ticker") == "TSLA").select("date", "close"),
+        tm.split_inputs(combined, macro, ["SPY"]),
+    )
+    assert raw.select("series_id", "date").is_duplicated().sum() > 0  # the bug dedupe_prices prevents
+    clean = tm.dedupe_prices(combined)
+    drivers = tm.split_inputs(clean, macro, ["SPY"])
+    out = tm.ticker_metrics("TSLA", clean.filter(pl.col("ticker") == "TSLA").select("date", "close"), drivers)
+    assert out.select("series_id", "date").is_duplicated().sum() == 0
