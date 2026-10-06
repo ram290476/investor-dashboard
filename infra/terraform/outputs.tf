@@ -9,8 +9,13 @@ output "replica_bucket_arn" {
 }
 
 output "audit_bucket_name" {
-  description = "Object-locked bucket holding CloudTrail and Config records."
+  description = "Object-locked bucket holding CloudTrail records."
   value       = module.audit_logging.audit_bucket_name
+}
+
+output "config_bucket_name" {
+  description = "AWS Config history and snapshots (versioned, KMS, delete-deny; no Object Lock, which Config does not support)."
+  value       = module.audit_logging.config_bucket_name
 }
 
 output "ecr_repository_url" {
