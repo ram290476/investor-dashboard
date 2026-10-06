@@ -2,6 +2,11 @@ variable "name" {
   type = string
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "lake_bucket_name" {
   type = string
 }
@@ -113,9 +118,10 @@ data "aws_iam_policy_document" "malware" {
 }
 
 resource "aws_iam_role" "malware" {
-  count              = var.enable_malware_protection ? 1 : 0
-  name               = "${var.name}-guardduty-malware-s3"
-  assume_role_policy = data.aws_iam_policy_document.malware_trust.json
+  count                = var.enable_malware_protection ? 1 : 0
+  name                 = "${var.name}-guardduty-malware-s3"
+  assume_role_policy   = data.aws_iam_policy_document.malware_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 resource "aws_iam_role_policy" "malware" {

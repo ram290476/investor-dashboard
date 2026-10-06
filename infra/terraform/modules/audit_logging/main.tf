@@ -2,6 +2,11 @@ variable "name" {
   type = string
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "trail_name" {
   type = string
 }
@@ -451,8 +456,9 @@ data "aws_iam_policy_document" "config_trust" {
 }
 
 resource "aws_iam_role" "config" {
-  name               = "${var.name}-config-recorder"
-  assume_role_policy = data.aws_iam_policy_document.config_trust.json
+  name                 = "${var.name}-config-recorder"
+  assume_role_policy   = data.aws_iam_policy_document.config_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 resource "aws_iam_role_policy_attachment" "config" {

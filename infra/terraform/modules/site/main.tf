@@ -21,6 +21,10 @@ locals {
 }
 
 resource "aws_s3_bucket" "site" {
+  #checkov:skip=CKV_AWS_18:Served only through CloudFront OAC; bucket changes are in CloudTrail management events
+  #checkov:skip=CKV2_AWS_62:No consumers of site object events
+  #checkov:skip=CKV_AWS_144:Static build output; the deploy workflow rebuilds it from git, so no DR copy is kept
+  #checkov:skip=CKV_AWS_145:Public static assets with no data; SSE-S3 avoids a KMS grant to CloudFront
   bucket = local.bucket_name
 }
 
@@ -70,6 +74,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "site" {
     noncurrent_version_expiration {
       noncurrent_days = 30
     }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
@@ -82,6 +90,13 @@ resource "aws_cloudfront_origin_access_control" "site" {
 }
 
 resource "aws_cloudfront_distribution" "site" {
+  #checkov:skip=CKV_AWS_174:Default *.cloudfront.net certificate, for which CloudFront always allows TLSv1; TLS 1.2 minimum needs a custom domain and ACM certificate
+  #checkov:skip=CKV2_AWS_42:No custom domain yet; uses the default CloudFront certificate
+  #checkov:skip=CKV_AWS_68:Accepted risk: no WAF on the static site (cost); data is behind the Cognito-authorized API
+  #checkov:skip=CKV2_AWS_47:No WAF attached (see CKV_AWS_68)
+  #checkov:skip=CKV_AWS_86:Accepted gap: no CloudFront access logs for static assets; API access is logged by API Gateway
+  #checkov:skip=CKV_AWS_310:Single S3 origin; the site is rebuilt by the deploy workflow
+  #checkov:skip=CKV_AWS_374:Invited users may sign in from any country
   enabled             = true
   comment             = "${var.name} investor dashboard"
   default_root_object = "index.html"
@@ -126,7 +141,10 @@ resource "aws_cloudfront_distribution" "site" {
 
   viewer_certificate {
     cloudfront_default_certificate = true
-    minimum_protocol_version       = "TLSv1.2_2021"
+    # With the default certificate CloudFront always applies TLSv1 (it ignored the TLSv1.2_2021
+    # previously set here, which showed as a change on every plan). TLS 1.2 minimum needs a custom
+    # domain with an ACM certificate.
+    minimum_protocol_version = "TLSv1"
   }
 
   tags = {

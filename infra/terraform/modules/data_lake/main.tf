@@ -7,6 +7,11 @@ terraform {
   }
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "name" {
   type = string
 }
@@ -272,8 +277,9 @@ data "aws_iam_policy_document" "replication_trust" {
 }
 
 resource "aws_iam_role" "replication" {
-  name               = "${var.name}-lake-replication"
-  assume_role_policy = data.aws_iam_policy_document.replication_trust.json
+  name                 = "${var.name}-lake-replication"
+  assume_role_policy   = data.aws_iam_policy_document.replication_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "replication" {

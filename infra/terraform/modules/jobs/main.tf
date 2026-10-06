@@ -2,6 +2,11 @@ variable "name" {
   type = string
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "image_uri" {
   description = "Job image in ECR (built from the repo Dockerfile). Empty = create nothing yet."
   type        = string
@@ -114,9 +119,10 @@ resource "aws_cloudwatch_log_group" "job" {
 }
 
 resource "aws_iam_role" "job" {
-  for_each           = local.enabled_jobs
-  name               = "${var.name}-job-${each.key}"
-  assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
+  for_each             = local.enabled_jobs
+  name                 = "${var.name}-job-${each.key}"
+  assume_role_policy   = data.aws_iam_policy_document.lambda_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "job" {
@@ -287,9 +293,10 @@ data "aws_iam_policy_document" "scheduler_trust" {
 }
 
 resource "aws_iam_role" "scheduler" {
-  count              = length(local.scheduled) > 0 ? 1 : 0
-  name               = "${var.name}-jobs-scheduler"
-  assume_role_policy = data.aws_iam_policy_document.scheduler_trust.json
+  count                = length(local.scheduled) > 0 ? 1 : 0
+  name                 = "${var.name}-jobs-scheduler"
+  assume_role_policy   = data.aws_iam_policy_document.scheduler_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 resource "aws_iam_role_policy" "scheduler" {

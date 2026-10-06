@@ -1,11 +1,19 @@
 # GitHub Actions deploy access (IA-2, IA-5, AC-6, CM-3): an OIDC identity provider for
-# token.actions.githubusercontent.com and the invdash-terraform-deploy role, assumable only by
-# workflow jobs running in this repository's protected GitHub environment. No long-lived keys.
+# token.actions.githubusercontent.com and the invdash-terraform-deploy role. No long-lived keys.
 #
-# The deploy workflow runs `terraform apply` for this whole stack, so the role needs broad rights:
-# PowerUserAccess (everything except IAM, Organizations and Account) plus IAM limited to this
-# project's `<name>-*` roles and policies. It cannot change its own role or the OIDC provider, so
-# widening CI's access always needs an administrator apply. See docs/operations.md.
+# Who can assume it (trust policy): jobs whose OIDC token says repository <github_repository>,
+# environment <github_environment>, ref <github_ref> and workflow file <github_workflow_path> at
+# that ref. The ref and job_workflow_ref keys are GitHub claims AWS STS has evaluated since Feb 2026.
+#
+# What it can do: the deploy workflow runs `terraform apply` for this whole stack, so the role is
+# broad. It has PowerUserAccess (everything except IAM, Organizations and Account) plus IAM limited
+# to this project's `<name>-*` roles and policies. Every role write is allowed only when the role
+# carries the workload permissions boundary (modules/workload_boundary), and that boundary allows
+# no IAM writes and no role assumption except the prefs API hop. So a role CI creates or edits
+# can't be used to change IAM, including this role or the identity provider. Explicit denies stop
+# it from changing itself, the provider or the boundary, removing boundaries, assuming any role,
+# or touching Identity Center. Changing any of those needs an administrator apply.
+# See docs/operations.md for what this does not cover.
 
 variable "name" {
   type = string
@@ -29,6 +37,23 @@ variable "create_oidc_provider" {
 variable "oidc_provider_arn" {
   description = "Existing provider ARN when create_oidc_provider is false."
   type        = string
+}
+
+variable "workload_boundary_arn" {
+  description = "Permissions boundary every <name>-* role must carry for the deploy role to create or change it."
+  type        = string
+}
+
+variable "github_ref" {
+  description = "Only workflow runs for this git ref may assume the role."
+  type        = string
+  default     = "refs/heads/main"
+}
+
+variable "github_workflow_path" {
+  description = "Only this workflow file (at github_ref) may assume the role."
+  type        = string
+  default     = ".github/workflows/deploy.yml"
 }
 
 data "aws_caller_identity" "current" {}
@@ -66,11 +91,24 @@ data "aws_iam_policy_document" "trust" {
       variable = "${local.issuer}:aud"
       values   = ["sts.amazonaws.com"]
     }
-    # Only jobs that run in the protected environment of this repository; no branches, tags or PRs.
+    # sub identifies the repository and environment only. When a job uses an environment,
+    # GitHub's default sub has no branch, tag or PR in it, so the ref is checked separately below.
     condition {
       test     = "StringEquals"
       variable = "${local.issuer}:sub"
       values   = ["repo:${var.github_repository}:environment:${var.github_environment}"]
+    }
+    # Branch restriction enforced by AWS: the run's ref must be main...
+    condition {
+      test     = "StringEquals"
+      variable = "${local.issuer}:ref"
+      values   = [var.github_ref]
+    }
+    # ...and the job must come from the deploy workflow file as it exists on main.
+    condition {
+      test     = "StringEquals"
+      variable = "${local.issuer}:job_workflow_ref"
+      values   = ["${var.github_repository}/${var.github_workflow_path}@${var.github_ref}"]
     }
   }
 }
@@ -82,34 +120,48 @@ resource "aws_iam_role" "deploy" {
   max_session_duration = 3600
 }
 
-# Everything except IAM, Organizations and Account.
+# Everything except IAM, Organizations and Account (Identity Center is denied below).
 resource "aws_iam_role_policy_attachment" "power_user" {
   role       = aws_iam_role.deploy.name
   policy_arn = "arn:${local.partition}:iam::aws:policy/PowerUserAccess"
 }
 
 data "aws_iam_policy_document" "iam_for_stack" {
+  #checkov:skip=CKV_AWS_356:ReadIam is read-only IAM metadata; the List* actions Terraform calls have no resource-level permissions
   statement {
     sid       = "ReadIam"
     actions   = ["iam:Get*", "iam:List*"]
     resources = ["*"]
   }
 
+  # Every role write the IAM condition key covers requires the role to carry the workload boundary
+  # (for CreateRole and PutRolePermissionsBoundary: the boundary being set).
   statement {
-    sid = "ManageProjectRoles"
+    sid = "ManageBoundedProjectRoles"
     actions = [
       "iam:CreateRole", "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateRoleDescription",
-      "iam:UpdateAssumeRolePolicy", "iam:TagRole", "iam:UntagRole",
-      "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+      "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+      "iam:DetachRolePolicy", "iam:PutRolePermissionsBoundary",
     ]
     resources = [local.project_role]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [var.workload_boundary_arn]
+    }
   }
 
-  # Only the managed policies this stack attaches: AWS_ConfigRole and the project's own policies.
+  # Only the managed policies this stack attaches (AWS_ConfigRole and the project's own), and only
+  # to bounded roles.
   statement {
-    sid       = "AttachKnownPolicies"
-    actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+    sid       = "AttachKnownPoliciesToBoundedRoles"
+    actions   = ["iam:AttachRolePolicy"]
     resources = [local.project_role]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [var.workload_boundary_arn]
+    }
     condition {
       test     = "ArnLike"
       variable = "iam:PolicyARN"
@@ -118,6 +170,13 @@ data "aws_iam_policy_document" "iam_for_stack" {
         local.project_pol,
       ]
     }
+  }
+
+  # IAM has no boundary condition for tagging; tags grant nothing in this stack.
+  statement {
+    sid       = "TagProjectRoles"
+    actions   = ["iam:TagRole", "iam:UntagRole"]
+    resources = [local.project_role]
   }
 
   statement {
@@ -129,7 +188,8 @@ data "aws_iam_policy_document" "iam_for_stack" {
     resources = [local.project_pol]
   }
 
-  # Hand project roles only to the services this stack configures.
+  # Hand project roles only to the services this stack configures. iam:PassRole has no boundary
+  # condition key, but every role CI can create or edit carries the boundary (above).
   statement {
     sid       = "PassProjectRoles"
     actions   = ["iam:PassRole"]
@@ -150,12 +210,48 @@ data "aws_iam_policy_document" "iam_for_stack" {
     resources = ["*"]
   }
 
-  # CI can never widen its own access or repoint the identity provider.
+  statement {
+    sid       = "DenyBoundaryRemoval"
+    effect    = "Deny"
+    actions   = ["iam:DeleteRolePermissionsBoundary", "iam:DeleteUserPermissionsBoundary"]
+    resources = ["*"]
+  }
+
+  # The boundary policy matches <name>-*; CI must not be able to rewrite or delete it.
+  statement {
+    sid    = "ProtectBoundaryPolicy"
+    effect = "Deny"
+    actions = [
+      "iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion",
+      "iam:DeletePolicy", "iam:TagPolicy", "iam:UntagPolicy",
+    ]
+    resources = [var.workload_boundary_arn]
+  }
+
+  # No changes to this role or the identity provider (also blocks passing or assuming this role).
   statement {
     sid         = "NoSelfModification"
     effect      = "Deny"
     not_actions = ["iam:Get*", "iam:List*"]
     resources   = [local.self_role, local.oidc_arn]
+  }
+
+  # Terraform here assumes no roles. Blocks hopping into project roles, and into
+  # OrganizationAccountAccessRole in member accounts (this is the Organization management account).
+  statement {
+    sid       = "NoRoleAssumption"
+    effect    = "Deny"
+    actions   = ["sts:AssumeRole"]
+    resources = ["*"]
+  }
+
+  # PowerUserAccess would otherwise allow Identity Center and Identity Store writes (users,
+  # permission sets, account assignments). The stack manages none of them.
+  statement {
+    sid       = "NoIdentityCenter"
+    effect    = "Deny"
+    actions   = ["sso:*", "sso-directory:*", "sso-oauth:*", "identitystore:*", "identity-sync:*"]
+    resources = ["*"]
   }
 }
 

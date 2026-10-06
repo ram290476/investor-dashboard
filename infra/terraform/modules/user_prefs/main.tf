@@ -9,6 +9,11 @@ terraform {
   }
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "name" {
   type = string
 }
@@ -108,8 +113,9 @@ data "aws_iam_policy_document" "lambda_trust" {
 }
 
 resource "aws_iam_role" "api" {
-  name               = local.fn_name
-  assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
+  name                 = local.fn_name
+  assume_role_policy   = data.aws_iam_policy_document.lambda_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "access_trust" {
@@ -135,6 +141,7 @@ data "aws_iam_policy_document" "access_trust" {
 resource "aws_iam_role" "access" {
   name                 = "${var.name}-prefs-access"
   assume_role_policy   = data.aws_iam_policy_document.access_trust.json
+  permissions_boundary = var.permissions_boundary_arn
   max_session_duration = 3600
 }
 
