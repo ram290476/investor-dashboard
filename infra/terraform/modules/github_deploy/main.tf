@@ -1,9 +1,13 @@
 # GitHub Actions deploy access (IA-2, IA-5, AC-6, CM-3): an OIDC identity provider for
 # token.actions.githubusercontent.com and the invdash-terraform-deploy role. No long-lived keys.
 #
-# Who can assume it (trust policy): jobs whose OIDC token says repository <github_repository>,
-# environment <github_environment>, ref <github_ref> and workflow file <github_workflow_path> at
-# that ref. The ref and job_workflow_ref keys are GitHub claims AWS STS has evaluated since Feb 2026.
+# Who can assume it (trust policy): jobs whose OIDC token has
+#   - sub = this repository's <github_environment> environment, in GitHub's immutable-ID form
+#     (repo:OWNER@OWNER_ID/REPO@REPO_ID:environment:ENV) or the older name-only form;
+#   - repository_id and repository_owner_id = the repository's numeric IDs, so the name-only form
+#     can't be satisfied by a different repository that later takes the same name;
+#   - ref = <github_ref>, and job_workflow_ref = <github_workflow_path> at that ref.
+# The ref, job_workflow_ref and ID keys are GitHub claims AWS STS has evaluated since Feb 2026.
 #
 # What it can do: the deploy workflow runs `terraform apply` for this whole stack, so the role is
 # broad. It has PowerUserAccess (everything except IAM, Organizations and Account) plus IAM limited
@@ -21,6 +25,16 @@ variable "name" {
 
 variable "github_repository" {
   description = "owner/repo allowed to assume the role."
+  type        = string
+}
+
+variable "github_owner_id" {
+  description = "Numeric GitHub ID of the repository owner (immutable; appears in the sub claim and repository_owner_id)."
+  type        = string
+}
+
+variable "github_repository_id" {
+  description = "Numeric GitHub ID of the repository (immutable; appears in the sub claim and repository_id)."
   type        = string
 }
 
@@ -69,6 +83,14 @@ locals {
   project_pol  = "arn:${local.partition}:iam::${local.account_id}:policy/${var.name}-*"
   self_role    = "arn:${local.partition}:iam::${local.account_id}:role/${local.role_name}"
   oidc_arn     = "arn:${local.partition}:iam::${local.account_id}:oidc-provider/${local.issuer}"
+
+  # GitHub sub claims for jobs in the deploy environment. Repositories created after
+  # 2026-07-15 (this one) or opted in use the immutable-ID form; the name-only form is kept so a
+  # GitHub-side rollback or format change doesn't lock deploys out. Both are exact strings.
+  github_owner  = split("/", var.github_repository)[0]
+  github_repo   = split("/", var.github_repository)[1]
+  sub_immutable = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${var.github_environment}"
+  sub_name_only = "repo:${var.github_repository}:environment:${var.github_environment}"
 }
 
 # AWS validates GitHub's OIDC certificates itself, so no thumbprint is pinned.
@@ -93,10 +115,22 @@ data "aws_iam_policy_document" "trust" {
     }
     # sub identifies the repository and environment only. When a job uses an environment,
     # GitHub's default sub has no branch, tag or PR in it, so the ref is checked separately below.
+    # Either exact form is accepted (StringEquals with a list is an OR of exact matches).
     condition {
       test     = "StringEquals"
       variable = "${local.issuer}:sub"
-      values   = ["repo:${var.github_repository}:environment:${var.github_environment}"]
+      values   = [local.sub_immutable, local.sub_name_only]
+    }
+    # The repository's immutable IDs, required whichever sub form GitHub sends.
+    condition {
+      test     = "StringEquals"
+      variable = "${local.issuer}:repository_id"
+      values   = [var.github_repository_id]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.issuer}:repository_owner_id"
+      values   = [var.github_owner_id]
     }
     # Branch restriction enforced by AWS: the run's ref must be main...
     condition {
@@ -104,7 +138,9 @@ data "aws_iam_policy_document" "trust" {
       variable = "${local.issuer}:ref"
       values   = [var.github_ref]
     }
-    # ...and the job must come from the deploy workflow file as it exists on main.
+    # ...and the job must come from the deploy workflow file as it exists on main. For a job that
+    # isn't in a reusable workflow, job_workflow_ref equals workflow_ref and is name-based
+    # (owner/repo/.github/workflows/<file>@<ref>); the immutable IDs only appear in sub.
     condition {
       test     = "StringEquals"
       variable = "${local.issuer}:job_workflow_ref"

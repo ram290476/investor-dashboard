@@ -140,18 +140,23 @@ appear in plan output, so keep only non-sensitive settings in it.
 
 ### Who can assume the deploy role
 
-The role's trust policy requires all of the following from the GitHub OIDC token:
+The role's trust policy requires all of the following from the GitHub OIDC token (all `StringEquals`, exact values, no wildcards):
 
-- `aud` = `sts.amazonaws.com`;
-- `sub` = `repo:ram290476/investor-dashboard:environment:production`;
-- `ref` = `refs/heads/main`;
-- `job_workflow_ref` = `ram290476/investor-dashboard/.github/workflows/deploy.yml@refs/heads/main`.
+| Claim | Required value |
+| --- | --- |
+| `aud` | `sts.amazonaws.com` |
+| `sub` | `repo:ram290476@48363891/investor-dashboard@1403740156:environment:production` **or** `repo:ram290476/investor-dashboard:environment:production` |
+| `repository_id` | `1403740156` |
+| `repository_owner_id` | `48363891` |
+| `ref` | `refs/heads/main` |
+| `job_workflow_ref` | `ram290476/investor-dashboard/.github/workflows/deploy.yml@refs/heads/main` |
 
-AWS STS has evaluated the GitHub `ref` and `job_workflow_ref` claims since February 2026.
-`sub` alone doesn't restrict the branch: when a job uses an environment, GitHub's default `sub`
-contains only the repository and environment, with no branch, tag or pull request. The `ref`
-condition is what AWS enforces for the branch, and `job_workflow_ref` ties the role to the deploy
-workflow file as it exists on `main`.
+- **`sub` format.** GitHub puts immutable owner and repository IDs in the default `sub` for repositories created after 2026-07-15, and for repositories that opt in. This repository was created on 2026-10-04 and uses that format: `gh api repos/ram290476/investor-dashboard/actions/oidc/customization/sub` reports `use_immutable_subject: true` and prefix `repo:ram290476@48363891/investor-dashboard@1403740156`. The older name-only form is also accepted, so a GitHub-side rollback doesn't lock deploys out.
+- **Why the ID conditions.** On their own, names can be reused by a different account or repository later. The `repository_id` and `repository_owner_id` conditions ensure that even the name-only `sub` only matches this repository.
+- **Where the IDs come from.** They're Terraform variables `github_repository_owner_id` and `github_repository_id`, with defaults of this repository's values. To get them, run `gh api repos/OWNER/REPO --jq '.owner.id, .id'`.
+- **Branch.** `sub` alone doesn't restrict the branch: when a job uses an environment, `sub` contains only the repository and environment. The `ref` condition is what AWS enforces for the branch. `workflow_run` runs (after CI on `main`) always run on the default branch, and `workflow_dispatch` runs use the branch they were started from, which must be `main`.
+- **Workflow file.** `job_workflow_ref` ties the role to the deploy workflow file as it exists on `main`. For a workflow that isn't reusable, it equals `workflow_ref` and is name-based: GitHub adds the IDs only to `sub`. A token from this repository confirmed this on 2026-10-06.
+- **Supported keys.** AWS STS has evaluated GitHub's `ref`, `job_workflow_ref`, `repository_id` and `repository_owner_id` claims since February 2026.
 
 Defense in depth, configured outside AWS:
 
@@ -159,11 +164,7 @@ Defense in depth, configured outside AWS:
 - required reviewers;
 - the workflow's own `if:` guard (dispatch from `main`, or a successful CI push to `main`).
 
-Optional stricter claim format: GitHub can include more claims (for example `ref`) in `sub` by
-customizing the repository's OIDC subject template. That's a repository-settings change, and the
-trust policy would then need the new `sub` format. It isn't needed with the `ref` condition
-above. If the repository ever opts in to GitHub's immutable-ID `sub` format
-(`repo:owner@id/repo@id:...`), the `sub` condition must be updated to match.
+If a deploy fails at `configure-aws-credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`, CloudTrail's failed `AssumeRoleWithWebIdentity` event shows the `sub` GitHub sent (in `userIdentity.userName`); compare it with the table above. Changing the trust policy needs an administrator apply, because CI can't modify this role.
 
 ### What the deploy role may do
 
