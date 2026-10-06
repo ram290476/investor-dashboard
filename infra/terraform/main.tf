@@ -226,6 +226,8 @@ module "github_deploy" {
 
   name                  = local.name
   github_repository     = var.github_repository
+  github_owner_id       = var.github_repository_owner_id
+  github_repository_id  = var.github_repository_id
   github_environment    = var.github_environment
   create_oidc_provider  = var.github_oidc_provider_arn == ""
   oidc_provider_arn     = var.github_oidc_provider_arn

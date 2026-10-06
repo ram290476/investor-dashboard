@@ -416,6 +416,28 @@ variable "github_repository" {
   default     = "ram290476/investor-dashboard"
 }
 
+variable "github_repository_owner_id" {
+  description = "Numeric ID of the GitHub repository owner, used in the deploy role's trust policy. Find it with `gh api repos/OWNER/REPO --jq .owner.id`, or in the sub_claim_prefix from `gh api repos/OWNER/REPO/actions/oidc/customization/sub`."
+  type        = string
+  default     = "48363891" # ram290476
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_owner_id))
+    error_message = "github_repository_owner_id must be the numeric GitHub owner ID."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Numeric ID of the GitHub repository, used in the deploy role's trust policy. Find it with `gh api repos/OWNER/REPO --jq .id`."
+  type        = string
+  default     = "1403740156" # ram290476/investor-dashboard
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "github_repository_id must be the numeric GitHub repository ID."
+  }
+}
+
 variable "github_environment" {
   description = "GitHub environment allowed to assume the deploy role. Protect it with required reviewers."
   type        = string
