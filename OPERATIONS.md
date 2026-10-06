@@ -140,13 +140,15 @@ five years, five requests per invocation). Each ticker has a persisted cursor in
 replace the same object instead of duplicating records. The scheduled 15-minute invocation
 continues incomplete work; individual invocations are bounded to avoid API timeouts.
 
-After the image and `backfill` Lambda are deployed, start the initial load with:
+After the image and `backfill` Lambda are deployed, start the initial load for the base tickers
+and the index ETF proxies (`BASE_TICKERS` and `INDEX_PROXIES` in `infra/app/universe.py`).
+`trend_metrics` uses the ETF histories as drivers, so it needs them too:
 
 ```sh
 aws lambda invoke \
   --function-name invdash-backfill \
   --cli-binary-format raw-in-base64-out \
-  --payload '{"tickers":["TSLA","SPCX"]}' \
+  --payload '{"tickers":["TSLA","SPCX","SPY","DIA","QQQ","IWM","XLY","ITA","SMH"]}' \
   /tmp/backfill-result.json
 cat /tmp/backfill-result.json
 ```
@@ -154,7 +156,9 @@ cat /tmp/backfill-result.json
 Replace `invdash` with the Terraform `project` value. The first run requests the newest available
 window, then works backward. It is safe to invoke again: active tickers keep their current
 cursor, and a completed ticker is not requeued by duplicate events. A TickerAdded event starts
-history for a new ticker automatically.
+history for a new user ticker automatically; ETF proxies are not user tickers, so if you change
+`INDEX_PROXIES`, invoke the backfill with the new symbols. The weekday `daily-prices` (D4) run
+collects the base tickers, user tickers and ETF proxies going forward.
 
 Monitor progress and failures:
 
@@ -168,7 +172,7 @@ include requested/received/processed/rejected/stored counts, no-data boundaries 
 tickers. CloudWatch custom metrics include requested days and backfill row counts. A failed
 request leaves its cursor unchanged; the scheduled run retries it. Do not delete the checkpoint
 to resume. Changing `backfill_years` while a load is active is rejected; use an explicit
-`{"tickers":["TSLA","SPCX"],"force":true}` event only when a deliberate full restart is intended.
+`{"tickers":["TSLA","SPCX","SPY","DIA","QQQ","IWM","XLY","ITA","SMH"],"force":true}` event only when a deliberate full restart is intended.
 
 The loader reports complete after reaching the five-year cutoff or an explicit provider
 no-data boundary. It cannot guarantee five years for a newly listed or unsupported symbol.
@@ -182,7 +186,7 @@ The default schedules are configured in `infra/variables.tf` and use
 
 | Job | Schedule / trigger | Notes |
 | --- | --- | --- |
-| `daily-prices` | Weekdays 16:45 ET | Alpaca daily bars; NYSE weekends/holidays are skipped. |
+| `daily-prices` | Weekdays 16:45 ET | Alpaca daily bars for base, user and index ETF proxy tickers; NYSE weekends/holidays are skipped. |
 | `q1-fundamentals` | Mondays 08:30 ET | Weekly safety refresh. |
 | `short-interest` | Weekdays 18:30 ET | FINRA only publishes on settlement cadence. |
 | `options-daily` | Weekdays 16:50 ET | Disabled by default through `enable_options_daily`; validate the feed before enabling. |
