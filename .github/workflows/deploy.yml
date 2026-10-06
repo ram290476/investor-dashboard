@@ -30,7 +30,30 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      - name: Check deploy configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          AWS_REGION_VAR: ${{ vars.AWS_REGION }}
+          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG }}
+          TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "$AWS_DEPLOY_ROLE_ARN" ] || missing="$missing secret:AWS_DEPLOY_ROLE_ARN"
+          [ -n "$AWS_REGION_VAR" ] || missing="$missing variable:AWS_REGION"
+          [ -n "$TF_BACKEND_CONFIG" ] || missing="$missing secret:TF_BACKEND_CONFIG"
+          [ -n "$TERRAFORM_TFVARS" ] || missing="$missing secret:TERRAFORM_TFVARS"
+          if [ -n "$missing" ]; then
+            echo "::error::Set these in the GitHub 'production' environment:$missing (see docs/operations.md)"
+            exit 1
+          fi
+
+      # Same version as the committed lock file was made with. The wrapper is off so
+      # $(terraform output -raw ...) captures only the value.
       - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
+          terraform_wrapper: false
 
       - uses: docker/setup-qemu-action@v3
         with:
@@ -41,6 +64,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-deploy-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Prepare Terraform configuration
@@ -59,9 +83,9 @@ jobs:
         working-directory: infra/terraform
         run: |
           set -euo pipefail
-          terraform init
+          terraform init -input=false
           if ! terraform state list | grep -q '^module\.data_lake\.aws_ecr_repository\.jobs$'; then
-            terraform apply -auto-approve -var='jobs_image_uri='
+            terraform apply -input=false -auto-approve -var='jobs_image_uri='
           fi
           echo "ECR_REPOSITORY=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
 
@@ -86,7 +110,7 @@ jobs:
         working-directory: infra/terraform
         run: |
           set -euo pipefail
-          terraform apply -auto-approve -var="jobs_image_uri=${JOBS_IMAGE_URI}"
+          terraform apply -input=false -auto-approve -var="jobs_image_uri=${JOBS_IMAGE_URI}"
           terraform output -json site_runtime_config > ../../apps/web/config.json
           site_output="$(terraform output -json site)"
           echo "SITE_BUCKET=$(jq -r '.bucket_name' <<< "$site_output")" >> "$GITHUB_ENV"

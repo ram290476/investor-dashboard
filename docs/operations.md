@@ -108,20 +108,57 @@ dispatch from `main`. Protect the GitHub `production` environment with required 
 branch restrictions; the environment gate is what prevents an unreviewed production apply.
 Configure:
 
-| GitHub production environment value | Purpose |
-| --- | --- |
-| Variable `AWS_REGION` | AWS deployment region; must match the Terraform `region` (default `us-west-1`). |
-| Secret `AWS_DEPLOY_ROLE_ARN` | IAM role assumed using GitHub OIDC. |
-| Secret `TF_BACKEND_CONFIG` | Complete Terraform `backend "s3"` block used in `backend.tf`. |
-| Secret `TERRAFORM_TFVARS` | Full non-secret Terraform variable configuration, including alert recipients. Do not place provider credentials here. |
+### One-time setup
 
-The AWS account must have the GitHub OIDC identity provider and an IAM role whose trust policy
-restricts `token.actions.githubusercontent.com:sub` to
-`repo:<OWNER>/<REPOSITORY>:environment:production` and audience to
-`sts.amazonaws.com`. Its permissions must cover the Terraform-managed resources plus ECR image
-push, site-bucket object publication, and CloudFront invalidation. Terraform manages substantial
-account-level security resources, so use a dedicated account and review the deployment role's
-scope carefully.
+1. **Create the deploy role (administrator, once).** Terraform's `github_deploy` module creates the
+   account's GitHub OIDC provider (`token.actions.githubusercontent.com`, audience
+   `sts.amazonaws.com`) and the `invdash-terraform-deploy` role. The role trusts only
+   `repo:ram290476/investor-dashboard:environment:production`, so branches, tags, pull requests
+   and other repositories can't assume it. Apply it from a workstation signed in with
+   AdministratorAccess. If the account already has a GitHub OIDC provider, set
+   `github_oidc_provider_arn` instead of creating a second one.
+2. **Protect the environment.** In GitHub, open Settings → Environments → `production`. Add
+   **required reviewers** (Ram) and limit deployment branches to `main`. This approval is the
+   only gate before `terraform apply -auto-approve` runs in CI.
+3. **Add these values to the `production` environment** (environment-level, not repository-level):
+
+| Name | Kind | Value and where it comes from |
+| --- | --- | --- |
+| `AWS_REGION` | Variable | `us-west-1` (must match Terraform `region`). |
+| `AWS_DEPLOY_ROLE_ARN` | Secret | `terraform output -raw github_deploy_role_arn`, i.e. `arn:aws:iam::308639168050:role/invdash-terraform-deploy`. |
+| `TF_BACKEND_CONFIG` | Secret | The full contents of the local `infra/terraform/backend.tf` (the `backend "s3"` block for bucket `invdash-tfstate-308639168050`, key `investor-dashboard/infra.tfstate`, region `us-west-1`, `encrypt = true`, `use_lockfile = true`). |
+| `TERRAFORM_TFVARS` | Secret | The full contents of the local `infra/terraform/terraform.tfvars`, **plus** `sec_user_agent = "investor-dashboard <contact email>"`. Leave out `jobs_image_uri`; the workflow sets it for each image. Never put provider API keys here; they live in SSM (`rotate-key.sh`). |
+
+The workflow checks that all four exist and fails with a clear message if one is missing.
+
+### What the deploy role may do
+
+The workflow runs `terraform apply` for the whole stack, so the role needs broad rights. They are
+limited where Terraform allows:
+
+- **AWS managed `PowerUserAccess`:** every service except IAM, Organizations and Account. This
+  covers S3, KMS, Lambda, ECR push, CloudFront invalidation, Config, GuardDuty, Security Hub and
+  the rest of the stack.
+- **IAM limited to this project (inline `iam-for-this-stack`):**
+  - read IAM;
+  - manage `invdash-*` roles and policies;
+  - attach only `AWS_ConfigRole` or `invdash-*` policies;
+  - pass `invdash-*` roles only to the services the stack uses (Lambda, Scheduler, Config, S3,
+    EventBridge, GuardDuty malware protection, Synthetics);
+  - manage the account password policy.
+- **No self-modification:** an explicit deny blocks every change to the
+  `invdash-terraform-deploy` role and the GitHub OIDC provider. Widening CI's own access always
+  needs an administrator apply.
+- **Remaining risk:**
+  - Anyone who gets a commit through review to `main` *and* an approved `production` run can still
+    put an inline policy on an `invdash-*` role. That is effectively administrator-level within the
+    account.
+  - Keep required reviewers on.
+  - The stricter alternatives are an IAM permissions boundary on all `invdash-*` roles, or a
+    narrow publish-only role with Terraform applied by an administrator (see the PR that added
+    this).
+- **The role is named `invdash-terraform-deploy` on purpose:** the audit and config bucket
+  policies allow only this role and AdministratorAccess SSO roles to change their lifecycle rules.
 
 The deployment performs a base Terraform apply only when the ECR repository is not yet in state,
 builds/pushes an immutable arm64 image, applies the job Lambdas with that image, writes the

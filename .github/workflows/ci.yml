@@ -25,6 +25,8 @@ jobs:
           node-version: "22"
 
       - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
 
       - uses: docker/setup-qemu-action@v3
         with:
