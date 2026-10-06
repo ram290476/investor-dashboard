@@ -14,14 +14,17 @@ data. Terraform also defines encryption, audit, monitoring and security services
 
 | Path | What |
 | --- | --- |
-| `Web/site/` | Responsive dashboard, Cognito PKCE sign-in, preferences, market charts and data states |
-| `infra/` | Terraform for AWS infrastructure, site hosting, API, Cognito, jobs, audit and observability |
-| `infra/app/` | Shared collectors, S3 helpers, structured logging/tracing/metrics, API key reader |
-| `infra/functions/` | Collector, backfill, dashboard build, API and key-rotation handlers |
-| `infra/tests/` | Python unit tests for collectors, API, transformations, retries and historical batching |
+| `apps/web/` | Production responsive dashboard, Cognito PKCE sign-in, preferences, market charts and data states |
+| `services/data-jobs/src/` | Shared collectors and Lambda handlers |
+| `services/data-jobs/tests/` | Python unit tests for collectors, API, transformations, retries and historical batching |
+| `services/data-jobs/scripts/` | Data-job maintenance commands |
+| `infra/terraform/` | Terraform for AWS infrastructure, site hosting, API, Cognito, jobs, audit and observability |
+| `infra/docker/` | Shared Lambda job image definition |
+| `data/catalog/` | Data-source catalog source, documentation and workbook |
+| `design/ai-generated/` | AI-generated UI canvas and reference assets; not production site content |
 | `.github/workflows/` | Pull request validation and approval-gated production deployment |
-| [`OPERATIONS.md`](OPERATIONS.md) | Environment setup, deploy, historical load, refresh operations and troubleshooting |
-| [`infra/README.md`](infra/README.md) | Infrastructure/security baseline and Terraform setup |
+| [`docs/operations.md`](docs/operations.md) | Environment setup, deploy, historical load, refresh operations and troubleshooting |
+| [`infra/terraform/README.md`](infra/terraform/README.md) | Infrastructure/security baseline and Terraform setup |
 
 ## Scope and status
 
