@@ -99,7 +99,7 @@ The dashboard now serves several signed-in users, each with their own ticker lis
 
 ### Sign-in and preferences
 
-- **Sign-in:** invite-only Cognito user pool (Plus tier for threat protection), MFA required, 15-character passwords. The site uses the authorization-code flow with PKCE through Cognito's hosted UI, with no Amplify. Tokens last 1 hour and refresh for up to 12 hours (AC-12).
+- **Sign-in:** invite-only Cognito user pool (Plus tier for threat protection), MFA off (password-only for now), 15-character passwords. The site uses the authorization-code flow with PKCE through Cognito's hosted UI, with no Amplify. Tokens last 1 hour and refresh for up to 12 hours (AC-12).
 
 - **Preferences store:** DynamoDB table invdash-user-prefs, one item per user keyed by Cognito sub (user_sub). On-demand billing, encrypted with the data key, point-in-time recovery, deletion protection.
 
@@ -341,7 +341,7 @@ What changes from the base design:
 
 - **Disaster recovery:** the data lake is replicated from us-west-1 to us-west-2.
 
-- **Sign-in:** people sign in to AWS through IAM Identity Center with MFA, and dashboard sign-in requires MFA too. The 12 provider API keys rotate every 90–365 days, with emailed reminders.
+- **Sign-in:** people sign in to AWS through IAM Identity Center with MFA; dashboard Cognito MFA is off (password-only) for now. The 12 provider API keys rotate every 90–365 days, with emailed reminders.
 
 Scope notes:
 
@@ -516,7 +516,7 @@ The table maps each relevant Moderate control to how it is met and where it is b
 | CM-8 | Component inventory | AWS Config continuous recording | audit_logging |
 | CP-2, CP-4 | Contingency plan and testing | SLOs, recovery table, quarterly game days, yearly regional drill | observability, this doc |
 | CP-6, CP-9, CP-10 | Alternate storage, backup, recovery | Versioning; cross-region replica with replica key; immutable images | data_lake, kms |
-| IA-2(1), IA-2(2) | MFA | IAM Identity Center MFA for AWS; invite-only Cognito pool with MFA required for the dashboard | account setup, app |
+| IA-2(1), IA-2(2) | MFA | IAM Identity Center MFA for AWS; Cognito dashboard MFA currently off (password-only; Plus threat protection on) | account setup, app |
 | IA-5 | Authenticator management | No long-lived CI keys (OIDC); API keys in SSM with the data key, rotated every 90–365 days with daily reminders; IAM password policy | ci.yml, security_services, api_keys |
 | IR-4, IR-5, IR-6 | Incident handling and reporting | GuardDuty + EventBridge → security email; review template | alerting, security_services |
 | RA-5, SI-2 | Vulnerability scanning, flaw fixes | Inspector on image and functions; pip-audit and Checkov in CI | security_services, ci.yml |
@@ -553,7 +553,7 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 | us_east_1 | CloudFront 5xx alarm with its own encrypted topic and key; forwarding of IAM and root sign-in events to the primary region |
 | observability | Log groups, saved queries, alarms with SLO burn rates, 2 dashboards, canary, \$40 budget |
 | api_keys | 14 SSM SecureStrings with rotation periods (now including FINRA); daily 8:00 PT check that emails reminders |
-| site_auth | Invite-only Cognito user pool (Plus, MFA required: SMS or authenticator app), invdash-cognito-sms role, and PKCE web client |
+| site_auth | Invite-only Cognito user pool (Plus, MFA off / password-only for now) and PKCE web client |
 | user_prefs | DynamoDB prefs table, site API (GET/PUT /prefs, JWT authorizer), per-user isolation role, collector read policy, 5xx alarm |
 | jobs | Six container-image job Lambdas with their own roles, schedules (ET), event triggers and DLQ; created once jobs_image_uri is set |
 | workload_boundary | invdash-workload-boundary permissions boundary on every IAM role (no IAM writes; no role assumption except the prefs API hop) |
