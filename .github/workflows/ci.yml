@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: infra/requirements-jobs.txt
+          cache-dependency-path: services/data-jobs/requirements-jobs.txt
 
       - uses: actions/setup-node@v4
         with:
@@ -35,26 +35,26 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r infra/requirements-jobs.txt -r infra/requirements-test.txt ruff pip-audit
+          python -m pip install -r services/data-jobs/requirements-jobs.txt -r services/data-jobs/requirements-test.txt ruff pip-audit
 
       - name: Lint Python
-        working-directory: infra
-        run: ruff check app functions tests
+        working-directory: services/data-jobs
+        run: ruff check src tests scripts
 
       - name: Test Python
-        working-directory: infra
+        working-directory: services/data-jobs
         run: pytest -q
 
       - name: Audit Python dependencies
         run: |
-          pip-audit -r infra/requirements-jobs.txt
-          pip-audit -r infra/requirements-test.txt
+          pip-audit -r services/data-jobs/requirements-jobs.txt
+          pip-audit -r services/data-jobs/requirements-test.txt
 
       - name: Check browser JavaScript syntax
-        run: node --check Web/site/app.js
+        run: node --check apps/web/app.js
 
       - name: Format and validate Terraform
-        working-directory: infra
+        working-directory: infra/terraform
         run: |
           terraform fmt -check -recursive
           terraform init -backend=false
@@ -62,7 +62,7 @@ jobs:
 
       - name: Build the Lambda image for its deployment architecture
         run: |
-          docker buildx build --platform linux/arm64 --load -t investor-dashboard-jobs:ci infra
+          docker buildx build --file infra/docker/Dockerfile --platform linux/arm64 --load -t investor-dashboard-jobs:ci .
 
       - name: Check infrastructure and workflow security
         uses: bridgecrewio/checkov-action@v12
