@@ -44,13 +44,13 @@ The deployment workflow is already defined. It is not live in AWS yet; the AWS s
 
 1. **Prepare Terraform state.** Create a private, versioned, encrypted S3 bucket with public access blocked. Copy `infra/terraform/backend.tf.example` to `infra/terraform/backend.tf`; it is pre-filled for bucket `invdash-tfstate-308639168050` in `us-west-1`. The state bucket must exist before Terraform can initialize.
 
-2. **Set up GitHub OIDC and production protections.** In the AWS account, configure GitHub's OIDC provider and a deployment role trusted only for `repo:<OWNER>/<REPO>:environment:production` with audience `sts.amazonaws.com`. Give that role the permissions needed for this Terraform stack, ECR image publication, site-bucket upload, and CloudFront invalidation. In GitHub, create the `production` environment and require reviewer approval; otherwise the environment is not an approval gate.
+2. **Set up GitHub OIDC and production protections.** The first administrator `terraform apply` creates the GitHub OIDC provider and the `invdash-terraform-deploy` role (module `github_deploy`). The role is trusted only for `repo:ram290476/investor-dashboard:environment:production` with audience `sts.amazonaws.com`, ref `refs/heads/main` and the `deploy.yml` workflow. Its permissions are PowerUserAccess plus IAM limited to `invdash-*` roles that carry the `invdash-workload-boundary` permissions boundary; see [the deploy role permissions](docs/operations.md#what-the-deploy-role-may-do). In GitHub, create the `production` environment, require reviewer approval and limit it to `main`; otherwise the environment is not an approval gate.
 
 3. **Add GitHub environment values** under Settings → Environments → `production`:
    - Variable `AWS_REGION`, matching the Terraform `region` (default `us-west-1`).
-   - Secret `AWS_DEPLOY_ROLE_ARN`.
+   - Secret `AWS_DEPLOY_ROLE_ARN`, from `terraform output -raw github_deploy_role_arn`.
    - Secret `TF_BACKEND_CONFIG`, containing the complete S3 backend block.
-   - Secret `TERRAFORM_TFVARS`, containing the non-secret Terraform settings (for example project, region, and alert email). Do not put provider API credentials in it.
+   - Secret `TERRAFORM_TFVARS`, containing the non-secret Terraform settings (for example project, region, alert email and `sec_user_agent`; not `jobs_image_uri`). Do not put provider API credentials in it.
 
    See `terraform.tfvars.example` for the configuration shape. Provider credentials belong in SSM SecureString using `rotate-key.sh`, not in GitHub runtime config or the static site.
 

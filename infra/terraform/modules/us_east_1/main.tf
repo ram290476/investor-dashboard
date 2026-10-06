@@ -13,6 +13,11 @@ terraform {
 #   default event bus. Rules here forward them to the primary region's default bus, where the
 #   alerting module's rules publish them to the security topic (AC-2(4), IA-2(1)).
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "name" {
   type = string
 }
@@ -216,8 +221,9 @@ data "aws_iam_policy_document" "forward_trust" {
 resource "aws_iam_role" "forward" {
   count = length(local.forward) > 0 ? 1 : 0
 
-  name               = "${var.name}-events-forward-us-east-1"
-  assume_role_policy = data.aws_iam_policy_document.forward_trust.json
+  name                 = "${var.name}-events-forward-us-east-1"
+  assume_role_policy   = data.aws_iam_policy_document.forward_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 resource "aws_iam_role_policy" "forward" {

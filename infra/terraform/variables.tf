@@ -403,3 +403,27 @@ variable "jobs" {
     }
   }
 }
+
+variable "enable_github_deploy" {
+  description = "Create the GitHub OIDC provider and the invdash-terraform-deploy role used by .github/workflows/deploy.yml."
+  type        = bool
+  default     = true
+}
+
+variable "github_repository" {
+  description = "GitHub owner/repo allowed to assume the deploy role."
+  type        = string
+  default     = "ram290476/investor-dashboard"
+}
+
+variable "github_environment" {
+  description = "GitHub environment allowed to assume the deploy role. Protect it with required reviewers."
+  type        = string
+  default     = "production"
+}
+
+variable "github_oidc_provider_arn" {
+  description = "Existing token.actions.githubusercontent.com provider ARN. Leave empty to create one (only one per account is allowed)."
+  type        = string
+  default     = ""
+}

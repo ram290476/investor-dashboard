@@ -4,6 +4,13 @@ locals {
   security_alert_emails = length(var.security_alert_emails) > 0 ? var.security_alert_emails : var.alert_emails
 }
 
+# AC-6: ceiling for every IAM role below; the deploy role may only create or edit roles that carry it.
+module "workload_boundary" {
+  source = "./modules/workload_boundary"
+
+  name = local.name
+}
+
 # SC-12, SC-13, SC-28: customer-managed keys with yearly rotation.
 module "kms" {
   source = "./modules/kms"
@@ -19,6 +26,8 @@ module "kms" {
 # Data lake with versioning, encryption, and cross-region replication (CP-6, CP-9, SC-28).
 module "data_lake" {
   source = "./modules/data_lake"
+
+  permissions_boundary_arn = module.workload_boundary.arn
   providers = {
     aws    = aws
     aws.dr = aws.dr
@@ -33,6 +42,8 @@ module "data_lake" {
 module "audit_logging" {
   source = "./modules/audit_logging"
 
+  permissions_boundary_arn = module.workload_boundary.arn
+
   name             = local.name
   trail_name       = local.trail_name
   audit_key_arn    = module.kms.audit_key_arn
@@ -46,12 +57,13 @@ module "audit_logging" {
 module "security_services" {
   source = "./modules/security_services"
 
+  permissions_boundary_arn = module.workload_boundary.arn
+
   name                      = local.name
   lake_bucket_name          = module.data_lake.lake_bucket_name
   data_key_arn              = module.kms.data_key_arn
   enable_malware_protection = var.enable_malware_protection
-
-  depends_on = [module.audit_logging] # Security Hub controls rely on the Config recorder.
+  config_recorder_status_id = module.audit_logging.config_recorder_status_id # Security Hub after Config
 }
 
 # SNS topics and EventBridge rules for security and ops events (IR-4, IR-5, IR-6, SI-4(5)).
@@ -67,6 +79,8 @@ module "alerting" {
 # Logs, metrics, alarms, SLOs, dashboards, external canary, budget (AU-6, SI-4, CP-2, SA-9).
 module "observability" {
   source = "./modules/observability"
+
+  permissions_boundary_arn = module.workload_boundary.arn
 
   name                  = local.name
   audit_key_arn         = module.kms.audit_key_arn
@@ -88,6 +102,8 @@ module "observability" {
 # forwarding of IAM and root/global sign-in events to this region's alerting rules (SI-4, AC-2(4)).
 module "us_east_1" {
   source = "./modules/us_east_1"
+
+  permissions_boundary_arn = module.workload_boundary.arn
   providers = {
     aws = aws.us_east_1
   }
@@ -104,6 +120,8 @@ module "us_east_1" {
 # check that emails reminders before each key is due (IA-5, IA-5(h), SC-28).
 module "api_keys" {
   source = "./modules/api_keys"
+
+  permissions_boundary_arn = module.workload_boundary.arn
 
   name               = local.name
   data_key_arn       = module.kms.data_key_arn
@@ -139,6 +157,8 @@ module "site_hosting" {
 module "user_prefs" {
   source = "./modules/user_prefs"
 
+  permissions_boundary_arn = module.workload_boundary.arn
+
   name                 = local.name
   data_key_arn         = module.kms.data_key_arn
   audit_key_arn        = module.kms.audit_key_arn
@@ -156,6 +176,8 @@ module "user_prefs" {
 # ticker backfill, status feed. Created once jobs_image_uri is set.
 module "jobs" {
   source = "./modules/jobs"
+
+  permissions_boundary_arn = module.workload_boundary.arn
 
   name      = local.name
   image_uri = var.jobs_image_uri
@@ -194,4 +216,18 @@ module "jobs" {
     BACKFILL_BATCH_DAYS  = tostring(var.backfill_batch_days)
     BACKFILL_MAX_BATCHES = tostring(var.backfill_max_batches)
   }
+}
+
+# GitHub Actions deploy role via OIDC, limited to this repository's production environment
+# (IA-2, AC-6, CM-3). Changes to this module must be applied by an administrator.
+module "github_deploy" {
+  source = "./modules/github_deploy"
+  count  = var.enable_github_deploy ? 1 : 0
+
+  name                  = local.name
+  github_repository     = var.github_repository
+  github_environment    = var.github_environment
+  create_oidc_provider  = var.github_oidc_provider_arn == ""
+  oidc_provider_arn     = var.github_oidc_provider_arn
+  workload_boundary_arn = module.workload_boundary.arn
 }

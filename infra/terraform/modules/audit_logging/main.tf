@@ -2,6 +2,11 @@ variable "name" {
   type = string
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "trail_name" {
   type = string
 }
@@ -451,8 +456,9 @@ data "aws_iam_policy_document" "config_trust" {
 }
 
 resource "aws_iam_role" "config" {
-  name               = "${var.name}-config-recorder"
-  assume_role_policy = data.aws_iam_policy_document.config_trust.json
+  name                 = "${var.name}-config-recorder"
+  assume_role_policy   = data.aws_iam_policy_document.config_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 resource "aws_iam_role_policy_attachment" "config" {
@@ -517,6 +523,11 @@ resource "aws_config_configuration_recorder_status" "this" {
   name       = aws_config_configuration_recorder.this.name
   is_enabled = true
   depends_on = [aws_config_delivery_channel.this]
+}
+
+# Lets other modules wait for Config recording without a module-wide depends_on.
+output "config_recorder_status_id" {
+  value = aws_config_configuration_recorder_status.this.id
 }
 
 output "audit_bucket_name" {

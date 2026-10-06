@@ -112,3 +112,8 @@ output "cloudfront_alarm_topic_arn" {
   description = "us-east-1 topic for the CloudFront 5xx alarm (null when enable_cloudfront_alarms is false). Recipients confirm it separately."
   value       = module.us_east_1.cloudfront_topic_arn
 }
+
+output "github_deploy_role_arn" {
+  description = "Value for the GitHub production environment secret AWS_DEPLOY_ROLE_ARN."
+  value       = var.enable_github_deploy ? module.github_deploy[0].role_arn : null
+}

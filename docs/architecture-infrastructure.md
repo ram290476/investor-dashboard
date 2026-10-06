@@ -556,6 +556,8 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 | site_auth | Invite-only Cognito user pool (Plus, MFA required) and PKCE web client |
 | user_prefs | DynamoDB prefs table, site API (GET/PUT /prefs, JWT authorizer), per-user isolation role, collector read policy, 5xx alarm |
 | jobs | Six container-image job Lambdas with their own roles, schedules (ET), event triggers and DLQ; created once jobs_image_uri is set |
+| workload_boundary | invdash-workload-boundary permissions boundary on every IAM role (no IAM writes; no role assumption except the prefs API hop) |
+| github_deploy | GitHub OIDC provider and the invdash-terraform-deploy role (production environment, main, deploy.yml only; PowerUserAccess plus IAM limited to bounded invdash-* roles) |
 | app/ | Observability, API key reader, HTTP allowlist, ticker universe, lake helpers, status feed, collectors (Alpaca, FINRA, Kalshi, Fed sources, Yahoo) |
 | functions/ | trend_metrics, q1_fundamentals, short_interest, options_daily, backfill, status_feed, prefs_api, key_rotation_check |
 | Dockerfile, requirements-jobs.txt | One arm64 job image |

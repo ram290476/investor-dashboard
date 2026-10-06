@@ -9,6 +9,11 @@ terraform {
   }
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "name" {
   type = string
 }
@@ -301,9 +306,10 @@ data "aws_iam_policy_document" "canary_trust" {
 }
 
 resource "aws_iam_role" "canary" {
-  count              = local.canary_on ? 1 : 0
-  name               = "${var.name}-canary"
-  assume_role_policy = data.aws_iam_policy_document.canary_trust.json
+  count                = local.canary_on ? 1 : 0
+  name                 = "${var.name}-canary"
+  assume_role_policy   = data.aws_iam_policy_document.canary_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "canary" {

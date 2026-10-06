@@ -108,20 +108,126 @@ dispatch from `main`. Protect the GitHub `production` environment with required 
 branch restrictions; the environment gate is what prevents an unreviewed production apply.
 Configure:
 
-| GitHub production environment value | Purpose |
-| --- | --- |
-| Variable `AWS_REGION` | AWS deployment region; must match the Terraform `region` (default `us-west-1`). |
-| Secret `AWS_DEPLOY_ROLE_ARN` | IAM role assumed using GitHub OIDC. |
-| Secret `TF_BACKEND_CONFIG` | Complete Terraform `backend "s3"` block used in `backend.tf`. |
-| Secret `TERRAFORM_TFVARS` | Full non-secret Terraform variable configuration, including alert recipients. Do not place provider credentials here. |
+### One-time setup
 
-The AWS account must have the GitHub OIDC identity provider and an IAM role whose trust policy
-restricts `token.actions.githubusercontent.com:sub` to
-`repo:<OWNER>/<REPOSITORY>:environment:production` and audience to
-`sts.amazonaws.com`. Its permissions must cover the Terraform-managed resources plus ECR image
-push, site-bucket object publication, and CloudFront invalidation. Terraform manages substantial
-account-level security resources, so use a dedicated account and review the deployment role's
-scope carefully.
+1. **Create the deploy role (administrator, once).** Terraform's `github_deploy` module creates
+   three things:
+   - the account's GitHub OIDC provider (`token.actions.githubusercontent.com`, audience
+     `sts.amazonaws.com`);
+   - the `invdash-terraform-deploy` role;
+   - the `invdash-workload-boundary` permissions boundary, set on every `invdash-*` role.
+
+   Apply it from a workstation signed in with AdministratorAccess; CI can't create its own role.
+   If the account already has a GitHub OIDC provider, set `github_oidc_provider_arn` instead of
+   creating a second one.
+2. **Protect the environment.** In GitHub, open Settings → Environments → `production`.
+   - Add **required reviewers** (Ram). This approval is the only human gate before
+     `terraform apply -auto-approve` runs in CI.
+   - Set deployment branches to **`main` only**.
+3. **Add these values to the `production` environment** (environment-level, not repository-level):
+
+| Name | Kind | Value and where it comes from |
+| --- | --- | --- |
+| `AWS_REGION` | Variable | `us-west-1` (must match Terraform `region`). |
+| `AWS_DEPLOY_ROLE_ARN` | Secret | `terraform output -raw github_deploy_role_arn`, i.e. `arn:aws:iam::308639168050:role/invdash-terraform-deploy`. |
+| `TF_BACKEND_CONFIG` | Secret | The full contents of the local `infra/terraform/backend.tf` (the `backend "s3"` block for bucket `invdash-tfstate-308639168050`, key `investor-dashboard/infra.tfstate`, region `us-west-1`, `encrypt = true`, `use_lockfile = true`). |
+| `TERRAFORM_TFVARS` | Secret | The full contents of the local `infra/terraform/terraform.tfvars`, **plus** `sec_user_agent = "investor-dashboard <contact email>"`. Leave out `jobs_image_uri`; the workflow sets it for each image. Never put provider API keys here; they live in SSM (`rotate-key.sh`). |
+
+The workflow checks that all four exist and fails with a clear message if one is missing.
+This repository is public, so its workflow logs are public too. The workflow masks every e-mail
+address found in `TERRAFORM_TFVARS` before Terraform runs. Any other value in that secret may
+appear in plan output, so keep only non-sensitive settings in it.
+
+### Who can assume the deploy role
+
+The role's trust policy requires all of the following from the GitHub OIDC token:
+
+- `aud` = `sts.amazonaws.com`;
+- `sub` = `repo:ram290476/investor-dashboard:environment:production`;
+- `ref` = `refs/heads/main`;
+- `job_workflow_ref` = `ram290476/investor-dashboard/.github/workflows/deploy.yml@refs/heads/main`.
+
+AWS STS has evaluated the GitHub `ref` and `job_workflow_ref` claims since February 2026.
+`sub` alone doesn't restrict the branch: when a job uses an environment, GitHub's default `sub`
+contains only the repository and environment, with no branch, tag or pull request. The `ref`
+condition is what AWS enforces for the branch, and `job_workflow_ref` ties the role to the deploy
+workflow file as it exists on `main`.
+
+Defense in depth, configured outside AWS:
+
+- the `production` deployment-branch rule (`main` only);
+- required reviewers;
+- the workflow's own `if:` guard (dispatch from `main`, or a successful CI push to `main`).
+
+Optional stricter claim format: GitHub can include more claims (for example `ref`) in `sub` by
+customizing the repository's OIDC subject template. That's a repository-settings change, and the
+trust policy would then need the new `sub` format. It isn't needed with the `ref` condition
+above. If the repository ever opts in to GitHub's immutable-ID `sub` format
+(`repo:owner@id/repo@id:...`), the `sub` condition must be updated to match.
+
+### What the deploy role may do
+
+The workflow runs `terraform apply` for the whole stack, so the role is broad:
+
+- **AWS managed `PowerUserAccess`:** every service except IAM, Organizations and Account. It covers
+  S3, KMS, Lambda, ECR push, CloudFront invalidation, Config, GuardDuty, Security Hub and the rest
+  of the stack.
+- **IAM limited to this project (inline `iam-for-this-stack`):**
+  - read IAM;
+  - create, update and delete `invdash-*` roles. Every role write that IAM's
+    `iam:PermissionsBoundary` condition supports requires the role to carry
+    `invdash-workload-boundary`: CreateRole, DeleteRole, UpdateRole, UpdateRoleDescription,
+    UpdateAssumeRolePolicy, Put/DeleteRolePolicy, Attach/DetachRolePolicy and
+    PutRolePermissionsBoundary. Only TagRole/UntagRole have no such key;
+  - attach only `AWS_ConfigRole` or `invdash-*` managed policies;
+  - manage `invdash-*` managed policies, except the boundary itself;
+  - pass `invdash-*` roles only to the services the stack uses (Lambda, Scheduler, Config, S3,
+    EventBridge, GuardDuty malware protection, Synthetics);
+  - manage the account password policy.
+- **Explicit denies:**
+  - removing any permissions boundary;
+  - changing or deleting the boundary policy;
+  - any non-read action on the deploy role itself or the OIDC provider;
+  - `sts:AssumeRole` into any role, including project roles and `OrganizationAccountAccessRole`
+    in member accounts (this is the Organization management account);
+  - all Identity Center and Identity Store actions (PowerUserAccess would otherwise allow creating
+    users and account assignments).
+
+**What the boundary enforces.** `invdash-workload-boundary` is a ceiling on every `invdash-*` role
+the stack creates. It allows:
+
+- service actions other than IAM, STS, Organizations, Account and Identity Center;
+- the read-only identity calls the AWS Config recorder needs;
+- only the prefs API's hop into `invdash-prefs-access`.
+
+It explicitly denies:
+
+- any change to the deploy role, the OIDC provider or the boundary;
+- creating IAM users, access keys or login profiles;
+- setting or removing permissions boundaries;
+- assuming any other role.
+
+So a role that CI creates or edits, even with an arbitrary inline policy, can't make IAM changes
+when it's passed to Lambda. It can't change the deploy role, the provider or the boundary.
+
+**Remaining risk, stated plainly:**
+
+- **Broad non-IAM power.** CI and any bounded role it creates keep PowerUser-level rights over
+  non-IAM services in this account: data in S3 and DynamoDB, KMS use, and turning off logging
+  or Config. Someone who gets a malicious commit merged to `main` *and* gets a `production` run
+  approved can do that much damage. They can't gain IAM, Organizations or Identity Center
+  control through this role. Required reviewers and branch protection remain essential.
+- **Boundary changes need an administrator.** CI can't change the boundary, the deploy role or the
+  OIDC provider, so a pull request that changes any of them needs an administrator apply.
+- **Unbounded legacy roles.** `iam:PassRole` can't be conditioned on a boundary. CI could pass an
+  `invdash-*` role that exists without the boundary, but it can't create or edit such a role.
+  After the first administrator apply, every Terraform-managed `invdash-*` role carries the
+  boundary.
+- **Narrower alternative:** a publish-only CI role (ECR push, site sync, CloudFront invalidation,
+  `lambda:UpdateFunctionCode`), with every `terraform apply` run by an administrator.
+
+**The role is named `invdash-terraform-deploy` on purpose:** the audit and config bucket policies
+allow only this role and AdministratorAccess SSO roles to change their lifecycle rules.
 
 The deployment performs a base Terraform apply only when the ECR repository is not yet in state,
 builds/pushes an immutable arm64 image, applies the job Lambdas with that image, writes the

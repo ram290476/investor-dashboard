@@ -9,6 +9,11 @@ terraform {
   }
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
+  type        = string
+}
+
 variable "name" {
   type = string
 }
@@ -122,8 +127,9 @@ data "aws_iam_policy_document" "lambda_trust" {
 }
 
 resource "aws_iam_role" "checker" {
-  name               = local.fn_name
-  assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
+  name                 = local.fn_name
+  assume_role_policy   = data.aws_iam_policy_document.lambda_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 # Least privilege: metadata and tags only, never ssm:GetParameter or kms:Decrypt on the keys.
@@ -226,8 +232,9 @@ data "aws_iam_policy_document" "scheduler_trust" {
 }
 
 resource "aws_iam_role" "scheduler" {
-  name               = "${local.fn_name}-scheduler"
-  assume_role_policy = data.aws_iam_policy_document.scheduler_trust.json
+  name                 = "${local.fn_name}-scheduler"
+  assume_role_policy   = data.aws_iam_policy_document.scheduler_trust.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 resource "aws_iam_role_policy" "scheduler" {

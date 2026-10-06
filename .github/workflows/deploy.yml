@@ -6,9 +6,8 @@ on:
     types: [completed]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write
+# Third-party actions are pinned to full commit SHAs (tag in the trailing comment).
+permissions: {}
 
 concurrency:
   group: investor-dashboard-production
@@ -24,23 +23,53 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    timeout-minutes: 55 # the OIDC session lasts 1 hour
     environment: production
+    permissions:
+      contents: read
+      id-token: write # OIDC token for the AWS role; only this job gets it
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
 
-      - uses: hashicorp/setup-terraform@v3
+      - name: Check deploy configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          AWS_REGION_VAR: ${{ vars.AWS_REGION }}
+          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG }}
+          TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "$AWS_DEPLOY_ROLE_ARN" ] || missing="$missing secret:AWS_DEPLOY_ROLE_ARN"
+          [ -n "$AWS_REGION_VAR" ] || missing="$missing variable:AWS_REGION"
+          [ -n "$TF_BACKEND_CONFIG" ] || missing="$missing secret:TF_BACKEND_CONFIG"
+          [ -n "$TERRAFORM_TFVARS" ] || missing="$missing secret:TERRAFORM_TFVARS"
+          if [ -n "$missing" ]; then
+            echo "::error::Set these in the GitHub 'production' environment:$missing (see docs/operations.md)"
+            exit 1
+          fi
 
-      - uses: docker/setup-qemu-action@v3
+      # Terraform CLI version chosen for this repository (the lock file pins providers, not the
+      # CLI). The wrapper is off so $(terraform output -raw ...) captures only the value.
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.16.5"
+          terraform_wrapper: false
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: arm64
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Prepare Terraform configuration
@@ -52,6 +81,11 @@ jobs:
           set -euo pipefail
           test -n "$TF_BACKEND_CONFIG"
           test -n "$TERRAFORM_TFVARS"
+          # This repository is public, so workflow logs are too. Terraform prints variable values
+          # such as alert e-mail addresses in its plan output; mask every address in the tfvars.
+          { grep -oE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' <<< "$TERRAFORM_TFVARS" || true; } | sort -u |
+            while IFS= read -r value; do echo "::add-mask::${value}"; done
+          umask 077
           printf '%s' "$TF_BACKEND_CONFIG" > backend.tf
           printf '%s' "$TERRAFORM_TFVARS" > terraform.tfvars
 
@@ -59,13 +93,13 @@ jobs:
         working-directory: infra/terraform
         run: |
           set -euo pipefail
-          terraform init
+          terraform init -input=false
           if ! terraform state list | grep -q '^module\.data_lake\.aws_ecr_repository\.jobs$'; then
-            terraform apply -auto-approve -var='jobs_image_uri='
+            terraform apply -input=false -auto-approve -var='jobs_image_uri='
           fi
           echo "ECR_REPOSITORY=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
 
-      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Build and publish the job image
         env:
@@ -86,7 +120,7 @@ jobs:
         working-directory: infra/terraform
         run: |
           set -euo pipefail
-          terraform apply -auto-approve -var="jobs_image_uri=${JOBS_IMAGE_URI}"
+          terraform apply -input=false -auto-approve -var="jobs_image_uri=${JOBS_IMAGE_URI}"
           terraform output -json site_runtime_config > ../../apps/web/config.json
           site_output="$(terraform output -json site)"
           echo "SITE_BUCKET=$(jq -r '.bucket_name' <<< "$site_output")" >> "$GITHUB_ENV"
