@@ -1,4 +1,4 @@
-"""D4: collect recent Alpaca daily bars for the configured ticker universe."""
+"""D4: collect recent Alpaca daily bars for the ticker universe and the index ETF proxies."""
 
 from __future__ import annotations
 
@@ -13,6 +13,11 @@ def is_market_day(day: date) -> bool:
     import holidays
 
     return day not in holidays.financial_holidays("NYSE", years=[day.year])
+
+
+def collection_symbols(universe: dict[str, list[str]]) -> list[str]:
+    """Equities plus the index ETF proxies (trend_metrics drivers), de-duplicated, order kept."""
+    return list(dict.fromkeys([*universe.get("equities", []), *universe.get("etfs", [])]))
 
 
 def normalize_daily_bars(payload: dict) -> list[dict]:
@@ -52,7 +57,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             logger.info("market_calendar_skip", extra={"job": "D4", "date": today.isoformat()})
             return {"status": "skipped", "reason": "NYSE holiday or weekend", "date": today.isoformat()}
 
-        tickers = collection_universe(user_ticker_union())["equities"]
+        tickers = collection_symbols(collection_universe(user_ticker_union()))
         headers = {
             "APCA-API-KEY-ID": api_key("alpaca-key-id"),
             "APCA-API-SECRET-KEY": api_key("alpaca-secret-key"),

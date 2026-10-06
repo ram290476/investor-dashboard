@@ -120,12 +120,15 @@ def _check_host(request: httpx.Request) -> None:
         raise HostNotAllowedError(f"Outbound request to {host!r} blocked: not in the provider allowlist")
 
 
-def get_client(timeout_s: float = 30.0, **kwargs) -> httpx.Client:
-    """httpx client: TLS verified, 10 s connect / 30 s read, redirects re-checked against the allowlist."""
+def get_client(timeout_s: float = 30.0, headers: dict[str, str] | None = None, **kwargs) -> httpx.Client:
+    """httpx client: TLS verified, 10 s connect / 30 s read, redirects re-checked against the allowlist.
+
+    Caller headers (e.g. provider auth) are merged over the default User-Agent.
+    """
     return httpx.Client(
         timeout=httpx.Timeout(timeout_s, connect=10.0),
         follow_redirects=True,
-        headers={"User-Agent": USER_AGENT},
+        headers={"User-Agent": USER_AGENT, **(headers or {})},
         event_hooks={"request": [_check_host]},
         **kwargs,
     )
