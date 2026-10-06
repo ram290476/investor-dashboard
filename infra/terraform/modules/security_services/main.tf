@@ -2,6 +2,11 @@ variable "name" {
   type = string
 }
 
+variable "config_recorder_status_id" {
+  description = "Config recorder status from audit_logging; Security Hub controls rely on recording being on."
+  type        = string
+}
+
 variable "permissions_boundary_arn" {
   description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
   type        = string
@@ -159,6 +164,17 @@ resource "aws_securityhub_account" "this" {
   enable_default_standards  = false
   auto_enable_controls      = true
   control_finding_generator = "SECURITY_CONTROL"
+
+  # Referencing the recorder status orders Security Hub after Config recording starts. This
+  # replaces a module-wide depends_on, which deferred every data source here whenever
+  # audit_logging had any pending change, and so planned a needless replacement of the NIST
+  # standards subscription.
+  lifecycle {
+    precondition {
+      condition     = var.config_recorder_status_id != ""
+      error_message = "AWS Config recording must be set up (audit_logging) before Security Hub."
+    }
+  }
 }
 
 resource "aws_securityhub_standards_subscription" "nist_800_53" {

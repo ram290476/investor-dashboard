@@ -63,8 +63,7 @@ module "security_services" {
   lake_bucket_name          = module.data_lake.lake_bucket_name
   data_key_arn              = module.kms.data_key_arn
   enable_malware_protection = var.enable_malware_protection
-
-  depends_on = [module.audit_logging] # Security Hub controls rely on the Config recorder.
+  config_recorder_status_id = module.audit_logging.config_recorder_status_id # Security Hub after Config
 }
 
 # SNS topics and EventBridge rules for security and ops events (IR-4, IR-5, IR-6, SI-4(5)).

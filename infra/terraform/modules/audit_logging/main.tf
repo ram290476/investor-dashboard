@@ -525,6 +525,11 @@ resource "aws_config_configuration_recorder_status" "this" {
   depends_on = [aws_config_delivery_channel.this]
 }
 
+# Lets other modules wait for Config recording without a module-wide depends_on.
+output "config_recorder_status_id" {
+  value = aws_config_configuration_recorder_status.this.id
+}
+
 output "audit_bucket_name" {
   value = aws_s3_bucket.audit.id
 }
