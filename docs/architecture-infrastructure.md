@@ -83,7 +83,7 @@ Tables are grouped by how often they change, and that sets their file layout: ho
 | fundamentals_quarterly | Quarterly | ticker, metric, fiscal_quarter | release_date, value, unit, source_id; metrics gross_margin_gaap, revenue_gaap, gross_profit_gaap, deliveries, fsd_subscribers | none | q1_fundamentals (DS-11 XBRL, DS-12 manual) |
 | calendar_days | Monthly | calendar, date | is_open, close_time | none | C1, A1 |
 | ingestion_runs | Every run | run_id | job, source_id, status, rows, error, duration_ms | year/month | all jobs |
-| user_prefs (DynamoDB) | On change | user_sub | tickers\[\], pinned\[\] (max 6), display.time_zone, display.updown_palette, version, updated_at | n/a | prefs API |
+| user_prefs (DynamoDB) | On change | user_sub | tickers\[\], pinned\[\] (max 6), display.time_zone, display.updown_palette, display.chart_period, version, updated_at | n/a | prefs API |
 
 **Serving layer** — JSON files built for the screen, one per dashboard panel (e.g. serving/panel/rates.json), plus manifest.json listing each panel's version and last update.
 
@@ -193,7 +193,7 @@ Each job has its own role: read and write only its listed lake prefixes, read on
 
 ### Names that differ from the UI brief
 
-- The table key is user_sub; display settings live under display.time_zone and display.updown_palette (green-red, red-green, blue-orange). Order is the order of tickers and pinned, not a separate field.
+- The table key is user_sub; display settings live under display.time_zone, display.updown_palette (green-red, red-green, blue-orange), and display.chart_period (1D, 1W, 1M, 3M, 1Y, 3Y, 5Y; anything else is stored as 1M). Order is the order of tickers and pinned, not a separate field.
 
 - Fundamentals use fiscal_quarter as in the brief, with metric IDs gross_margin_gaap, deliveries and fsd_subscribers, plus revenue_gaap and gross_profit_gaap as inputs.
 

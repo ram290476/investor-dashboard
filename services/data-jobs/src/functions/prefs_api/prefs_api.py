@@ -11,7 +11,8 @@ Item (table user_prefs, partition key user_sub):
     user_sub      string   Cognito sub
     tickers       list     "My tickers", in display order (max 50)
     pinned        list     pinned tickers, in order (max 6, each also in tickers)
-    display       map      time_zone (IANA, e.g. America/Los_Angeles), updown_palette (see PALETTES)
+    display       map      time_zone (IANA, e.g. America/Los_Angeles), updown_palette (see PALETTES),
+                           chart_period (1D|1W|1M|3M|1Y|3Y|5Y; unknown values are stored as 1M)
     version       number   optimistic concurrency; PUT must send the version it read
     updated_at    string   ISO-8601 UTC
 
@@ -40,10 +41,11 @@ MAX_TICKERS = int(os.environ.get("MAX_TICKERS_PER_USER", "50"))
 MAX_PINNED = 6
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 PALETTES = {"green-red", "red-green", "blue-orange"}  # up/down colours; blue-orange is colour-blind safe
+CHART_PERIODS = {"1D", "1W", "1M", "3M", "1Y", "3Y", "5Y"}
 DEFAULTS = {
     "tickers": ["TSLA", "SPCX"],
     "pinned": ["TSLA", "SPCX"],
-    "display": {"time_zone": "America/New_York", "updown_palette": "green-red"},
+    "display": {"time_zone": "America/New_York", "updown_palette": "green-red", "chart_period": "1M"},
     "version": 0,
 }
 
@@ -92,13 +94,16 @@ def validate(body: dict) -> dict:
     palette = display.get("updown_palette", DEFAULTS["display"]["updown_palette"])
     if palette not in PALETTES:
         raise ValidationError(f"updown_palette must be one of {sorted(PALETTES)}")
+    chart_period = display.get("chart_period", DEFAULTS["display"]["chart_period"])
+    if chart_period not in CHART_PERIODS:
+        chart_period = DEFAULTS["display"]["chart_period"]
     version = body.get("version", 0)
     if not isinstance(version, int) or version < 0:
         raise ValidationError("version must be the non-negative integer returned by GET")
     return {
         "tickers": clean,
         "pinned": pins,
-        "display": {"time_zone": str(tz), "updown_palette": palette},
+        "display": {"time_zone": str(tz), "updown_palette": palette, "chart_period": chart_period},
         "version": version,
     }
 
