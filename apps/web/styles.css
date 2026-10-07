@@ -167,9 +167,7 @@ a {
 .header-actions,
 .section-head,
 .ticker-actions,
-.chart-legend,
-.field-row,
-.control-row {
+.chart-legend {
   display: flex;
   align-items: center;
 }
@@ -704,40 +702,6 @@ a {
   font-weight: 500;
 }
 
-.control-row {
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 14px 16px 16px;
-}
-
-.field-row {
-  flex: 1 1 180px;
-  gap: 8px;
-}
-
-.field-row input,
-.control-row select {
-  min-width: 0;
-  min-height: 44px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0 10px;
-  background: #0f1319;
-}
-
-.field-row input {
-  flex: 1;
-}
-
-.control-row label {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.control-row .button-primary {
-  min-height: 44px;
-}
-
 .dashboard-footer {
   display: flex;
   flex-wrap: wrap;
@@ -756,6 +720,550 @@ a {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   clip-path: inset(50%);
+}
+
+/* ------------------------------------------------------------------ ticker strip extras (#36) */
+.watchlist-divider {
+  flex: none;
+  width: 1px;
+  margin: 6px 2px;
+  background: var(--line);
+}
+
+.ticker-pin {
+  margin-right: 5px;
+  color: #e3b341;
+  font-size: 12px;
+}
+
+.ticker-manage {
+  min-width: 120px;
+  flex: 0 0 auto;
+  border-style: dashed;
+  background: transparent;
+}
+
+.ticker-manage .ticker-symbol {
+  color: var(--blue);
+}
+
+/* ------------------------------------------------------------------ account menu */
+.account {
+  position: relative;
+}
+
+.account-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-icon {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 38%, var(--muted) 0 4px, transparent 4.5px),
+    radial-gradient(ellipse at 50% 112%, var(--muted) 0 9px, transparent 9.5px);
+}
+
+.account-icon .dot {
+  position: absolute;
+  right: -2px;
+  bottom: -1px;
+  border: 2px solid var(--surface-raised);
+  box-sizing: content-box;
+}
+
+.account-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  width: min(330px, calc(100vw - 24px));
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.account-menu[hidden] {
+  display: none;
+}
+
+.menu-head {
+  display: grid;
+  gap: 2px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.menu-head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.menu-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+}
+
+.menu-item:focus-visible {
+  outline-offset: -2px;
+}
+
+.menu-hint {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------------ settings dialog */
+body.modal-open {
+  overflow: hidden;
+}
+
+.settings-backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(5, 8, 12, 0.72);
+}
+
+.settings-backdrop[hidden] {
+  display: none;
+}
+
+.settings-dialog {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(780px, 100%);
+  max-height: min(760px, calc(100vh - 32px));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 10px;
+}
+
+.settings-head h2 {
+  margin: 0;
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-save {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.settings-save.ok {
+  color: var(--green);
+}
+
+.settings-save.error {
+  color: #ffb3ad;
+}
+
+.settings-close {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.settings-tab {
+  min-height: 40px;
+  margin-bottom: -1px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.settings-tab:hover {
+  background: transparent;
+  color: var(--text);
+}
+
+.settings-tab[aria-selected="true"] {
+  border-bottom-color: var(--blue);
+  color: var(--text);
+}
+
+.settings-panel {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-panel:focus-visible {
+  outline-offset: -2px;
+}
+
+.settings-intro h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-hint,
+.settings-foot {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-hint.error {
+  color: #ffb3ad;
+}
+
+.settings-foot {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.settings-label {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-alert {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(240, 122, 122, 0.45);
+  border-radius: 8px;
+  background: rgba(240, 122, 122, 0.08);
+  color: #ffb3ad;
+  font-size: 12px;
+}
+
+.settings-alert.notice {
+  border-color: rgba(242, 178, 78, 0.45);
+  background: rgba(242, 178, 78, 0.08);
+  color: var(--amber);
+}
+
+.settings-alert .button-link {
+  min-height: 28px;
+}
+
+.my-tickers {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.my-ticker {
+  display: grid;
+  grid-template-columns: 28px 32px minmax(90px, 1fr) 64px 82px 92px 32px 32px 32px;
+  align-items: center;
+  gap: 6px;
+  min-height: 46px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.my-ticker.pinned {
+  border-color: rgba(227, 179, 65, 0.35);
+}
+
+.my-ticker.dragging {
+  opacity: 0.5;
+}
+
+.my-ticker.drop-before {
+  box-shadow: 0 -2px 0 var(--blue);
+}
+
+.my-ticker.drop-after {
+  box-shadow: 0 2px 0 var(--blue);
+}
+
+.my-ticker button {
+  min-height: 32px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.row-handle {
+  border-color: transparent;
+  background: transparent;
+  color: var(--subtle);
+  cursor: grab;
+  letter-spacing: -2px;
+}
+
+.row-pin {
+  color: var(--subtle);
+  font-size: 16px !important;
+}
+
+.row-pin[aria-pressed="true"] {
+  border-color: rgba(227, 179, 65, 0.5);
+  color: #e3b341;
+}
+
+.row-pin[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.row-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.row-name strong {
+  font-size: 14px;
+}
+
+.row-tag {
+  padding: 2px 6px;
+  border: 1px solid rgba(227, 179, 65, 0.45);
+  border-radius: 999px;
+  color: #e3b341;
+  font-size: 10px;
+}
+
+.row-tag.loading {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.spark {
+  width: 64px;
+  height: 20px;
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.spark.positive {
+  stroke: var(--green);
+}
+
+.spark.negative {
+  stroke: var(--red);
+}
+
+.spark-empty,
+.row-price,
+.row-change {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.row-price {
+  color: var(--text);
+}
+
+.row-move:disabled,
+.row-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.row-remove:not(:disabled):hover {
+  border-color: rgba(240, 122, 122, 0.6);
+  color: var(--red);
+}
+
+.add-ticker,
+.zone-search {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.add-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f1319;
+  text-transform: uppercase;
+}
+
+.zone-search .add-row input {
+  text-transform: none;
+}
+
+.add-row input[aria-invalid="true"] {
+  border-color: #c45c5c;
+}
+
+.zone-search .button-link {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  font-size: 12px;
+}
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0f1319;
+}
+
+.segment {
+  min-height: 36px;
+  padding: 0 14px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.segment[aria-pressed="true"] {
+  border-color: #557ead;
+  background: #172333;
+  color: var(--text);
+}
+
+.settings-preview {
+  display: flex;
+  gap: 8px;
+}
+
+.preview-chip {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
+.profile-email {
+  margin: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.settings-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 16px 14px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  font-size: 13px;
+}
+
+.settings-toast[hidden] {
+  display: none;
+}
+
+.settings-toast .button-link {
+  min-height: 32px;
+  color: var(--blue);
+}
+
+@media (max-width: 640px) {
+  .account-text {
+    display: none;
+  }
+
+  .settings-backdrop {
+    padding: 0;
+    place-items: end stretch;
+  }
+
+  .settings-dialog {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    border-radius: 16px 16px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .my-ticker {
+    grid-template-columns: 24px 32px minmax(0, 1fr) 76px 32px 32px 32px;
+  }
+
+  .my-ticker .spark,
+  .my-ticker .spark-empty,
+  .my-ticker .row-change {
+    display: none;
+  }
 }
 
 @media (max-width: 930px) {
