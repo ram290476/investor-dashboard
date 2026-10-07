@@ -156,6 +156,57 @@ def upsert_parquet(df: pl.DataFrame, key: str, bucket: str | None = None, *, inc
     raise RuntimeError(f"{key} kept changing; gave up after {UPSERT_ATTEMPTS} attempts")
 
 
+def dedupe_ranked(frame: pl.DataFrame, subset: list[str], rank_col: str) -> pl.DataFrame:
+    """One row per subset. Higher rank_col wins; equal rank keeps the later row."""
+    if frame.is_empty() or not set(subset) <= set(frame.columns):
+        return frame
+    ranked = frame.with_row_index("_row")
+    if rank_col in frame.columns:
+        ranked = ranked.with_columns(pl.col(rank_col).fill_null(0))
+        order = [rank_col, "_row"]
+    else:
+        order = ["_row"]
+    return ranked.sort(order).unique(subset=subset, keep="last").sort("_row").drop("_row")
+
+
+def upsert_ranked(
+    df: pl.DataFrame,
+    key: str,
+    subset: list[str],
+    rank_col: str,
+    bucket: str | None = None,
+) -> int:
+    """Conditional read-merge-write keyed on subset. See upsert_parquet for the ETag race."""
+    bucket = bucket or LAKE_BUCKET
+    client = s3()
+    for _ in range(UPSERT_ATTEMPTS):
+        existing, etag = pl.DataFrame(), None
+        if _object_exists(client, bucket, key):
+            try:
+                obj = client.get_object(Bucket=bucket, Key=key)
+                existing, etag = pl.read_parquet(io.BytesIO(obj["Body"].read())), obj["ETag"]
+            except client.exceptions.NoSuchKey:
+                pass
+        parts = [p for p in (existing, df) if not p.is_empty()]
+        merged = dedupe_ranked(pl.concat(parts, how="diagonal_relaxed"), subset, rank_col) if parts else df
+        buf = io.BytesIO()
+        merged.write_parquet(buf, compression="zstd")
+        cond = {"IfMatch": etag} if etag else {"IfNoneMatch": "*"}
+        try:
+            client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=buf.getvalue(),
+                ContentType="application/vnd.apache.parquet",
+                **cond,
+            )
+            return merged.height
+        except client.exceptions.ClientError as exc:
+            if exc.response["Error"]["Code"] not in ("PreconditionFailed", "ConditionalRequestConflict"):
+                raise
+    raise RuntimeError(f"{key} kept changing; gave up after {UPSERT_ATTEMPTS} attempts")
+
+
 def upsert_prices(df: pl.DataFrame, bucket: str | None = None, *, incoming_wins: bool = True) -> list[str]:
     """Upsert daily price rows (ticker, date, ...) into their ticker/year partitions; returns the keys written."""
     if df.is_empty():
