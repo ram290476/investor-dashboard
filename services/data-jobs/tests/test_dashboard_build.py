@@ -111,6 +111,8 @@ def test_news_keeps_the_last_48_hours_and_a_seven_day_mean():
     assert news["sentiment_7d"] == pytest.approx(0.3)
     assert [item["title"] for item in news["headlines"]] == ["Tesla approval"]
     assert news["headlines"][0]["label"] == "bullish"
+
+
 def test_intraday_is_today_only_and_short_interest_is_the_latest_settlement():
     snapshot = dashboard_build.build_snapshot(
         tickers=["TSLA"],

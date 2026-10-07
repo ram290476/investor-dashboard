@@ -323,6 +323,8 @@ variable "jobs" {
       read_prefixes  = ["curated/news_articles/", "curated/news_daily/"]
       write_prefixes = ["raw/news/", "curated/news_articles/", "curated/news_daily/"]
       api_keys       = ["finnhub", "alpha-vantage", "massive"]
+      reads_prefs    = true
+    }
     # H1: hourly bars during the NYSE session. Early-close days stop after 13:05 in the handler.
     hourly-prices = {
       handler        = "hourly_prices.handler"
@@ -338,7 +340,7 @@ variable "jobs" {
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H2"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2"]
       memory   = 1024
       timeout  = 300
       read_prefixes = [

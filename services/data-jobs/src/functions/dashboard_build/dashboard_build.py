@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 MAX_PRICE_ROWS = 1260
 SCHEMA_VERSION = 2
 HEADLINE_LIMIT = 10
+ET = ZoneInfo("America/New_York")
 
 
 def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: datetime) -> dict:
@@ -50,12 +52,6 @@ def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: d
         "sentiment_7d": rolling_mean(daily_rows, now.astimezone(UTC).date()),
         "headlines": headlines,
     }
-from datetime import UTC, datetime
-from zoneinfo import ZoneInfo
-
-MAX_PRICE_ROWS = 1260
-SCHEMA_VERSION = 2
-ET = ZoneInfo("America/New_York")
 
 
 def _session_date(ts: str) -> str:
