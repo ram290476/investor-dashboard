@@ -288,6 +288,8 @@ variable "jobs" {
     write_prefixes = list(string)
     api_keys       = list(string)
     reads_prefs    = bool
+    # Only the release-day job creates one-off schedules. Default false so existing jobs are unchanged.
+    manages_schedules = optional(bool, false)
   }))
   default = {
     # After D4 (daily close) and M1 (release days) succeed
@@ -337,10 +339,39 @@ variable "jobs" {
       api_keys       = ["alpaca-key-id", "alpaca-secret-key", "finnhub", "alpha-vantage"]
       reads_prefs    = true
     }
+    # H3: federal business days. The 14:05 FOMC one-off waits for D1; this schedule still covers that hour.
+    regulatory-feeds = {
+      handler        = "regulatory_feeds.handler"
+      schedule       = "cron(25 6-22 ? * MON-FRI *)"
+      triggers       = []
+      memory         = 512
+      timeout        = 300
+      read_prefixes  = ["curated/filings/", "curated/events/"]
+      write_prefixes = ["raw/edgar/", "raw/regfeeds/", "curated/filings/", "curated/events/", "curated/events_daily/"]
+      api_keys       = ["api-data-gov"]
+      reads_prefs    = true
+    }
+    # D5: after the DoD daily contract post. SAM stays inside a 10-call day.
+    gov-contracts = {
+      handler       = "gov_contracts.handler"
+      schedule      = "cron(45 17 ? * MON-FRI *)"
+      triggers      = []
+      memory        = 512
+      timeout       = 300
+      read_prefixes = ["curated/contracts/", "curated/contracts_rollup/"]
+      write_prefixes = [
+        "raw/contracts/",
+        "curated/contracts/",
+        "curated/contracts_rollup/",
+        "curated/contract_opportunities/",
+      ]
+      api_keys    = ["sam-gov"]
+      reads_prefs = true
+    }
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1"]
       memory   = 1024
       timeout  = 300
       read_prefixes = [
@@ -349,9 +380,15 @@ variable "jobs" {
         "curated/news_articles/",
         "curated/prices_hourly/",
         "curated/short_interest/",
+        "curated/filings/",
+        "curated/events/",
+        "curated/contracts_rollup/",
+        "curated/contracts/",
         "serving/trend_metrics/latest/",
         "serving/fundamentals_quarterly.json",
         "serving/status.json",
+        "curated/releases/",
+        "curated/release_calendar/",
       ]
       write_prefixes = ["serving/dashboard.json"]
       api_keys       = []
@@ -416,6 +453,19 @@ variable "jobs" {
       write_prefixes = ["curated/prices_daily/"]
       api_keys       = []
       reads_prefs    = true
+    }
+    # Event-driven. One-off at() schedules are created from the stopgap release calendar.
+    release-day = {
+      handler           = "release_day.handler"
+      schedule          = ""
+      triggers          = []
+      memory            = 512
+      timeout           = 300
+      read_prefixes     = ["curated/releases/", "curated/release_calendar/", "curated/macro_daily/"]
+      write_prefixes    = ["raw/releases/", "curated/releases/", "curated/release_calendar/", "curated/macro_daily/"]
+      api_keys          = ["bls", "bea", "census", "fred"]
+      reads_prefs       = false
+      manages_schedules = true
     }
     # Rebuilds serving/status.json after every job
     status-feed = {

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 MAX_PRICE_ROWS = 1260
 SCHEMA_VERSION = 2
 HEADLINE_LIMIT = 10
 ET = ZoneInfo("America/New_York")
+CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
 
 
 def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: datetime) -> dict:
@@ -51,6 +52,96 @@ def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: d
         "as_of": headlines[0]["published_at"] if headlines else None,
         "sentiment_7d": rolling_mean(daily_rows, now.astimezone(UTC).date()),
         "headlines": headlines,
+    }
+
+
+def _as_of(generated_at: str | None) -> datetime:
+    if not generated_at:
+        return datetime.now(UTC)
+    stamp = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp
+
+
+def build_filings(rows: list[dict]) -> list[dict]:
+    ordered = sorted(rows, key=lambda row: str(row.get("filed_at") or ""), reverse=True)
+    latest = []
+    seen: set[str] = set()
+    for row in ordered:
+        accession = str(row.get("accession_no") or "")
+        if accession and accession in seen:
+            continue
+        if accession:
+            seen.add(accession)
+        latest.append(
+            {
+                "form": row.get("form"),
+                "filed_at": row.get("filed_at"),
+                "title": row.get("title") or row.get("form"),
+                "url": row.get("primary_doc_url"),
+                "class": row.get("filing_class") or row.get("class"),
+            }
+        )
+        if len(latest) == 10:
+            break
+    return latest
+
+
+def build_insider(rows: list[dict], as_of: date) -> dict:
+    from regulatory_feeds import insider_flows
+
+    return insider_flows(rows, as_of)
+
+
+def build_events(rows: list[dict], as_of: date) -> list[dict]:
+    cutoff = (as_of - timedelta(days=14)).isoformat()
+    chosen = []
+    seen: set[str] = set()
+    ordered = sorted(rows, key=lambda row: str(row.get("event_ts") or ""), reverse=True)
+    for row in ordered:
+        day = str(row.get("event_ts") or "")[:10]
+        if day and day < cutoff:
+            continue
+        key = str(row.get("event_id") or row.get("source_url") or "")
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        chosen.append(
+            {
+                "event_ts": row.get("event_ts"),
+                "type": row.get("type"),
+                "title": row.get("title"),
+                "source_url": row.get("source_url"),
+                "tickers": row.get("tickers") or [],
+            }
+        )
+        if len(chosen) == 20:
+            break
+    return chosen
+
+
+def build_releases(rows: list[dict], calendar: list[dict]) -> dict:
+    latest: dict[str, dict] = {}
+    for row in rows:
+        series_id = row.get("series_id")
+        period = str(row.get("period") or "")
+        if not series_id:
+            continue
+        current = latest.get(series_id)
+        if current is None or period > str(current.get("period") or ""):
+            latest[series_id] = {
+                "series": series_id,
+                "period": period,
+                "actual": row.get("actual"),
+                "consensus": row.get("consensus"),
+                "surprise": row.get("surprise"),
+            }
+    upcoming = sorted(calendar, key=lambda row: str(row.get("release_ts") or ""))[:5]
+    return {
+        "latest": [latest[key] for key in sorted(latest)],
+        "next": [{"series": row.get("series"), "release_ts": row.get("release_ts")} for row in upcoming],
     }
 
 
@@ -122,13 +213,14 @@ def build_snapshot(
     news: dict[str, dict] | None = None,
     hourly: dict[str, list[dict]] | None = None,
     short_interest: dict[str, list[dict]] | None = None,
+    filings: dict[str, list[dict]] | None = None,
+    events: list[dict] | None = None,
+    contracts: dict[str, dict] | None = None,
+    releases: list[dict] | None = None,
+    release_calendar: list[dict] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
-    clock = datetime.now(UTC)
-    if generated_at:
-        clock = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-        if clock.tzinfo is None:
-            clock = clock.replace(tzinfo=UTC)
+    clock = _as_of(generated_at)
     instruments = {}
     for ticker in tickers:
         unique: dict[str, dict] = {}
@@ -145,6 +237,10 @@ def build_snapshot(
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
         bundle = None if news is None else news.get(ticker) or {}
+        filing_rows = None if filings is None else filings.get(ticker) or []
+        award = None
+        if contracts is not None and ticker in CONTRACT_TICKERS:
+            award = contracts.get(ticker)
         interest = latest_short_interest((short_interest or {}).get(ticker, []))
         instruments[ticker] = {
             "ticker": ticker,
@@ -155,6 +251,9 @@ def build_snapshot(
             else build_news(ticker, bundle.get("daily") or [], bundle.get("articles") or [], clock),
             "intraday": build_intraday((hourly or {}).get(ticker, []), history),
             "short_interest": interest.get(ticker),
+            "filings": None if filing_rows is None else build_filings(filing_rows),
+            "insider_30d": None if filing_rows is None else build_insider(filing_rows, clock.date()),
+            "contracts": award,
             "price_status": "available" if history else "unavailable",
             "price_as_of": history[-1]["date"] if history else None,
         }
@@ -169,6 +268,12 @@ def build_snapshot(
         "data_status": "available" if available else "unavailable",
         "tickers": instruments,
         "fundamentals": normalized_fundamentals,
+        "events": None if events is None else build_events(events, clock.date()),
+        "releases": (
+            None
+            if releases is None and release_calendar is None
+            else build_releases(releases or [], release_calendar or [])
+        ),
         "status": status,
     }
 
@@ -191,6 +296,17 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             ticker: {"daily": [row for row in daily_rows if row.get("ticker") == ticker], "articles": article_rows}
             for ticker in tickers
         }
+        filing_frame = read_parquet_prefix("curated/filings/")
+        event_frame = read_parquet_prefix("curated/events/")
+        filing_rows = filing_frame.to_dicts() if not filing_frame.is_empty() else []
+        event_rows = event_frame.to_dicts() if not event_frame.is_empty() else []
+        filings_by_ticker: dict[str, list[dict]] = {ticker: [] for ticker in tickers}
+        for row in filing_rows:
+            symbol = str(row.get("ticker") or "").upper()
+            if symbol in filings_by_ticker:
+                filings_by_ticker[symbol].append(row)
+        rollup = read_json("curated/contracts_rollup/latest.json") or []
+        contracts_data = {row.get("ticker"): row for row in rollup if isinstance(row, dict)}
         hourly_data: dict[str, list[dict]] = {}
         for ticker in tickers:
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
@@ -206,6 +322,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
 
         fundamental_doc = read_json("serving/fundamentals_quarterly.json") or {}
         status = read_json("serving/status.json")
+        release_frame = read_parquet_prefix("curated/releases/")
+        calendar = read_json("curated/release_calendar/upcoming.json") or []
         snapshot = build_snapshot(
             tickers=tickers,
             prices=price_data,
@@ -215,6 +333,11 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             news=news_data,
             hourly=hourly_data,
             short_interest=short_by_ticker,
+            filings=filings_by_ticker,
+            events=event_rows,
+            contracts=contracts_data,
+            releases=release_frame.to_dicts() if not release_frame.is_empty() else [],
+            release_calendar=calendar if isinstance(calendar, list) else [],
         )
         write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
         logger.info(

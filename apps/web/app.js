@@ -527,6 +527,7 @@ function renderStats(tickerData) {
   const pressure = netPressure(tickerData);
   const grid = node("section", "stats-grid");
   grid.setAttribute("aria-label", "Selected ticker summary");
+  const insider = tickerData?.insider_30d;
   const live = tickerData?.intraday;
   if (isNumericValue(live?.last)) {
     grid.append(
@@ -538,7 +539,7 @@ function renderStats(tickerData) {
       ),
     );
   }
-  grid.append(
+  const cards = [
     statCard("LAST CLOSE", latest ? formatPrice(displayPrice(latest)) : "—", latest?.date || tickerData?.price_as_of || "No data"),
     statCard(
       "MACRO PRESSURE",
@@ -546,8 +547,50 @@ function renderStats(tickerData) {
       "Trend model · −1 to +1",
       polarity(pressure),
     ),
-  );
+  ];
+  if (insider && isNumericValue(insider.net_shares)) {
+    const shares = Number(insider.net_shares);
+    const value = isNumericValue(insider.net_value) ? Number(insider.net_value) : null;
+    cards.push(
+      statCard(
+        "FORM 4 · 30D",
+        `${shares > 0 ? "+" : ""}${shares.toLocaleString()} sh`,
+        value == null ? "Net insider shares" : `${value > 0 ? "+" : ""}${formatPrice(value)} net value`,
+        polarity(shares),
+      ),
+    );
+  }
+  grid.append(...cards);
   return grid;
+}
+
+function renderContracts(tickerData) {
+  const contracts = tickerData?.contracts;
+  if (!contracts) return null;
+  const panel = node("section", "panel");
+  panel.append(sectionHeader("Government contracts", "Trailing 12 months · SpaceX and Tesla awards"));
+  const total = isNumericValue(contracts.ttm_obligated) ? formatPrice(contracts.ttm_obligated) : "—";
+  panel.append(node("p", "news-score", `TTM obligated ${total}`));
+  const list = node("ul", "news-list");
+  (contracts.recent || []).slice(0, 5).forEach((row) => {
+    const item = node("li", "news-item");
+    const link = node("a", "news-title", `${row.agency || "Agency"} · ${row.award_id || ""}`);
+    if (row.url) {
+      link.href = row.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    item.append(link);
+    const amount = isNumericValue(row.amount) ? formatPrice(row.amount) : "—";
+    item.append(node("p", "news-meta", `${row.date || ""} · ${amount}`));
+    list.append(item);
+  });
+  if (!list.childElementCount) {
+    panel.append(node("p", "data-state", "No awards in the last 30 days."));
+  } else {
+    panel.append(list);
+  }
+  return panel;
 }
 
 function renderDrivers(tickerData) {
@@ -568,19 +611,34 @@ function renderDrivers(tickerData) {
   }
   if (!drivers.length) {
     panel.append(node("p", "data-state", "Driver trends are unavailable until daily prices and macro observations have been processed."));
-    return panel;
+  } else {
+    const list = node("ul", "driver-list");
+    drivers.forEach((row) => {
+      const item = node("li", "driver-row");
+      item.append(node("span", "driver-name", aliases[row.series_id] || row.series_id));
+      const effect = Number(row.effect);
+      item.append(node("span", `driver-value ${polarity(effect)}`, `${effect > 0 ? "+" : ""}${effect.toFixed(2)}`));
+      list.append(item);
+    });
+    const body = node("div", "panel-body");
+    body.append(list);
+    panel.append(body);
   }
-  const list = node("ul", "driver-list");
-  drivers.forEach((row) => {
-    const item = node("li", "driver-row");
-    item.append(node("span", "driver-name", aliases[row.series_id] || row.series_id));
-    const effect = Number(row.effect);
-    item.append(node("span", `driver-value ${polarity(effect)}`, `${effect > 0 ? "+" : ""}${effect.toFixed(2)}`));
-    list.append(item);
-  });
-  const body = node("div", "panel-body");
-  body.append(list);
-  panel.append(body);
+  const releases = session.dashboard?.releases;
+  if (releases) {
+    const note = node("div", "release-notes");
+    const labels = { CUSR0000SA0: "CPI", CUSR0000SA0L1E: "Core CPI", PCE: "PCE" };
+    (releases.latest || [])
+      .filter((row) => labels[row.series])
+      .forEach((row) => {
+        const surprise = isNumericValue(row.surprise) ? Number(row.surprise) : null;
+        const text = surprise == null ? "no consensus" : `${surprise > 0 ? "+" : ""}${surprise.toFixed(2)} vs consensus`;
+        note.append(node("p", "release-note", `${labels[row.series]} surprise ${text}`));
+      });
+    const next = (releases.next || [])[0];
+    if (next?.release_ts) note.append(node("p", "release-note", `Next release ${next.series || ""} ${next.release_ts}`));
+    if (note.childElementCount) panel.append(note);
+  }
   return panel;
 }
 
@@ -677,6 +735,56 @@ function renderFundamentals() {
   table.append(caption, head, body);
   scroll.append(table);
   panel.append(scroll);
+  return panel;
+}
+
+function renderFilings(tickerData) {
+  const panel = node("section", "panel");
+  panel.append(sectionHeader("Filings & events", "Latest SEC filings and the last 14 days of events"));
+  const filings = tickerData?.filings;
+  const events = session.dashboard?.events;
+  if (!filings && !events && session.dashboardState === "loading") {
+    panel.append(node("p", "data-state", "Loading filings…"));
+    return panel;
+  }
+  if (!filings && !events && session.dashboardState === "error") {
+    panel.append(node("p", "data-state", "Filings could not be loaded. Use Try again above."));
+    return panel;
+  }
+  if (!filings && !events) {
+    panel.append(node("p", "data-state", "Filings have not been collected yet."));
+    return panel;
+  }
+  const list = node("ul", "news-list");
+  (filings || []).forEach((row) => {
+    const item = node("li", "news-item");
+    const link = node("a", "news-title", `${row.form || "Filing"} · ${row.title || ""}`);
+    if (row.url) {
+      link.href = row.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    item.append(link);
+    item.append(node("p", "news-meta", `${row.filed_at || ""} · ${row.class || "filing"}`));
+    list.append(item);
+  });
+  (events || []).slice(0, 8).forEach((event) => {
+    const item = node("li", "news-item");
+    const link = node("a", "news-title", event.title || event.type || "Event");
+    if (event.source_url) {
+      link.href = event.source_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    item.append(link);
+    item.append(node("p", "news-meta", `${event.event_ts || ""} · ${event.type || "event"}`));
+    list.append(item);
+  });
+  if (!list.childElementCount) {
+    panel.append(node("p", "data-state", "No filings or events in the current window."));
+    return panel;
+  }
+  panel.append(list);
   return panel;
 }
 
@@ -873,10 +981,13 @@ function renderDashboard() {
   const mainGrid = node("main", "dashboard-grid");
   mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
   const primary = node("div");
-  primary.append(renderStats(tickerData), renderPricePanel(tickerData, onSelectPeriod), renderFundamentals());
+  primary.append(renderStats(tickerData), renderPricePanel(tickerData, onSelectPeriod));
+  const contracts = renderContracts(tickerData);
+  if (contracts) primary.append(contracts);
+  primary.append(renderFundamentals());
   const side = node("aside", "side-column");
   side.setAttribute("aria-label", "Macro drivers and data status");
-  side.append(renderDrivers(tickerData), renderNews(tickerData), renderStatus());
+  side.append(renderDrivers(tickerData), renderNews(tickerData), renderFilings(tickerData), renderStatus());
   mainGrid.append(primary, side);
   root.append(mainGrid);
   root.append(renderSettings(onMessage));

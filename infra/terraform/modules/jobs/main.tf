@@ -23,6 +23,8 @@ variable "jobs" {
     write_prefixes = list(string)
     api_keys       = list(string)
     reads_prefs    = bool
+    # Only the release-day job creates one-off schedules. Default false so existing jobs are unchanged.
+    manages_schedules = optional(bool, false)
   }))
 }
 
@@ -90,7 +92,8 @@ locals {
   enabled_jobs = var.image_uri == "" ? {} : var.jobs
   job_source   = "${var.name}.jobs"
 
-  scheduled = { for k, j in local.enabled_jobs : k => j if j.schedule != "" }
+  scheduled         = { for k, j in local.enabled_jobs : k => j if j.schedule != "" }
+  schedule_managers = { for k, j in local.enabled_jobs : k => j if j.manages_schedules }
   triggers = merge([
     for k, j in local.enabled_jobs : {
       for t in j.triggers : "${k}--${replace(replace(t, ":", "-"), "*", "any")}" => { job = k, trigger = t }
@@ -248,7 +251,9 @@ resource "aws_lambda_function" "job" {
     variables = merge(var.base_environment, var.extra_environment, {
       JOB_NAME    = each.key
       PREFS_TABLE = var.prefs_table_name
-    })
+      }, each.value.manages_schedules && length(local.scheduled) > 0 ? {
+      SCHEDULER_ROLE_ARN = aws_iam_role.scheduler[0].arn
+    } : {})
   }
 
   tracing_config {
@@ -306,10 +311,43 @@ resource "aws_iam_role_policy" "scheduler" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = "lambda:InvokeFunction"
-      Resource = [for k, _ in local.scheduled : aws_lambda_function.job[k].arn]
+      Effect = "Allow"
+      Action = "lambda:InvokeFunction"
+      Resource = distinct(concat(
+        [for k, _ in local.scheduled : aws_lambda_function.job[k].arn],
+        [for k, _ in local.schedule_managers : aws_lambda_function.job[k].arn],
+      ))
     }]
+  })
+}
+
+# M1 creates one-off at() schedules. Other jobs do not get these actions.
+resource "aws_iam_role_policy" "manage_schedules" {
+  for_each = length(local.scheduled) > 0 ? local.schedule_managers : {}
+  name     = "create-one-off-schedules"
+  role     = aws_iam_role.job[each.key].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "scheduler:CreateSchedule",
+          "scheduler:UpdateSchedule",
+          "scheduler:GetSchedule",
+          "scheduler:DeleteSchedule",
+        ]
+        Resource = "arn:${local.partition}:scheduler:${local.region}:${local.account_id}:schedule/default/${var.name}-m1-*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
+        Resource = aws_iam_role.scheduler[0].arn
+        Condition = {
+          StringEquals = { "iam:PassedToService" = "scheduler.amazonaws.com" }
+        }
+      },
+    ]
   })
 }
 
