@@ -11,6 +11,7 @@ COPY services/data-jobs/src/app/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/trend_metrics/ services/data-jobs/src/functions/q1_fundamentals/ services/data-jobs/src/functions/short_interest/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/options_daily/ services/data-jobs/src/functions/backfill/ services/data-jobs/src/functions/status_feed/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/daily_prices/ services/data-jobs/src/functions/dashboard_build/ ${LAMBDA_TASK_ROOT}/
+COPY services/data-jobs/src/functions/hourly_prices/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/price_reconcile/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/release_day/ ${LAMBDA_TASK_ROOT}/
 
