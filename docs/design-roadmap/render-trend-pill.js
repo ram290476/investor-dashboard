@@ -15,6 +15,8 @@
  *                                       RIGHT of the period chips (requested placement).
  *                                       DOM is rearranged in the headless page only; the
  *                                       mockup source is never modified.
+ *                                       REJECTED Oct 7, 2026 (no room right of the chips); see
+ *                                       render-trend-pill-layout.js for the under-the-price mock.
  *
  * Usage (from repo root):
  *   npm i --no-save puppeteer-core     # or NODE_PATH=<dir with puppeteer-core>
