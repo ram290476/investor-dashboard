@@ -11,6 +11,10 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `desktop-signals.png` | Net macro pressure, regimes, drivers, catalyst sensitivity |
 | `desktop-macro-panels.png` | Macro / theme / news sentiment panels |
 | `mobile-glance.png` | Four-tab phone glance layout (Chart / Signals / Calendar & more) |
+| `account-menu.png` | Header account button with the signed-in account menu open (data refresh summary, My tickers, Display, Sign out) |
+| `account-settings-tickers.png` | Account settings dialog, **My tickers** tab (pin ★ max 6, reorder ▲▼, remove ✕, search-add) |
+| `account-settings-refresh.png` | Account settings dialog, **Data refresh** tab (job schedule / status) |
+| `account-settings-display.png` | Account settings dialog, **Display** tab (time zone PT/ET, up/down colors) |
 | `themes/*-desktop-full.png` | Full desktop view in each proposed color theme (see [`themes/README.md`](themes/README.md)) |
 
 **Note:** Values in these shots are **design sample data** from the artboard’s inline demo generator (dated demo facts and synthetic series), **not live lake / market data**. See the [Dashboard features](https://github.com/ram290476/investor-dashboard/wiki/Dashboard-features) wiki for what ships today vs design-only.
@@ -22,4 +26,11 @@ cd design/ai-generated
 python3 -m http.server 8765
 # In another shell, open Main.dc.html / Mobile.dc.html in Chrome and capture,
 # or use a headless script against http://127.0.0.1:8765/…
+```
+
+Account menu / settings dialog shots (self-contained, starts its own static server):
+
+```sh
+npm i --no-save puppeteer-core     # or NODE_PATH=<dir with puppeteer-core>
+CHROME=/usr/bin/google-chrome node docs/design-roadmap/render-account-settings.js
 ```
