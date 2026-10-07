@@ -9,13 +9,16 @@ import {
 } from "./chart-period.js";
 import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle } from "./trend-state.js";
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
+import { createAccountSettings } from "./account-settings.js";
+import { emailFromIdToken, fallbackSelection, parseSettingsHash, stripOrder } from "./settings-model.js";
 
 const root = document.querySelector("#app");
 const svgNS = "http://www.w3.org/2000/svg";
-const authKeys = { state: "oauth_state", verifier: "oauth_verifier" };
+const authKeys = { state: "oauth_state", verifier: "oauth_verifier", hash: "oauth_return_hash" };
 const session = {
   config: null,
   accessToken: null,
+  email: null,
   prefs: null,
   dashboard: null,
   // "loading" until the first /dashboard answer; "error" when it could not be read.
@@ -23,6 +26,8 @@ const session = {
   // Last refresh failure. Ordinary redraws keep showing it until a refresh succeeds.
   dashboardError: "",
   status: null,
+  // A settings save that failed after the dialog closed: { message, reopen }.
+  settingsError: null,
   selected: null,
   periodSave: false,
 };
@@ -96,6 +101,7 @@ async function beginSignIn() {
     const state = randomBase64Url(32);
     sessionStorage.setItem(authKeys.verifier, verifier);
     sessionStorage.setItem(authKeys.state, state);
+    if (parseSettingsHash(location.hash)) sessionStorage.setItem(authKeys.hash, location.hash);
     const authorize = new URL("/oauth2/authorize", session.config.cognitoDomain);
     authorize.search = new URLSearchParams({
       client_id: session.config.clientId,
@@ -140,7 +146,11 @@ async function completeSignIn() {
     throw new Error(tokens.error_description || tokens.error || "Cognito did not return an access token.");
   }
   session.accessToken = tokens.access_token;
-  history.replaceState({}, "", location.pathname);
+  session.email = emailFromIdToken(tokens.id_token);
+  // Keep a #settings/... deep link that was saved before the Cognito round trip.
+  const pendingHash = sessionStorage.getItem(authKeys.hash) || "";
+  sessionStorage.removeItem(authKeys.hash);
+  history.replaceState({}, "", location.pathname + pendingHash);
   return true;
 }
 
@@ -173,8 +183,7 @@ async function apiGet(path) {
   return readApiResponse(response, what);
 }
 
-async function savePrefs(update) {
-  const candidate = { ...session.prefs, ...update, version: session.prefs.version };
+async function putPrefs(candidate) {
   let response;
   try {
     response = await fetch(apiUrl("prefs"), {
@@ -189,7 +198,11 @@ async function savePrefs(update) {
   } catch (cause) {
     throw networkError("Saving preferences", cause);
   }
-  session.prefs = await readApiResponse(response, "Saving preferences");
+  return readApiResponse(response, "Saving preferences");
+}
+
+async function savePrefs(update) {
+  session.prefs = await putPrefs({ ...session.prefs, ...update, version: session.prefs.version });
 }
 
 // Displayed prices use close_raw (the actual traded close) and fall back to close.
@@ -351,8 +364,13 @@ function sectionHeader(title, subtitle = "") {
 function renderWatchlist() {
   const list = node("nav", "watchlist");
   list.setAttribute("aria-label", "Watchlist");
-  const tickers = session.prefs?.tickers || [];
-  tickers.forEach((ticker) => {
+  const { pinned, others } = stripOrder(session.prefs || {});
+  [...pinned, ...others].forEach((ticker, index) => {
+    if (index === pinned.length && pinned.length && others.length) {
+      const divider = node("span", "watchlist-divider");
+      divider.setAttribute("aria-hidden", "true");
+      list.append(divider);
+    }
     const record = session.dashboard?.tickers?.[ticker];
     const history = record?.price_history || [];
     const latest = history.at(-1);
@@ -364,7 +382,13 @@ function renderWatchlist() {
       session.selected = ticker;
       renderDashboard();
     });
-    button.append(node("span", "ticker-symbol", ticker));
+    const symbol = node("span", "ticker-symbol", ticker);
+    if (pinned.includes(ticker)) {
+      const star = node("span", "ticker-pin", "★");
+      star.setAttribute("aria-hidden", "true");
+      symbol.prepend(star);
+    }
+    button.append(symbol);
     button.append(
       node(
         "span",
@@ -374,6 +398,13 @@ function renderWatchlist() {
     );
     list.append(button);
   });
+  const manage = node("button", "ticker-button ticker-manage");
+  manage.type = "button";
+  manage.dataset.opener = "strip";
+  manage.setAttribute("aria-label", "My tickers: add, pin or reorder");
+  manage.append(node("span", "ticker-symbol", "+ Add / pin"), node("span", "ticker-meta", "My tickers"));
+  manage.addEventListener("click", () => settings.open("tickers", "strip"));
+  list.append(manage);
   return list;
 }
 
@@ -793,6 +824,8 @@ function renderFilings(tickerData) {
 
 function renderStatus() {
   const panel = node("section", "panel");
+  panel.id = "data-freshness";
+  panel.tabIndex = -1;
   const status = session.status || session.dashboard?.status;
   panel.append(sectionHeader("Data freshness", status?.generated_at ? `Updated ${formatTime(status.generated_at, session.prefs.display.time_zone)}` : "Collector status"));
   const jobs = status?.jobs || [];
@@ -820,111 +853,10 @@ function renderStatus() {
   return panel;
 }
 
-function renderSettings(onMessage) {
-  const panel = node("section", "panel");
-  panel.append(sectionHeader("Watchlist & display", "Preferences are private to your signed-in account."));
-  const form = node("form", "control-row");
-  form.setAttribute("aria-label", "Add a ticker to the watchlist");
-  const field = node("div", "field-row");
-  const label = node("label", "visually-hidden", "Ticker symbol");
-  label.htmlFor = "new-ticker";
-  const input = node("input");
-  input.id = "new-ticker";
-  input.name = "ticker";
-  input.placeholder = "Add ticker (e.g. NVDA)";
-  input.autocomplete = "off";
-  input.maxLength = 10;
-  input.required = true;
-  field.append(label, input);
-  const add = node("button", "button-primary", "Add ticker");
-  add.type = "submit";
-  form.append(field, add);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const ticker = input.value.trim().toUpperCase();
-    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) {
-      onMessage("Enter a valid ticker symbol.", true);
-      return;
-    }
-    if (session.prefs.tickers.includes(ticker)) {
-      onMessage(`${ticker} is already on your watchlist.`, true);
-      return;
-    }
-    add.disabled = true;
-    try {
-      await savePrefs({ tickers: [...session.prefs.tickers, ticker] });
-      session.selected = ticker;
-      onMessage(`${ticker} added. Its historical backfill will start automatically.`);
-      await refreshData(false);
-    } catch (error) {
-      onMessage(error.message, true);
-    } finally {
-      add.disabled = false;
-    }
-  });
-
-  const paletteLabel = node("label", "", "Up/down colors");
-  paletteLabel.htmlFor = "palette";
-  const palette = document.createElement("select");
-  palette.id = "palette";
-  [
-    ["green-red", "Green / red"],
-    ["red-green", "Red / green"],
-    ["blue-orange", "Blue / orange"],
-  ].forEach(([value, labelText]) => {
-    const option = node("option", "", labelText);
-    option.value = value;
-    option.selected = session.prefs.display.updown_palette === value;
-    palette.append(option);
-  });
-  palette.addEventListener("change", async () => {
-    try {
-      await savePrefs({
-        display: { ...session.prefs.display, updown_palette: palette.value },
-      });
-      onMessage("Display preference saved.");
-      renderDashboard();
-    } catch (error) {
-      onMessage(error.message, true);
-      palette.value = session.prefs.display.updown_palette;
-    }
-  });
-  const timezoneLabel = node("label", "", "Time zone");
-  timezoneLabel.htmlFor = "timezone";
-  const timezone = document.createElement("select");
-  timezone.id = "timezone";
-  [
-    ["America/Los_Angeles", "Pacific"],
-    ["America/New_York", "Eastern"],
-    ["UTC", "UTC"],
-  ].forEach(([value, labelText]) => {
-    const option = node("option", "", labelText);
-    option.value = value;
-    option.selected = session.prefs.display.time_zone === value;
-    timezone.append(option);
-  });
-  timezone.addEventListener("change", async () => {
-    try {
-      await savePrefs({ display: { ...session.prefs.display, time_zone: timezone.value } });
-      onMessage("Display preference saved.");
-      renderDashboard();
-    } catch (error) {
-      onMessage(error.message, true);
-      timezone.value = session.prefs.display.time_zone;
-    }
-  });
-  const controls = node("div", "control-row");
-  controls.append(paletteLabel, palette, timezoneLabel, timezone);
-  panel.append(form, controls);
-  return panel;
-}
-
 function renderDashboard() {
   const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
-  if (!session.selected || !session.prefs.tickers.includes(session.selected)) {
-    session.selected = session.prefs.pinned?.[0] || session.prefs.tickers[0];
-  }
+  session.selected = fallbackSelection(session.prefs, session.selected);
   root.replaceChildren();
   root.dataset.palette = session.prefs.display.updown_palette;
 
@@ -940,10 +872,19 @@ function renderDashboard() {
     ? `Data ${formatTime(session.dashboard.generated_at, session.prefs.display.time_zone)}`
     : "Refresh data";
   actions.append(action(lastRefresh, "", () => refreshData(true)));
-  actions.append(action("Sign out", "", signOut));
+  actions.append(settings.renderAccountButton());
   header.append(actions);
   root.append(header);
   root.append(renderWatchlist());
+
+  if (session.settingsError) {
+    const { message, reopen } = session.settingsError;
+    const alert = node("p", "data-state error", `${message} `);
+    alert.setAttribute("role", "alert");
+    // Opening the dialog clears settingsError and redraws the page without this alert.
+    alert.append(action("Open settings", "button-link", reopen));
+    root.append(alert);
+  }
 
   if (errorMessage) {
     const alert = node("p", "data-state error");
@@ -993,7 +934,6 @@ function renderDashboard() {
   side.append(renderDrivers(tickerData), renderNews(tickerData), renderFilings(tickerData), renderStatus());
   mainGrid.append(primary, side);
   root.append(mainGrid);
-  root.append(renderSettings(onMessage));
   const footer = node("footer", "dashboard-footer");
   footer.append(node("span", "", "Information for research; not investment advice."));
   footer.append(node("span", "", session.dashboard?.generated_at ? `Snapshot ${session.dashboard.generated_at}` : "Serving snapshot unavailable"));
@@ -1002,6 +942,7 @@ function renderDashboard() {
   if (!session.dashboard && !errorMessage) {
     root.querySelector(".price-panel-state")?.remove();
   }
+  settings.refresh();
 }
 
 async function refreshData(showLoading) {
@@ -1026,6 +967,7 @@ async function refreshData(showLoading) {
     .filter((result) => result.status === "rejected")
     .forEach((result) => console.error("Dashboard refresh failed:", result.reason));
   if (outcome.unauthorized) {
+    settings.close();
     session.accessToken = null;
     showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
     return;
@@ -1068,8 +1010,10 @@ async function start() {
 
   try {
     session.prefs = await apiGet("prefs");
-    session.selected = session.prefs.pinned?.[0] || session.prefs.tickers[0];
+    session.selected = fallbackSelection(session.prefs, null);
     renderDashboard();
+    window.addEventListener("hashchange", () => settings.openFromHash());
+    settings.openFromHash();
     await refreshData(false);
   } catch (error) {
     if (error.status === 401) {
@@ -1079,5 +1023,30 @@ async function start() {
     showGate("Dashboard could not load", "The preferences service did not return your account settings.", error.message, true);
   }
 }
+
+const settings = createAccountSettings({
+  session,
+  putPrefs,
+  getPrefs: () => apiGet("prefs"),
+  onPrefsChange: () => renderDashboard(),
+  onTickerAdded: (ticker) => {
+    session.selected = ticker;
+    refreshData(false);
+  },
+  onUnauthorized: () => {
+    settings.close();
+    session.accessToken = null;
+    showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+  },
+  onSaveError: (message, reopen) => {
+    session.settingsError = { message, reopen };
+    renderDashboard();
+  },
+  signOut,
+  formatPrice,
+  formatPercent,
+  displayPrice,
+  browserTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+});
 
 start();
