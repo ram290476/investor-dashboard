@@ -7,11 +7,23 @@ import {
   sessionReturn,
   validBars,
 } from "./chart-period.js";
+import { hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 
 const root = document.querySelector("#app");
 const svgNS = "http://www.w3.org/2000/svg";
 const authKeys = { state: "oauth_state", verifier: "oauth_verifier" };
-const session = { config: null, accessToken: null, prefs: null, dashboard: null, status: null, selected: null, periodSave: false };
+const session = {
+  config: null,
+  accessToken: null,
+  prefs: null,
+  dashboard: null,
+  // "loading" until the first /dashboard answer; "error" when it could not be read.
+  dashboardState: "loading",
+  status: null,
+  selected: null,
+  periodSave: false,
+};
+const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 const aliases = {
   DGS2: "2Y Treasury",
   DGS10: "10Y Treasury",
@@ -142,40 +154,39 @@ function signOut() {
 }
 
 async function apiGet(path) {
-  const response = await fetch(apiUrl(path), {
-    headers: {
-      Authorization: `Bearer ${session.accessToken}`,
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body.error || `Request failed (${response.status}).`);
-    error.status = response.status;
-    throw error;
+  const what = apiLabels[path] || "The request";
+  let response;
+  try {
+    response = await fetch(apiUrl(path), {
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    });
+  } catch (cause) {
+    throw networkError(what, cause);
   }
-  return body;
+  return readApiResponse(response, what);
 }
 
 async function savePrefs(update) {
   const candidate = { ...session.prefs, ...update, version: session.prefs.version };
-  const response = await fetch(apiUrl("prefs"), {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${session.accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(candidate),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body.error || `Saving preferences failed (${response.status}).`);
-    error.status = response.status;
-    throw error;
+  let response;
+  try {
+    response = await fetch(apiUrl("prefs"), {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(candidate),
+    });
+  } catch (cause) {
+    throw networkError("Saving preferences", cause);
   }
-  session.prefs = body;
+  session.prefs = await readApiResponse(response, "Saving preferences");
 }
 
 // Displayed prices use close_raw (the actual traded close) and fall back to close.
@@ -462,9 +473,13 @@ function renderPricePanel(tickerData, onSelectPeriod) {
       node(
         "p",
         "data-state",
-        bars.length === 1
-          ? "Only one daily close is available; a line chart needs at least two points."
-          : "No historical closes are published yet. Start the initial backfill and this chart will fill as batches complete.",
+        session.dashboardState === "loading"
+          ? "Loading daily closes…"
+          : session.dashboardState === "error" && !tickerData
+            ? "Daily closes could not be loaded. Use Try again above."
+            : bars.length === 1
+              ? "Only one daily close is available; a line chart needs at least two points."
+              : "No historical closes are published yet. Start the initial backfill and this chart will fill as batches complete.",
       ),
     );
   }
@@ -497,6 +512,14 @@ function renderDrivers(tickerData) {
     .filter((row) => row.series_id && isNumericValue(row.effect))
     .sort((a, b) => Math.abs(Number(b.effect)) - Math.abs(Number(a.effect)))
     .slice(0, 5);
+  if (!drivers.length && session.dashboardState === "loading") {
+    panel.append(node("p", "data-state", "Loading driver trends…"));
+    return panel;
+  }
+  if (!drivers.length && session.dashboardState === "error") {
+    panel.append(node("p", "data-state", "Driver trends could not be loaded. Use Try again above."));
+    return panel;
+  }
   if (!drivers.length) {
     panel.append(node("p", "data-state", "Driver trends are unavailable until daily prices and macro observations have been processed."));
     return panel;
@@ -522,6 +545,14 @@ function renderFundamentals() {
     .filter((row) => row.ticker === session.selected)
     .sort((a, b) => String(b.release_date).localeCompare(String(a.release_date)))
     .slice(0, 8);
+  if (!rows.length && session.dashboardState === "loading") {
+    panel.append(node("p", "data-state", "Loading quarterly fundamentals…"));
+    return panel;
+  }
+  if (!rows.length && session.dashboardState === "error") {
+    panel.append(node("p", "data-state", "Quarterly fundamentals could not be loaded. Use Try again above."));
+    return panel;
+  }
   if (!rows.length) {
     panel.append(node("p", "data-state", "No quarterly fundamentals have been published for this ticker yet."));
     return panel;
@@ -709,7 +740,8 @@ function renderDashboard(errorMessage = "") {
   if (errorMessage) {
     const alert = node("p", "data-state error");
     alert.setAttribute("role", "alert");
-    alert.textContent = errorMessage;
+    alert.textContent = `${errorMessage} `;
+    alert.append(action("Try again", "button-link", () => refreshData(true)));
     root.append(alert);
   }
 
@@ -770,11 +802,22 @@ async function refreshData(showLoading) {
     }
   }
   const [dashboardResult, statusResult] = await Promise.allSettled([apiGet("dashboard"), apiGet("status")]);
-  if (dashboardResult.status === "fulfilled") session.dashboard = dashboardResult.value;
+  if (dashboardResult.status === "fulfilled" && !hasDashboardData(dashboardResult.value)) {
+    const error = new Error("Dashboard data arrived without any tickers. Try again.");
+    error.status = 200;
+    Object.assign(dashboardResult, { status: "rejected", reason: error });
+  }
+  if (dashboardResult.status === "fulfilled") {
+    session.dashboard = dashboardResult.value;
+    session.dashboardState = "ready";
+  } else if (!session.dashboard) {
+    session.dashboardState = dashboardResult.reason?.status === 503 ? "unpublished" : "error";
+  }
   if (statusResult.status === "fulfilled") session.status = statusResult.value;
   const failures = [dashboardResult, statusResult]
     .filter((result) => result.status === "rejected")
     .map((result) => result.reason);
+  failures.forEach((error) => console.error("Dashboard refresh failed:", error));
   if (failures.some((error) => error.status === 401)) {
     session.accessToken = null;
     showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
