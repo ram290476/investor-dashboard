@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ApiError, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
+import { ApiError, applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 
 const json = (body, status = 200) =>
   new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -53,6 +53,28 @@ test("network failures carry status 0 and the browser's reason", () => {
   const error = networkError("Dashboard data", new TypeError("Load failed"));
   assert.equal(error.status, 0);
   assert.match(error.message, /Dashboard data could not be reached \(Load failed\)/);
+});
+
+test("a failed first dashboard load keeps its message until a later load succeeds", () => {
+  const loading = { dashboard: null, dashboardState: "loading", status: null, dashboardError: "" };
+  const failed = applyRefresh(
+    loading,
+    { status: "rejected", reason: networkError("Dashboard data", new TypeError("Load failed")) },
+    { status: "fulfilled", value: { jobs: [] } },
+  );
+  assert.equal(failed.dashboard, null);
+  assert.equal(failed.dashboardState, "error");
+  assert.match(dashboardBanner(failed), /Dashboard data could not be reached \(Load failed\)/);
+  assert.equal(dashboardBanner(failed), failed.dashboardError);
+
+  const recovered = applyRefresh(
+    failed,
+    { status: "fulfilled", value: { tickers: { TSLA: { price_history: [] } }, generated_at: "2026-10-07T00:00:00Z" } },
+    { status: "fulfilled", value: { jobs: [] } },
+  );
+  assert.equal(recovered.dashboardState, "ready");
+  assert.equal(recovered.dashboard.tickers.TSLA.price_history.length, 0);
+  assert.equal(dashboardBanner(recovered), "");
 });
 
 test("hasDashboardData requires a tickers map", () => {

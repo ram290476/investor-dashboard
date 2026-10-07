@@ -46,3 +46,54 @@ export async function readApiResponse(response, what) {
 export function hasDashboardData(dashboard) {
   return Boolean(dashboard && typeof dashboard.tickers === "object" && dashboard.tickers !== null && !Array.isArray(dashboard.tickers));
 }
+
+export const UNPUBLISHED_DASHBOARD_MESSAGE =
+  "Dashboard data has not been published. Start the historical backfill; the serving snapshot is rebuilt as data arrives.";
+
+function settledFailures(dashboardResult, statusResult) {
+  return [dashboardResult, statusResult]
+    .filter((result) => result && result.status === "rejected" && result.reason)
+    .map((result) => result.reason);
+}
+
+// The banner refreshData shows. Empty when both calls succeeded.
+export function refreshErrorMessage(dashboardResult, statusResult) {
+  const failures = settledFailures(dashboardResult, statusResult);
+  if (dashboardResult?.status === "rejected" && dashboardResult.reason?.status === 503) {
+    return UNPUBLISHED_DASHBOARD_MESSAGE;
+  }
+  const dashboardError = failures.find((error) => error.status !== 503) || failures[0];
+  return dashboardError?.message || "";
+}
+
+// Fold one refresh into the session fields a later redraw will read.
+// The error string stays until a later refresh has nothing to report.
+// A 401 still applies any successful payload, then leaves the previous banner alone;
+// the caller replaces the page with the sign-in gate.
+// Ordinary redraws (watchlist, period, preferences) read this instead of a passed-in message.
+export function dashboardBanner(session) {
+  return session?.dashboardError || "";
+}
+
+export function applyRefresh(session, dashboardResult, statusResult) {
+  const next = {
+    dashboard: session?.dashboard ?? null,
+    dashboardState: session?.dashboardState ?? "loading",
+    status: session?.status ?? null,
+    dashboardError: session?.dashboardError || "",
+    unauthorized: false,
+  };
+  if (dashboardResult?.status === "fulfilled") {
+    next.dashboard = dashboardResult.value;
+    next.dashboardState = "ready";
+  } else if (!session?.dashboard) {
+    next.dashboardState = dashboardResult?.reason?.status === 503 ? "unpublished" : "error";
+  }
+  if (statusResult?.status === "fulfilled") next.status = statusResult.value;
+  if (settledFailures(dashboardResult, statusResult).some((error) => error.status === 401)) {
+    next.unauthorized = true;
+    return next;
+  }
+  next.dashboardError = refreshErrorMessage(dashboardResult, statusResult);
+  return next;
+}

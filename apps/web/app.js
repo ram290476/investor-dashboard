@@ -7,7 +7,7 @@ import {
   sessionReturn,
   validBars,
 } from "./chart-period.js";
-import { hasDashboardData, networkError, readApiResponse } from "./api-response.js";
+import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 
 const root = document.querySelector("#app");
 const svgNS = "http://www.w3.org/2000/svg";
@@ -19,6 +19,8 @@ const session = {
   dashboard: null,
   // "loading" until the first /dashboard answer; "error" when it could not be read.
   dashboardState: "loading",
+  // Last refresh failure. Ordinary redraws keep showing it until a refresh succeeds.
+  dashboardError: "",
   status: null,
   selected: null,
   periodSave: false,
@@ -712,7 +714,8 @@ function renderSettings(onMessage) {
   return panel;
 }
 
-function renderDashboard(errorMessage = "") {
+function renderDashboard() {
+  const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
   if (!session.selected || !session.prefs.tickers.includes(session.selected)) {
     session.selected = session.prefs.pinned?.[0] || session.prefs.tickers[0];
@@ -807,30 +810,20 @@ async function refreshData(showLoading) {
     error.status = 200;
     Object.assign(dashboardResult, { status: "rejected", reason: error });
   }
-  if (dashboardResult.status === "fulfilled") {
-    session.dashboard = dashboardResult.value;
-    session.dashboardState = "ready";
-  } else if (!session.dashboard) {
-    session.dashboardState = dashboardResult.reason?.status === 503 ? "unpublished" : "error";
-  }
-  if (statusResult.status === "fulfilled") session.status = statusResult.value;
-  const failures = [dashboardResult, statusResult]
+  const outcome = applyRefresh(session, dashboardResult, statusResult);
+  session.dashboard = outcome.dashboard;
+  session.dashboardState = outcome.dashboardState;
+  session.status = outcome.status;
+  [dashboardResult, statusResult]
     .filter((result) => result.status === "rejected")
-    .map((result) => result.reason);
-  failures.forEach((error) => console.error("Dashboard refresh failed:", error));
-  if (failures.some((error) => error.status === 401)) {
+    .forEach((result) => console.error("Dashboard refresh failed:", result.reason));
+  if (outcome.unauthorized) {
     session.accessToken = null;
     showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
     return;
   }
-  const dashboardError = failures.find((error) => error.status !== 503) || failures[0];
-  const message =
-    dashboardResult.status === "rejected" && dashboardResult.reason.status === 503
-      ? "Dashboard data has not been published. Start the historical backfill; the serving snapshot is rebuilt as data arrives."
-      : dashboardError
-        ? dashboardError.message
-        : "";
-  renderDashboard(message);
+  session.dashboardError = outcome.dashboardError;
+  renderDashboard();
 }
 
 async function start() {
