@@ -9,7 +9,7 @@ select = ["E", "F", "W", "I", "B", "UP", "DTZ", "BLE", "RUF"]
 known-first-party = [
   "observability", "api_keys", "http_client", "universe", "lake", "status_feed", "collectors",
   "trend_metrics", "fundamentals", "prefs_api", "key_rotation_check", "short_interest", "options_daily", "backfill",
-  "price_reconcile",
+  "price_reconcile", "news_sentiment",
 ]
 
 [tool.pytest.ini_options]

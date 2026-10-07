@@ -1,4 +1,5 @@
 import dashboard_build
+import pytest
 
 
 def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals():
@@ -19,7 +20,8 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
         generated_at="2026-10-04T22:00:00+00:00",
     )
 
-    assert snapshot["schema_version"] == 1
+    assert snapshot["schema_version"] == 2
+    assert snapshot["tickers"]["TSLA"]["news"] is None
     assert snapshot["generated_at"] == "2026-10-04T22:00:00+00:00"
     assert snapshot["data_status"] == "available"
     assert snapshot["tickers"]["TSLA"]["price_history"] == [
@@ -55,3 +57,55 @@ def test_snapshot_carries_close_raw_and_tolerates_rows_without_it():
     history = snapshot["tickers"]["TSLA"]["price_history"]
     assert history[0]["close_raw"] is None and history[0]["adj_close"] is None
     assert history[1] == {"date": "2026-10-02", "close": 150.0, "close_raw": 300.0, "adj_close": 149.0, "volume": 2}
+
+
+def test_news_keeps_the_last_48_hours_and_a_seven_day_mean():
+    snapshot = dashboard_build.build_snapshot(
+        tickers=["TSLA"],
+        prices={},
+        trends={},
+        fundamentals=[],
+        status=None,
+        generated_at="2026-10-06T18:00:00+00:00",
+        news={
+            "TSLA": {
+                "daily": [
+                    {"ticker": "TSLA", "date": "2026-10-01", "mean_sentiment": 0.2},
+                    {"ticker": "TSLA", "date": "2026-10-06", "mean_sentiment": 0.4},
+                ],
+                "articles": [
+                    {
+                        "url_hash": "old",
+                        "url": "https://example.com/old",
+                        "title": "Old",
+                        "publisher": "Old",
+                        "published_at": "2026-10-01T00:00:00+00:00",
+                        "sentiment_label": "bullish",
+                        "tickers": ["TSLA"],
+                    },
+                    {
+                        "url_hash": "new",
+                        "url": "https://example.com/new",
+                        "title": "Tesla approval",
+                        "publisher": "Wire",
+                        "published_at": "2026-10-06T16:30:00+00:00",
+                        "sentiment_label": "bullish",
+                        "tickers": ["TSLA"],
+                    },
+                    {
+                        "url_hash": "new",
+                        "url": "https://example.com/new?utm_source=x",
+                        "title": "Duplicate",
+                        "publisher": "Wire",
+                        "published_at": "2026-10-06T16:00:00+00:00",
+                        "sentiment_label": "bearish",
+                        "tickers": ["TSLA"],
+                    },
+                ],
+            }
+        },
+    )
+    news = snapshot["tickers"]["TSLA"]["news"]
+    assert news["sentiment_7d"] == pytest.approx(0.3)
+    assert [item["title"] for item in news["headlines"]] == ["Tesla approval"]
+    assert news["headlines"][0]["label"] == "bullish"
