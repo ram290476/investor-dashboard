@@ -1,4 +1,5 @@
 import dashboard_build
+import pytest
 
 
 def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals():
@@ -69,6 +70,9 @@ def test_contracts_are_served_only_for_mapped_tickers():
     }
     snapshot = dashboard_build.build_snapshot(
         tickers=["SPCX", "TSLA", "AAPL"],
+def test_news_keeps_the_last_48_hours_and_a_seven_day_mean():
+    snapshot = dashboard_build.build_snapshot(
+        tickers=["TSLA"],
         prices={},
         trends={},
         fundamentals=[],
@@ -78,6 +82,49 @@ def test_contracts_are_served_only_for_mapped_tickers():
     assert snapshot["tickers"]["SPCX"]["contracts"]["ttm_obligated"] == 1200.0
     assert snapshot["tickers"]["TSLA"]["contracts"] is None
     assert snapshot["tickers"]["AAPL"]["contracts"] is None
+        generated_at="2026-10-06T18:00:00+00:00",
+        news={
+            "TSLA": {
+                "daily": [
+                    {"ticker": "TSLA", "date": "2026-10-01", "mean_sentiment": 0.2},
+                    {"ticker": "TSLA", "date": "2026-10-06", "mean_sentiment": 0.4},
+                ],
+                "articles": [
+                    {
+                        "url_hash": "old",
+                        "url": "https://example.com/old",
+                        "title": "Old",
+                        "publisher": "Old",
+                        "published_at": "2026-10-01T00:00:00+00:00",
+                        "sentiment_label": "bullish",
+                        "tickers": ["TSLA"],
+                    },
+                    {
+                        "url_hash": "new",
+                        "url": "https://example.com/new",
+                        "title": "Tesla approval",
+                        "publisher": "Wire",
+                        "published_at": "2026-10-06T16:30:00+00:00",
+                        "sentiment_label": "bullish",
+                        "tickers": ["TSLA"],
+                    },
+                    {
+                        "url_hash": "new",
+                        "url": "https://example.com/new?utm_source=x",
+                        "title": "Duplicate",
+                        "publisher": "Wire",
+                        "published_at": "2026-10-06T16:00:00+00:00",
+                        "sentiment_label": "bearish",
+                        "tickers": ["TSLA"],
+                    },
+                ],
+            }
+        },
+    )
+    news = snapshot["tickers"]["TSLA"]["news"]
+    assert news["sentiment_7d"] == pytest.approx(0.3)
+    assert [item["title"] for item in news["headlines"]] == ["Tesla approval"]
+    assert news["headlines"][0]["label"] == "bullish"
 
 
 def test_intraday_is_today_only_and_short_interest_is_the_latest_settlement():

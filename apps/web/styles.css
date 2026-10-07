@@ -609,6 +609,7 @@ a {
 
 .news-list {
   display: grid;
+  gap: 0;
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
@@ -632,9 +633,25 @@ a {
 }
 
 .news-meta {
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.news-title:hover {
+  color: var(--text);
+}
+
+.news-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   margin: 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+.news-label {
+  text-transform: lowercase;
 }
 
 .driver-value,
