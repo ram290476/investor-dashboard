@@ -15,6 +15,7 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `account-settings-tickers.png` | Account settings dialog, **My tickers** tab (pin ★ max 6, reorder ▲▼, remove ✕, search-add) |
 | `account-settings-refresh.png` | Account settings dialog, **Data refresh** tab (job schedule / status) |
 | `account-settings-display.png` | Account settings dialog, **Display** tab (time zone PT/ET, up/down colors) |
+| `themes/*-desktop-full.png` | Full desktop view in each proposed color theme (see [`themes/README.md`](themes/README.md)) |
 
 **Note:** Values in these shots are **design sample data** from the artboard’s inline demo generator (dated demo facts and synthetic series), **not live lake / market data**. See the [Dashboard features](https://github.com/ram290476/investor-dashboard/wiki/Dashboard-features) wiki for what ships today vs design-only.
 

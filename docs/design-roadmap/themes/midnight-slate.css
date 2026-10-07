@@ -1,0 +1,32 @@
+/* Midnight Slate — Modern fintech / crypto dashboards: blue-slate surfaces a step lighter than the default, indigo accent, mint up / rose down. */
+/* Generated from themes.json by render-themes.js. */
+:root[data-theme="midnight-slate"] {
+  color-scheme: dark;
+  --bg: #0F172A;
+  --surface: #162036;
+  --surface-2: #1E293B;
+  --border: #334155;
+  --border-strong: #52617A;
+  --grid: #243049;
+  --text: #F1F5F9;
+  --text-2: #CBD5E1;
+  --text-muted: #A7B3C5;
+  --text-faint: #94A3B8;
+  --accent: #818CF8;
+  --accent-text: #A5B4FC;
+  --up: #34D399;
+  --down: #FB7185;
+  --neutral: #A7B3C5;
+  --warning: #FBBF24;
+  --series-1: #818CF8;
+  --series-2: #F59E0B;
+  --series-3: #F472B6;
+  --series-4: #C084FC;
+  --series-5: #22D3EE;
+  --series-6: #FACC15;
+  --heat: #6366F1;
+  --accent-subtle: #2B365D;
+  --up-subtle: #1B3B45;
+  --down-subtle: #382C42;
+  --warning-subtle: #444032;
+}

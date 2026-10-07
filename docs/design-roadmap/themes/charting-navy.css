@@ -1,0 +1,32 @@
+/* Charting Navy — Dark mode of popular web charting platforms: deep navy canvas, teal-green up / coral-red down candles, vivid blue accent. */
+/* Generated from themes.json by render-themes.js. */
+:root[data-theme="charting-navy"] {
+  color-scheme: dark;
+  --bg: #0A1120;
+  --surface: #111A2E;
+  --surface-2: #18233A;
+  --border: #27344F;
+  --border-strong: #3E4E70;
+  --grid: #1C2842;
+  --text: #D9E1EE;
+  --text-2: #B6C1D4;
+  --text-muted: #93A0B8;
+  --text-faint: #8592AB;
+  --accent: #4C8DFF;
+  --accent-text: #8DB6FF;
+  --up: #26A69A;
+  --down: #EF5350;
+  --neutral: #93A0B8;
+  --warning: #F7B32B;
+  --series-1: #4C8DFF;
+  --series-2: #FF9800;
+  --series-3: #F06292;
+  --series-4: #A98BF5;
+  --series-5: #26C6DA;
+  --series-6: #FFD54F;
+  --heat: #3D6FD6;
+  --accent-subtle: #1D3158;
+  --up-subtle: #142F3E;
+  --down-subtle: #322333;
+  --warning-subtle: #3F392D;
+}

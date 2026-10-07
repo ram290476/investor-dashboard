@@ -1,0 +1,32 @@
+/* Industrial Dark (default) — The current Investor Dashboard design: cool charcoal panels, blue accent, GitHub-style green/red. */
+/* Generated from themes.json by render-themes.js. */
+:root[data-theme="industrial-dark"] {
+  color-scheme: dark;
+  --bg: #0B0E13;
+  --surface: #12161D;
+  --surface-2: #1A2029;
+  --border: #2A323E;
+  --border-strong: #4A5361;
+  --grid: #222A35;
+  --text: #E6EAF0;
+  --text-2: #C5CDD8;
+  --text-muted: #9BA6B5;
+  --text-faint: #8B96A6;
+  --accent: #6CA6FF;
+  --accent-text: #8EBBFF;
+  --up: #3FB950;
+  --down: #F85149;
+  --neutral: #9BA6B5;
+  --warning: #E3B341;
+  --series-1: #6CA6FF;
+  --series-2: #F2A33A;
+  --series-3: #EC7BA6;
+  --series-4: #B392F0;
+  --series-5: #39C5B0;
+  --series-6: #E3C05C;
+  --heat: #5B6BD6;
+  --accent-subtle: #24334A;
+  --up-subtle: #192E25;
+  --down-subtle: #341F24;
+  --warning-subtle: #3C3524;
+}
