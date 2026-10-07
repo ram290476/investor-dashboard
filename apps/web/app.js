@@ -391,7 +391,7 @@ function disabledPeriodTip(period, quote) {
   return `Not enough history yet · ${period.id} needs ${quote.needed} sessions (${have})`;
 }
 
-function renderPeriodChips(history, activeId, onSelect) {
+function renderPeriodChips(history, activeId, onSelect, intraday) {
   const group = node("div", "period-chips");
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", "Period: return over each period; select one to chart it");
@@ -402,8 +402,10 @@ function renderPeriodChips(history, activeId, onSelect) {
     button.type = "button";
     button.dataset.period = period.id;
     button.setAttribute("aria-pressed", selected ? "true" : "false");
-    const valueClass = quote.available ? polarity(quote.returnValue) : "neutral";
-    const valueText = quote.available ? formatPercent(quote.returnValue, 1) : "—";
+    const liveReturn = period.id === "1D" && isNumericValue(intraday?.change_pct) ? Number(intraday.change_pct) : null;
+    const shownReturn = liveReturn == null ? quote.returnValue : liveReturn;
+    const valueClass = quote.available || liveReturn != null ? polarity(shownReturn) : "neutral";
+    const valueText = quote.available || liveReturn != null ? formatPercent(shownReturn, 1) : "—";
     button.append(node("span", "period-label", period.id), node("span", `period-return mono ${valueClass}`, valueText));
     if (!quote.available) {
       const reason = disabledPeriodTip(period, quote);
@@ -414,7 +416,7 @@ function renderPeriodChips(history, activeId, onSelect) {
     } else {
       const shown = selected ? "shown on the chart" : "click to show this period on the chart";
       button.title = `${period.id} return ${valueText} · ${shown}`;
-      button.setAttribute("aria-label", `${period.id} return ${valueText}, ${periodDirection(quote.returnValue)}, ${shown}`);
+      button.setAttribute("aria-label", `${period.id} return ${valueText}, ${periodDirection(shownReturn)}, ${shown}`);
       button.addEventListener("click", () => onSelect(period.id));
     }
     group.append(button);
@@ -448,13 +450,21 @@ function renderPricePanel(tickerData, onSelectPeriod) {
   const bars = validBars(history);
   const activeId = resolveChartPeriod(session.prefs.display?.chart_period, history);
   const quote = periodQuote(history, activeId);
-  const chartHistory = quote.available ? quote.window : bars;
+  const intradayBars = (tickerData?.intraday?.bars || []).map((bar) => ({
+    date: bar.ts,
+    close: bar.close,
+    adj_close: bar.close,
+    volume: bar.volume,
+  }));
+  const chartHistory = activeId === "1D" && intradayBars.length >= 2 ? intradayBars : quote.available ? quote.window : bars;
   const panel = node("section", "panel price-panel");
   const overview = node("div", "overview");
   const quoteBlock = node("div", "overview-quote");
-  quoteBlock.append(node("h2", "overview-kicker", `${session.selected} · daily closes`));
+  const live = tickerData?.intraday;
+  const liveLast = isNumericValue(live?.last) ? Number(live.last) : null;
+  quoteBlock.append(node("h2", "overview-kicker", `${session.selected} · ${liveLast == null ? "daily closes" : "live"}`));
   const latest = bars.at(-1);
-  quoteBlock.append(node("p", "overview-price", latest ? formatPrice(displayPrice(latest)) : "—"));
+  quoteBlock.append(node("p", "overview-price", liveLast == null ? (latest ? formatPrice(displayPrice(latest)) : "—") : formatPrice(liveLast)));
   quoteBlock.append(renderTrend(history, tickerData));
   const asOf = latest?.date || tickerData?.price_as_of;
   const meta = node("p", "overview-meta");
@@ -468,7 +478,7 @@ function renderPricePanel(tickerData, onSelectPeriod) {
     meta.textContent = `As of ${asOf}`;
   }
   quoteBlock.append(meta);
-  overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod));
+  overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
   panel.append(overview);
 
   if (chartHistory.length >= 2) {
@@ -483,7 +493,7 @@ function renderPricePanel(tickerData, onSelectPeriod) {
         node(
           "span",
           "",
-          `${activeId} · ${formatPercent(quote.returnValue, 1)} · ${chartHistory.length.toLocaleString()} sessions · daily closes`,
+          `${activeId} · ${formatPercent(activeId === "1D" && isNumericValue(live?.change_pct) ? live.change_pct : quote.returnValue, 1)} · ${chartHistory.length.toLocaleString()} ${activeId === "1D" && intradayBars.length >= 2 ? "hourly bars" : "sessions · daily closes"}`,
         ),
       );
       legend.append(
@@ -517,6 +527,17 @@ function renderStats(tickerData) {
   const pressure = netPressure(tickerData);
   const grid = node("section", "stats-grid");
   grid.setAttribute("aria-label", "Selected ticker summary");
+  const live = tickerData?.intraday;
+  if (isNumericValue(live?.last)) {
+    grid.append(
+      statCard(
+        "LIVE",
+        formatPrice(live.last),
+        isNumericValue(live.change_pct) ? `${formatPercent(live.change_pct, 1)} vs prior close` : "Hourly session",
+        polarity(live.change_pct),
+      ),
+    );
+  }
   grid.append(
     statCard("LAST CLOSE", latest ? formatPrice(displayPrice(latest)) : "—", latest?.date || tickerData?.price_as_of || "No data"),
     statCard(
