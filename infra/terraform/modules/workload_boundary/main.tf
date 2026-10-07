@@ -2,7 +2,8 @@
 # nothing by itself: a role's effective permissions are the overlap of its own policies and this
 # boundary. Its job is to keep any role the deploy pipeline creates or edits below the deploy
 # role's own reach:
-#   - no IAM writes of any kind (only the reads AWS Config needs);
+#   - no IAM writes of any kind (only the reads AWS Config needs), and iam:PassRole only for
+#     handing <name>-jobs-scheduler to EventBridge Scheduler (M1's one-off schedules);
 #   - no Organizations, Account, Identity Center or Identity Store writes;
 #   - no STS role assumption except the prefs API's session-tagged hop into <name>-prefs-access.
 # The explicit denies below repeat the most important of these, so widening the allow statements
@@ -32,6 +33,9 @@ locals {
   deploy_role   = "arn:${local.partition}:iam::${local.account_id}:role/${var.name}-terraform-deploy"
   oidc_provider = "arn:${local.partition}:iam::${local.account_id}:oidc-provider/token.actions.githubusercontent.com"
   prefs_access  = "arn:${local.partition}:iam::${local.account_id}:role/${var.name}-prefs-access"
+
+  # Must match aws_iam_role.scheduler in modules/jobs.
+  jobs_scheduler = "arn:${local.partition}:iam::${local.account_id}:role/${var.name}-jobs-scheduler"
 }
 
 data "aws_iam_policy_document" "boundary" {
@@ -76,6 +80,20 @@ data "aws_iam_policy_document" "boundary" {
     effect    = "Allow"
     actions   = ["sts:AssumeRole", "sts:TagSession"]
     resources = [local.prefs_access]
+  }
+
+  # The release-day job (M1) creates one-off schedules that run as the jobs scheduler role.
+  # Creating a schedule passes that role to EventBridge Scheduler; nothing else may be passed.
+  statement {
+    sid       = "PassJobsSchedulerRole"
+    effect    = "Allow"
+    actions   = ["iam:PassRole"]
+    resources = [local.jobs_scheduler]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["scheduler.amazonaws.com"]
+    }
   }
 
   statement {

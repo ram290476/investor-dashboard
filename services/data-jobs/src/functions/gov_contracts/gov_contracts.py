@@ -17,6 +17,9 @@ SAM_CALLS_PER_RUN = 3
 SAM_CALLS_PER_DAY = 10
 BACKFILL_DAYS = 365 * 5
 STATE_KEY = "curated/contracts/_state.json"
+USASPENDING_CONTRACT_CODES = ("A", "B", "C", "D")
+USASPENDING_PAGE_SIZE = 100
+USASPENDING_MAX_PAGES = 20
 NAME_TO_TICKER = (
     ("space exploration technologies", "SPCX"),
     ("spacex", "SPCX"),
@@ -89,6 +92,29 @@ def _amount(value) -> float:
         cleaned = value.replace("$", "").replace(",", "").strip()
         return float(cleaned or 0)
     return 0.0
+
+
+def usaspending_body(recipient: str, start: str, end: str, page: int = 1) -> dict:
+    """spending_by_award request. award_type_codes is required (422 without it); A-D are contracts."""
+    return {
+        "filters": {
+            "recipient_search_text": [recipient],
+            "award_type_codes": list(USASPENDING_CONTRACT_CODES),
+            "time_period": [{"start_date": start, "end_date": end}],
+        },
+        "fields": [
+            "Award ID",
+            "Recipient Name",
+            "Recipient UEI",
+            "Award Amount",
+            "Awarding Agency",
+            "Awarding Sub Agency",
+            "Start Date",
+            "Description",
+        ],
+        "limit": USASPENDING_PAGE_SIZE,
+        "page": page,
+    }
 
 
 def parse_usaspending(payload: dict, ingested_at: str) -> list[dict]:
@@ -304,28 +330,26 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         awards: list[dict] = []
         opportunities: list[dict] = []
 
+        usaspending_ok = True
         with get_client() as http:
             for index, name in enumerate(("Space Exploration Technologies", "Tesla")):
                 with source_run("usaspending") as record:
-                    payload = request_with_retry(
-                        http,
-                        "POST",
-                        "https://api.usaspending.gov/api/v2/search/spending_by_award/",
-                        json={
-                            "filters": {
-                                "recipient_search_text": [name],
-                                "time_period": [{"start_date": start, "end_date": now.date().isoformat()}],
-                            },
-                            "fields": ["Award ID", "Recipient Name", "Award Amount", "Awarding Agency", "Start Date"],
-                            "limit": 100,
-                            "page": 1,
-                        },
-                    ).json()
-                    found = parse_usaspending(payload, ingested_at)
-                    raw_key = f"raw/contracts/usaspending/date={now.date().isoformat()}/{index}.json"
-                    write_json(payload, raw_key)
-                    awards.extend(found)
-                    record["rows"] = len(found)
+                    for page in range(1, USASPENDING_MAX_PAGES + 1):
+                        payload = request_with_retry(
+                            http,
+                            "POST",
+                            "https://api.usaspending.gov/api/v2/search/spending_by_award/",
+                            json=usaspending_body(name, start, now.date().isoformat(), page),
+                        ).json()
+                        found = parse_usaspending(payload, ingested_at)
+                        day = now.date().isoformat()
+                        write_json(payload, f"raw/contracts/usaspending/date={day}/{run_id}-{index}-{page}.json")
+                        awards.extend(found)
+                        record["rows"] += len(found)
+                        if not (payload.get("page_metadata") or {}).get("hasNext"):
+                            break
+                if record["outcome"] == "failure":
+                    usaspending_ok = False
             used = 0
             if budget:
                 with source_run("sam-awards") as record:
@@ -396,7 +420,9 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         if rolled:
             write_json(rolled, "curated/contracts_rollup/latest.json")
         state.setdefault("sam_calls", {})[now.date().isoformat()] = calls_today + used
-        state["watermark"] = now.date().isoformat()
+        # USAspending is the backfill source; keep the old watermark so a failed run retries the window.
+        if usaspending_ok:
+            state["watermark"] = now.date().isoformat()
         write_json(state, STATE_KEY)
         return {"status": "partial" if partial else "success", "awards": len(merged), "sam_calls": used}
 

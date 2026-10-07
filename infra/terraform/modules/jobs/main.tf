@@ -310,14 +310,24 @@ resource "aws_iam_role_policy" "scheduler" {
   role  = aws_iam_role.scheduler[0].id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = "lambda:InvokeFunction"
-      Resource = distinct(concat(
-        [for k, _ in local.scheduled : aws_lambda_function.job[k].arn],
-        [for k, _ in local.schedule_managers : aws_lambda_function.job[k].arn],
-      ))
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunction"
+        Resource = distinct(concat(
+          [for k, _ in local.scheduled : aws_lambda_function.job[k].arn],
+          [for k, _ in local.schedule_managers : aws_lambda_function.job[k].arn],
+        ))
+      },
+      {
+        # Schedules are encrypted with the data key; Scheduler decrypts the target input with
+        # this role at run time. Without it every invocation fails as a target error.
+        Sid      = "DecryptScheduleInput"
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = var.data_key_arn
+      },
+    ]
   })
 }
 

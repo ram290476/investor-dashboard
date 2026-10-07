@@ -632,14 +632,17 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         if role:
             import boto3
 
-            planned = follow_ups_for(upcoming) + month_open_schedules(today)
-            names = ensure_schedules(
-                boto3.client("scheduler"),
-                future_schedules(planned, now),
-                getattr(context, "invoked_function_arn", ""),
-                role,
-            )
-            logger.info("release_schedules_armed", extra={"count": len(names)})
+            # Bulkhead: the prints above are already stored, so a scheduler error marks M1 partial.
+            with source_run("scheduler") as rec:
+                planned = follow_ups_for(upcoming) + month_open_schedules(today)
+                names = ensure_schedules(
+                    boto3.client("scheduler"),
+                    future_schedules(planned, now),
+                    getattr(context, "invoked_function_arn", ""),
+                    role,
+                )
+                rec["rows"] = len(names)
+                logger.info("release_schedules_armed", extra={"count": len(names)})
         return {"status": "success" if fresh else "skipped", "new_periods": len(fresh)}
 
     return run(event, context)

@@ -10,6 +10,7 @@ from gov_contracts import (
     sam_budget,
     sam_status,
     ticker_for,
+    usaspending_body,
 )
 from observability import emit_job_finished, job_handler
 
@@ -48,6 +49,16 @@ SAM = {
         }
     ]
 }
+
+
+def test_usaspending_body_has_required_award_type_codes_and_pages():
+    body = usaspending_body("Tesla", "2021-10-07", "2026-10-07", page=3)
+    # USAspending answers 422 when award_type_codes is missing.
+    assert body["filters"]["award_type_codes"] == ["A", "B", "C", "D"]
+    assert body["filters"]["recipient_search_text"] == ["Tesla"]
+    assert body["filters"]["time_period"] == [{"start_date": "2021-10-07", "end_date": "2026-10-07"}]
+    assert body["page"] == 3
+    assert "Recipient UEI" in body["fields"]
 
 
 def test_usaspending_and_sam_fixtures_map_recipients():
