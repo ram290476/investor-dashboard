@@ -7,7 +7,7 @@ import {
   sessionReturn,
   validBars,
 } from "./chart-period.js";
-import { resolveTrend, servingPriceTrend, trendLabel, trendRelation } from "./trend-state.js";
+import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle } from "./trend-state.js";
 
 const root = document.querySelector("#app");
 const svgNS = "http://www.w3.org/2000/svg";
@@ -409,47 +409,6 @@ function renderPeriodChips(history, activeId, onSelect) {
   return group;
 }
 
-function trendTitle(trend) {
-  if (!trend.state || trend.days == null) {
-    const start = trend.historyStarts ? `, history starts ${trend.historyStarts}` : "";
-    const lines = [`Not enough history · trend needs ${trend.needed} daily closes (have ${trend.sessionsAvailable}${start})`];
-    if (trend.ma20 != null) {
-      const vs = trend.vsMa20 == null ? "" : `   (${formatPercent(trend.vsMa20, 1)} vs 20D)`;
-      lines.push(`20-day avg ${formatPrice(trend.ma20)}${vs}`);
-    }
-    return lines.join("\n");
-  }
-  const name = trend.state === "uptrend" ? "Uptrend" : trend.state === "downtrend" ? "Downtrend" : "Range";
-  const sessions = `${trend.days} session${trend.days === 1 ? "" : "s"}`;
-  const held = trend.fromStart ? `at least ${sessions}` : sessions;
-  const since = trend.fromStart ? "since start of history" : `since ${trend.since}`;
-  const lines = [
-    trend.state === "range"
-      ? `Range for ${held} (${since}): ${trendRelation(trend)}`
-      : `${name} for ${held} (${since})`,
-  ];
-  const vs = trend.vsMa20 == null ? "" : `   (${formatPercent(trend.vsMa20, 1)} vs 20D)`;
-  const maNote =
-    trend.ma20 > trend.ma50 ? "20D above 50D" : trend.ma20 < trend.ma50 ? "20D below 50D" : "20D in line with 50D";
-  lines.push(`Price      ${formatPrice(trend.close)}${vs}`);
-  lines.push(`20-day avg ${formatPrice(trend.ma20)}`);
-  lines.push(`50-day avg ${formatPrice(trend.ma50)}   (${maNote})`);
-  lines.push(`Daily closes, as of ${trend.asOf || "the latest close"}`);
-  return lines.join("\n");
-}
-
-function trendSentence(trend) {
-  if (!trend.state || trend.days == null) {
-    const start = trend.historyStarts ? `, history starts ${trend.historyStarts}` : "";
-    return `Not enough history. Trend needs ${trend.needed} daily closes, ${trend.sessionsAvailable} available${start}.`;
-  }
-  const sessions = `${trend.days} session${trend.days === 1 ? "" : "s"}`;
-  const held = trend.fromStart ? `at least ${sessions} since the start of history` : sessions;
-  const vs = trend.vsMa20 == null ? "" : `, ${formatPercent(trend.vsMa20, 1)} versus the 20-day average`;
-  const name = trend.state === "uptrend" ? "Uptrend" : trend.state === "downtrend" ? "Downtrend" : "Range";
-  return `Daily closes. ${name} for ${held}: ${trendRelation(trend)}${vs}.`;
-}
-
 function renderTrend(history, tickerData) {
   const trend = resolveTrend(history, servingPriceTrend(tickerData, session.selected));
   const tone =
@@ -458,8 +417,8 @@ function renderTrend(history, tickerData) {
   const pill = node("span", `trend-pill ${tone}`, trendLabel(trend));
   pill.dataset.state = trend.state || "insufficient";
   pill.tabIndex = 0;
-  pill.title = trendTitle(trend);
-  pill.setAttribute("aria-label", trendSentence(trend));
+  pill.title = trendTitle(trend, formatPrice, formatPercent);
+  pill.setAttribute("aria-label", trendSentence(trend, formatPercent));
   row.append(pill);
   if (trend.ma20 != null && trend.vsMa20 != null) {
     const vs = node("span", "trend-vs");

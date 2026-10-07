@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveTrend, servingPriceTrend, trendLabel, trendRelation, trendState } from "./trend-state.js";
+import {
+  resolveTrend,
+  servingPriceTrend,
+  trendLabel,
+  trendRelation,
+  trendSentence,
+  trendState,
+  trendTitle,
+} from "./trend-state.js";
 
 function historyFromCloses(closes, start = "2026-01-02") {
   const cursor = new Date(`${start}T00:00:00Z`);
@@ -143,4 +151,70 @@ test("macro driver trend rows are ignored and a PX row is preferred", () => {
   assert.equal(resolved.fromStart, false);
   assert.equal(trendLabel(resolved), "Downtrend · 9d");
   assert.equal(resolved.ma20, 100);
+});
+
+test("a run that reaches the first 50-day session says at least, and names that session", () => {
+  const history = historyFromCloses(Array.from({ length: 80 }, (_, index) => 100 + index));
+  const trend = trendState(history);
+  assert.equal(trend.fromStart, true);
+  assert.equal(trend.since, history[49].date);
+  const title = trendTitle(trend);
+  const sentence = trendSentence(trend);
+  for (const copy of [title, sentence]) {
+    assert.match(copy, /at least 31 sessions/);
+    assert.match(copy, new RegExp(trend.since));
+    assert.match(copy, /Earlier sessions have no 50-day average/);
+    assert.doesNotMatch(copy, /start of history/);
+  }
+});
+
+test("a missing 50-day average is not described as above or below the 20-day", () => {
+  const history = historyFromCloses(Array.from({ length: 34 }, (_, index) => 20 + index * 0.1));
+  const serving = { state: "downtrend", days: 9, since: "2026-09-20", fromStart: false };
+  const trend = resolveTrend(history, serving);
+  assert.equal(trend.ma50, null);
+  assert.equal(trend.state, "downtrend");
+  const title = trendTitle(trend);
+  assert.match(title, /50-day avg unavailable/);
+  assert.doesNotMatch(title, /20D above 50D|20D below 50D|20D in line with 50D/);
+  assert.equal(trendRelation(trend), null);
+});
+
+test("not enough history still speaks the 20-day comparison when that average exists", () => {
+  const partial = trendState(historyFromCloses(Array.from({ length: 34 }, (_, index) => 20 + index), "2026-06-12"));
+  const sentence = trendSentence(partial);
+  assert.match(sentence, /Not enough history/);
+  assert.match(sentence, /34 available/);
+  assert.match(sentence, /history starts 2026-06-12/);
+  assert.match(sentence, /versus the 20-day average/);
+  assert.match(sentence, /\+[\d.]+%/);
+
+  const tiny = trendState(historyFromCloses(Array.from({ length: 15 }, (_, index) => index + 1)));
+  const shortSentence = trendSentence(tiny);
+  assert.match(shortSentence, /15 available/);
+  assert.doesNotMatch(shortSentence, /20-day average/);
+});
+
+test("a partial serving override does not borrow the computed run", () => {
+  const history = historyFromCloses(Array(60).fill(100));
+  const computed = trendState(history);
+  assert.equal(computed.state, "range");
+  assert.equal(computed.days, 11);
+
+  const stateOnly = servingPriceTrend(
+    { trend: { rows: [{ series_id: "PX:TSLA", trend_state: "down" }] } },
+    "TSLA",
+  );
+  const daysOnly = servingPriceTrend(
+    { trend: { rows: [{ series_id: "PX:TSLA", trend_state: "down", days_in_state: 9 }] } },
+    "TSLA",
+  );
+  for (const serving of [stateOnly, daysOnly]) {
+    const resolved = resolveTrend(history, serving);
+    assert.equal(resolved.source, "price_history");
+    assert.equal(resolved.state, "range");
+    assert.equal(resolved.days, computed.days);
+    assert.equal(resolved.since, computed.since);
+    assert.equal(trendLabel(resolved), "Range · ≥11d");
+  }
 });

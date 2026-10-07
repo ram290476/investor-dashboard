@@ -103,15 +103,28 @@ export function servingPriceTrend(tickerData, ticker) {
   };
 }
 
+function fallbackPrice(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return `$${Number(value).toFixed(2)}`;
+}
+
+function fallbackPercent(value, digits = 1) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  const number = Number(value) * 100;
+  return `${number > 0 ? "+" : ""}${number.toFixed(digits)}%`;
+}
+
+// A serving row replaces the computed run only when it brings its own state,
+// day count, and start date. A state alone must not reuse another run's days.
 export function resolveTrend(history, serving) {
   const computed = trendState(history);
-  if (!serving?.state) return computed;
+  if (!serving?.state || serving.days == null || !serving.since) return computed;
   return {
     ...computed,
     state: serving.state,
-    days: serving.days ?? computed.days,
-    since: serving.since || computed.since,
-    fromStart: serving.days != null ? serving.fromStart : computed.fromStart,
+    days: serving.days,
+    since: serving.since,
+    fromStart: Boolean(serving.fromStart),
     source: "serving",
   };
 }
@@ -120,6 +133,67 @@ export function trendLabel(trend) {
   if (!trend?.state || trend.days == null) return "Not enough history";
   const name = trend.state === "uptrend" ? "Uptrend" : trend.state === "downtrend" ? "Downtrend" : "Range";
   return `${name} · ${trend.fromStart ? "≥" : ""}${trend.days}d`;
+}
+
+export function averageNote(trend) {
+  if (trend?.ma20 == null || trend?.ma50 == null) return null;
+  if (trend.ma20 > trend.ma50) return "20D above 50D";
+  if (trend.ma20 < trend.ma50) return "20D below 50D";
+  return "20D in line with 50D";
+}
+
+function sessionPhrase(days) {
+  return `${days} session${days === 1 ? "" : "s"}`;
+}
+
+export function trendTitle(trend, formatPrice = fallbackPrice, formatPercent = fallbackPercent) {
+  if (!trend?.state || trend.days == null) {
+    const start = trend?.historyStarts ? `, history starts ${trend.historyStarts}` : "";
+    const lines = [`Not enough history · trend needs ${trend?.needed} daily closes (have ${trend?.sessionsAvailable}${start})`];
+    if (trend?.ma20 != null) {
+      const vs = trend.vsMa20 == null ? "" : `   (${formatPercent(trend.vsMa20, 1)} vs 20D)`;
+      lines.push(`20-day avg ${formatPrice(trend.ma20)}${vs}`);
+    }
+    return lines.join("\n");
+  }
+  const name = trend.state === "uptrend" ? "Uptrend" : trend.state === "downtrend" ? "Downtrend" : "Range";
+  const sessions = sessionPhrase(trend.days);
+  const held = trend.fromStart ? `at least ${sessions}` : sessions;
+  const since = `since ${trend.since}`;
+  const unknown = trend.fromStart ? ". Earlier sessions have no 50-day average" : "";
+  const relation = trendRelation(trend);
+  const lines = [
+    trend.state === "range" && relation
+      ? `Range for ${held} (${since})${unknown}: ${relation}`
+      : `${name} for ${held} (${since})${unknown}`,
+  ];
+  const vs = trend.vsMa20 == null ? "" : `   (${formatPercent(trend.vsMa20, 1)} vs 20D)`;
+  const note = averageNote(trend);
+  lines.push(`Price      ${formatPrice(trend.close)}${vs}`);
+  lines.push(trend.ma20 == null ? "20-day avg unavailable" : `20-day avg ${formatPrice(trend.ma20)}`);
+  lines.push(trend.ma50 == null ? "50-day avg unavailable" : `50-day avg ${formatPrice(trend.ma50)}${note ? `   (${note})` : ""}`);
+  lines.push(`Daily closes, as of ${trend.asOf || "the latest close"}`);
+  return lines.join("\n");
+}
+
+export function trendSentence(trend, formatPercent = fallbackPercent) {
+  if (!trend?.state || trend.days == null) {
+    const start = trend?.historyStarts ? `, history starts ${trend.historyStarts}` : "";
+    const vs = trend?.vsMa20 == null ? "" : `, ${formatPercent(trend.vsMa20, 1)} versus the 20-day average`;
+    return `Not enough history. Trend needs ${trend?.needed} daily closes, ${trend?.sessionsAvailable} available${start}${vs}.`;
+  }
+  const name = trend.state === "uptrend" ? "Uptrend" : trend.state === "downtrend" ? "Downtrend" : "Range";
+  const sessions = sessionPhrase(trend.days);
+  const relation = trendRelation(trend);
+  const parts = [];
+  if (relation) parts.push(relation);
+  if (trend.vsMa20 != null) parts.push(`${formatPercent(trend.vsMa20, 1)} versus the 20-day average`);
+  const detail = parts.length ? `: ${parts.join(", ")}` : "";
+  if (trend.fromStart) {
+    const lead = `Daily closes. ${name} for at least ${sessions} since ${trend.since}. Earlier sessions have no 50-day average`;
+    return parts.length ? `${lead}: ${parts.join(", ")}.` : `${lead}.`;
+  }
+  return `Daily closes. ${name} for ${sessions}${detail}.`;
 }
 
 export function trendRelation(trend) {
