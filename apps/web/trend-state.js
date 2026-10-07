@@ -2,8 +2,9 @@
 // Uptrend: close > 20-day average and that average > the 50-day average.
 // Downtrend: the reverse. Anything else is Range.
 // The rule is fixed to daily closes. It does not follow the selected chart period.
-// No prices are filled in. A future per-ticker serving row (series_id PX:<ticker>)
-// can override the label; nothing in the lake provides that row today.
+// trend_metrics publishes one price row per equity (series_id PX:<ticker>).
+// That row can override the label. Macro driver rows use a different rule and are ignored.
+// A price trend is used only when it belongs to the ticker being shown.
 
 import { chartValue, validBars } from "./chart-period.js";
 
@@ -81,16 +82,31 @@ export function trendState(history) {
   return base;
 }
 
-// Prefer a per-ticker price trend if serving ever publishes one.
-// Macro driver rows (DGS10, ETF:SPY, …) use a different rule and are ignored.
+function ownedByTicker(source, ticker) {
+  const owner = String(source?.ticker || "").toUpperCase();
+  return !owner || owner === ticker;
+}
+
+function finiteOrNull(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+// A published PX:<ticker> row wins. price_trend is used only when it names this
+// ticker. Another symbol's price trend, and every macro driver row, is ignored.
 export function servingPriceTrend(tickerData, ticker) {
   if (!tickerData || !ticker) return null;
-  const rows = tickerData.trend?.rows || [];
+  const symbol = String(ticker).toUpperCase();
+  const rows = Array.isArray(tickerData.trend?.rows) ? tickerData.trend.rows : [];
   const row = rows.find((item) => {
     const id = String(item?.series_id || "");
-    return id === `PX:${ticker}` || id === `PRICE:${ticker}`;
+    const matches = id === `PX:${symbol}` || id === `PRICE:${symbol}`;
+    return matches && ownedByTicker(item, symbol);
   });
-  const source = tickerData.price_trend || row;
+  const priceTrend = tickerData.price_trend;
+  const priceTrendOk = priceTrend && String(priceTrend.ticker || "").toUpperCase() === symbol;
+  const source = row || (priceTrendOk ? priceTrend : null);
   if (!source) return null;
   const state = SERVING_STATES[String(source.trend_state || source.state || "").toLowerCase()];
   if (!state) return null;
@@ -100,6 +116,10 @@ export function servingPriceTrend(tickerData, ticker) {
     days: Number.isFinite(days) && days > 0 ? days : null,
     since: source.since || source.trend_since || null,
     fromStart: Boolean(source.from_start || source.fromStart),
+    vsMa20: finiteOrNull(source.vs_ma20 ?? source.vsMa20),
+    close: finiteOrNull(source.close),
+    ma20: finiteOrNull(source.ma20),
+    ma50: finiteOrNull(source.ma50),
   };
 }
 
@@ -119,7 +139,7 @@ function fallbackPercent(value, digits = 1) {
 export function resolveTrend(history, serving) {
   const computed = trendState(history);
   if (!serving?.state || serving.days == null || !serving.since) return computed;
-  return {
+  const resolved = {
     ...computed,
     state: serving.state,
     days: serving.days,
@@ -127,6 +147,12 @@ export function resolveTrend(history, serving) {
     fromStart: Boolean(serving.fromStart),
     source: "serving",
   };
+  // The selected ticker's published price trend carries its own distance from the
+  // 20-day average. A copied price history must not keep another symbol's percent.
+  for (const key of ["vsMa20", "close", "ma20", "ma50"]) {
+    if (serving[key] != null && Number.isFinite(serving[key])) resolved[key] = serving[key];
+  }
+  return resolved;
 }
 
 export function trendLabel(trend) {

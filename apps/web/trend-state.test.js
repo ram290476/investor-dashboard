@@ -218,3 +218,82 @@ test("a partial serving override does not borrow the computed run", () => {
     assert.equal(trendLabel(resolved), "Range · ≥11d");
   }
 });
+
+function pillFor(history, tickerData, ticker) {
+  return resolveTrend(history, servingPriceTrend(tickerData, ticker));
+}
+
+test("switching tickers does not keep the first ticker's trend", () => {
+  const tslaHistory = historyFromCloses([...Array(50).fill(100), 130, 140, 150, 160], "2026-08-01");
+  const spcxHistory = historyFromCloses(Array.from({ length: 80 }, (_, index) => 300 - index), "2026-06-12");
+  const sharedDrivers = [
+    { series_id: "DGS10", ticker: "TSLA", trend_state: "up", days_in_state: 40, since: "2026-08-01" },
+  ];
+  // The same price_trend object copied onto every ticker, the way one shared serving value shows up.
+  const sharedPriceTrend = { ticker: "TSLA", trend_state: "up", days_in_state: 4, since: "2026-10-02", vs_ma20: 0.03 };
+  const tslaData = {
+    price_trend: sharedPriceTrend,
+    trend: {
+      rows: [
+        ...sharedDrivers,
+        { series_id: "PX:TSLA", ticker: "TSLA", trend_state: "up", days_in_state: 4, since: "2026-10-02", vs_ma20: 0.029 },
+      ],
+    },
+  };
+  const spcxData = {
+    price_trend: sharedPriceTrend,
+    trend: {
+      rows: [
+        { ...sharedDrivers[0], ticker: "SPCX" },
+        { series_id: "PX:TSLA", ticker: "TSLA", trend_state: "up", days_in_state: 4, since: "2026-10-02", vs_ma20: 0.029 },
+      ],
+    },
+  };
+
+  const tsla = pillFor(tslaHistory, tslaData, "TSLA");
+  const spcx = pillFor(spcxHistory, spcxData, "SPCX");
+
+  assert.equal(trendLabel(tsla), "Uptrend · 4d");
+  assert.equal(tsla.since, "2026-10-02");
+  assert.equal(tsla.days, 4);
+  assert.equal(tsla.vsMa20, 0.029);
+  assert.equal(trendLabel(spcx), "Downtrend · ≥31d");
+  assert.equal(spcx.state, "downtrend");
+  assert.equal(spcx.fromStart, true);
+  assert.notEqual(spcx.since, tsla.since);
+  assert.notEqual(spcx.days, tsla.days);
+  assert.ok(spcx.vsMa20 < 0);
+  assert.notEqual(trendLabel(tsla), trendLabel(spcx));
+  assert.notEqual(spcx.vsMa20, tsla.vsMa20);
+});
+
+test("a copied price history does not keep another ticker's distance from the 20-day average", () => {
+  const sharedHistory = historyFromCloses(Array.from({ length: 80 }, (_, index) => 100 + index));
+  const spcxData = {
+    price_trend: { ticker: "TSLA", trend_state: "up", days_in_state: 31, since: "2026-02-20", vs_ma20: 0.05 },
+    trend: {
+      rows: [
+        { series_id: "DGS10", trend_state: "up", days_in_state: 40, since: "2026-08-01", vs_ma20: 0.05 },
+        {
+          series_id: "PX:SPCX",
+          ticker: "SPCX",
+          trend_state: "down",
+          days_in_state: 9,
+          since: "2026-09-20",
+          vs_ma20: -0.081,
+          close: 90,
+          ma20: 98,
+          ma50: 110,
+        },
+      ],
+    },
+  };
+  const spcx = pillFor(sharedHistory, spcxData, "SPCX");
+  assert.equal(spcx.source, "serving");
+  assert.equal(trendLabel(spcx), "Downtrend · 9d");
+  assert.equal(spcx.since, "2026-09-20");
+  assert.equal(spcx.vsMa20, -0.081);
+  assert.equal(spcx.close, 90);
+  assert.equal(spcx.ma20, 98);
+  assert.notEqual(trendLabel(spcx), trendLabel(pillFor(sharedHistory, { trend: { rows: [] } }, "TSLA")));
+});

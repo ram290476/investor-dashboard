@@ -424,13 +424,16 @@ function renderPeriodChips(history, activeId, onSelect, intraday) {
   return group;
 }
 
-function renderTrend(history, tickerData) {
-  const trend = resolveTrend(history, servingPriceTrend(tickerData, session.selected));
+function renderTrend(history, tickerData, ticker) {
+  const trend = resolveTrend(history, servingPriceTrend(tickerData, ticker));
   const tone =
     trend.state === "uptrend" ? "up" : trend.state === "downtrend" ? "down" : trend.state === "range" ? "range" : "insufficient";
   const row = node("div", "trend-row");
   const pill = node("span", `trend-pill ${tone}`, trendLabel(trend));
+  pill.dataset.ticker = ticker || "";
   pill.dataset.state = trend.state || "insufficient";
+  if (trend.since) pill.dataset.since = trend.since;
+  if (trend.vsMa20 != null) pill.dataset.vsMa20 = String(trend.vsMa20);
   pill.tabIndex = 0;
   pill.title = trendTitle(trend, formatPrice, formatPercent);
   pill.setAttribute("aria-label", trendSentence(trend, formatPercent));
@@ -465,7 +468,7 @@ function renderPricePanel(tickerData, onSelectPeriod) {
   quoteBlock.append(node("h2", "overview-kicker", `${session.selected} · ${liveLast == null ? "daily closes" : "live"}`));
   const latest = bars.at(-1);
   quoteBlock.append(node("p", "overview-price", liveLast == null ? (latest ? formatPrice(displayPrice(latest)) : "—") : formatPrice(liveLast)));
-  quoteBlock.append(renderTrend(history, tickerData));
+  quoteBlock.append(renderTrend(history, tickerData, session.selected));
   const asOf = latest?.date || tickerData?.price_as_of;
   const meta = node("p", "overview-meta");
   if (!latest) {
