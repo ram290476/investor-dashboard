@@ -26,6 +26,7 @@ const prefs = (tickers, pinned = []) => ({ tickers, pinned, display: { time_zone
 test("deep links open the matching tab and unknown tabs fall back to My tickers", () => {
   assert.equal(parseSettingsHash("#settings/theme"), "theme");
   assert.equal(parseSettingsHash("#settings/profile"), "profile");
+  assert.equal(parseSettingsHash("#settings/refresh"), "refresh");
   assert.equal(parseSettingsHash("#settings/tickers"), "tickers");
   assert.equal(parseSettingsHash("#settings/nope"), "tickers");
   assert.equal(parseSettingsHash("#settings"), "tickers");
@@ -35,10 +36,11 @@ test("deep links open the matching tab and unknown tabs fall back to My tickers"
 
 test("tab keys wrap with arrows and jump with Home/End", () => {
   assert.equal(tabAfterKey("tickers", "ArrowRight"), "theme");
-  assert.equal(tabAfterKey("profile", "ArrowRight"), "tickers");
+  assert.equal(tabAfterKey("profile", "ArrowRight"), "refresh");
   assert.equal(tabAfterKey("tickers", "ArrowLeft"), "profile");
   assert.equal(tabAfterKey("theme", "Home"), "tickers");
-  assert.equal(tabAfterKey("tickers", "End"), "profile");
+  assert.equal(tabAfterKey("tickers", "End"), "refresh");
+  assert.equal(tabAfterKey("refresh", "ArrowRight"), "tickers");
   assert.equal(tabAfterKey("tickers", "a"), null);
 });
 

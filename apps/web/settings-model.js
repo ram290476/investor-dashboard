@@ -10,6 +10,7 @@ export const SETTINGS_TABS = [
   { id: "tickers", label: "My tickers" },
   { id: "theme", label: "Theme & display" },
   { id: "profile", label: "Profile & time zone" },
+  { id: "refresh", label: "Data refresh" },
 ];
 
 export const PALETTES = [
