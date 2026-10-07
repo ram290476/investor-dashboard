@@ -1,0 +1,29 @@
+{
+  "$comment": "Maps every literal color used by design/ai-generated/Main.dc.html (default Industrial Dark) to a theme token. A value is either a token name or a mix [tokenA, tokenB, weightOfA] (sRGB linear blend) for tinted fills like selected chips. render-themes.js recolors the rendered DOM with this map at screenshot time; the mockup source is never modified.",
+  "roles": {
+    "#0B0E13": "bg", "#05080C": "bg", "#0F1319": "bg",
+    "#12161D": "surface",
+    "#1A2029": "surface-2", "#161B23": "surface-2", "#161D27": "surface-2",
+    "#2A323E": "border", "#222A35": "grid",
+    "#4A5361": "border-strong", "#4A5A72": "border-strong", "#6B7686": "border-strong", "#5B6577": "border-strong",
+    "#F1F4F8": "text", "#E6EAF0": "text",
+    "#D2D8E0": "text-2", "#C5CDD8": "text-2",
+    "#9BA6B5": "text-muted", "#8B96A6": "text-faint",
+    "#6CA6FF": "accent", "#60A5FA": "accent",
+    "#8EBBFF": "accent-text", "#7DB4FF": "accent-text", "#A9CCFF": "accent-text", "#7DD3FC": "accent-text", "#8B9CFF": "heat",
+    "#3FB950": "up", "#58A6FF": "up", "#57C78F": "up",
+    "#F85149": "down", "#F0883E": "down", "#F0A6A6": "down",
+    "#E3B341": "warning",
+    "#F2A33A": "series-2", "#FB923C": "series-2", "#FDBA74": "series-2",
+    "#EC7BA6": "series-3", "#F9A8D4": "series-3", "#FF8FA3": "series-3", "#F472B6": "series-3", "#FCA5A5": "series-3", "#FB7185": "series-3", "#F0A6C4": "series-3",
+    "#B392F0": "series-4", "#A5B4FC": "series-4", "#C084FC": "series-4", "#E879F9": "series-4", "#A78BFA": "series-4",
+    "#39C5B0": "series-5", "#5EEAD4": "series-5", "#7FE0CF": "series-5",
+    "#E3C05C": "series-6", "#FDE68A": "series-6", "#A3E635": "series-6", "#FACC15": "series-6",
+    "#16202E": ["accent", "surface", 0.05], "#1B2533": ["accent", "surface", 0.07], "#1E2C40": ["accent", "surface", 0.1],
+    "#1B2A40": ["accent", "surface", 0.1], "#2A3A52": ["accent", "surface", 0.18], "#25344A": ["accent", "surface", 0.2],
+    "#2C4466": ["accent", "surface", 0.3], "#3B5578": ["accent", "surface", 0.43], "#2F5E9E": ["accent", "surface", 0.35],
+    "#3A2A10": ["warning", "surface", 0.2], "#8A5A1C": ["warning", "surface", 0.55],
+    "#13302B": ["series-5", "surface", 0.18], "#1E5A50": ["series-5", "surface", 0.4],
+    "#2A1E2A": ["series-3", "surface", 0.12], "#3A4352": ["text-muted", "surface", 0.25], "#1C232D": ["border", "surface", 0.6], "#6B4A5A": ["series-3", "surface", 0.4]
+  }
+}

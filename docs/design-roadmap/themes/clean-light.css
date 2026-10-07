@@ -1,0 +1,32 @@
+/* Clean Light — Mainstream finance portals and brokerage web apps in light mode: white cards on soft gray, dark ink, restrained green/red. */
+/* Generated from themes.json by render-themes.js. */
+:root[data-theme="clean-light"] {
+  color-scheme: light;
+  --bg: #F3F5F8;
+  --surface: #FFFFFF;
+  --surface-2: #F1F3F6;
+  --border: #D9DEE5;
+  --border-strong: #AAB3C0;
+  --grid: #E7EBF0;
+  --text: #111827;
+  --text-2: #2F3A4A;
+  --text-muted: #4B5563;
+  --text-faint: #5D6877;
+  --accent: #1A62D6;
+  --accent-text: #1554BD;
+  --up: #0B7A3B;
+  --down: #C62828;
+  --neutral: #5D6877;
+  --warning: #A15C00;
+  --series-1: #1A62D6;
+  --series-2: #E06C00;
+  --series-3: #C2185B;
+  --series-4: #7047D1;
+  --series-5: #00897B;
+  --series-6: #A77B00;
+  --heat: #7FA6F0;
+  --accent-subtle: #D1E0F7;
+  --up-subtle: #DAEBE2;
+  --down-subtle: #F6DFDF;
+  --warning-subtle: #ECDECC;
+}
