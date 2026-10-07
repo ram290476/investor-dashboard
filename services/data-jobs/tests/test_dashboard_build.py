@@ -25,6 +25,8 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
     assert snapshot["tickers"]["TSLA"]["filings"] is None
     assert snapshot["tickers"]["TSLA"]["insider_30d"] is None
     assert snapshot["events"] is None
+    assert snapshot["tickers"]["TSLA"]["contracts"] is None
+    assert snapshot["tickers"]["SPCX"]["contracts"] is None
     assert snapshot["tickers"]["TSLA"]["intraday"] is None
     assert snapshot["tickers"]["TSLA"]["short_interest"] is None
     assert snapshot["generated_at"] == "2026-10-04T22:00:00+00:00"
@@ -178,6 +180,33 @@ def test_filings_events_and_insider_flow_are_served():
     assert [row["title"] for row in filings] == ["Duplicate accession", "Form 4"]
     assert snapshot["tickers"]["TSLA"]["insider_30d"] == {"net_shares": 100.0, "net_value": 1000.0}
     assert [event["title"] for event in snapshot["events"]] == ["FOMC"]
+
+
+def test_contracts_are_served_only_for_mapped_tickers():
+    award = {
+        "ttm_obligated": 1200.0,
+        "by_agency": [{"agency": "NASA", "quarter": "FY2026Q4", "obligated": 1200.0}],
+        "recent": [
+            {
+                "award_id": "80NSSC",
+                "agency": "NASA",
+                "amount": 1200.0,
+                "date": "2026-10-01",
+                "url": "https://sam.gov/x",
+            }
+        ],
+    }
+    snapshot = dashboard_build.build_snapshot(
+        tickers=["SPCX", "TSLA", "AAPL"],
+        prices={},
+        trends={},
+        fundamentals=[],
+        status=None,
+        contracts={"SPCX": award, "AAPL": award},
+    )
+    assert snapshot["tickers"]["SPCX"]["contracts"]["ttm_obligated"] == 1200.0
+    assert snapshot["tickers"]["TSLA"]["contracts"] is None
+    assert snapshot["tickers"]["AAPL"]["contracts"] is None
 
 
 def test_intraday_is_today_only_and_short_interest_is_the_latest_settlement():

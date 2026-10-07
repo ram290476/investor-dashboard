@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 MAX_PRICE_ROWS = 1260
 SCHEMA_VERSION = 2
 HEADLINE_LIMIT = 10
 ET = ZoneInfo("America/New_York")
+CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
 
 
 def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: datetime) -> dict:
@@ -191,6 +192,7 @@ def build_snapshot(
     short_interest: dict[str, list[dict]] | None = None,
     filings: dict[str, list[dict]] | None = None,
     events: list[dict] | None = None,
+    contracts: dict[str, dict] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
     clock = _as_of(generated_at)
@@ -211,6 +213,9 @@ def build_snapshot(
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
         bundle = None if news is None else news.get(ticker) or {}
         filing_rows = None if filings is None else filings.get(ticker) or []
+        award = None
+        if contracts is not None and ticker in CONTRACT_TICKERS:
+            award = contracts.get(ticker)
         interest = latest_short_interest((short_interest or {}).get(ticker, []))
         instruments[ticker] = {
             "ticker": ticker,
@@ -223,6 +228,7 @@ def build_snapshot(
             "short_interest": interest.get(ticker),
             "filings": None if filing_rows is None else build_filings(filing_rows),
             "insider_30d": None if filing_rows is None else build_insider(filing_rows, clock.date()),
+            "contracts": award,
             "price_status": "available" if history else "unavailable",
             "price_as_of": history[-1]["date"] if history else None,
         }
@@ -269,6 +275,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             symbol = str(row.get("ticker") or "").upper()
             if symbol in filings_by_ticker:
                 filings_by_ticker[symbol].append(row)
+        rollup = read_json("curated/contracts_rollup/latest.json") or []
+        contracts_data = {row.get("ticker"): row for row in rollup if isinstance(row, dict)}
         hourly_data: dict[str, list[dict]] = {}
         for ticker in tickers:
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
@@ -295,6 +303,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             short_interest=short_by_ticker,
             filings=filings_by_ticker,
             events=event_rows,
+            contracts=contracts_data,
         )
         write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
         logger.info(

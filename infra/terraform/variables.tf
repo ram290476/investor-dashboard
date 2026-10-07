@@ -349,10 +349,27 @@ variable "jobs" {
       api_keys       = ["api-data-gov"]
       reads_prefs    = true
     }
+    # D5: after the DoD daily contract post. SAM stays inside a 10-call day.
+    gov-contracts = {
+      handler       = "gov_contracts.handler"
+      schedule      = "cron(45 17 ? * MON-FRI *)"
+      triggers      = []
+      memory        = 512
+      timeout       = 300
+      read_prefixes = ["curated/contracts/", "curated/contracts_rollup/"]
+      write_prefixes = [
+        "raw/contracts/",
+        "curated/contracts/",
+        "curated/contracts_rollup/",
+        "curated/contract_opportunities/",
+      ]
+      api_keys    = ["sam-gov"]
+      reads_prefs = true
+    }
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2", "job:H3"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5"]
       memory   = 1024
       timeout  = 300
       read_prefixes = [
@@ -363,6 +380,8 @@ variable "jobs" {
         "curated/short_interest/",
         "curated/filings/",
         "curated/events/",
+        "curated/contracts_rollup/",
+        "curated/contracts/",
         "serving/trend_metrics/latest/",
         "serving/fundamentals_quarterly.json",
         "serving/status.json",
