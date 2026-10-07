@@ -337,10 +337,22 @@ variable "jobs" {
       api_keys       = ["alpaca-key-id", "alpaca-secret-key", "finnhub", "alpha-vantage"]
       reads_prefs    = true
     }
+    # H3: federal business days. The 14:05 FOMC one-off waits for D1; this schedule still covers that hour.
+    regulatory-feeds = {
+      handler        = "regulatory_feeds.handler"
+      schedule       = "cron(25 6-22 ? * MON-FRI *)"
+      triggers       = []
+      memory         = 512
+      timeout        = 300
+      read_prefixes  = ["curated/filings/", "curated/events/"]
+      write_prefixes = ["raw/edgar/", "raw/regfeeds/", "curated/filings/", "curated/events/", "curated/events_daily/"]
+      api_keys       = ["api-data-gov"]
+      reads_prefs    = true
+    }
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2", "job:H3"]
       memory   = 1024
       timeout  = 300
       read_prefixes = [
@@ -349,6 +361,8 @@ variable "jobs" {
         "curated/news_articles/",
         "curated/prices_hourly/",
         "curated/short_interest/",
+        "curated/filings/",
+        "curated/events/",
         "serving/trend_metrics/latest/",
         "serving/fundamentals_quarterly.json",
         "serving/status.json",

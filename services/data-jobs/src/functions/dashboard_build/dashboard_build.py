@@ -54,6 +54,73 @@ def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: d
     }
 
 
+def _as_of(generated_at: str | None) -> datetime:
+    if not generated_at:
+        return datetime.now(UTC)
+    stamp = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp
+
+
+def build_filings(rows: list[dict]) -> list[dict]:
+    ordered = sorted(rows, key=lambda row: str(row.get("filed_at") or ""), reverse=True)
+    latest = []
+    seen: set[str] = set()
+    for row in ordered:
+        accession = str(row.get("accession_no") or "")
+        if accession and accession in seen:
+            continue
+        if accession:
+            seen.add(accession)
+        latest.append(
+            {
+                "form": row.get("form"),
+                "filed_at": row.get("filed_at"),
+                "title": row.get("title") or row.get("form"),
+                "url": row.get("primary_doc_url"),
+                "class": row.get("filing_class") or row.get("class"),
+            }
+        )
+        if len(latest) == 10:
+            break
+    return latest
+
+
+def build_insider(rows: list[dict], as_of: date) -> dict:
+    from regulatory_feeds import insider_flows
+
+    return insider_flows(rows, as_of)
+
+
+def build_events(rows: list[dict], as_of: date) -> list[dict]:
+    cutoff = (as_of - timedelta(days=14)).isoformat()
+    chosen = []
+    seen: set[str] = set()
+    ordered = sorted(rows, key=lambda row: str(row.get("event_ts") or ""), reverse=True)
+    for row in ordered:
+        day = str(row.get("event_ts") or "")[:10]
+        if day and day < cutoff:
+            continue
+        key = str(row.get("event_id") or row.get("source_url") or "")
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        chosen.append(
+            {
+                "event_ts": row.get("event_ts"),
+                "type": row.get("type"),
+                "title": row.get("title"),
+                "source_url": row.get("source_url"),
+                "tickers": row.get("tickers") or [],
+            }
+        )
+        if len(chosen) == 20:
+            break
+    return chosen
+
+
 def _session_date(ts: str) -> str:
     stamp = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
     if stamp.tzinfo is None:
@@ -122,13 +189,11 @@ def build_snapshot(
     news: dict[str, dict] | None = None,
     hourly: dict[str, list[dict]] | None = None,
     short_interest: dict[str, list[dict]] | None = None,
+    filings: dict[str, list[dict]] | None = None,
+    events: list[dict] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
-    clock = datetime.now(UTC)
-    if generated_at:
-        clock = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-        if clock.tzinfo is None:
-            clock = clock.replace(tzinfo=UTC)
+    clock = _as_of(generated_at)
     instruments = {}
     for ticker in tickers:
         unique: dict[str, dict] = {}
@@ -145,6 +210,7 @@ def build_snapshot(
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
         bundle = None if news is None else news.get(ticker) or {}
+        filing_rows = None if filings is None else filings.get(ticker) or []
         interest = latest_short_interest((short_interest or {}).get(ticker, []))
         instruments[ticker] = {
             "ticker": ticker,
@@ -155,6 +221,8 @@ def build_snapshot(
             else build_news(ticker, bundle.get("daily") or [], bundle.get("articles") or [], clock),
             "intraday": build_intraday((hourly or {}).get(ticker, []), history),
             "short_interest": interest.get(ticker),
+            "filings": None if filing_rows is None else build_filings(filing_rows),
+            "insider_30d": None if filing_rows is None else build_insider(filing_rows, clock.date()),
             "price_status": "available" if history else "unavailable",
             "price_as_of": history[-1]["date"] if history else None,
         }
@@ -169,6 +237,7 @@ def build_snapshot(
         "data_status": "available" if available else "unavailable",
         "tickers": instruments,
         "fundamentals": normalized_fundamentals,
+        "events": None if events is None else build_events(events, clock.date()),
         "status": status,
     }
 
@@ -191,6 +260,15 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             ticker: {"daily": [row for row in daily_rows if row.get("ticker") == ticker], "articles": article_rows}
             for ticker in tickers
         }
+        filing_frame = read_parquet_prefix("curated/filings/")
+        event_frame = read_parquet_prefix("curated/events/")
+        filing_rows = filing_frame.to_dicts() if not filing_frame.is_empty() else []
+        event_rows = event_frame.to_dicts() if not event_frame.is_empty() else []
+        filings_by_ticker: dict[str, list[dict]] = {ticker: [] for ticker in tickers}
+        for row in filing_rows:
+            symbol = str(row.get("ticker") or "").upper()
+            if symbol in filings_by_ticker:
+                filings_by_ticker[symbol].append(row)
         hourly_data: dict[str, list[dict]] = {}
         for ticker in tickers:
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
@@ -215,6 +293,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             news=news_data,
             hourly=hourly_data,
             short_interest=short_by_ticker,
+            filings=filings_by_ticker,
+            events=event_rows,
         )
         write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
         logger.info(

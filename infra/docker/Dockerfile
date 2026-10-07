@@ -13,6 +13,7 @@ COPY services/data-jobs/src/functions/options_daily/ services/data-jobs/src/func
 COPY services/data-jobs/src/functions/daily_prices/ services/data-jobs/src/functions/dashboard_build/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/news_sentiment/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/hourly_prices/ ${LAMBDA_TASK_ROOT}/
+COPY services/data-jobs/src/functions/regulatory_feeds/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/price_reconcile/ ${LAMBDA_TASK_ROOT}/
 
 # Lambda always runs the code as its own unprivileged user and checks health itself.

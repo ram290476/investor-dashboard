@@ -527,6 +527,7 @@ function renderStats(tickerData) {
   const pressure = netPressure(tickerData);
   const grid = node("section", "stats-grid");
   grid.setAttribute("aria-label", "Selected ticker summary");
+  const insider = tickerData?.insider_30d;
   const live = tickerData?.intraday;
   if (isNumericValue(live?.last)) {
     grid.append(
@@ -538,7 +539,7 @@ function renderStats(tickerData) {
       ),
     );
   }
-  grid.append(
+  const cards = [
     statCard("LAST CLOSE", latest ? formatPrice(displayPrice(latest)) : "—", latest?.date || tickerData?.price_as_of || "No data"),
     statCard(
       "MACRO PRESSURE",
@@ -546,7 +547,20 @@ function renderStats(tickerData) {
       "Trend model · −1 to +1",
       polarity(pressure),
     ),
-  );
+  ];
+  if (insider && isNumericValue(insider.net_shares)) {
+    const shares = Number(insider.net_shares);
+    const value = isNumericValue(insider.net_value) ? Number(insider.net_value) : null;
+    cards.push(
+      statCard(
+        "FORM 4 · 30D",
+        `${shares > 0 ? "+" : ""}${shares.toLocaleString()} sh`,
+        value == null ? "Net insider shares" : `${value > 0 ? "+" : ""}${formatPrice(value)} net value`,
+        polarity(shares),
+      ),
+    );
+  }
+  grid.append(...cards);
   return grid;
 }
 
@@ -677,6 +691,56 @@ function renderFundamentals() {
   table.append(caption, head, body);
   scroll.append(table);
   panel.append(scroll);
+  return panel;
+}
+
+function renderFilings(tickerData) {
+  const panel = node("section", "panel");
+  panel.append(sectionHeader("Filings & events", "Latest SEC filings and the last 14 days of events"));
+  const filings = tickerData?.filings;
+  const events = session.dashboard?.events;
+  if (!filings && !events && session.dashboardState === "loading") {
+    panel.append(node("p", "data-state", "Loading filings…"));
+    return panel;
+  }
+  if (!filings && !events && session.dashboardState === "error") {
+    panel.append(node("p", "data-state", "Filings could not be loaded. Use Try again above."));
+    return panel;
+  }
+  if (!filings && !events) {
+    panel.append(node("p", "data-state", "Filings have not been collected yet."));
+    return panel;
+  }
+  const list = node("ul", "news-list");
+  (filings || []).forEach((row) => {
+    const item = node("li", "news-item");
+    const link = node("a", "news-title", `${row.form || "Filing"} · ${row.title || ""}`);
+    if (row.url) {
+      link.href = row.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    item.append(link);
+    item.append(node("p", "news-meta", `${row.filed_at || ""} · ${row.class || "filing"}`));
+    list.append(item);
+  });
+  (events || []).slice(0, 8).forEach((event) => {
+    const item = node("li", "news-item");
+    const link = node("a", "news-title", event.title || event.type || "Event");
+    if (event.source_url) {
+      link.href = event.source_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    item.append(link);
+    item.append(node("p", "news-meta", `${event.event_ts || ""} · ${event.type || "event"}`));
+    list.append(item);
+  });
+  if (!list.childElementCount) {
+    panel.append(node("p", "data-state", "No filings or events in the current window."));
+    return panel;
+  }
+  panel.append(list);
   return panel;
 }
 
@@ -876,7 +940,7 @@ function renderDashboard() {
   primary.append(renderStats(tickerData), renderPricePanel(tickerData, onSelectPeriod), renderFundamentals());
   const side = node("aside", "side-column");
   side.setAttribute("aria-label", "Macro drivers and data status");
-  side.append(renderDrivers(tickerData), renderNews(tickerData), renderStatus());
+  side.append(renderDrivers(tickerData), renderNews(tickerData), renderFilings(tickerData), renderStatus());
   mainGrid.append(primary, side);
   root.append(mainGrid);
   root.append(renderSettings(onMessage));
