@@ -601,6 +601,42 @@ a {
   white-space: nowrap;
 }
 
+.news-score {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.news-list {
+  display: grid;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.news-item {
+  display: grid;
+  gap: 3px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(39, 48, 60, 0.7);
+}
+
+.news-item:last-child {
+  border-bottom: 0;
+}
+
+.news-title {
+  color: #d0d7e2;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.news-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .driver-value,
 .mono {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;

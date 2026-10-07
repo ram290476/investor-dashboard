@@ -19,7 +19,9 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
         generated_at="2026-10-04T22:00:00+00:00",
     )
 
-    assert snapshot["schema_version"] == 1
+    assert snapshot["schema_version"] == 2
+    assert snapshot["tickers"]["TSLA"]["contracts"] is None
+    assert snapshot["tickers"]["SPCX"]["contracts"] is None
     assert snapshot["generated_at"] == "2026-10-04T22:00:00+00:00"
     assert snapshot["data_status"] == "available"
     assert snapshot["tickers"]["TSLA"]["price_history"] == [
@@ -55,3 +57,22 @@ def test_snapshot_carries_close_raw_and_tolerates_rows_without_it():
     history = snapshot["tickers"]["TSLA"]["price_history"]
     assert history[0]["close_raw"] is None and history[0]["adj_close"] is None
     assert history[1] == {"date": "2026-10-02", "close": 150.0, "close_raw": 300.0, "adj_close": 149.0, "volume": 2}
+
+
+def test_contracts_are_served_only_for_mapped_tickers():
+    award = {
+        "ttm_obligated": 1200.0,
+        "by_agency": [{"agency": "NASA", "quarter": "FY2026Q4", "obligated": 1200.0}],
+        "recent": [{"award_id": "80NSSC", "agency": "NASA", "amount": 1200.0, "date": "2026-10-01", "url": "https://sam.gov/x"}],
+    }
+    snapshot = dashboard_build.build_snapshot(
+        tickers=["SPCX", "TSLA", "AAPL"],
+        prices={},
+        trends={},
+        fundamentals=[],
+        status=None,
+        contracts={"SPCX": award, "AAPL": award},
+    )
+    assert snapshot["tickers"]["SPCX"]["contracts"]["ttm_obligated"] == 1200.0
+    assert snapshot["tickers"]["TSLA"]["contracts"] is None
+    assert snapshot["tickers"]["AAPL"]["contracts"] is None

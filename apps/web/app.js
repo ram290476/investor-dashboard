@@ -529,6 +529,35 @@ function renderStats(tickerData) {
   return grid;
 }
 
+function renderContracts(tickerData) {
+  const contracts = tickerData?.contracts;
+  if (!contracts) return null;
+  const panel = node("section", "panel");
+  panel.append(sectionHeader("Government contracts", "Trailing 12 months · SpaceX and Tesla awards"));
+  const total = isNumericValue(contracts.ttm_obligated) ? formatPrice(contracts.ttm_obligated) : "—";
+  panel.append(node("p", "news-score", `TTM obligated ${total}`));
+  const list = node("ul", "news-list");
+  (contracts.recent || []).slice(0, 5).forEach((row) => {
+    const item = node("li", "news-item");
+    const link = node("a", "news-title", `${row.agency || "Agency"} · ${row.award_id || ""}`);
+    if (row.url) {
+      link.href = row.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    item.append(link);
+    const amount = isNumericValue(row.amount) ? formatPrice(row.amount) : "—";
+    item.append(node("p", "news-meta", `${row.date || ""} · ${amount}`));
+    list.append(item);
+  });
+  if (!list.childElementCount) {
+    panel.append(node("p", "data-state", "No awards in the last 30 days."));
+  } else {
+    panel.append(list);
+  }
+  return panel;
+}
+
 function renderDrivers(tickerData) {
   const panel = node("section", "panel");
   panel.append(sectionHeader("Macro drivers", "Trend model · latest published observation"));
@@ -802,7 +831,10 @@ function renderDashboard() {
   const mainGrid = node("main", "dashboard-grid");
   mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
   const primary = node("div");
-  primary.append(renderStats(tickerData), renderPricePanel(tickerData, onSelectPeriod), renderFundamentals());
+  primary.append(renderStats(tickerData), renderPricePanel(tickerData, onSelectPeriod));
+  const contracts = renderContracts(tickerData);
+  if (contracts) primary.append(contracts);
+  primary.append(renderFundamentals());
   const side = node("aside", "side-column");
   side.setAttribute("aria-label", "Macro drivers and data status");
   side.append(renderDrivers(tickerData), renderStatus());

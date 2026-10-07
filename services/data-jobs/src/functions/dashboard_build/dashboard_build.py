@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 MAX_PRICE_ROWS = 1260
+SCHEMA_VERSION = 2
+CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
 
 
 def build_snapshot(
@@ -14,6 +16,7 @@ def build_snapshot(
     fundamentals: list[dict],
     status: dict | None,
     generated_at: str | None = None,
+    contracts: dict[str, dict] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
     instruments = {}
@@ -31,10 +34,14 @@ def build_snapshot(
                     "volume": row.get("volume"),
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
+        award = None
+        if contracts is not None and ticker in CONTRACT_TICKERS:
+            award = contracts.get(ticker)
         instruments[ticker] = {
             "ticker": ticker,
             "price_history": history,
             "trend": trends.get(ticker),
+            "contracts": award,
             "price_status": "available" if history else "unavailable",
             "price_as_of": history[-1]["date"] if history else None,
         }
@@ -44,7 +51,7 @@ def build_snapshot(
     ]
     available = any(item["price_status"] == "available" for item in instruments.values())
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
         "data_status": "available" if available else "unavailable",
         "tickers": instruments,
@@ -63,6 +70,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         tickers = collection_universe(user_ticker_union())["equities"]
         price_data: dict[str, list[dict]] = {}
         trend_data: dict[str, dict | None] = {}
+        rollup = read_json("curated/contracts_rollup/latest.json") or []
+        contracts_data = {row.get("ticker"): row for row in rollup if isinstance(row, dict)}
         for ticker in tickers:
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
             price_data[ticker] = frame.to_dicts() if not frame.is_empty() else []
@@ -76,6 +85,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             trends=trend_data,
             fundamentals=fundamental_doc.get("rows", []),
             status=status,
+            contracts=contracts_data,
         )
         write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
         logger.info(
