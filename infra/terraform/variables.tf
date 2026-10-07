@@ -313,6 +313,18 @@ variable "jobs" {
       api_keys       = ["alpaca-key-id", "alpaca-secret-key"]
       reads_prefs    = true
     }
+    # H2: hourly on NYSE days. Alpha Vantage stays inside 06:15–21:15 and 16 calls/day.
+    news-sentiment = {
+      handler        = "news_sentiment.handler"
+      schedule       = "cron(15 * ? * MON-FRI *)"
+      triggers       = []
+      memory         = 512
+      timeout        = 180
+      read_prefixes  = ["curated/news_articles/", "curated/news_daily/"]
+      write_prefixes = ["raw/news/", "curated/news_articles/", "curated/news_daily/"]
+      api_keys       = ["finnhub", "alpha-vantage", "massive"]
+      reads_prefs    = true
+    }
     # H1: hourly bars during the NYSE session. Early-close days stop after 13:05 in the handler.
     hourly-prices = {
       handler        = "hourly_prices.handler"
@@ -345,6 +357,8 @@ variable "jobs" {
       timeout  = 300
       read_prefixes = [
         "curated/prices_daily/",
+        "curated/news_daily/",
+        "curated/news_articles/",
         "curated/prices_hourly/",
         "curated/short_interest/",
         "curated/filings/",

@@ -598,6 +598,56 @@ function renderDrivers(tickerData) {
   return panel;
 }
 
+function renderNews(tickerData) {
+  const panel = node("section", "panel");
+  panel.append(sectionHeader("News & sentiment", "Headlines from the last 48 hours"));
+  const news = tickerData?.news;
+  if (!news && session.dashboardState === "loading") {
+    panel.append(node("p", "data-state", "Loading headlines…"));
+    return panel;
+  }
+  if (!news && session.dashboardState === "error") {
+    panel.append(node("p", "data-state", "Headlines could not be loaded. Use Try again above."));
+    return panel;
+  }
+  if (!news) {
+    panel.append(node("p", "data-state", "News has not been collected yet."));
+    return panel;
+  }
+  const body = node("div", "panel-body");
+  const score = isNumericValue(news.sentiment_7d) ? Number(news.sentiment_7d) : null;
+  const summary = node("p", "news-score");
+  summary.append(document.createTextNode("7-day sentiment "));
+  summary.append(node("span", `mono ${polarity(score)}`, score == null ? "—" : `${score > 0 ? "+" : ""}${score.toFixed(2)}`));
+  body.append(summary);
+  const headlines = Array.isArray(news.headlines) ? news.headlines.slice(0, 10) : [];
+  if (!headlines.length) {
+    body.append(node("p", "data-state", "No headlines in the last 48 hours."));
+    panel.append(body);
+    return panel;
+  }
+  const list = node("ul", "news-list");
+  headlines.forEach((item) => {
+    const row = node("li", "news-item");
+    const link = node("a", "news-title", item.title || "Untitled");
+    link.href = item.url || "#";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    row.append(link);
+    const meta = node("p", "news-meta");
+    meta.append(document.createTextNode(`${item.publisher || "Source"} · ${item.published_at || ""}`));
+    if (item.label) {
+      const tone = item.label === "bullish" ? "positive" : item.label === "bearish" ? "negative" : "neutral";
+      meta.append(node("span", `news-label ${tone}`, item.label));
+    }
+    row.append(meta);
+    list.append(row);
+  });
+  body.append(list);
+  panel.append(body);
+  return panel;
+}
+
 function renderFundamentals() {
   const panel = node("section", "panel");
   panel.append(sectionHeader("Company fundamentals", "Quarterly release data"));
@@ -891,6 +941,7 @@ function renderDashboard() {
   const side = node("aside", "side-column");
   side.setAttribute("aria-label", "Macro drivers and data status");
   side.append(renderDrivers(tickerData), renderFilings(tickerData), renderStatus());
+  side.append(renderDrivers(tickerData), renderNews(tickerData), renderStatus());
   mainGrid.append(primary, side);
   root.append(mainGrid);
   root.append(renderSettings(onMessage));

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 MAX_PRICE_ROWS = 1260
 SCHEMA_VERSION = 2
+HEADLINE_LIMIT = 10
 ET = ZoneInfo("America/New_York")
 
 
@@ -73,6 +74,47 @@ def build_events(rows: list[dict], as_of: date) -> list[dict]:
         if len(chosen) == 20:
             break
     return chosen
+def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: datetime) -> dict:
+    """Last 48 hours of headlines and the 7-day mean of daily sentiment."""
+    from news_sentiment import rolling_mean
+
+    cutoff = now.astimezone(UTC) - timedelta(hours=48)
+    headlines = []
+    seen: set[str] = set()
+    ordered = sorted(articles, key=lambda row: str(row.get("published_at") or ""), reverse=True)
+    for row in ordered:
+        symbols = [str(symbol).upper() for symbol in row.get("tickers") or []]
+        if ticker not in symbols:
+            continue
+        published = str(row.get("published_at") or "")
+        try:
+            stamp = datetime.fromisoformat(published.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=UTC)
+        if stamp.astimezone(UTC) < cutoff:
+            continue
+        digest = str(row.get("url_hash") or row.get("url") or "")
+        if not digest or digest in seen:
+            continue
+        seen.add(digest)
+        headlines.append(
+            {
+                "title": row.get("title") or "",
+                "url": row.get("url") or "",
+                "publisher": row.get("publisher") or "",
+                "published_at": published,
+                "label": row.get("sentiment_label") or "neutral",
+            }
+        )
+        if len(headlines) == HEADLINE_LIMIT:
+            break
+    return {
+        "as_of": headlines[0]["published_at"] if headlines else None,
+        "sentiment_7d": rolling_mean(daily_rows, now.astimezone(UTC).date()),
+        "headlines": headlines,
+    }
 
 
 def _session_date(ts: str) -> str:
@@ -140,6 +182,7 @@ def build_snapshot(
     fundamentals: list[dict],
     status: dict | None,
     generated_at: str | None = None,
+    news: dict[str, dict] | None = None,
     hourly: dict[str, list[dict]] | None = None,
     short_interest: dict[str, list[dict]] | None = None,
     filings: dict[str, list[dict]] | None = None,
@@ -147,6 +190,11 @@ def build_snapshot(
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
     clock = _as_of(generated_at)
+    clock = datetime.now(UTC)
+    if generated_at:
+        clock = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        if clock.tzinfo is None:
+            clock = clock.replace(tzinfo=UTC)
     instruments = {}
     for ticker in tickers:
         unique: dict[str, dict] = {}
@@ -163,11 +211,15 @@ def build_snapshot(
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
         filing_rows = None if filings is None else filings.get(ticker) or []
+        bundle = None if news is None else news.get(ticker) or {}
         interest = latest_short_interest((short_interest or {}).get(ticker, []))
         instruments[ticker] = {
             "ticker": ticker,
             "price_history": history,
             "trend": trends.get(ticker),
+            "news": None
+            if bundle is None
+            else build_news(ticker, bundle.get("daily") or [], bundle.get("articles") or [], clock),
             "intraday": build_intraday((hourly or {}).get(ticker, []), history),
             "short_interest": interest.get(ticker),
             "filings": None if filing_rows is None else build_filings(filing_rows),
@@ -210,6 +262,14 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             symbol = str(row.get("ticker") or "").upper()
             if symbol in filings_by_ticker:
                 filings_by_ticker[symbol].append(row)
+        article_frame = read_parquet_prefix("curated/news_articles/")
+        daily_frame = read_parquet_prefix("curated/news_daily/")
+        article_rows = article_frame.to_dicts() if not article_frame.is_empty() else []
+        daily_rows = daily_frame.to_dicts() if not daily_frame.is_empty() else []
+        news_data = {
+            ticker: {"daily": [row for row in daily_rows if row.get("ticker") == ticker], "articles": article_rows}
+            for ticker in tickers
+        }
         hourly_data: dict[str, list[dict]] = {}
         for ticker in tickers:
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
@@ -231,6 +291,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             trends=trend_data,
             fundamentals=fundamental_doc.get("rows", []),
             status=status,
+            news=news_data,
             hourly=hourly_data,
             short_interest=short_by_ticker,
             filings=filings_by_ticker,
