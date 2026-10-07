@@ -1,7 +1,17 @@
+import {
+  PERIODS,
+  chartValue,
+  isNumericValue,
+  periodQuote,
+  resolveChartPeriod,
+  sessionReturn,
+  validBars,
+} from "./chart-period.js";
+
 const root = document.querySelector("#app");
 const svgNS = "http://www.w3.org/2000/svg";
 const authKeys = { state: "oauth_state", verifier: "oauth_verifier" };
-const session = { config: null, accessToken: null, prefs: null, dashboard: null, status: null, selected: null };
+const session = { config: null, accessToken: null, prefs: null, dashboard: null, status: null, selected: null, periodSave: false };
 const aliases = {
   DGS2: "2Y Treasury",
   DGS10: "10Y Treasury",
@@ -168,18 +178,8 @@ async function savePrefs(update) {
   session.prefs = body;
 }
 
-function isNumericValue(value) {
-  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
-}
-
-// Charts and returns use adj_close (split- and dividend-adjusted, continuous across corporate
-// actions); displayed prices use close_raw (the actual traded close). Both fall back to close,
-// which older rows carry alone.
-function chartValue(row) {
-  if (!row) return null;
-  return isNumericValue(row.adj_close) ? Number(row.adj_close) : isNumericValue(row.close) ? Number(row.close) : null;
-}
-
+// Displayed prices use close_raw (the actual traded close) and fall back to close.
+// Chart paths and chip returns use chartValue (adj_close, then close) from chart-period.js.
 function displayPrice(row) {
   if (!row) return null;
   return isNumericValue(row.close_raw) ? Number(row.close_raw) : isNumericValue(row.close) ? Number(row.close) : null;
@@ -216,11 +216,7 @@ function selectedData() {
 }
 
 function returns(history, offset) {
-  if (!history || history.length <= offset) return null;
-  const before = chartValue(history[history.length - 1 - offset]);
-  const latest = chartValue(history.at(-1));
-  if (before === null || latest === null) return null;
-  return before ? latest / before - 1 : null;
+  return sessionReturn(validBars(history), offset);
 }
 
 function netPressure(tickerData) {
@@ -234,7 +230,7 @@ function polarity(value) {
   return Number(value) > 0 ? "positive" : "negative";
 }
 
-function drawChart(history, ticker) {
+function drawChart(history, ticker, periodId = "1M") {
   if (!history?.length) return null;
   const values = history.map(chartValue).filter((value) => value !== null);
   if (values.length < 2) return null;
@@ -254,9 +250,11 @@ function drawChart(history, ticker) {
   svg.setAttribute("class", "price-chart");
   svg.setAttribute("viewBox", "0 0 940 210");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `${ticker} daily closing prices over ${values.length} sessions`);
+  svg.setAttribute("aria-label", `${ticker} ${periodId} daily closing prices, ${values.length} sessions`);
+  svg.dataset.period = periodId;
+  svg.dataset.sessions = String(values.length);
   const title = document.createElementNS(svgNS, "title");
-  title.textContent = `${ticker} daily close, adjusted for splits and dividends`;
+  title.textContent = `${ticker} ${periodId} daily close, adjusted for splits and dividends`;
   const desc = document.createElementNS(svgNS, "desc");
   desc.textContent = `Adjusted price range ${formatPrice(min)} to ${formatPrice(max)}. Most recent close ${formatPrice(displayPrice(history.at(-1)))}.`;
   svg.append(title, desc);
@@ -365,35 +363,95 @@ function renderWatchlist() {
   return list;
 }
 
-function renderPricePanel(tickerData) {
-  const panel = node("section", "panel");
-  const history = (tickerData?.price_history || []).filter((row) => chartValue(row) !== null);
-  const heading = sectionHeader(
-    "Price history",
-    tickerData?.price_as_of ? `Daily close · as of ${tickerData.price_as_of}` : "Daily close · five-year history",
-  );
-  const latest = history.at(-1);
-  if (latest) {
-    const summary = node("div", "price-summary");
-    summary.append(node("strong", "", formatPrice(displayPrice(latest))));
-    summary.append(node("span", `mono ${polarity(returns(history, 1))}`, `${formatPercent(returns(history, 1))} 1D`));
-    heading.append(summary);
+function periodDirection(value) {
+  const tone = polarity(value);
+  if (tone === "positive") return "up";
+  if (tone === "negative") return "down";
+  return "flat";
+}
+
+function disabledPeriodTip(period, quote) {
+  const start = quote.historyStarts ? `, history starts ${quote.historyStarts}` : "";
+  const have = `${quote.sessionsAvailable} session${quote.sessionsAvailable === 1 ? "" : "s"} available${start}`;
+  if (period.id === "5Y") return `Not enough history yet · 5Y needs about five years of daily closes (${have})`;
+  return `Not enough history yet · ${period.id} needs ${quote.needed} sessions (${have})`;
+}
+
+function renderPeriodChips(history, activeId, onSelect) {
+  const group = node("div", "period-chips");
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", "Period: return over each period; select one to chart it");
+  PERIODS.forEach((period) => {
+    const quote = periodQuote(history, period.id);
+    const selected = quote.available && period.id === activeId;
+    const button = node("button", "period-chip");
+    button.type = "button";
+    button.dataset.period = period.id;
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+    const valueClass = quote.available ? polarity(quote.returnValue) : "neutral";
+    const valueText = quote.available ? formatPercent(quote.returnValue, 1) : "—";
+    button.append(node("span", "period-label", period.id), node("span", `period-return mono ${valueClass}`, valueText));
+    if (!quote.available) {
+      const reason = disabledPeriodTip(period, quote);
+      button.setAttribute("aria-disabled", "true");
+      button.title = reason;
+      button.setAttribute("aria-label", `${period.id}, ${reason}`);
+      button.addEventListener("click", (event) => event.preventDefault());
+    } else {
+      const shown = selected ? "shown on the chart" : "click to show this period on the chart";
+      button.title = `${period.id} return ${valueText} · ${shown}`;
+      button.setAttribute("aria-label", `${period.id} return ${valueText}, ${periodDirection(quote.returnValue)}, ${shown}`);
+      button.addEventListener("click", () => onSelect(period.id));
+    }
+    group.append(button);
+  });
+  return group;
+}
+
+function renderPricePanel(tickerData, onSelectPeriod) {
+  const history = tickerData?.price_history || [];
+  const bars = validBars(history);
+  const activeId = resolveChartPeriod(session.prefs.display?.chart_period, history);
+  const quote = periodQuote(history, activeId);
+  const chartHistory = quote.available ? quote.window : bars;
+  const panel = node("section", "panel price-panel");
+  const overview = node("div", "overview");
+  const quoteBlock = node("div", "overview-quote");
+  quoteBlock.append(node("h2", "overview-kicker", `${session.selected} · daily closes`));
+  const latest = bars.at(-1);
+  quoteBlock.append(node("p", "overview-price", latest ? formatPrice(displayPrice(latest)) : "—"));
+  const asOf = latest?.date || tickerData?.price_as_of;
+  const meta = node("p", "overview-meta");
+  if (!latest) {
+    meta.textContent = "No daily closes yet";
+  } else if (quote.available) {
+    meta.append(document.createTextNode(`As of ${asOf} · `));
+    meta.append(node("span", polarity(quote.returnValue), `${formatPercent(quote.returnValue, 1)} ${activeId}`));
+    meta.append(document.createTextNode(" on the chart"));
+  } else {
+    meta.textContent = `As of ${asOf}`;
   }
-  panel.append(heading);
-  if (history.length >= 2) {
+  quoteBlock.append(meta);
+  overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod));
+  panel.append(overview);
+
+  if (chartHistory.length >= 2) {
     const wrap = node("div", "chart-wrap");
-    const chart = drawChart(history, session.selected);
+    const chart = drawChart(chartHistory, session.selected, activeId);
     if (chart) {
       wrap.append(chart);
       panel.append(wrap);
       const legend = node("div", "chart-legend");
-      legend.append(node("span", "", `${history.length.toLocaleString()} sessions`));
+      const values = chartHistory.map(chartValue);
       legend.append(
         node(
           "span",
           "",
-          `Adjusted ${formatPrice(Math.min(...history.map(chartValue)))} – ${formatPrice(Math.max(...history.map(chartValue)))}`,
+          `${activeId} · ${formatPercent(quote.returnValue, 1)} · ${chartHistory.length.toLocaleString()} sessions · daily closes`,
         ),
+      );
+      legend.append(
+        node("span", "", `Adjusted ${formatPrice(Math.min(...values))} – ${formatPrice(Math.max(...values))}`),
       );
       panel.append(legend);
     } else {
@@ -404,7 +462,7 @@ function renderPricePanel(tickerData) {
       node(
         "p",
         "data-state",
-        history.length === 1
+        bars.length === 1
           ? "Only one daily close is available; a line chart needs at least two points."
           : "No historical closes are published yet. Start the initial backfill and this chart will fill as batches complete.",
       ),
@@ -415,15 +473,12 @@ function renderPricePanel(tickerData) {
 
 function renderStats(tickerData) {
   const history = tickerData?.price_history || [];
-  const oneDay = returns(history, 1);
-  const oneMonth = returns(history, 21);
+  const latest = validBars(history).at(-1);
   const pressure = netPressure(tickerData);
   const grid = node("section", "stats-grid");
   grid.setAttribute("aria-label", "Selected ticker summary");
   grid.append(
-    statCard("LAST CLOSE", history.length ? formatPrice(displayPrice(history.at(-1))) : "—", tickerData?.price_as_of || "No data"),
-    statCard("1D CHANGE", formatPercent(oneDay), "Previous session", polarity(oneDay)),
-    statCard("1M CHANGE", formatPercent(oneMonth), "21 trading sessions", polarity(oneMonth)),
+    statCard("LAST CLOSE", latest ? formatPrice(displayPrice(latest)) : "—", latest?.date || tickerData?.price_as_of || "No data"),
     statCard(
       "MACRO PRESSURE",
       pressure === null ? "—" : pressure.toFixed(2),
@@ -659,16 +714,6 @@ function renderDashboard(errorMessage = "") {
   }
 
   const tickerData = selectedData();
-  const mainGrid = node("main", "dashboard-grid");
-  mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
-  const primary = node("div");
-  primary.append(renderStats(tickerData), renderPricePanel(tickerData), renderFundamentals());
-  const side = node("aside", "side-column");
-  side.setAttribute("aria-label", "Macro drivers and data status");
-  side.append(renderDrivers(tickerData), renderStatus());
-  mainGrid.append(primary, side);
-  root.append(mainGrid);
-
   let notice;
   const onMessage = (message, isError = false) => {
     notice = node("p", `data-state${isError ? " error" : ""}`, message);
@@ -676,6 +721,35 @@ function renderDashboard(errorMessage = "") {
     root.prepend(notice);
     window.setTimeout(() => notice?.remove(), 6000);
   };
+  const onSelectPeriod = async (periodId) => {
+    if (session.periodSave || session.prefs.display?.chart_period === periodId) return;
+    session.periodSave = true;
+    try {
+      await savePrefs({ display: { ...session.prefs.display, chart_period: periodId } });
+      // An older prefs response can omit chart_period; keep the click for this session.
+      if (session.prefs.display?.chart_period !== periodId) {
+        session.prefs = {
+          ...session.prefs,
+          display: { ...session.prefs.display, chart_period: periodId },
+        };
+      }
+      renderDashboard();
+      root.querySelector(`[data-period="${periodId}"]`)?.focus();
+    } catch (error) {
+      onMessage(error.message, true);
+    } finally {
+      session.periodSave = false;
+    }
+  };
+  const mainGrid = node("main", "dashboard-grid");
+  mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
+  const primary = node("div");
+  primary.append(renderStats(tickerData), renderPricePanel(tickerData, onSelectPeriod), renderFundamentals());
+  const side = node("aside", "side-column");
+  side.setAttribute("aria-label", "Macro drivers and data status");
+  side.append(renderDrivers(tickerData), renderStatus());
+  mainGrid.append(primary, side);
+  root.append(mainGrid);
   root.append(renderSettings(onMessage));
   const footer = node("footer", "dashboard-footer");
   footer.append(node("span", "", "Information for research; not investment advice."));

@@ -312,18 +312,103 @@ a {
   font-size: 11px;
 }
 
-.price-summary {
+.overview {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid rgba(39, 48, 60, 0.72);
 }
 
-.price-summary strong {
-  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: clamp(23px, 3vw, 32px);
+.overview-quote {
+  min-width: 0;
+  flex: 1 1 200px;
+}
+
+.overview-kicker {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: -0.04em;
+}
+
+.overview-price {
+  margin: 0;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: clamp(32px, 4vw, 44px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+}
+
+.overview-meta {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.period-chips {
+  display: flex;
+  flex: 1 1 280px;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+
+.period-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 62px;
+  padding: 3px 8px;
+  border: 1px solid #2a323e;
+  border-radius: 8px;
+  background: transparent;
+  color: #c5cdd8;
+}
+
+.period-chip:hover {
+  border-color: #46566b;
+  background: #1a222d;
+}
+
+.period-chip[aria-pressed="true"] {
+  border-color: #6ca6ff;
+  background: #1e2c40;
+}
+
+.period-chip[aria-pressed="true"]:hover {
+  border-color: #6ca6ff;
+  background: #243650;
+}
+
+.period-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.period-chip .period-return {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.period-chip[aria-disabled="true"],
+.period-chip[aria-disabled="true"]:hover {
+  border-color: #2a323e;
+  background: transparent;
+  color: var(--subtle);
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.period-chip[aria-disabled="true"] .period-return {
+  color: var(--subtle);
 }
 
 .positive {
@@ -388,7 +473,7 @@ a {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 240px));
   gap: 8px;
   margin: 0 0 12px;
 }
@@ -599,8 +684,8 @@ a {
     flex: 0 0 142px;
   }
 
-  .stats-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .period-chips {
+    justify-content: flex-start;
   }
 
   .side-column {

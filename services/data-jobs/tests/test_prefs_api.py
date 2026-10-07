@@ -98,6 +98,46 @@ def test_users_do_not_see_each_other(api):
     assert other["tickers"] == ["TSLA", "SPCX"]
 
 
+def test_chart_period_allow_list_and_unknown_fallback(api):
+    mod, _ = api
+    fresh = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert fresh["display"]["chart_period"] == "1M"
+
+    saved = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"time_zone": "America/New_York", "updown_palette": "green-red", "chart_period": "5Y"},
+                    "version": 0,
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert saved["display"]["chart_period"] == "5Y"
+    assert saved["display"]["updown_palette"] == "green-red"
+
+    coerced = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"chart_period": "YTD"},
+                    "version": saved["version"],
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert coerced["display"]["chart_period"] == "1M"
+    assert coerced["display"]["time_zone"] == "America/New_York"
+
+
 def test_unauthenticated(api):
     mod, _ = api
     assert mod.handler({"requestContext": {"http": {"method": "GET"}}}, None)["statusCode"] == 401

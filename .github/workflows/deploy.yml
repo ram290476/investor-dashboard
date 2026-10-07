@@ -148,7 +148,9 @@ jobs:
           set -euo pipefail
           aws s3 sync apps/web "s3://${SITE_BUCKET}" \
             --delete \
-            --exclude config.example.json
+            --exclude config.example.json \
+            --exclude package.json \
+            --exclude "*.test.js"
           aws cloudfront create-invalidation \
             --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
             --paths '/*'

@@ -60,7 +60,12 @@ jobs:
           pip-audit -r services/data-jobs/requirements-test.txt
 
       - name: Check browser JavaScript syntax
-        run: node --check apps/web/app.js
+        run: |
+          node --check apps/web/app.js
+          node --check apps/web/chart-period.js
+
+      - name: Test chart period selection
+        run: node --test apps/web/chart-period.test.js
 
       - name: Format and validate Terraform
         working-directory: infra/terraform

@@ -110,7 +110,7 @@ Evidence for an assessor: the daily `key_rotation_status` log lines (kept 400 da
 
 | Contract | Location | Fields |
 | --- | --- | --- |
-| Preferences API | `GET/PUT {site_api_endpoint}/prefs`, `Authorization: Bearer <Cognito access token>` | `tickers` (ordered, max 50), `pinned` (max 6, subset of tickers), `display.time_zone` (IANA), `display.updown_palette` (`green-red`, `red-green`, `blue-orange`), `version` (send back on PUT; 409 if stale), `updated_at` |
+| Preferences API | `GET/PUT {site_api_endpoint}/prefs`, `Authorization: Bearer <Cognito access token>` | `tickers` (ordered, max 50), `pinned` (max 6, subset of tickers), `display.time_zone` (IANA), `display.updown_palette` (`green-red`, `red-green`, `blue-orange`), `display.chart_period` (`1D`, `1W`, `1M`, `3M`, `1Y`, `3Y`, `5Y`; unknown values stored as `1M`), `version` (send back on PUT; 409 if stale), `updated_at` |
 | Daily prices | `curated/prices_daily/ticker=<T>/year=<YYYY>/prices.parquet`; `serving/dashboard.json` `tickers.<T>.price_history` | `ticker, date, close` (split-adjusted), `close_raw` (traded), `adj_close` (split + dividend adjusted; charts and trends), `volume, source_id`. `close_raw`/`adj_close` may be null on rows written before price-reconcile ran |
 | Trend metrics | `serving/trend_metrics/ticker=<T>/trend_metrics.parquet`, `serving/trend_metrics/latest/<T>.json` | `series_id, ticker, date, value, chg_1w, chg_1m, chg_3m, z_1w, z_1m, z_3m, range_pct_1y, trend_state, days_in_state, corr_30d, corr_90d, effect, net_pressure` |
 | Fundamentals | `serving/fundamentals_quarterly.json` | `ticker, metric (gross_margin_gaap, revenue_gaap, gross_profit_gaap, deliveries, fsd_subscribers), fiscal_quarter, release_date, value, unit, source_id` |
