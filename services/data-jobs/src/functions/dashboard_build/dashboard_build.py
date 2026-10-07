@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 MAX_PRICE_ROWS = 1260
 SCHEMA_VERSION = 2
+HEADLINE_LIMIT = 10
 ET = ZoneInfo("America/New_York")
 
 
@@ -30,6 +31,46 @@ def build_releases(rows: list[dict], calendar: list[dict]) -> dict:
     return {
         "latest": [latest[key] for key in sorted(latest)],
         "next": [{"series": row.get("series"), "release_ts": row.get("release_ts")} for row in upcoming],
+def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: datetime) -> dict:
+    """Last 48 hours of headlines and the 7-day mean of daily sentiment."""
+    from news_sentiment import rolling_mean
+
+    cutoff = now.astimezone(UTC) - timedelta(hours=48)
+    headlines = []
+    seen: set[str] = set()
+    ordered = sorted(articles, key=lambda row: str(row.get("published_at") or ""), reverse=True)
+    for row in ordered:
+        symbols = [str(symbol).upper() for symbol in row.get("tickers") or []]
+        if ticker not in symbols:
+            continue
+        published = str(row.get("published_at") or "")
+        try:
+            stamp = datetime.fromisoformat(published.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=UTC)
+        if stamp.astimezone(UTC) < cutoff:
+            continue
+        digest = str(row.get("url_hash") or row.get("url") or "")
+        if not digest or digest in seen:
+            continue
+        seen.add(digest)
+        headlines.append(
+            {
+                "title": row.get("title") or "",
+                "url": row.get("url") or "",
+                "publisher": row.get("publisher") or "",
+                "published_at": published,
+                "label": row.get("sentiment_label") or "neutral",
+            }
+        )
+        if len(headlines) == HEADLINE_LIMIT:
+            break
+    return {
+        "as_of": headlines[0]["published_at"] if headlines else None,
+        "sentiment_7d": rolling_mean(daily_rows, now.astimezone(UTC).date()),
+        "headlines": headlines,
     }
 
 
@@ -98,12 +139,18 @@ def build_snapshot(
     fundamentals: list[dict],
     status: dict | None,
     generated_at: str | None = None,
+    news: dict[str, dict] | None = None,
     hourly: dict[str, list[dict]] | None = None,
     short_interest: dict[str, list[dict]] | None = None,
     releases: list[dict] | None = None,
     release_calendar: list[dict] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
+    clock = datetime.now(UTC)
+    if generated_at:
+        clock = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        if clock.tzinfo is None:
+            clock = clock.replace(tzinfo=UTC)
     instruments = {}
     for ticker in tickers:
         unique: dict[str, dict] = {}
@@ -119,11 +166,15 @@ def build_snapshot(
                     "volume": row.get("volume"),
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
+        bundle = None if news is None else news.get(ticker) or {}
         interest = latest_short_interest((short_interest or {}).get(ticker, []))
         instruments[ticker] = {
             "ticker": ticker,
             "price_history": history,
             "trend": trends.get(ticker),
+            "news": None
+            if bundle is None
+            else build_news(ticker, bundle.get("daily") or [], bundle.get("articles") or [], clock),
             "intraday": build_intraday((hourly or {}).get(ticker, []), history),
             "short_interest": interest.get(ticker),
             "price_status": "available" if history else "unavailable",
@@ -159,6 +210,14 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         tickers = collection_universe(user_ticker_union())["equities"]
         price_data: dict[str, list[dict]] = {}
         trend_data: dict[str, dict | None] = {}
+        article_frame = read_parquet_prefix("curated/news_articles/")
+        daily_frame = read_parquet_prefix("curated/news_daily/")
+        article_rows = article_frame.to_dicts() if not article_frame.is_empty() else []
+        daily_rows = daily_frame.to_dicts() if not daily_frame.is_empty() else []
+        news_data = {
+            ticker: {"daily": [row for row in daily_rows if row.get("ticker") == ticker], "articles": article_rows}
+            for ticker in tickers
+        }
         hourly_data: dict[str, list[dict]] = {}
         for ticker in tickers:
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
@@ -182,6 +241,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             trends=trend_data,
             fundamentals=fundamental_doc.get("rows", []),
             status=status,
+            news=news_data,
             hourly=hourly_data,
             short_interest=short_by_ticker,
             releases=release_frame.to_dicts() if not release_frame.is_empty() else [],
