@@ -822,37 +822,6 @@ function renderFilings(tickerData) {
   return panel;
 }
 
-function renderStatus() {
-  const panel = node("section", "panel");
-  panel.id = "data-freshness";
-  panel.tabIndex = -1;
-  const status = session.status || session.dashboard?.status;
-  panel.append(sectionHeader("Data freshness", status?.generated_at ? `Updated ${formatTime(status.generated_at, session.prefs.display.time_zone)}` : "Collector status"));
-  const jobs = status?.jobs || [];
-  if (!jobs.length) {
-    panel.append(node("p", "data-state", "Refresh status is not available yet. It appears after the first collector run."));
-    return panel;
-  }
-  const list = node("ul", "status-list");
-  jobs
-    .slice()
-    .sort((a, b) => String(a.job).localeCompare(String(b.job)))
-    .forEach((job) => {
-      const item = node("li", "status-row");
-      const label = node("span");
-      const dot = node("span", `dot ${job.status === "ok" ? "ok" : job.status === "partial" ? "partial" : job.status === "failed" ? "failed" : ""}`);
-      label.append(dot, document.createTextNode(` ${job.name || job.job}`));
-      const last = formatTime(job.last_run, session.prefs.display.time_zone);
-      item.append(label, node("span", "mono", last));
-      item.title = job.last_outcome ? `Last outcome: ${job.last_outcome}; failed sources: ${job.failed_sources || 0}` : "No successful run has been recorded.";
-      list.append(item);
-    });
-  const body = node("div", "panel-body");
-  body.append(list);
-  panel.append(body);
-  return panel;
-}
-
 function renderDashboard() {
   const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
@@ -930,8 +899,8 @@ function renderDashboard() {
   if (contracts) primary.append(contracts);
   primary.append(renderFundamentals());
   const side = node("aside", "side-column");
-  side.setAttribute("aria-label", "Macro drivers and data status");
-  side.append(renderDrivers(tickerData), renderNews(tickerData), renderFilings(tickerData), renderStatus());
+  side.setAttribute("aria-label", "Macro drivers, news and filings");
+  side.append(renderDrivers(tickerData), renderNews(tickerData), renderFilings(tickerData));
   mainGrid.append(primary, side);
   root.append(mainGrid);
   const footer = node("footer", "dashboard-footer");
@@ -1045,6 +1014,7 @@ const settings = createAccountSettings({
   signOut,
   formatPrice,
   formatPercent,
+  formatTime,
   displayPrice,
   browserTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
 });

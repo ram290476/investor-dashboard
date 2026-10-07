@@ -1,6 +1,6 @@
 # Design roadmap screenshots
 
-Reference captures from the AI-generated design canvases in `design/ai-generated/` (`Main.dc.html`, `Mobile.dc.html`). Used by GitHub roadmap issues for features not yet shipped in `apps/web`.
+Reference captures from the AI-generated design canvases in `design/ai-generated/` (`Main.dc.html`, `Mobile.dc.html`). Some show features now implemented in `apps/web`; others remain roadmap designs.
 
 Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview shim) so the artboard’s `renderVals()` sample/demo series bind into charts and labels.
 
@@ -13,7 +13,7 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `mobile-glance.png` | Four-tab phone glance layout (Chart / Signals / Calendar & more) |
 | `account-menu.png` | Header account button with the signed-in account menu open (data refresh summary, My tickers, Display, Sign out) |
 | `account-settings-tickers.png` | Account settings dialog, **My tickers** tab (pin ★ max 6, reorder ▲▼, remove ✕, search-add) |
-| `account-settings-refresh.png` | Account settings dialog, **Data refresh** tab (job schedule / status) |
+| `account-settings-refresh.png` | Account settings dialog, **Data refresh** tab (job schedule / status; implemented in `apps/web` for #52) |
 | `account-settings-display.png` | Account settings dialog, **Display** tab (time zone PT/ET, up/down colors) |
 | `trend-pill-overview.png` | Selected-stock overview row as designed: last price, trend-state pill (`Uptrend · 4d`) + `vs 20-day avg`, period chips |
 | `trend-pill-states.png` | The same quote block for each sample ticker in My tickers (`Uptrend · Nd`, `Range · 2d`) |

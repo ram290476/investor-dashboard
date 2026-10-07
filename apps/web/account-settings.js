@@ -1,5 +1,5 @@
 // Account menu and the tabbed Account settings dialog (issue #36). Every user setting lives here:
-// My tickers (add, pin, reorder, remove), Theme & display, Profile & time zone.
+// My tickers (add, pin, reorder, remove), Theme & display, Profile & time zone, Data refresh.
 // Changes apply at once and autosave through PUT /prefs, one request at a time.
 
 import { PERIODS, chartValue, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
@@ -71,7 +71,8 @@ function sparkline(history) {
 /**
  * ctx: { session, putPrefs(body), getPrefs(), onPrefsChange(), onTickerAdded(ticker), onUnauthorized(),
  *        onSaveError(message, reopen),
- *        signOut(), formatPrice(n), formatPercent(n, digits), displayPrice(row), browserTimeZone() }
+ *        signOut(), formatPrice(n), formatPercent(n, digits), displayPrice(row), formatTime(value, timeZone),
+ *        browserTimeZone() }
  */
 export function createAccountSettings(ctx) {
   const { session } = ctx;
@@ -308,6 +309,7 @@ export function createAccountSettings(ctx) {
     if (activeTab === "tickers") panel.append(...renderTickersTab());
     if (activeTab === "theme") panel.append(...renderThemeTab());
     if (activeTab === "profile") panel.append(...renderProfileTab());
+    if (activeTab === "refresh") panel.append(...renderRefreshTab());
     if (focusKey) {
       const target = panel.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
       (target && !target.disabled ? target : panel).focus();
@@ -663,6 +665,72 @@ export function createAccountSettings(ctx) {
     return [profile, zone, other, signOutField];
   }
 
+  // ---------------------------------------------------------------- Data refresh
+  function renderRefreshTab() {
+    const status = session.status || session.dashboard?.status;
+    const intro = el("div", "settings-intro");
+    intro.append(el("h3", "", "Data refresh jobs"));
+    intro.append(el(
+      "p",
+      "settings-hint",
+      status?.generated_at
+        ? `Updated ${ctx.formatTime(status.generated_at, session.prefs.display.time_zone)}`
+        : "Collector status",
+    ));
+
+    const jobs = status?.jobs || [];
+    if (!jobs.length) {
+      return [
+        intro,
+        el("p", "data-state", "Refresh status is not available yet. It appears after the first collector run."),
+      ];
+    }
+
+    const table = el("table", "refresh-table");
+    table.setAttribute("aria-label", "Data refresh job status");
+    const head = el("thead");
+    const headerRow = el("tr");
+    ["Job", "Name", "Last run", "Next run", "Status"].forEach((label) => {
+      headerRow.append(el("th", "", label));
+    });
+    head.append(headerRow);
+    table.append(head);
+
+    const body = el("tbody");
+    jobs
+      .slice()
+      .sort((a, b) => String(a.job).localeCompare(String(b.job)))
+      .forEach((job) => {
+        const row = el("tr");
+        row.append(el("td", "mono", job.job || "—"));
+        row.append(el("td", "", job.name || job.job || "—"));
+        row.append(el("td", "mono", ctx.formatTime(job.last_run, session.prefs.display.time_zone)));
+        row.append(el(
+          "td",
+          "mono",
+          job.next_run ? ctx.formatTime(job.next_run, session.prefs.display.time_zone) : "not scheduled",
+        ));
+
+        const state = ["ok", "partial", "failed"].includes(job.status) ? job.status : "never_run";
+        const statusCell = el("td");
+        const statusLabel = state === "never_run" ? "never run" : state;
+        const indicator = el("span", `dot ${state === "never_run" ? "" : state}`.trim());
+        indicator.setAttribute("aria-hidden", "true");
+        statusCell.append(indicator, document.createTextNode(` ${statusLabel}`));
+        statusCell.className = `refresh-status ${state}`;
+        statusCell.title = job.last_outcome
+          ? `Last outcome: ${job.last_outcome}; failed sources: ${job.failed_sources || 0}`
+          : "No successful run has been recorded.";
+        row.append(statusCell);
+        body.append(row);
+      });
+    table.append(body);
+
+    const wrap = el("div", "refresh-table-wrap");
+    wrap.append(table);
+    return [intro, wrap];
+  }
+
   // ---------------------------------------------------------------- account menu
   function renderAccountButton() {
     const wrap = el("div", "account");
@@ -685,20 +753,22 @@ export function createAccountSettings(ctx) {
     const head = el("div", "menu-head");
     head.setAttribute("role", "presentation");
     head.append(el("strong", "", "Signed in"), el("span", "", `${session.email || "Cognito account"} · Cognito session active`));
-    const refresh = el("p", "menu-refresh");
-    refresh.setAttribute("role", "presentation");
+    const refresh = el("button", "menu-refresh");
+    refresh.type = "button";
+    refresh.setAttribute("role", "menuitem");
+    refresh.tabIndex = -1;
+    refresh.setAttribute("aria-label", `Data refresh: ${summary.text}`);
     refresh.append(el("span", `dot ${summary.tone}`.trim()), document.createTextNode(` Data refresh: ${summary.text}`));
-    menu.append(head, refresh);
+    refresh.addEventListener("click", () => {
+      hideMenu(false);
+      open("refresh", "account");
+    });
 
-    const items = [
+    const items = [refresh, ...[
       ["My tickers", "add · pin · reorder", () => open("tickers", "account")],
       ["Theme & display", "colors · chart period", () => open("theme", "account")],
       ["Profile & time zone", `email · ${timeZoneLabel(session.prefs.display.time_zone)}`, () => open("profile", "account")],
-      ["All refresh jobs", "data freshness panel", () => {
-        const target = document.querySelector("#data-freshness");
-        target?.scrollIntoView({ block: "start" });
-        target?.focus();
-      }],
+      ["All refresh jobs", "job schedule · status", () => open("refresh", "account")],
       ["Sign out", "", ctx.signOut],
     ].map(([label, hint, run]) => {
       const item = el("button", "menu-item");
@@ -712,8 +782,8 @@ export function createAccountSettings(ctx) {
         run();
       });
       return item;
-    });
-    menu.append(...items);
+    })];
+    menu.append(head, ...items);
 
     function showMenu(focusIndex = 0) {
       menu.hidden = false;
