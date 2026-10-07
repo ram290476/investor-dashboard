@@ -611,19 +611,34 @@ function renderDrivers(tickerData) {
   }
   if (!drivers.length) {
     panel.append(node("p", "data-state", "Driver trends are unavailable until daily prices and macro observations have been processed."));
-    return panel;
+  } else {
+    const list = node("ul", "driver-list");
+    drivers.forEach((row) => {
+      const item = node("li", "driver-row");
+      item.append(node("span", "driver-name", aliases[row.series_id] || row.series_id));
+      const effect = Number(row.effect);
+      item.append(node("span", `driver-value ${polarity(effect)}`, `${effect > 0 ? "+" : ""}${effect.toFixed(2)}`));
+      list.append(item);
+    });
+    const body = node("div", "panel-body");
+    body.append(list);
+    panel.append(body);
   }
-  const list = node("ul", "driver-list");
-  drivers.forEach((row) => {
-    const item = node("li", "driver-row");
-    item.append(node("span", "driver-name", aliases[row.series_id] || row.series_id));
-    const effect = Number(row.effect);
-    item.append(node("span", `driver-value ${polarity(effect)}`, `${effect > 0 ? "+" : ""}${effect.toFixed(2)}`));
-    list.append(item);
-  });
-  const body = node("div", "panel-body");
-  body.append(list);
-  panel.append(body);
+  const releases = session.dashboard?.releases;
+  if (releases) {
+    const note = node("div", "release-notes");
+    const labels = { CUSR0000SA0: "CPI", CUSR0000SA0L1E: "Core CPI", PCE: "PCE" };
+    (releases.latest || [])
+      .filter((row) => labels[row.series])
+      .forEach((row) => {
+        const surprise = isNumericValue(row.surprise) ? Number(row.surprise) : null;
+        const text = surprise == null ? "no consensus" : `${surprise > 0 ? "+" : ""}${surprise.toFixed(2)} vs consensus`;
+        note.append(node("p", "release-note", `${labels[row.series]} surprise ${text}`));
+      });
+    const next = (releases.next || [])[0];
+    if (next?.release_ts) note.append(node("p", "release-note", `Next release ${next.series || ""} ${next.release_ts}`));
+    if (note.childElementCount) panel.append(note);
+  }
   return panel;
 }
 

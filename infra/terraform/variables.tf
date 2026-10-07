@@ -288,6 +288,8 @@ variable "jobs" {
     write_prefixes = list(string)
     api_keys       = list(string)
     reads_prefs    = bool
+    # Only the release-day job creates one-off schedules. Default false so existing jobs are unchanged.
+    manages_schedules = optional(bool, false)
   }))
   default = {
     # After D4 (daily close) and M1 (release days) succeed
@@ -369,7 +371,7 @@ variable "jobs" {
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1"]
       memory   = 1024
       timeout  = 300
       read_prefixes = [
@@ -385,6 +387,8 @@ variable "jobs" {
         "serving/trend_metrics/latest/",
         "serving/fundamentals_quarterly.json",
         "serving/status.json",
+        "curated/releases/",
+        "curated/release_calendar/",
       ]
       write_prefixes = ["serving/dashboard.json"]
       api_keys       = []
@@ -449,6 +453,19 @@ variable "jobs" {
       write_prefixes = ["curated/prices_daily/"]
       api_keys       = []
       reads_prefs    = true
+    }
+    # Event-driven. One-off at() schedules are created from the stopgap release calendar.
+    release-day = {
+      handler           = "release_day.handler"
+      schedule          = ""
+      triggers          = []
+      memory            = 512
+      timeout           = 300
+      read_prefixes     = ["curated/releases/", "curated/release_calendar/", "curated/macro_daily/"]
+      write_prefixes    = ["raw/releases/", "curated/releases/", "curated/release_calendar/", "curated/macro_daily/"]
+      api_keys          = ["bls", "bea", "census", "fred"]
+      reads_prefs       = false
+      manages_schedules = true
     }
     # Rebuilds serving/status.json after every job
     status-feed = {

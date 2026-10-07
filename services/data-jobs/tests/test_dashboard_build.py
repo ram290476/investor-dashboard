@@ -27,6 +27,7 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
     assert snapshot["events"] is None
     assert snapshot["tickers"]["TSLA"]["contracts"] is None
     assert snapshot["tickers"]["SPCX"]["contracts"] is None
+    assert snapshot["releases"] is None
     assert snapshot["tickers"]["TSLA"]["intraday"] is None
     assert snapshot["tickers"]["TSLA"]["short_interest"] is None
     assert snapshot["generated_at"] == "2026-10-04T22:00:00+00:00"
@@ -46,6 +47,29 @@ def test_snapshot_exposes_empty_dataset_as_unavailable():
     assert snapshot["tickers"]["TSLA"]["price_history"] == []
     assert snapshot["tickers"]["TSLA"]["price_as_of"] is None
     assert snapshot["status"] is None
+
+
+def test_releases_keep_the_latest_print_and_the_next_five_dates():
+    calendar = [{"series": "cpi", "release_ts": f"2026-11-{day:02d}T08:35:00-05:00"} for day in range(1, 7)]
+    snapshot = dashboard_build.build_snapshot(
+        tickers=["TSLA"],
+        prices={},
+        trends={},
+        fundamentals=[],
+        status=None,
+        releases=[
+            {"series_id": "CUSR0000SA0", "period": "2026-08", "actual": 320.0, "consensus": 319.5, "surprise": 0.5},
+            {"series_id": "CUSR0000SA0", "period": "2026-09", "actual": 321.2, "consensus": 321.0, "surprise": 0.2},
+            {"series_id": "PCE", "period": "2026-09", "actual": 124.0, "consensus": 123.8, "surprise": 0.2},
+        ],
+        release_calendar=calendar,
+    )
+    assert snapshot["releases"]["latest"] == [
+        {"series": "CUSR0000SA0", "period": "2026-09", "actual": 321.2, "consensus": 321.0, "surprise": 0.2},
+        {"series": "PCE", "period": "2026-09", "actual": 124.0, "consensus": 123.8, "surprise": 0.2},
+    ]
+    assert len(snapshot["releases"]["next"]) == 5
+    assert snapshot["releases"]["next"][0]["release_ts"].startswith("2026-11-01")
 
 
 def test_snapshot_carries_close_raw_and_tolerates_rows_without_it():

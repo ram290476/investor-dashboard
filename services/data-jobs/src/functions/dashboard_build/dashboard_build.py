@@ -122,6 +122,29 @@ def build_events(rows: list[dict], as_of: date) -> list[dict]:
     return chosen
 
 
+def build_releases(rows: list[dict], calendar: list[dict]) -> dict:
+    latest: dict[str, dict] = {}
+    for row in rows:
+        series_id = row.get("series_id")
+        period = str(row.get("period") or "")
+        if not series_id:
+            continue
+        current = latest.get(series_id)
+        if current is None or period > str(current.get("period") or ""):
+            latest[series_id] = {
+                "series": series_id,
+                "period": period,
+                "actual": row.get("actual"),
+                "consensus": row.get("consensus"),
+                "surprise": row.get("surprise"),
+            }
+    upcoming = sorted(calendar, key=lambda row: str(row.get("release_ts") or ""))[:5]
+    return {
+        "latest": [latest[key] for key in sorted(latest)],
+        "next": [{"series": row.get("series"), "release_ts": row.get("release_ts")} for row in upcoming],
+    }
+
+
 def _session_date(ts: str) -> str:
     stamp = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
     if stamp.tzinfo is None:
@@ -193,6 +216,8 @@ def build_snapshot(
     filings: dict[str, list[dict]] | None = None,
     events: list[dict] | None = None,
     contracts: dict[str, dict] | None = None,
+    releases: list[dict] | None = None,
+    release_calendar: list[dict] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
     clock = _as_of(generated_at)
@@ -244,6 +269,11 @@ def build_snapshot(
         "tickers": instruments,
         "fundamentals": normalized_fundamentals,
         "events": None if events is None else build_events(events, clock.date()),
+        "releases": (
+            None
+            if releases is None and release_calendar is None
+            else build_releases(releases or [], release_calendar or [])
+        ),
         "status": status,
     }
 
@@ -292,6 +322,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
 
         fundamental_doc = read_json("serving/fundamentals_quarterly.json") or {}
         status = read_json("serving/status.json")
+        release_frame = read_parquet_prefix("curated/releases/")
+        calendar = read_json("curated/release_calendar/upcoming.json") or []
         snapshot = build_snapshot(
             tickers=tickers,
             prices=price_data,
@@ -304,6 +336,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             filings=filings_by_ticker,
             events=event_rows,
             contracts=contracts_data,
+            releases=release_frame.to_dicts() if not release_frame.is_empty() else [],
+            release_calendar=calendar if isinstance(calendar, list) else [],
         )
         write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
         logger.info(
