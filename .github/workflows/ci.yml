@@ -63,9 +63,10 @@ jobs:
         run: |
           node --check apps/web/app.js
           node --check apps/web/chart-period.js
+          node --check apps/web/trend-state.js
 
-      - name: Test chart period selection
-        run: node --test apps/web/chart-period.test.js
+      - name: Test chart period selection and trend state
+        run: node --test apps/web/chart-period.test.js apps/web/trend-state.test.js
 
       - name: Format and validate Terraform
         working-directory: infra/terraform
