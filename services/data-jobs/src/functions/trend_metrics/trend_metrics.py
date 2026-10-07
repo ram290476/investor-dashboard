@@ -6,6 +6,7 @@ writes Parquet and a small latest-day JSON to the serving prefix:
 
     serving/trend_metrics/ticker=<T>/trend_metrics.parquet   full history
     serving/trend_metrics/latest/<T>.json                     last trading day, one row per driver
+                                                          plus PX:<T>, that ticker's own 20/50-day price trend
 
 Key: (series_id, ticker, date). Columns, per the UI brief:
     value, chg_1w, chg_1m, chg_3m, z_1w, z_1m, z_3m      changes over 5/21/63 trading days and their z-scores
@@ -165,6 +166,84 @@ def ticker_metrics(ticker: str, ticker_px: pl.DataFrame, drivers: dict[str, pl.D
 
 
 MACRO_COLUMNS = {"series_id", "obs_date", "value"}
+PRICE_TREND_SHORT, PRICE_TREND_LONG = 20, 50
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def _price_state_at(closes: list[float], index: int) -> str | None:
+    """Same 20/50 rule as apps/web/trend-state.js. up/down/flat match the serving vocabulary."""
+    if index < PRICE_TREND_LONG - 1:
+        return None
+    ma20 = _mean(closes[index - (PRICE_TREND_SHORT - 1) : index + 1])
+    ma50 = _mean(closes[index - (PRICE_TREND_LONG - 1) : index + 1])
+    close = closes[index]
+    if close > ma20 and ma20 > ma50:
+        return "up"
+    if close < ma20 and ma20 < ma50:
+        return "down"
+    return "flat"
+
+
+def price_trend_row(ticker: str, prices: pl.DataFrame) -> dict | None:
+    """One PX:<ticker> row from that ticker's closes. None until 50 closes exist.
+
+    days_in_state counts back only through sessions that have a 50-day average.
+    from_start is true when that run reaches the first such session.
+    """
+    if prices.is_empty() or not {"date", "close"} <= set(prices.columns):
+        return None
+    frame = prices.filter(pl.col("close").is_not_null()).unique(subset=["date"], keep="last").sort("date")
+    if frame.height < PRICE_TREND_LONG:
+        return None
+    closes = [float(value) for value in frame["close"].to_list()]
+    dates = [str(value)[:10] for value in frame["date"].to_list()]
+    latest = len(closes) - 1
+    state = _price_state_at(closes, latest)
+    if state is None:
+        return None
+    ma20 = _mean(closes[-PRICE_TREND_SHORT:])
+    ma50 = _mean(closes[-PRICE_TREND_LONG:])
+    close = closes[-1]
+    days = 0
+    since_index = latest
+    for index in range(latest, PRICE_TREND_LONG - 2, -1):
+        if _price_state_at(closes, index) != state:
+            break
+        days += 1
+        since_index = index
+    return {
+        "series_id": f"PX:{ticker}",
+        "ticker": ticker,
+        "date": dates[-1],
+        "trend_state": state,
+        "days_in_state": days,
+        "since": dates[since_index],
+        "from_start": since_index == PRICE_TREND_LONG - 1,
+        "vs_ma20": None if ma20 == 0 else close / ma20 - 1.0,
+        "close": close,
+        "ma20": ma20,
+        "ma50": ma50,
+    }
+
+
+def latest_document(ticker: str, metrics: pl.DataFrame, prices: pl.DataFrame) -> dict | None:
+    """Last driver day for one ticker, plus that ticker's own price trend when it can be computed."""
+    rows: list[dict] = []
+    as_of = None
+    if metrics is not None and not metrics.is_empty():
+        last = metrics.filter(pl.col("date") == metrics["date"].max())
+        rows = last.to_dicts()
+        as_of = str(last["date"][0])[:10]
+    price_row = price_trend_row(ticker, prices)
+    if price_row:
+        rows.append(price_row)
+        as_of = as_of or price_row["date"]
+    if not rows:
+        return None
+    return {"ticker": ticker, "date": as_of, "rows": rows}
 
 
 def analysis_prices(prices: pl.DataFrame) -> pl.DataFrame:
@@ -215,14 +294,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         for t in uni["equities"]:
             px = prices.filter(pl.col("ticker") == t).select("date", pl.col("close").cast(pl.Float64))
             out = ticker_metrics(t, px, drivers)
-            if out.is_empty():
+            document = latest_document(t, out, px)
+            if document is None:
                 continue
-            write_parquet(out, f"serving/trend_metrics/ticker={t}/trend_metrics.parquet")
-            last = out.filter(pl.col("date") == out["date"].max())
-            write_json(
-                {"ticker": t, "date": str(last["date"][0]), "rows": last.to_dicts()},
-                f"serving/trend_metrics/latest/{t}.json",
-            )
+            if not out.is_empty():
+                write_parquet(out, f"serving/trend_metrics/ticker={t}/trend_metrics.parquet")
+            write_json(document, f"serving/trend_metrics/latest/{t}.json")
             written += 1
         return {"tickers": written, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": uni["dropped"]}
 

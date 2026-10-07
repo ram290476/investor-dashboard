@@ -144,6 +144,49 @@ def test_split_inputs_tolerates_empty_prices():
     assert tm.split_inputs(pl.DataFrame(), pl.DataFrame(), ["SPY"]) == {}
 
 
+def test_each_ticker_gets_its_own_price_trend():
+    days = _days(80)
+    tsla = pl.DataFrame({"date": days, "close": [100.0 + i for i in range(80)]})
+    spcx = pl.DataFrame({"date": days, "close": [300.0 - i for i in range(80)]})
+    up = tm.price_trend_row("TSLA", tsla)
+    down = tm.price_trend_row("SPCX", spcx)
+    assert up["series_id"] == "PX:TSLA" and up["ticker"] == "TSLA"
+    assert down["series_id"] == "PX:SPCX" and down["ticker"] == "SPCX"
+    assert up["trend_state"] == "up" and down["trend_state"] == "down"
+    assert up["vs_ma20"] > 0 > down["vs_ma20"]
+    assert up["since"] and down["since"]
+    assert up["from_start"] is True and down["from_start"] is True
+
+    # A short run after a flat base is not the other ticker's long decline.
+    mixed_days = _days(54)
+    mixed = pl.DataFrame({"date": mixed_days, "close": [100.0] * 50 + [130.0, 140.0, 150.0, 160.0]})
+    brief = tm.price_trend_row("TSLA", mixed)
+    assert brief["trend_state"] == "up"
+    assert brief["days_in_state"] == 4
+    assert brief["from_start"] is False
+    assert brief["since"] == str(mixed_days[50])
+    assert brief["since"] != down["since"]
+
+    shared_driver = pl.DataFrame(
+        {
+            "series_id": ["DGS10"],
+            "ticker": ["TSLA"],
+            "date": [days[-1]],
+            "trend_state": ["up"],
+            "days_in_state": [40],
+        }
+    )
+    tsla_doc = tm.latest_document("TSLA", shared_driver, tsla)
+    spcx_doc = tm.latest_document("SPCX", pl.DataFrame(), spcx)
+    tsla_px = next(row for row in tsla_doc["rows"] if row["series_id"] == "PX:TSLA")
+    spcx_px = next(row for row in spcx_doc["rows"] if row["series_id"] == "PX:SPCX")
+    assert tsla_px["trend_state"] != spcx_px["trend_state"]
+    assert tsla_px["vs_ma20"] != spcx_px["vs_ma20"]
+    assert spcx_doc["ticker"] == "SPCX"
+    # No driver rows still publishes the price trend, so a ticker is not skipped.
+    assert [row["series_id"] for row in spcx_doc["rows"]] == ["PX:SPCX"]
+
+
 def test_duplicate_dates_do_not_duplicate_metric_rows():
     prices, macro = _fixture()
     tsla = prices.filter(pl.col("ticker") == "TSLA").with_columns(pl.lit("DS-05").alias("source_id"))

@@ -113,7 +113,11 @@ def test_daily_prices_collects_etfs_and_trend_metrics_has_etf_drivers(lake_bucke
     )
     assert latest["date"] == D4_DAY.isoformat()
     rows = {row["series_id"]: row for row in latest["rows"]}
-    assert set(rows) == {f"ETF:{etf}" for etf in universe.INDEX_PROXIES}  # every proxy collected by D4 is a driver
+    assert set(rows) == {f"ETF:{etf}" for etf in universe.INDEX_PROXIES} | {"PX:TSLA"}
+    assert rows["PX:TSLA"]["ticker"] == "TSLA"
+    assert rows["PX:TSLA"]["trend_state"] in {"up", "down", "flat"}
+    assert rows["PX:TSLA"]["since"]
+    assert rows["PX:TSLA"]["days_in_state"] >= 1
     full = pl.read_parquet(
         io.BytesIO(
             lake_bucket.get_object(Bucket="lake", Key="serving/trend_metrics/ticker=TSLA/trend_metrics.parquet")[

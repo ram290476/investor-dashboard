@@ -225,6 +225,11 @@ def build_snapshot(
     for ticker in tickers:
         unique: dict[str, dict] = {}
         for row in prices.get(ticker, []):
+            # A mixed frame (another symbol's rows under this key) must not overwrite
+            # this ticker's close for the day. Rows with no ticker are already scoped.
+            owner = str(row.get("ticker") or "").upper()
+            if owner and owner != ticker.upper():
+                continue
             day = str(row.get("date", ""))
             close = row.get("close")
             if day and isinstance(close, (int, float)):

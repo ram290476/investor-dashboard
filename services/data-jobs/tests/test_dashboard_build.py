@@ -41,6 +41,29 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
     assert snapshot["status"]["jobs"][0]["job"] == "D4"
 
 
+def test_snapshot_keeps_each_ticker_when_price_rows_are_mixed():
+    mixed = [
+        {"ticker": "TSLA", "date": "2026-10-01", "close": 100.0, "adj_close": 100.0, "volume": 1},
+        {"ticker": "SPCX", "date": "2026-10-01", "close": 200.0, "adj_close": 180.0, "volume": 2},
+        {"ticker": "TSLA", "date": "2026-10-02", "close": 110.0, "adj_close": 110.0, "volume": 3},
+        {"ticker": "SPCX", "date": "2026-10-02", "close": 190.0, "adj_close": 170.0, "volume": 4},
+    ]
+    snapshot = dashboard_build.build_snapshot(
+        ["TSLA", "SPCX"],
+        {"TSLA": mixed, "SPCX": mixed},
+        {},
+        [],
+        None,
+    )
+    tsla = snapshot["tickers"]["TSLA"]["price_history"]
+    spcx = snapshot["tickers"]["SPCX"]["price_history"]
+    assert [row["close"] for row in tsla] == [100.0, 110.0]
+    assert [row["adj_close"] for row in tsla] == [100.0, 110.0]
+    assert [row["close"] for row in spcx] == [200.0, 190.0]
+    assert [row["adj_close"] for row in spcx] == [180.0, 170.0]
+    assert tsla != spcx
+
+
 def test_snapshot_exposes_empty_dataset_as_unavailable():
     snapshot = dashboard_build.build_snapshot(["TSLA"], {}, {}, [], None)
     assert snapshot["data_status"] == "unavailable"
