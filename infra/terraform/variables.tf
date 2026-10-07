@@ -313,6 +313,18 @@ variable "jobs" {
       api_keys       = ["alpaca-key-id", "alpaca-secret-key"]
       reads_prefs    = true
     }
+    # H1: hourly bars during the NYSE session. Early-close days stop after 13:05 in the handler.
+    hourly-prices = {
+      handler        = "hourly_prices.handler"
+      schedule       = "cron(5 10-16 ? * MON-FRI *)"
+      triggers       = []
+      memory         = 512
+      timeout        = 120
+      read_prefixes  = ["curated/prices_hourly/"]
+      write_prefixes = ["raw/alpaca_bars_1h/", "curated/prices_hourly/"]
+      api_keys       = ["alpaca-key-id", "alpaca-secret-key", "finnhub", "alpha-vantage"]
+      reads_prefs    = true
+    }
     # H3: federal business days. The 14:05 FOMC one-off waits for D1; this schedule still covers that hour.
     regulatory-feeds = {
       handler        = "regulatory_feeds.handler"
@@ -328,11 +340,13 @@ variable "jobs" {
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H3"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H3"]
       memory   = 1024
       timeout  = 300
       read_prefixes = [
         "curated/prices_daily/",
+        "curated/prices_hourly/",
+        "curated/short_interest/",
         "curated/filings/",
         "curated/events/",
         "serving/trend_metrics/latest/",
