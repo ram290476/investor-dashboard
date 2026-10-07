@@ -324,7 +324,7 @@ a {
 
 .overview-quote {
   min-width: 0;
-  flex: 1 1 200px;
+  flex: 1 1 auto;
 }
 
 .overview-kicker {
@@ -349,11 +349,68 @@ a {
   font-size: 12px;
 }
 
+.trend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+
+.trend-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.trend-pill.up {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 53%, transparent);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+.trend-pill.down {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 53%, transparent);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.trend-pill.range {
+  color: var(--muted);
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+
+.trend-pill.insufficient {
+  /* --subtle alone is about 4.3:1 on the panel. Mix toward --muted so the dimmed label stays at least 4.5:1. */
+  color: color-mix(in srgb, var(--muted) 45%, var(--subtle));
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.trend-pill:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.trend-vs {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .period-chips {
   display: flex;
-  flex: 1 1 280px;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 3px;
   justify-content: flex-end;
   max-width: 100%;
 }
@@ -363,11 +420,12 @@ a {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  min-width: 62px;
-  padding: 3px 8px;
+  gap: 0;
+  min-width: 50px;
+  min-height: 36px;
+  padding: 2px 6px;
   border: 1px solid #2a323e;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   color: #c5cdd8;
 }
@@ -388,13 +446,15 @@ a {
 }
 
 .period-label {
-  font-size: 10px;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
   text-transform: uppercase;
 }
 
 .period-chip .period-return {
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.25;
   white-space: nowrap;
 }
 
@@ -685,6 +745,8 @@ a {
   }
 
   .period-chips {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
     justify-content: flex-start;
   }
 
@@ -711,6 +773,12 @@ a {
 
   .gate {
     padding: 24px;
+  }
+}
+
+@media (pointer: coarse) {
+  .period-chip {
+    min-height: 44px;
   }
 }
 

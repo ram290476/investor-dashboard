@@ -7,6 +7,7 @@ import {
   sessionReturn,
   validBars,
 } from "./chart-period.js";
+import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle } from "./trend-state.js";
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 
 const root = document.querySelector("#app");
@@ -421,6 +422,27 @@ function renderPeriodChips(history, activeId, onSelect) {
   return group;
 }
 
+function renderTrend(history, tickerData) {
+  const trend = resolveTrend(history, servingPriceTrend(tickerData, session.selected));
+  const tone =
+    trend.state === "uptrend" ? "up" : trend.state === "downtrend" ? "down" : trend.state === "range" ? "range" : "insufficient";
+  const row = node("div", "trend-row");
+  const pill = node("span", `trend-pill ${tone}`, trendLabel(trend));
+  pill.dataset.state = trend.state || "insufficient";
+  pill.tabIndex = 0;
+  pill.title = trendTitle(trend, formatPrice, formatPercent);
+  pill.setAttribute("aria-label", trendSentence(trend, formatPercent));
+  row.append(pill);
+  if (trend.ma20 != null && trend.vsMa20 != null) {
+    const vs = node("span", "trend-vs");
+    vs.setAttribute("aria-hidden", "true");
+    vs.append(document.createTextNode("vs 20-day avg "));
+    vs.append(node("span", `mono ${polarity(trend.vsMa20)}`, formatPercent(trend.vsMa20, 1)));
+    row.append(vs);
+  }
+  return row;
+}
+
 function renderPricePanel(tickerData, onSelectPeriod) {
   const history = tickerData?.price_history || [];
   const bars = validBars(history);
@@ -433,6 +455,7 @@ function renderPricePanel(tickerData, onSelectPeriod) {
   quoteBlock.append(node("h2", "overview-kicker", `${session.selected} · daily closes`));
   const latest = bars.at(-1);
   quoteBlock.append(node("p", "overview-price", latest ? formatPrice(displayPrice(latest)) : "—"));
+  quoteBlock.append(renderTrend(history, tickerData));
   const asOf = latest?.date || tickerData?.price_as_of;
   const meta = node("p", "overview-meta");
   if (!latest) {

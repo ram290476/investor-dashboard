@@ -64,9 +64,10 @@ jobs:
           node --check apps/web/app.js
           node --check apps/web/chart-period.js
           node --check apps/web/api-response.js
+          node --check apps/web/trend-state.js
 
-      - name: Test chart period selection and API response handling
-        run: node --test apps/web/chart-period.test.js apps/web/api-response.test.js
+      - name: Test chart period, trend state and API response handling
+        run: node --test apps/web/chart-period.test.js apps/web/trend-state.test.js apps/web/api-response.test.js
 
       - name: Format and validate Terraform
         working-directory: infra/terraform
