@@ -56,6 +56,8 @@ def parse_bars(payload: dict) -> list[dict]:
                     "low": b["l"],
                     "close": b["c"],
                     "volume": b["v"],
+                    "vwap": b.get("vw"),
+                    "trade_count": b.get("n"),
                     "feed": "iex",
                 }
             )

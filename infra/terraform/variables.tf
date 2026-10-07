@@ -323,6 +323,16 @@ variable "jobs" {
       read_prefixes  = ["curated/news_articles/", "curated/news_daily/"]
       write_prefixes = ["raw/news/", "curated/news_articles/", "curated/news_daily/"]
       api_keys       = ["finnhub", "alpha-vantage", "massive"]
+    # H1: hourly bars during the NYSE session. Early-close days stop after 13:05 in the handler.
+    hourly-prices = {
+      handler        = "hourly_prices.handler"
+      schedule       = "cron(5 10-16 ? * MON-FRI *)"
+      triggers       = []
+      memory         = 512
+      timeout        = 120
+      read_prefixes  = ["curated/prices_hourly/"]
+      write_prefixes = ["raw/alpaca_bars_1h/", "curated/prices_hourly/"]
+      api_keys       = ["alpaca-key-id", "alpaca-secret-key", "finnhub", "alpha-vantage"]
       reads_prefs    = true
     }
     dashboard-build = {
@@ -335,6 +345,8 @@ variable "jobs" {
         "curated/prices_daily/",
         "curated/news_daily/",
         "curated/news_articles/",
+        "curated/prices_hourly/",
+        "curated/short_interest/",
         "serving/trend_metrics/latest/",
         "serving/fundamentals_quarterly.json",
         "serving/status.json",

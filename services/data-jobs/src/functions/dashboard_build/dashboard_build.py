@@ -50,6 +50,70 @@ def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: d
         "sentiment_7d": rolling_mean(daily_rows, now.astimezone(UTC).date()),
         "headlines": headlines,
     }
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
+MAX_PRICE_ROWS = 1260
+SCHEMA_VERSION = 2
+ET = ZoneInfo("America/New_York")
+
+
+def _session_date(ts: str) -> str:
+    stamp = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp.astimezone(ET).date().isoformat()
+
+
+def build_intraday(rows: list[dict], daily_history: list[dict]) -> dict | None:
+    """Today's hourly bars plus the change versus the prior daily close. Does not touch prices_daily."""
+    parsed = []
+    for row in rows:
+        ts = row.get("ts_utc") or row.get("ts")
+        close = row.get("close")
+        if not ts or not isinstance(close, (int, float)):
+            continue
+        parsed.append({"ts": str(ts), "close": float(close), "volume": row.get("volume")})
+    if not parsed:
+        return None
+    parsed.sort(key=lambda row: row["ts"])
+    session = _session_date(parsed[-1]["ts"])
+    today = [row for row in parsed if _session_date(row["ts"]) == session]
+    prior = None
+    for day in daily_history:
+        if str(day.get("date", "")) < session and isinstance(day.get("close"), (int, float)):
+            prior = float(day["close"])
+    last = today[-1]["close"]
+    return {
+        "as_of": today[-1]["ts"],
+        "last": last,
+        "change_pct": None if not prior else last / prior - 1,
+        "bars": today,
+    }
+
+
+def latest_short_interest(rows: list[dict]) -> dict[str, dict]:
+    """Latest FINRA settlement per ticker. Missing rows stay absent."""
+    latest: dict[str, dict] = {}
+    for row in rows:
+        ticker = str(row.get("ticker") or "").upper()
+        day = str(row.get("settlement_date") or "")
+        if not ticker or not day:
+            continue
+        if ticker in latest and day < latest[ticker]["settlement_date"]:
+            continue
+        shares = row.get("short_interest", row.get("shares_short"))
+        previous = row.get("previous_short_interest")
+        pct = None
+        if isinstance(shares, (int, float)) and isinstance(previous, (int, float)) and previous:
+            pct = (float(shares) - float(previous)) / float(previous)
+        latest[ticker] = {
+            "settlement_date": day,
+            "shares_short": shares,
+            "days_to_cover": row.get("days_to_cover"),
+            "pct_change": pct,
+        }
+    return latest
 
 
 def build_snapshot(
@@ -60,6 +124,8 @@ def build_snapshot(
     status: dict | None,
     generated_at: str | None = None,
     news: dict[str, dict] | None = None,
+    hourly: dict[str, list[dict]] | None = None,
+    short_interest: dict[str, list[dict]] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
     clock = datetime.now(UTC)
@@ -83,6 +149,7 @@ def build_snapshot(
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
         bundle = None if news is None else news.get(ticker) or {}
+        interest = latest_short_interest((short_interest or {}).get(ticker, []))
         instruments[ticker] = {
             "ticker": ticker,
             "price_history": history,
@@ -90,6 +157,8 @@ def build_snapshot(
             "news": None
             if bundle is None
             else build_news(ticker, bundle.get("daily") or [], bundle.get("articles") or [], clock),
+            "intraday": build_intraday((hourly or {}).get(ticker, []), history),
+            "short_interest": interest.get(ticker),
             "price_status": "available" if history else "unavailable",
             "price_as_of": history[-1]["date"] if history else None,
         }
@@ -126,10 +195,18 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             ticker: {"daily": [row for row in daily_rows if row.get("ticker") == ticker], "articles": article_rows}
             for ticker in tickers
         }
+        hourly_data: dict[str, list[dict]] = {}
         for ticker in tickers:
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
             price_data[ticker] = frame.to_dicts() if not frame.is_empty() else []
             trend_data[ticker] = read_json(f"serving/trend_metrics/latest/{ticker}.json")
+            hourly = read_parquet_prefix(f"curated/prices_hourly/ticker={ticker}/")
+            hourly_data[ticker] = hourly.to_dicts() if not hourly.is_empty() else []
+        short_frame = read_parquet_prefix("curated/short_interest/")
+        short_rows = short_frame.to_dicts() if not short_frame.is_empty() else []
+        short_by_ticker: dict[str, list[dict]] = {}
+        for row in short_rows:
+            short_by_ticker.setdefault(str(row.get("ticker") or "").upper(), []).append(row)
 
         fundamental_doc = read_json("serving/fundamentals_quarterly.json") or {}
         status = read_json("serving/status.json")
@@ -140,6 +217,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             fundamentals=fundamental_doc.get("rows", []),
             status=status,
             news=news_data,
+            hourly=hourly_data,
+            short_interest=short_by_ticker,
         )
         write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
         logger.info(

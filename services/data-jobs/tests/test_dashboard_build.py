@@ -22,6 +22,8 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
 
     assert snapshot["schema_version"] == 2
     assert snapshot["tickers"]["TSLA"]["news"] is None
+    assert snapshot["tickers"]["TSLA"]["intraday"] is None
+    assert snapshot["tickers"]["TSLA"]["short_interest"] is None
     assert snapshot["generated_at"] == "2026-10-04T22:00:00+00:00"
     assert snapshot["data_status"] == "available"
     assert snapshot["tickers"]["TSLA"]["price_history"] == [
@@ -109,3 +111,51 @@ def test_news_keeps_the_last_48_hours_and_a_seven_day_mean():
     assert news["sentiment_7d"] == pytest.approx(0.3)
     assert [item["title"] for item in news["headlines"]] == ["Tesla approval"]
     assert news["headlines"][0]["label"] == "bullish"
+def test_intraday_is_today_only_and_short_interest_is_the_latest_settlement():
+    snapshot = dashboard_build.build_snapshot(
+        tickers=["TSLA"],
+        prices={
+            "TSLA": [
+                {"date": "2026-10-05", "close": 360.0, "volume": 1},
+                {"date": "2026-10-06", "close": 370.0, "volume": 1},
+            ]
+        },
+        trends={},
+        fundamentals=[],
+        status=None,
+        hourly={
+            "TSLA": [
+                {"ts_utc": "2026-10-05T18:00:00+00:00", "close": 361.0, "volume": 10},
+                {"ts_utc": "2026-10-06T14:00:00+00:00", "close": 368.0, "volume": 20},
+                {"ts_utc": "2026-10-06T20:00:00+00:00", "close": 372.0, "volume": 30},
+            ]
+        },
+        short_interest={
+            "TSLA": [
+                {
+                    "ticker": "TSLA",
+                    "settlement_date": "2026-09-15",
+                    "short_interest": 100,
+                    "previous_short_interest": 80,
+                    "days_to_cover": 1.2,
+                },
+                {
+                    "ticker": "TSLA",
+                    "settlement_date": "2026-09-30",
+                    "short_interest": 90,
+                    "previous_short_interest": 100,
+                    "days_to_cover": 1.1,
+                },
+            ]
+        },
+    )
+    intraday = snapshot["tickers"]["TSLA"]["intraday"]
+    assert intraday["last"] == 372.0
+    assert [bar["ts"] for bar in intraday["bars"]] == ["2026-10-06T14:00:00+00:00", "2026-10-06T20:00:00+00:00"]
+    assert intraday["change_pct"] == (372.0 / 360.0 - 1)
+    assert snapshot["tickers"]["TSLA"]["short_interest"] == {
+        "settlement_date": "2026-09-30",
+        "shares_short": 90,
+        "days_to_cover": 1.1,
+        "pct_change": -0.1,
+    }
