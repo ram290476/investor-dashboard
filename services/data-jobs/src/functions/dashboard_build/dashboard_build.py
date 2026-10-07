@@ -2,9 +2,75 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 MAX_PRICE_ROWS = 1260
+SCHEMA_VERSION = 2
+
+
+def _as_of(generated_at: str | None) -> date:
+    if not generated_at:
+        return datetime.now(UTC).date()
+    stamp = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    return stamp.date()
+
+
+def build_filings(rows: list[dict]) -> list[dict]:
+    ordered = sorted(rows, key=lambda row: str(row.get("filed_at") or ""), reverse=True)
+    latest = []
+    seen: set[str] = set()
+    for row in ordered:
+        accession = str(row.get("accession_no") or "")
+        if accession and accession in seen:
+            continue
+        if accession:
+            seen.add(accession)
+        latest.append(
+            {
+                "form": row.get("form"),
+                "filed_at": row.get("filed_at"),
+                "title": row.get("title") or row.get("form"),
+                "url": row.get("primary_doc_url"),
+                "class": row.get("filing_class") or row.get("class"),
+            }
+        )
+        if len(latest) == 10:
+            break
+    return latest
+
+
+def build_insider(rows: list[dict], as_of: date) -> dict:
+    from regulatory_feeds import insider_flows
+
+    return insider_flows(rows, as_of)
+
+
+def build_events(rows: list[dict], as_of: date) -> list[dict]:
+    cutoff = (as_of - timedelta(days=14)).isoformat()
+    chosen = []
+    seen: set[str] = set()
+    ordered = sorted(rows, key=lambda row: str(row.get("event_ts") or ""), reverse=True)
+    for row in ordered:
+        day = str(row.get("event_ts") or "")[:10]
+        if day and day < cutoff:
+            continue
+        key = str(row.get("event_id") or row.get("source_url") or "")
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        chosen.append(
+            {
+                "event_ts": row.get("event_ts"),
+                "type": row.get("type"),
+                "title": row.get("title"),
+                "source_url": row.get("source_url"),
+                "tickers": row.get("tickers") or [],
+            }
+        )
+        if len(chosen) == 20:
+            break
+    return chosen
 
 
 def build_snapshot(
@@ -14,8 +80,11 @@ def build_snapshot(
     fundamentals: list[dict],
     status: dict | None,
     generated_at: str | None = None,
+    filings: dict[str, list[dict]] | None = None,
+    events: list[dict] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
+    clock = _as_of(generated_at)
     instruments = {}
     for ticker in tickers:
         unique: dict[str, dict] = {}
@@ -31,10 +100,13 @@ def build_snapshot(
                     "volume": row.get("volume"),
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
+        filing_rows = None if filings is None else filings.get(ticker) or []
         instruments[ticker] = {
             "ticker": ticker,
             "price_history": history,
             "trend": trends.get(ticker),
+            "filings": None if filing_rows is None else build_filings(filing_rows),
+            "insider_30d": None if filing_rows is None else build_insider(filing_rows, clock),
             "price_status": "available" if history else "unavailable",
             "price_as_of": history[-1]["date"] if history else None,
         }
@@ -44,17 +116,18 @@ def build_snapshot(
     ]
     available = any(item["price_status"] == "available" for item in instruments.values())
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
         "data_status": "available" if available else "unavailable",
         "tickers": instruments,
         "fundamentals": normalized_fundamentals,
+        "events": None if events is None else build_events(events, clock),
         "status": status,
     }
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
-    from lake import read_json, read_prices, write_json
+    from lake import read_json, read_parquet_prefix, read_prices, write_json
     from observability import job_handler, logger
     from universe import collection_universe, user_ticker_union
 
@@ -63,6 +136,15 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         tickers = collection_universe(user_ticker_union())["equities"]
         price_data: dict[str, list[dict]] = {}
         trend_data: dict[str, dict | None] = {}
+        filing_frame = read_parquet_prefix("curated/filings/")
+        event_frame = read_parquet_prefix("curated/events/")
+        filing_rows = filing_frame.to_dicts() if not filing_frame.is_empty() else []
+        event_rows = event_frame.to_dicts() if not event_frame.is_empty() else []
+        filings_by_ticker: dict[str, list[dict]] = {ticker: [] for ticker in tickers}
+        for row in filing_rows:
+            symbol = str(row.get("ticker") or "").upper()
+            if symbol in filings_by_ticker:
+                filings_by_ticker[symbol].append(row)
         for ticker in tickers:
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
             price_data[ticker] = frame.to_dicts() if not frame.is_empty() else []
@@ -76,6 +158,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             trends=trend_data,
             fundamentals=fundamental_doc.get("rows", []),
             status=status,
+            filings=filings_by_ticker,
+            events=event_rows,
         )
         write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
         logger.info(
