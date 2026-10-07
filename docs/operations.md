@@ -223,7 +223,9 @@ the stack creates. It allows:
 
 - service actions other than IAM, STS, Organizations, Account and Identity Center;
 - the read-only identity calls the AWS Config recorder needs;
-- only the prefs API's hop into `invdash-prefs-access`.
+- only the prefs API's hop into `invdash-prefs-access`;
+- `iam:PassRole` on `invdash-jobs-scheduler`, only to `scheduler.amazonaws.com`, so the
+  release-day job (M1) can create its one-off schedules.
 
 It explicitly denies:
 
