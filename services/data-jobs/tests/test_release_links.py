@@ -1,4 +1,4 @@
-"""Release trend, surprise, and the TSLA/SPCX windows around past release dates."""
+"""Release trend, surprise, and the watchlist windows around past release dates."""
 
 from datetime import date, timedelta
 
@@ -47,9 +47,7 @@ def test_window_returns_use_the_sessions_before_the_release_and_the_release_clos
     assert pending["week_before"] == got["week_before"]
 
 
-def test_release_links_report_correlation_count_and_average_move_by_surprise_sign():
-    days = _business_days(40)
-    surprises = [0.4, -0.3, 0.5, -0.4, 0.6, -0.2]
+def _releases(days, surprises):
     yoys = [2.0]
     for surprise in surprises:
         yoys.append(yoys[-1] + surprise)
@@ -59,17 +57,10 @@ def test_release_links_report_correlation_count_and_average_move_by_surprise_sig
         day = release_dates[i + 1]
         previous = max(item for item in days if item < day)
         closes[day] = closes[previous] * (1.0 + surprise)
-    prices = pl.DataFrame(
-        {
-            "ticker": ["TSLA"] * len(days) + ["SPCX"] * len(days),
-            "date": days + days,
-            "close": [closes[day] for day in days] + [100.0] * len(days),
-        }
-    )
     releases = [
         {
             "series_id": "CUSR0000SA0",
-            "period": f"2024-{i + 1:02d}",
+            "period": f"{2024 + i // 12:04d}-{(i % 12) + 1:02d}",
             "release_ts": f"{day.isoformat()}T12:30:00+00:00",
             "actual": 100.0 + yoy,
             "consensus": None,
@@ -77,7 +68,24 @@ def test_release_links_report_correlation_count_and_average_move_by_surprise_sig
         }
         for i, (day, yoy) in enumerate(zip(release_dates, yoys, strict=True))
     ]
-    table = links.build_release_links(releases, prices, {"CUSR0000SA0": "CPI_YOY"})
+    return releases, closes, yoys
+
+
+def test_release_links_follow_the_watchlist_once_twelve_releases_are_covered():
+    pattern = [0.4, -0.3, 0.5, -0.4, 0.6, -0.2]
+    surprises = pattern + pattern
+    days = _business_days(80)
+    releases, closes, yoys = _releases(days, surprises)
+    short = days[-30:]
+    prices = pl.DataFrame(
+        {
+            "ticker": ["TSLA"] * len(days) + ["AAPL"] * len(short) + ["NVDA"] * len(days),
+            "date": days + short + days,
+            "close": [closes[day] for day in days] + [100.0] * len(short) + [50.0] * len(days),
+        }
+    )
+    table = links.build_release_links(releases, prices, {"CUSR0000SA0": "CPI_YOY"}, ["TSLA", "AAPL", "NVDA"])
+    assert set(table.filter(pl.col("row_kind") == "summary")["ticker"].to_list()) == {"TSLA", "AAPL", "NVDA"}
     trend = table.filter(pl.col("row_kind") == "trend").row(0, named=True)
     assert trend["series_id"] == "CPI_YOY"
     assert trend["trend_direction"] == "decelerating"
@@ -85,20 +93,25 @@ def test_release_links_report_correlation_count_and_average_move_by_surprise_sig
     assert trend["yoy"] == yoys[-1]
 
     summary = table.filter(
-        (pl.col("row_kind") == "summary")
-        & (pl.col("ticker") == "TSLA")
-        & (pl.col("window") == "release_day")
+        (pl.col("row_kind") == "summary") & (pl.col("ticker") == "TSLA") & (pl.col("window") == "release_day")
     ).row(0, named=True)
     assert summary["n_releases"] == len(surprises)
     assert summary["correlation_surprise"] > 0.99
     assert summary["correlation_trend"] > 0.95
-    assert summary["n_positive_surprise"] == 3
-    assert summary["n_negative_surprise"] == 3
+    assert summary["n_positive_surprise"] == 6
+    assert summary["n_negative_surprise"] == 6
     assert abs(summary["avg_move_positive_surprise"] - (0.4 + 0.5 + 0.6) / 3) < 1e-9
     assert abs(summary["avg_move_negative_surprise"] - (-0.3 + -0.4 + -0.2) / 3) < 1e-9
 
-    flat = table.filter(
-        (pl.col("row_kind") == "summary") & (pl.col("ticker") == "SPCX") & (pl.col("window") == "release_day")
+    # A name absent from the watchlist is not linked, even when its closes are in the lake.
+    parked = links.build_release_links(releases, prices, {"CUSR0000SA0": "CPI_YOY"}, ["TSLA"])
+    assert "NVDA" not in parked["ticker"].drop_nulls().to_list()
+
+    short_row = table.filter(
+        (pl.col("row_kind") == "summary") & (pl.col("ticker") == "AAPL") & (pl.col("window") == "release_day")
     ).row(0, named=True)
-    assert flat["correlation_surprise"] is None
-    assert flat["avg_move_positive_surprise"] == 0.0
+    assert short_row["n_releases"] < links.MIN_RELEASES
+    assert short_row["correlation_surprise"] is None
+    assert short_row["correlation_trend"] is None
+    assert short_row["avg_move_positive_surprise"] is None
+    assert short_row["n_positive_surprise"] is None
