@@ -21,6 +21,7 @@ expired, so CloudWatch logs and live lake contents could not be inspected.
 | Status lists D2/D3/W1 despite no corresponding deployed job definitions | Planned catalog tiers appear permanently broken | Remove unimplemented placeholders, not real collector errors |
 | Successful `PutEvents` HTTP responses can contain failed entries | The collector finishes but dependent builds never start | Check `FailedEntryCount`, log and retry rejected publishes |
 | D4 collects ETF proxies but dashboard snapshots serve only equities | Market comparison overlays have no ETF price history despite successful collection | Serve proxy histories alongside equities without changing user watchlists |
+| TREND iterates collection equities, which deliberately exclude ETF proxies | An ETF added to My tickers has no own price trend or driver links | Use the capped watchlist universe, as M1 already does; exclude each ticker's own ETF driver |
 
 ## Implementation sequence
 
@@ -127,9 +128,10 @@ remain unimplemented catalog tiers, not failing deployed jobs.
 
 ### Validation and delivery
 
-Seven failing regression tests first reproduced the publication-date leak, false
+Eight failing regression tests first reproduced the publication-date leak, false
 neutral pressure, missing shared series history, nonfinite direction state and
-missing release-link schema and missing ETF overlay histories. The implemented fixes pass the focused regression
+missing release-link schema, missing ETF overlay histories and missing watchlist
+ETF trends. The implemented fixes pass the focused regression
 suite, including adjusted-price release links, concurrent-publisher exclusion,
 lease recovery, rejected event publishes and BLS/FRED application-error handling.
 

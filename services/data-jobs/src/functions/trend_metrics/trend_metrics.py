@@ -343,8 +343,8 @@ def analysis_prices(prices: pl.DataFrame) -> pl.DataFrame:
 def split_inputs(prices_daily: pl.DataFrame, macro_daily: pl.DataFrame, etfs: list[str]):
     """prices_daily: (ticker, date, close). macro_daily: (series_id, obs_date, value).
 
-    Either frame may be empty or column-less (read_parquet_prefix on an empty prefix, e.g. before
-    the M1 macro collector exists); the missing drivers are simply skipped.
+    Either frame may be empty or column-less (read_parquet_prefix before any collector
+    output); the missing drivers are simply skipped.
     """
     drivers: dict[str, pl.DataFrame] = {}
     if not macro_daily.is_empty() and MACRO_COLUMNS <= set(macro_daily.columns):
@@ -372,22 +372,24 @@ def split_inputs(prices_daily: pl.DataFrame, macro_daily: pl.DataFrame, etfs: li
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from lake import read_parquet_prefix, read_prices, write_json, write_parquet
     from observability import job_handler
-    from universe import collection_universe, user_ticker_union
+    from universe import collection_universe, user_ticker_union, watchlist_universe
 
     @job_handler("TREND", lease_key="serving/trend_metrics/_lease.json")
     def run(event, context):
-        uni = collection_universe(user_ticker_union())
+        users = user_ticker_union()
+        uni = collection_universe(users)
+        watch = watchlist_universe(users)
         # yearly partitions (+ any uncompacted legacy objects), deduped; adjusted closes for the math
         prices = analysis_prices(read_prices())
         macro = read_parquet_prefix("curated/macro_daily/")
         drivers = split_inputs(prices, macro, uni["etfs"])
         written = 0
         if prices.is_empty() or "ticker" not in prices.columns:
-            return {"tickers": 0, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": uni["dropped"]}
+            return {"tickers": 0, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": watch["dropped"]}
         shared = shared_metrics(prices["date"], drivers)
         if not shared.is_empty():
             write_parquet(shared, "serving/trend_metrics/series/metrics.parquet")
-        for t in uni["equities"]:
+        for t in list(watch["tickers"] or []):
             px = prices.filter(pl.col("ticker") == t).select("date", pl.col("close").cast(pl.Float64))
             out = ticker_metrics(t, px, drivers, shared)
             document = latest_document(t, out, px)
@@ -397,6 +399,6 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 write_parquet(out, f"serving/trend_metrics/ticker={t}/trend_metrics.parquet")
             write_json(document, f"serving/trend_metrics/latest/{t}.json")
             written += 1
-        return {"tickers": written, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": uni["dropped"]}
+        return {"tickers": written, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": watch["dropped"]}
 
     return run(event, context)

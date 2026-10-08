@@ -133,3 +133,14 @@ def test_daily_prices_collects_etfs_and_trend_metrics_has_etf_drivers(lake_bucke
     dashboard = lake.read_json("serving/dashboard.json")
     assert set(universe.INDEX_PROXIES) <= set(dashboard["tickers"])
     assert dashboard["tickers"]["SPY"]["price_history"][-1]["date"] == D4_DAY.isoformat()
+
+
+def test_watchlist_etf_has_its_own_price_trend_without_self_driver(lake_bucket, monkeypatch):
+    _seed_backfill()
+    monkeypatch.setattr(universe, "user_ticker_union", lambda: ["SPY"])
+    trend_metrics.handler({}, _Context())
+    latest = lake.read_json("serving/trend_metrics/latest/SPY.json")
+    assert latest is not None
+    rows = {row["series_id"]: row for row in latest["rows"]}
+    assert rows["PX:SPY"]["trend_state"] in {"up", "down", "flat"}
+    assert "ETF:SPY" not in rows
