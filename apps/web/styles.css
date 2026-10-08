@@ -707,44 +707,6 @@ a {
   background: var(--blue);
 }
 
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 240px));
-  gap: 8px;
-  margin: 0 0 12px;
-}
-
-.stat-card {
-  min-width: 0;
-  padding: 11px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(17, 22, 29, 0.76);
-}
-
-.stat-label {
-  display: block;
-  margin-bottom: 7px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.stat-value {
-  display: block;
-  overflow: hidden;
-  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: clamp(14px, 1.9vw, 19px);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stat-foot {
-  display: block;
-  margin-top: 5px;
-  color: var(--subtle);
-  font-size: 10px;
-}
-
 .driver-list,
 .status-list {
   display: grid;
