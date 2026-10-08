@@ -125,6 +125,8 @@ export function resolveChartPeriod(requested, history) {
   const id = normalizePeriod(requested);
   if (periodQuote(history, id).available) return id;
   if (id !== DEFAULT_PERIOD && periodQuote(history, DEFAULT_PERIOD).available) return DEFAULT_PERIOD;
-  const available = PERIODS.filter((period) => periodQuote(history, period.id).available);
+  const available = PERIODS.filter(
+    (period) => period.id !== "YTD" && periodQuote(history, period.id).available,
+  );
   return available.length ? available[available.length - 1].id : DEFAULT_PERIOD;
 }
