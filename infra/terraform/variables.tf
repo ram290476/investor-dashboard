@@ -292,17 +292,29 @@ variable "jobs" {
     manages_schedules = optional(bool, false)
   }))
   default = {
-    # After D4 (daily close) and M1 (release days) succeed
+    # After D4 (daily close), D1 (morning macro), M1 (release days), or a price reconcile
     trend-metrics = {
       handler        = "trend_metrics.handler"
       schedule       = ""
-      triggers       = ["job:D4", "job:M1", "job:RECONCILE"]
+      triggers       = ["job:D4", "job:M1", "job:RECONCILE", "job:D1"]
       memory         = 2048
       timeout        = 600
       read_prefixes  = ["curated/prices_daily/", "curated/macro_daily/"]
       write_prefixes = ["serving/trend_metrics/"]
       api_keys       = []
       reads_prefs    = true
+    }
+    # D1: 07:00 ET weekdays. The handler no-ops on federal holidays. First run backfills five years.
+    macro-daily = {
+      handler        = "macro_daily.handler"
+      schedule       = "cron(0 7 ? * MON-FRI *)"
+      triggers       = []
+      memory         = 512
+      timeout        = 300
+      read_prefixes  = ["curated/macro_daily/source=fred/"]
+      write_prefixes = ["raw/fred/", "curated/macro_daily/source=fred/"]
+      api_keys       = ["fred"]
+      reads_prefs    = false
     }
     daily-prices = {
       handler        = "daily_prices.handler"
