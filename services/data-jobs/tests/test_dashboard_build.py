@@ -1,5 +1,6 @@
-import dashboard_build
 import pytest
+
+import dashboard_build
 
 
 def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals():

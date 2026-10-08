@@ -1,6 +1,7 @@
 from datetime import date
 
 import pytest
+
 from daily_prices import combine_daily_bars, is_market_day, normalize_daily_bars
 
 

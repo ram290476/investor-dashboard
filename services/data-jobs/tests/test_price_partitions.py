@@ -7,12 +7,12 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import boto3
-import dashboard_build
 import numpy as np
 import polars as pl
 import pytest
 from moto import mock_aws
 
+import dashboard_build
 import lake
 import observability
 import trend_metrics
