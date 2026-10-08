@@ -10,7 +10,7 @@ known-first-party = [
   "observability", "api_keys", "http_client", "universe", "lake", "status_feed", "collectors",
   "trend_metrics", "fundamentals", "prefs_api", "key_rotation_check", "short_interest", "options_daily", "backfill",
   "price_reconcile", "news_sentiment", "hourly_prices", "regulatory_feeds", "gov_contracts", "release_day",
-  "macro_daily",
+  "release_links",
 ]
 
 [tool.pytest.ini_options]

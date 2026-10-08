@@ -468,13 +468,24 @@ variable "jobs" {
     }
     # Event-driven. One-off at() schedules are created from the stopgap release calendar.
     release-day = {
-      handler           = "release_day.handler"
-      schedule          = ""
-      triggers          = []
-      memory            = 512
-      timeout           = 300
-      read_prefixes     = ["curated/releases/", "curated/release_calendar/", "curated/macro_daily/"]
-      write_prefixes    = ["raw/releases/", "curated/releases/", "curated/release_calendar/", "curated/macro_daily/"]
+      handler  = "release_day.handler"
+      schedule = ""
+      triggers = []
+      memory   = 512
+      timeout  = 300
+      read_prefixes = [
+        "curated/releases/",
+        "curated/release_calendar/",
+        "curated/macro_daily/",
+        "curated/prices_daily/",
+      ]
+      write_prefixes = [
+        "raw/releases/",
+        "curated/releases/",
+        "curated/release_calendar/",
+        "curated/macro_daily/source=releases/",
+        "curated/release_links/",
+      ]
       api_keys          = ["bls", "bea", "census", "fred"]
       reads_prefs       = false
       manages_schedules = true
