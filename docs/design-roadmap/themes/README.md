@@ -45,3 +45,37 @@ The script serves `design/ai-generated/` locally, waits for `support.js` to bind
 (alpha preserved) before capturing. **The mockup file itself is not modified.** The mockup hard-codes
 hex literals rather than CSS variables, so this is a render-time token map, not how `apps/web` should
 implement themes (see the roadmap issue: CSS custom properties on `:root[data-theme]`).
+
+## Production application themes
+
+Issue #64 implements these palettes through [the application theme module](../../../apps/web/theme.js).
+The production module applies semantic properties to the document root, including the account dialog,
+and adjusts text, chart series, controls, and overlays for contrast on their actual backgrounds.
+[Theme tests](../../../apps/web/theme.test.js) enforce palette parity, AA text contrast, 3:1
+non-text contrast, and independent direction-palette overrides. The default direction palette remains
+green/red for existing users; choose **Theme default** to use each theme's own up/down colors.
+
+These captures show the **real application** at 1440px, not the design mockup. Authentication,
+prices, headlines, filings, fundamentals, and macro values are synthetic fixtures, not live data.
+
+| Theme | Production capture |
+| --- | --- |
+| Industrial Dark | [Desktop](production-industrial-dark.png) |
+| Terminal Amber | [Desktop](production-terminal-amber.png) |
+| Charting Navy | [Desktop](production-charting-navy.png) |
+| Clean Light | [Desktop](production-clean-light.png) / [390px mobile](production-clean-light-mobile.png) |
+| Colorblind High Contrast | [Desktop](production-colorblind-hc.png) |
+| Midnight Slate | [Desktop](production-midnight-slate.png) |
+
+To regenerate with Chrome and `puppeteer-core` available, serve `apps/web` on
+`http://127.0.0.1:8716`, then run:
+
+```sh
+node docs/design-roadmap/themes/render-production-themes.js
+```
+
+Set `CHROME` for a different Chrome/Chromium executable (the default is macOS Google Chrome).
+The script also checks autosave, reload persistence, chart-setting preservation, overlay/legend
+color parity, failed-save rollback, console errors, and desktop/mobile overflow.
+It intercepts authentication and API requests and never contacts Cognito or market-data services.
+For Cognito rollout and real authentication checks, see [operations](../../operations.md#dashboard-themes-and-cognito-branding).

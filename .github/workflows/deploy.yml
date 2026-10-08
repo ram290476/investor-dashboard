@@ -111,6 +111,30 @@ jobs:
           fi
           echo "ECR_REPOSITORY=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
 
+      - name: Verify Cognito branding migration prerequisites
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          cognito="$(terraform output -json cognito)"
+          pool_id="$(jq -r '.user_pool_id' <<< "$cognito")"
+          login_url="$(jq -r '.hosted_ui_url' <<< "$cognito")"
+          domain="${login_url#https://}"
+          domain="${domain%%.auth.*}"
+          current="$(aws cognito-idp describe-user-pool-domain --domain "$domain" --query 'DomainDescription.ManagedLoginVersion' --output text)"
+          desired="$(terraform console <<< 'var.cognito_login_branding_version')"
+          allowed="$(terraform console <<< 'var.cognito_allow_branding_migration')"
+          if [ "$current" != "$desired" ] && [ "$allowed" != "true" ]; then
+            echo "::error::Cognito branding is version ${current}, requested ${desired}. Review docs/operations.md and explicitly authorize the migration before changing the live login."
+            exit 1
+          fi
+          if [ "$desired" = "2" ]; then
+            tier="$(aws cognito-idp describe-user-pool --user-pool-id "$pool_id" --query 'UserPool.UserPoolTier' --output text)"
+            if [ "$tier" != "ESSENTIALS" ] && [ "$tier" != "PLUS" ]; then
+              echo "::error::Managed Login requires Essentials or Plus; do not change the feature plan as part of branding."
+              exit 1
+            fi
+          fi
+
       - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Build and publish the job image

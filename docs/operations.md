@@ -459,6 +459,70 @@ JavaScript and config, then invalidate CloudFront. For a Lambda image rollback, 
 `jobs_image_uri` to a previously published immutable ECR tag and apply Terraform. Do not delete
 Terraform state or the data-lake checkpoint during rollback.
 
+## Dashboard themes and Cognito branding
+
+Account settings -> Theme & display offers six application themes. The `display.theme`
+preference is validated by the preferences API, defaults to `industrial-dark` for legacy
+accounts, and is saved alongside the existing display/chart settings. Direction colors remain
+independent: **Theme default** uses the theme's up/down colors; the other palettes override
+direction only. Failed saves roll back through the existing settings error/retry flow.
+
+Production themes reuse the palettes in `docs/design-roadmap/themes/themes.json`.
+`apps/web/theme.test.js` verifies their correspondence and measures contrast on page, panel,
+raised, hover, selected, and direction-badge backgrounds. Runtime colors are adjusted toward
+black/white where needed; design screenshot contrast alone is not a production guarantee.
+Categorical overlays keep stable identities and adapt for chart-background contrast; they do
+not use semantic up/down overrides. No authentication material is stored for theme persistence.
+
+Cognito is on a separate origin, so application CSS and per-user themes cannot style its pages.
+Terraform supports both branded classic login and Managed Login v2:
+
+| Configuration | Effect |
+| --- | --- |
+| `cognito_login_branding_version = 1` (default) | Match the default Industrial Dark brand with Cognito's supported classic CSS selectors. Keep the existing login experience; classic cannot reproduce arbitrary layout/typography. |
+| `cognito_login_branding_version = 2` | Create/manage a dark Managed Login style for the existing web client, including page/form/input/button/link/focus styling. Requires Essentials or Plus. |
+| `cognito_allow_branding_migration = true` | Explicitly authorize deployment to change an existing domain's branding version after preflight. Normally leave this `false`. |
+
+The deployment preflight reads the actual domain version and pool tier using its AWS identity
+and refuses an unapproved version change. Local AWS access was unavailable during development:
+do not infer the deployed branding version from the Terraform source. The default keeps
+classic branding until the Managed Login migration has been checked. These settings do not
+change PKCE, callbacks, scopes, passwords, MFA, token lifetimes, or invite-only behavior.
+
+### Managed Login migration and rollback
+
+1. With authenticated AWS access, run `terraform output -json cognito` to obtain the pool/client
+   IDs and domain. Describe the domain with `aws cognito-idp describe-user-pool-domain` and
+   describe the pool/client. Save the current branding configuration privately for rollback.
+   Confirm the pool tier supports Managed Login and the current web client/callbacks are correct.
+2. Check for an existing style with `aws cognito-idp describe-managed-login-branding-by-client`.
+   A ResourceNotFound response means there is no style; other errors must be resolved, not
+   treated as absence. If a style already exists, import it rather than creating a duplicate:
+   `terraform import 'module.site_auth.aws_cognito_managed_login_branding.web[0]' '<pool-id>,<branding-id>'`
+   after configuring version 2. Likewise import an existing classic customization if it was
+   previously managed outside Terraform. Do not delete an existing style merely to change it.
+3. Set `cognito_login_branding_version = 2` and `cognito_allow_branding_migration = true` in the
+   production tfvars (including the deployment's `TERRAFORM_TFVARS` secret). Review a Terraform
+   plan: pool/client replacement or authentication-policy changes are not acceptable.
+4. Schedule a controlled rollout. AWS requires the domain for the branding resource, so the
+   domain update precedes creation of a new style. Login might be briefly unavailable until
+   the style is assigned. Keep the prior configuration available and do not treat the domain
+   version change alone as success. A failed style creation requires recovery/rollback.
+5. Verify the real login, first-login password change, password reset, error prompts, callback,
+   and logout; verify any code/MFA prompts already enabled in this pool. Verify mobile and
+   keyboard use. Do not enable a new factor just to test branding.
+6. Set `cognito_allow_branding_migration = false` again after a successful rollout.
+
+To roll back v2 to the previously verified classic experience, set version 1 and temporarily
+authorize the migration, review/apply the plan, and verify classic login. Terraform restores the
+matching classic CSS and removes its managed style. Then disable migration authorization again.
+Never delete/recreate the user pool/client or reset client settings as a branding workaround.
+For an application-theme rollback, revert the application change and deploy a known-good commit;
+stored theme IDs are non-sensitive preferences, not authentication state.
+
+AWS references: [Managed Login branding](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login-brandingeditor.html)
+and [classic customization limitations](https://docs.aws.amazon.com/cognito/latest/developerguide/hosted-ui-classic-branding.html).
+
 ## Troubleshooting
 
 | Symptom | Checks and recovery |

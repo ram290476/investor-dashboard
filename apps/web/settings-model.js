@@ -14,6 +14,7 @@ export const SETTINGS_TABS = [
 ];
 
 export const PALETTES = [
+  { id: "theme", label: "Theme default" },
   { id: "green-red", label: "Green / Red" },
   { id: "red-green", label: "Red / Green" },
   { id: "blue-orange", label: "Blue / Orange" },

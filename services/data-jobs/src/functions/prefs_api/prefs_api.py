@@ -12,7 +12,8 @@ Item (table user_prefs, partition key user_sub):
     tickers       list     "My tickers", in display order (max 50)
     pinned        list     pinned tickers, in order (max 6, each also in tickers)
     display       map      time_zone (IANA, e.g. America/Los_Angeles), updown_palette (see PALETTES),
-                           chart_period (1D|1W|1M|3M|YTD|1Y|3Y|5Y; unknown values are stored as 1M)
+                           chart_period (1D|1W|1M|3M|YTD|1Y|3Y|5Y; unknown values are stored as 1M),
+                           theme (see THEMES; missing legacy values default to industrial-dark)
     chart_settings map     per-ticker overlay IDs and under-chart lane IDs, limited to tickers and allowlists
     version       number   optimistic concurrency; PUT must send the version it read
     updated_at    string   ISO-8601 UTC
@@ -43,7 +44,11 @@ EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "invdash.prefs")
 MAX_TICKERS = int(os.environ.get("MAX_TICKERS_PER_USER", "50"))
 MAX_PINNED = 6
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
-PALETTES = {"green-red", "red-green", "blue-orange"}  # up/down colours; blue-orange is colour-blind safe
+PALETTES = {"theme", "green-red", "red-green", "blue-orange"}
+THEMES = {
+    "industrial-dark", "terminal-amber", "charting-navy",
+    "clean-light", "colorblind-hc", "midnight-slate",
+}
 CHART_PERIODS = {"1D", "1W", "1M", "3M", "YTD", "1Y", "3Y", "5Y"}
 CHART_LANES = {"VOL", "SI", "OPT", "PRESS"}
 CHART_OVERLAYS = {
@@ -57,7 +62,10 @@ CHART_OVERLAYS = {
 DEFAULTS = {
     "tickers": ["TSLA", "SPCX"],
     "pinned": ["TSLA", "SPCX"],
-    "display": {"time_zone": "America/New_York", "updown_palette": "green-red", "chart_period": "1M"},
+    "display": {
+        "time_zone": "America/New_York", "updown_palette": "green-red",
+        "chart_period": "1M", "theme": "industrial-dark",
+    },
     "chart_settings": {},
     "version": 0,
 }
@@ -99,6 +107,9 @@ def validate(body: dict) -> dict:
         raise ValidationError("pinned tickers must be unique and also in tickers")
     if not isinstance(display, dict):
         raise ValidationError("display must be an object")
+    theme = display.get("theme", DEFAULTS["display"]["theme"])
+    if not isinstance(theme, str) or theme not in THEMES:
+        raise ValidationError(f"theme must be one of {sorted(THEMES)}")
     tz = display.get("time_zone", DEFAULTS["display"]["time_zone"])
     try:
         ZoneInfo(str(tz))
@@ -143,7 +154,7 @@ def validate(body: dict) -> dict:
     return {
         "tickers": clean,
         "pinned": pins,
-        "display": {"time_zone": str(tz), "updown_palette": palette, "chart_period": chart_period},
+        "display": {"time_zone": str(tz), "updown_palette": palette, "chart_period": chart_period, "theme": theme},
         "chart_settings": chart_settings,
         "version": version,
     }
@@ -190,7 +201,7 @@ def _public(item: dict) -> dict:
     return {
         "tickers": list(item.get("tickers", [])),
         "pinned": list(item.get("pinned", [])),
-        "display": dict(item.get("display", {})),
+        "display": {"theme": DEFAULTS["display"]["theme"], **dict(item.get("display", {}))},
         "chart_settings": {
             ticker: {"overlays": list(settings.get("overlays", [])), "lanes": list(settings.get("lanes", []))}
             for ticker, settings in chart_settings.items()

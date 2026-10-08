@@ -3,6 +3,7 @@
 // Changes apply at once and autosave through PUT /prefs, one request at a time.
 
 import { PERIODS, chartValue, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
+import { DEFAULT_THEME, THEMES, themeProperties } from "./theme.js";
 import {
   MAX_PINNED,
   MAX_TICKERS,
@@ -583,6 +584,24 @@ export function createAccountSettings(ctx) {
 
   function renderThemeTab() {
     const display = session.prefs.display;
+    const themes = el("div", "settings-field");
+    themes.append(el("p", "settings-label", "Application theme"));
+    const choices = el("div", "theme-choices");
+    choices.setAttribute("role", "group");
+    choices.setAttribute("aria-label", "Application theme");
+    THEMES.forEach((theme) => {
+      const choice = button(theme.label, "theme-choice", () => {
+        if (theme.id !== (display.theme ?? DEFAULT_THEME)) setDisplay({ theme: theme.id }, `${theme.label} saved.`);
+      }, `theme-${theme.id}`);
+      choice.dataset.themeChoice = theme.id;
+      choice.setAttribute("aria-pressed", String(theme.id === (display.theme ?? DEFAULT_THEME)));
+      const colors = themeProperties(theme.id, "theme");
+      choice.style.setProperty("--preview-bg", colors["--surface"]);
+      choice.style.setProperty("--preview-text", colors["--text"]);
+      choice.style.setProperty("--preview-accent", colors["--price"]);
+      choices.append(choice);
+    });
+    themes.append(choices, el("p", "settings-hint", "Applies to all panels and charts. Cognito sign-in uses the default application branding."));
     const palette = segmented(
       "Up / down colors",
       PALETTES,
@@ -590,7 +609,7 @@ export function createAccountSettings(ctx) {
       (id) => id !== display.updown_palette && setDisplay({ updown_palette: id }, "Up and down colors saved."),
       "palette",
     );
-    palette.append(el("p", "settings-hint", "Blue / orange is easier to tell apart for red-green color blindness."));
+    palette.append(el("p", "settings-hint", "Theme default uses the selected theme's direction colors. Other palettes override direction colors only. Blue / orange is easier to tell apart for red-green color blindness."));
 
     const preview = el("div", "settings-preview");
     preview.dataset.palette = display.updown_palette;
@@ -606,7 +625,7 @@ export function createAccountSettings(ctx) {
       "period",
     );
     period.append(el("p", "settings-hint", "The chart opens on this period. Periods without enough history fall back to the longest one available."));
-    return [palette, preview, period];
+    return [themes, palette, preview, period];
   }
 
   // ---------------------------------------------------------------- Profile & time zone
