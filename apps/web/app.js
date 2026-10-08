@@ -301,12 +301,6 @@ function returns(history, offset) {
   return sessionReturn(validBars(history), offset);
 }
 
-function netPressure(tickerData) {
-  const rows = tickerData?.trend?.rows || [];
-  const row = rows.find((item) => isNumericValue(item.net_pressure));
-  return row ? Number(row.net_pressure) : null;
-}
-
 function polarity(value) {
   if (!isNumericValue(value) || Number(value) === 0) return "neutral";
   return Number(value) > 0 ? "positive" : "negative";
@@ -471,14 +465,6 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     svg.append(label);
   });
   return svg;
-}
-
-function statCard(label, value, foot, valueClass = "") {
-  const card = node("div", "stat-card");
-  card.append(node("span", "stat-label", label));
-  card.append(node("strong", `stat-value ${valueClass}`.trim(), value));
-  card.append(node("span", "stat-foot", foot));
-  return card;
 }
 
 function sectionHeader(title, subtitle = "") {
@@ -949,49 +935,6 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   return panel;
 }
 
-function renderStats(tickerData) {
-  const history = tickerData?.price_history || [];
-  const latest = validBars(history).at(-1);
-  const pressure = netPressure(tickerData);
-  const grid = node("section", "stats-grid");
-  grid.setAttribute("aria-label", "Selected ticker summary");
-  const insider = tickerData?.insider_30d;
-  const live = tickerData?.intraday;
-  if (isNumericValue(live?.last)) {
-    grid.append(
-      statCard(
-        "LIVE",
-        formatPrice(live.last),
-        isNumericValue(live.change_pct) ? `${formatPercent(live.change_pct, 1)} vs prior close` : "Hourly session",
-        polarity(live.change_pct),
-      ),
-    );
-  }
-  const cards = [
-    statCard("LAST CLOSE", latest ? formatPrice(displayPrice(latest)) : "—", latest?.date || tickerData?.price_as_of || "No data"),
-    statCard(
-      "MACRO PRESSURE",
-      pressure === null ? "—" : pressure.toFixed(2),
-      "Trend model · −1 to +1",
-      polarity(pressure),
-    ),
-  ];
-  if (insider && isNumericValue(insider.net_shares)) {
-    const shares = Number(insider.net_shares);
-    const value = isNumericValue(insider.net_value) ? Number(insider.net_value) : null;
-    cards.push(
-      statCard(
-        "FORM 4 · 30D",
-        `${shares > 0 ? "+" : ""}${shares.toLocaleString()} sh`,
-        value == null ? "Net insider shares" : `${value > 0 ? "+" : ""}${formatPrice(value)} net value`,
-        polarity(shares),
-      ),
-    );
-  }
-  grid.append(...cards);
-  return grid;
-}
-
 function renderContracts(tickerData) {
   const contracts = tickerData?.contracts;
   if (!contracts) return null;
@@ -1291,7 +1234,6 @@ function renderDashboard() {
   mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
   const primary = node("div");
   primary.append(
-    renderStats(tickerData),
     renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, (next) => updateChartSettings(session.selected, next)),
   );
   const contracts = renderContracts(tickerData);
