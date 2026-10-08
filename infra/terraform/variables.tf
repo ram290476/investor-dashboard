@@ -470,7 +470,8 @@ variable "jobs" {
     release-day = {
       handler  = "release_day.handler"
       schedule = ""
-      triggers = []
+      # Backfill success rebuilds release links for tickers whose history just arrived.
+      triggers = ["job:BACKFILL"]
       memory   = 512
       timeout  = 300
       read_prefixes = [
@@ -487,7 +488,7 @@ variable "jobs" {
         "curated/release_links/",
       ]
       api_keys          = ["bls", "bea", "census", "fred"]
-      reads_prefs       = false
+      reads_prefs       = true
       manages_schedules = true
     }
     # Rebuilds serving/status.json after every job
