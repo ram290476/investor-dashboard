@@ -6,7 +6,6 @@ from datetime import date, timedelta
 from urllib.parse import parse_qs
 
 import boto3
-import daily_prices
 import httpx
 import numpy as np
 import polars as pl
@@ -14,6 +13,7 @@ import pytest
 from moto import mock_aws
 
 import api_keys
+import daily_prices
 import http_client
 import lake
 import observability
