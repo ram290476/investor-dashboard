@@ -16,6 +16,29 @@ def test_next_run_skips_weekend_and_holiday():
     assert sf.next_run("TREND", datetime(2026, 11, 25, tzinfo=UTC)) is None
 
 
+def test_links_run_records_last_links_run_without_moving_last_run():
+    now = datetime(2026, 10, 8, 15, tzinfo=UTC)
+    prior = "2026-10-01T12:00:00+00:00"
+    feed = sf.apply_event(
+        {"jobs": [{"job": "M1", "status": "ok", "last_run": prior, "last_outcome": "success", "failed_sources": 0}]},
+        {"job": "M1", "outcome": "success", "mode": "links", "failed_sources": 0, "dropped": []},
+        now,
+    )
+    m1 = {j["job"]: j for j in feed["jobs"]}["M1"]
+    assert m1["last_run"] == prior and m1["status"] == "ok"
+    assert m1["last_links_run"] == now.isoformat(timespec="seconds")
+    assert "over_cap" not in m1
+    feed = sf.apply_event(
+        feed,
+        {"job": "M1", "outcome": "success", "failed_sources": 0, "dropped": ["ZZZ"]},
+        now,
+    )
+    m1 = {j["job"]: j for j in feed["jobs"]}["M1"]
+    assert m1["last_run"] == now.isoformat(timespec="seconds")
+    assert m1["last_links_run"] == now.isoformat(timespec="seconds")
+    assert m1["over_cap"] == "over the ticker cap" and m1["dropped"] == ["ZZZ"]
+
+
 def test_apply_event_statuses():
     now = datetime(2026, 10, 5, 21, tzinfo=UTC)
     feed = sf.apply_event(None, {"job": "D4", "outcome": "success", "failed_sources": 1}, now)

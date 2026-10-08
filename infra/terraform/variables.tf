@@ -383,7 +383,7 @@ variable "jobs" {
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?batches>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1"]
       memory   = 1024
       timeout  = 300
       read_prefixes = [
@@ -470,8 +470,8 @@ variable "jobs" {
     release-day = {
       handler  = "release_day.handler"
       schedule = ""
-      # Backfill success rebuilds release links for tickers whose history just arrived.
-      triggers = ["job:BACKFILL"]
+      # A backfill that wrote rows rebuilds links. Idle runs (batches = 0) do not start M1.
+      triggers = ["job:BACKFILL?batches>0"]
       memory   = 512
       timeout  = 300
       read_prefixes = [
