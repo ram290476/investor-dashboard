@@ -67,6 +67,15 @@ test("each chip return is the chart window's first close to its last close", () 
   assert.equal(periodQuote(history, "5Y").available, false);
 });
 
+test("YTD starts at the first available close in the latest calendar year", () => {
+  const history = weekdayBars("2025-12-29", "2026-10-06", 100);
+  const quote = periodQuote(history, "YTD");
+  assert.equal(quote.available, true);
+  assert.equal(quote.window[0].date, "2026-01-01");
+  assert.equal(quote.window.at(-1).date, "2026-10-06");
+  assert.equal(quote.returnValue, quote.window.at(-1).adj_close / quote.window[0].adj_close - 1);
+});
+
 test("null closes are skipped and never treated as prices", () => {
   const history = [
     { date: "2026-10-01", adj_close: null, close: 10, close_raw: 10 },
@@ -130,7 +139,7 @@ test("history shorter than 1M falls back to the longest chip that fits", () => {
 
 test("unknown and missing periods resolve to 1M when that window exists", () => {
   const history = bars(80);
-  assert.equal(normalizePeriod("YTD"), DEFAULT_PERIOD);
+  assert.equal(normalizePeriod("YTD"), "YTD");
   assert.equal(normalizePeriod("1W"), "1W");
   assert.equal(resolveChartPeriod(undefined, history), "1M");
   assert.equal(resolveChartPeriod("5D", history), "1M");

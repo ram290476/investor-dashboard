@@ -4,9 +4,7 @@ Bars: one multi-symbol call per 100 symbols covers the user-ticker union and the
 proxies (SPY, DIA, QQQ, IWM, XLY, ITA, SMH) in H1 and the D4 close check.
 
 Options (DS-92, job options_daily): chain snapshots on the free 'indicative' feed give
-15-minute-delayed derived quotes. Alpaca's docs don't say whether indicative snapshots
-carry implied volatility; iv30 is null when they don't, and options_daily stays disabled
-until a first run confirms the fields (variable enable_options_daily).
+15-minute-delayed derived quotes. IV30 is null when the feed omits implied volatility.
 """
 
 from __future__ import annotations

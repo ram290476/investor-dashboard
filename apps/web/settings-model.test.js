@@ -61,6 +61,17 @@ test("added tickers go to the end, unpinned, without mutating the input", () => 
   assert.deepEqual(before.tickers, ["TSLA", "SPCX"]);
 });
 
+test("chart settings are deep-copied when preferences are edited", () => {
+  const before = {
+    ...prefs(["TSLA"]),
+    chart_settings: { TSLA: { overlays: ["MA20"], lanes: ["VOL", "PRESS"] } },
+  };
+  const after = addTicker(before, "SPCX");
+  after.chart_settings.TSLA.overlays.push("SPY");
+  assert.deepEqual(before.chart_settings.TSLA.overlays, ["MA20"]);
+  assert.deepEqual(after.chart_settings.TSLA.overlays, ["MA20", "SPY"]);
+});
+
 test("a seventh pin is blocked; unpinning frees a slot", () => {
   const six = ["A", "B", "C", "D", "E", "F"];
   const full = prefs([...six, "G"], six);

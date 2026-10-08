@@ -520,6 +520,184 @@ a {
   font-size: 11px;
 }
 
+.chart-overlay-path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-controls {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(39, 48, 60, 0.72);
+  background: rgba(15, 19, 25, 0.62);
+}
+
+.overlay-tabs,
+.overlay-options,
+.lane-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 1px 0 3px;
+  scrollbar-width: thin;
+}
+
+.overlay-tab,
+.overlay-chip,
+.lane-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.overlay-tab[aria-selected="true"],
+.overlay-chip[aria-pressed="true"],
+.lane-toggle[aria-pressed="true"] {
+  border-color: #3b5578;
+  background: #25344a;
+  color: var(--text);
+}
+
+.overlay-chip {
+  min-height: 28px;
+  border-radius: 999px;
+}
+
+.overlay-chip.overlay-all {
+  border-style: dashed;
+}
+
+.overlay-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--overlay-color, var(--blue));
+}
+
+.chart-control-note,
+.overlay-empty,
+.chart-save-error {
+  margin: 0;
+  color: var(--subtle);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.chart-save-error {
+  color: #ffb3ad;
+  font-size: 11px;
+}
+
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chart-lanes {
+  display: grid;
+  min-width: 0;
+  padding: 0 12px 8px;
+}
+
+.chart-lane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+  min-height: 76px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(39, 48, 60, 0.58);
+}
+
+.chart-lane:last-child {
+  border-bottom: 0;
+}
+
+.lane-info {
+  display: grid;
+  grid-template-columns: minmax(110px, 165px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lane-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lane-subtitle {
+  margin: 0;
+  color: var(--subtle);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.lane-stat {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.lane-chart {
+  display: block;
+  width: 100%;
+  height: 48px;
+  overflow: visible;
+}
+
+.lane-volume-bar {
+  fill: #6689b6;
+  opacity: 0.78;
+}
+
+.lane-line {
+  fill: none;
+  stroke: #e3b341;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  vector-effect: non-scaling-stroke;
+}
+
+.lane-pressure-line {
+  stroke: #c5cdd8;
+}
+
+.lane-zero-line {
+  stroke: #46515f;
+  stroke-dasharray: 3 4;
+  stroke-width: 1;
+}
+
+.lane-empty {
+  padding: 8px 0;
+}
+
 .legend-mark {
   display: inline-block;
   width: 14px;
@@ -1405,6 +1583,33 @@ body.modal-open {
 
   .chart-legend {
     padding-inline: 13px;
+  }
+
+  .chart-controls {
+    padding-inline: 8px;
+  }
+
+  .chart-lanes {
+    padding-inline: 8px;
+  }
+
+  .chart-lane {
+    gap: 2px;
+    min-height: 72px;
+    padding-inline: 0;
+  }
+
+  .lane-info {
+    grid-template-columns: minmax(82px, 112px) minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+
+  .lane-subtitle {
+    font-size: 9px;
+  }
+
+  .lane-chart {
+    height: 52px;
   }
 
   .gate {

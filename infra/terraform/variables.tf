@@ -214,9 +214,9 @@ variable "max_user_tickers" {
 }
 
 variable "enable_options_daily" {
-  description = "Turn on the options_daily job after a manual run confirms the free Alpaca indicative feed returns snapshots (and whether they include IV)."
+  description = "Enable daily options snapshots from Alpaca's free indicative feed."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "backfill_years" {
@@ -397,12 +397,14 @@ variable "jobs" {
         "curated/contracts_rollup/",
         "curated/contracts/",
         "serving/trend_metrics/latest/",
+        "serving/trend_metrics/ticker=",
+        "curated/options_daily/",
         "serving/fundamentals_quarterly.json",
         "serving/status.json",
         "curated/releases/",
         "curated/release_calendar/",
       ]
-      write_prefixes = ["serving/dashboard.json"]
+      write_prefixes = ["serving/dashboard.json", "serving/chart_data/"]
       api_keys       = []
       reads_prefs    = true
     }
@@ -430,7 +432,7 @@ variable "jobs" {
       api_keys       = ["finra-client-id", "finra-client-secret"]
       reads_prefs    = true
     }
-    # With D4; no-op until enable_options_daily = true
+    # Runs five minutes after daily-prices; set enable_options_daily false to pause collection.
     options-daily = {
       handler        = "options_daily.handler"
       schedule       = "cron(50 16 ? * MON-FRI *)"

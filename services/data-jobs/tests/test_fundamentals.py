@@ -12,6 +12,25 @@ def _fact(start, end, val, filed, form="10-Q", frame=None):
 
 COMPANYFACTS = {
     "facts": {
+        "dei": {
+            "EntityCommonStockSharesOutstanding": {
+                "units": {
+                    "shares": [
+                        _fact("2025-03-31", "2025-03-31", 3_200_000_000, "2025-04-24"),
+                        _fact("2025-06-30", "2025-06-30", 3_210_000_000, "2025-07-24"),
+                        _fact("2025-06-30", "2025-06-30", 3_220_000_000, "2025-07-25", form="10-Q/A"),
+                    ]
+                }
+            },
+            "EntityPublicFloat": {
+                "units": {
+                    "USD": [
+                        _fact("2025-06-30", "2025-06-30", 900_000_000_000, "2026-01-29", form="10-K"),
+                        _fact("2025-06-30", "2025-06-30", 910_000_000_000, "2026-02-02", form="10-K/A"),
+                    ]
+                }
+            },
+        },
         "us-gaap": {
             "Revenues": {
                 "units": {
@@ -50,6 +69,17 @@ def test_quarters_and_derived_q4():
     assert str(gm["2025Q4"]["release_date"]) == "2026-01-29"
     rev = {r["fiscal_quarter"]: r["value"] for r in rows if r["metric"] == "revenue_gaap"}
     assert rev["2025Q1"] == 100.0  # not the later 999 re-report
+    shares = {r["fiscal_quarter"]: r for r in rows if r["metric"] == "shares_outstanding"}
+    assert shares["2025Q1"]["value"] == 3_200_000_000
+    assert shares["2025Q2"]["value"] == 3_210_000_000
+    assert shares["2025Q2"]["unit"] == "shares"
+    assert str(shares["2025Q2"]["release_date"]) == "2025-07-24"
+    public_float = [r for r in rows if r["metric"] == "public_float_usd"]
+    assert len(public_float) == 1
+    assert public_float[0]["value"] == 900_000_000_000
+    assert public_float[0]["unit"] == "USD"
+    assert str(public_float[0]["measurement_date"]) == "2025-06-30"
+    assert str(public_float[0]["release_date"]) == "2026-01-29"
 
 
 def test_manual_csv_validation_and_override():

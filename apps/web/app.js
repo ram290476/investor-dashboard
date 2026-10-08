@@ -11,6 +11,14 @@ import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle 
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
 import { emailFromIdToken, fallbackSelection, parseSettingsHash, stripOrder } from "./settings-model.js";
+import {
+  CHART_LANES,
+  chartSettingsFor,
+  isMarketOverlay,
+  overlayDefinition,
+  overlayGroups,
+  valuesForOverlay,
+} from "./chart-overlays.js";
 
 const root = document.querySelector("#app");
 const svgNS = "http://www.w3.org/2000/svg";
@@ -21,6 +29,9 @@ const session = {
   email: null,
   prefs: null,
   dashboard: null,
+  chartData: {},
+  chartDataState: {},
+  chartDataError: {},
   // "loading" until the first /dashboard answer; "error" when it could not be read.
   dashboardState: "loading",
   // Last refresh failure. Ordinary redraws keep showing it until a refresh succeeds.
@@ -30,8 +41,10 @@ const session = {
   settingsError: null,
   selected: null,
   periodSave: false,
+  chartSaveError: "",
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
+let prefsSaveQueue = Promise.resolve();
 const aliases = {
   DGS2: "2Y Treasury",
   DGS10: "10Y Treasury",
@@ -202,7 +215,49 @@ async function putPrefs(candidate) {
 }
 
 async function savePrefs(update) {
-  session.prefs = await putPrefs({ ...session.prefs, ...update, version: session.prefs.version });
+  session.prefs = { ...session.prefs, ...update };
+  const save = prefsSaveQueue.catch(() => {}).then(async () => {
+    const saved = await putPrefs({ ...session.prefs, version: session.prefs.version });
+    session.prefs = { ...session.prefs, version: saved.version };
+    session.chartSaveError = "";
+    return saved;
+  });
+  prefsSaveQueue = save;
+  return save;
+}
+
+async function loadChartData(ticker, force = false) {
+  if (!ticker || (!force && ["ready", "loading"].includes(session.chartDataState[ticker]))) return;
+  session.chartDataState[ticker] = "loading";
+  if (session.selected === ticker) renderDashboard();
+  try {
+    session.chartData[ticker] = await apiGet(`chart/${encodeURIComponent(ticker)}`);
+    session.chartDataState[ticker] = "ready";
+    session.chartDataError[ticker] = "";
+    session.chartSaveError = "";
+  } catch (error) {
+    session.chartDataState[ticker] = "error";
+    session.chartData[ticker] = null;
+    session.chartDataError[ticker] = error.message;
+    if (error.status === 401) {
+      settings.close();
+      session.accessToken = null;
+      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+      return;
+    }
+  }
+  if (session.selected === ticker) renderDashboard();
+}
+
+function updateChartSettings(ticker, settings) {
+  const chartSettings = { ...(session.prefs.chart_settings || {}), [ticker]: settings };
+  session.prefs = { ...session.prefs, chart_settings: chartSettings };
+  session.chartSaveError = "";
+  renderDashboard();
+  savePrefs({ chart_settings: chartSettings }).catch((error) => {
+    session.chartSaveError = error.message;
+    if (session.selected === ticker) renderDashboard();
+  });
 }
 
 // Displayed prices use close_raw (the actual traded close) and fall back to close.
@@ -257,53 +312,95 @@ function polarity(value) {
   return Number(value) > 0 ? "positive" : "negative";
 }
 
-function drawChart(history, ticker, periodId = "1M") {
+function seriesPath(values, xAt, yAt) {
+  let path = "";
+  let drawing = false;
+  values.forEach((value, index) => {
+    if (!isNumericValue(value)) {
+      drawing = false;
+      return;
+    }
+    path += `${drawing ? "L" : "M"}${xAt(index).toFixed(2)} ${yAt(Number(value), index).toFixed(2)} `;
+    drawing = true;
+  });
+  return path.trim();
+}
+
+function scalePercent(values) {
+  const first = values.find(isNumericValue);
+  if (!isNumericValue(first) || Number(first) === 0) return values.map(() => null);
+  return values.map((value) => (isNumericValue(value) ? (Number(value) / Number(first) - 1) * 100 : null));
+}
+
+function scaleIndicator(values, inverse) {
+  const numeric = values.filter(isNumericValue).map(Number);
+  if (!numeric.length) return values.map(() => null);
+  const min = Math.min(...numeric);
+  const max = Math.max(...numeric);
+  const spread = max - min || 1;
+  return values.map((value) => {
+    if (!isNumericValue(value)) return null;
+    const normalized = ((Number(value) - min) / spread) * 100;
+    return inverse ? 100 - normalized : normalized;
+  });
+}
+
+function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartContext = {}) {
   if (!history?.length) return null;
-  const values = history.map(chartValue).filter((value) => value !== null);
-  if (values.length < 2) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const bars = history;
+  const sourcePrices = bars.map(chartValue);
+  if (sourcePrices.filter(isNumericValue).length < 2) return null;
+  const marketSelected = overlayIds.some(isMarketOverlay);
+  const firstPrice = sourcePrices.find(isNumericValue);
+  const compareMarkets = marketSelected && isNumericValue(firstPrice) && Number(firstPrice) !== 0;
+  const prices = compareMarkets ? scalePercent(sourcePrices) : sourcePrices;
+  const configured = overlayIds.map((id) => {
+    const definition = overlayDefinition(id);
+    const values = valuesForOverlay(id, { ...chartContext, bars });
+    const scaled = compareMarkets && (definition?.kind === "market" || definition?.kind === "average")
+      ? scalePercent(values)
+      : definition?.kind === "market" || definition?.kind === "average"
+        ? values
+        : scaleIndicator(values, definition?.inverse);
+    return { id, definition, values, scaled };
+  });
+  const priceNumeric = prices.filter(isNumericValue).map(Number);
+  const axisValues = [...priceNumeric];
+  if (compareMarkets) {
+    configured.filter((item) => item.definition?.kind === "market").forEach((item) => {
+      axisValues.push(...item.scaled.filter(isNumericValue).map(Number));
+    });
+  } else {
+    configured.filter((item) => item.definition?.kind === "average").forEach((item) => {
+      axisValues.push(...item.scaled.filter(isNumericValue).map(Number));
+    });
+  }
+  const min = Math.min(...axisValues);
+  const max = Math.max(...axisValues);
   const spread = max - min || 1;
   const left = 70;
   const right = 890;
   const top = 18;
   const bottom = 178;
-  const points = values.map((value, index) => {
-    const x = left + (index / (values.length - 1)) * (right - left);
-    const y = bottom - ((value - min) / spread) * (bottom - top);
-    return [x, y];
-  });
+  const xAt = (index) => left + (index / (bars.length - 1)) * (right - left);
+  const yValue = (value) => bottom - ((value - min) / spread) * (bottom - top);
+  const yNormalized = (value) => bottom - (value / 100) * (bottom - top);
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("class", "price-chart");
   svg.setAttribute("viewBox", "0 0 940 210");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `${ticker} ${periodId} daily closing prices, ${values.length} sessions`);
+  svg.setAttribute("aria-label", `${ticker} ${periodId} chart, ${bars.length} observations`);
   svg.dataset.period = periodId;
-  svg.dataset.sessions = String(values.length);
+  svg.dataset.sessions = String(bars.length);
+  svg.dataset.scaleMode = compareMarkets ? "percent" : "price";
   const title = document.createElementNS(svgNS, "title");
-  title.textContent = `${ticker} ${periodId} daily close, adjusted for splits and dividends`;
+  title.textContent = `${ticker} ${periodId} daily close and selected overlays`;
+  const lastPrice = sourcePrices.filter(isNumericValue).at(-1);
   const desc = document.createElementNS(svgNS, "desc");
-  desc.textContent = `Adjusted price range ${formatPrice(min)} to ${formatPrice(max)}. Most recent close ${formatPrice(displayPrice(history.at(-1)))}.`;
+  desc.textContent = compareMarkets
+    ? `Price and market overlays shown as percent change from the start of the selected period. Latest price ${formatPrice(displayPrice(bars.at(-1)))}.`
+    : `Adjusted price range ${formatPrice(min)} to ${formatPrice(max)}. Latest price ${formatPrice(displayPrice(bars.at(-1)))}. Indicator overlays use normalized scales.`;
   svg.append(title, desc);
-
-  const defs = document.createElementNS(svgNS, "defs");
-  const gradient = document.createElementNS(svgNS, "linearGradient");
-  gradient.setAttribute("id", "price-fill");
-  gradient.setAttribute("x1", "0");
-  gradient.setAttribute("x2", "0");
-  gradient.setAttribute("y1", "0");
-  gradient.setAttribute("y2", "1");
-  const stopTop = document.createElementNS(svgNS, "stop");
-  stopTop.setAttribute("offset", "0%");
-  stopTop.setAttribute("stop-color", "#7db4ff");
-  stopTop.setAttribute("stop-opacity", "0.28");
-  const stopBottom = document.createElementNS(svgNS, "stop");
-  stopBottom.setAttribute("offset", "100%");
-  stopBottom.setAttribute("stop-color", "#7db4ff");
-  stopBottom.setAttribute("stop-opacity", "0");
-  gradient.append(stopTop, stopBottom);
-  defs.append(gradient);
-  svg.append(defs);
 
   for (let index = 0; index < 4; index += 1) {
     const y = top + ((bottom - top) / 3) * index;
@@ -320,27 +417,59 @@ function drawChart(history, ticker, periodId = "1M") {
     label.setAttribute("fill", "#8997a9");
     label.setAttribute("font-size", "11");
     label.setAttribute("font-family", "IBM Plex Mono, monospace");
-    label.textContent = formatPrice(max - ((max - min) / 3) * index);
+    label.textContent = compareMarkets ? `${(max - ((max - min) / 3) * index).toFixed(1)}%` : formatPrice(max - ((max - min) / 3) * index);
     svg.append(label);
   }
-  const linePath = points.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`).join(" ");
+
+  const pricePath = seriesPath(prices, xAt, (value) => yValue(value));
   const area = document.createElementNS(svgNS, "path");
   area.setAttribute("class", "chart-area");
-  area.setAttribute("d", `${linePath} L${right} ${bottom} L${left} ${bottom} Z`);
-  const path = document.createElementNS(svgNS, "path");
-  path.setAttribute("class", "chart-path");
-  path.setAttribute("d", linePath);
-  svg.append(area, path);
+  area.setAttribute("d", `${pricePath} L${right} ${bottom} L${left} ${bottom} Z`);
+  const priceLine = document.createElementNS(svgNS, "path");
+  priceLine.setAttribute("class", "chart-path");
+  priceLine.setAttribute("d", pricePath);
+  svg.append(area, priceLine);
 
-  const last = points.at(-1);
-  const marker = document.createElementNS(svgNS, "circle");
-  marker.setAttribute("cx", String(last[0]));
-  marker.setAttribute("cy", String(last[1]));
-  marker.setAttribute("r", "4");
-  marker.setAttribute("fill", "#d8e9ff");
-  marker.setAttribute("stroke", "#7db4ff");
-  marker.setAttribute("stroke-width", "2");
-  svg.append(marker);
+  configured.forEach(({ id, definition, scaled }) => {
+    if (!definition || !scaled.some(isNumericValue)) return;
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("class", "chart-overlay-path");
+    path.setAttribute("d", seriesPath(scaled, xAt, (value) => definition.kind === "macro" || definition.kind === "fundamental" ? yNormalized(value) : yValue(value)));
+    path.setAttribute("stroke", definition.color);
+    path.setAttribute("stroke-dasharray", definition.kind === "average" ? "none" : "5 4");
+    path.dataset.overlay = id;
+    svg.append(path);
+  });
+
+  if (Number.isFinite(lastPrice) && firstPrice !== 0) {
+    const latestIndex = sourcePrices.length - 1;
+    const latestValue = prices[latestIndex];
+    if (isNumericValue(latestValue)) {
+      const marker = document.createElementNS(svgNS, "circle");
+      marker.setAttribute("cx", String(xAt(latestIndex)));
+      marker.setAttribute("cy", String(yValue(latestValue)));
+      marker.setAttribute("r", "4");
+      marker.setAttribute("fill", "#d8e9ff");
+      marker.setAttribute("stroke", "#7db4ff");
+      marker.setAttribute("stroke-width", "2");
+      svg.append(marker);
+    }
+  }
+  [
+    { bar: bars[0], x: left, anchor: "start" },
+    { bar: bars.at(-1), x: right, anchor: "end" },
+  ].forEach(({ bar, x, anchor }) => {
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("x", String(x));
+    label.setAttribute("y", "202");
+    label.setAttribute("fill", "#8997a9");
+    label.setAttribute("font-size", "10");
+    label.setAttribute("font-family", "IBM Plex Mono, monospace");
+    label.setAttribute("text-anchor", anchor);
+    const stamp = String(bar?.ts || bar?.date || "");
+    label.textContent = periodId === "1D" && stamp.includes("T") ? stamp.slice(11, 16) : stamp.slice(0, 10);
+    svg.append(label);
+  });
   return svg;
 }
 
@@ -381,6 +510,7 @@ function renderWatchlist() {
     button.addEventListener("click", () => {
       session.selected = ticker;
       renderDashboard();
+      loadChartData(ticker);
     });
     const symbol = node("span", "ticker-symbol", ticker);
     if (pinned.includes(ticker)) {
@@ -479,12 +609,242 @@ function renderTrend(history, tickerData, ticker) {
   return row;
 }
 
-function renderPricePanel(tickerData, onSelectPeriod) {
+function renderOverlayControls(tickerData, chartData, chartDataState, onSettingsChange) {
+  const panel = node("section", "chart-controls");
+  const settings = chartSettingsFor(session.prefs, session.selected);
+  const groups = overlayGroups(tickerData, chartData, session.dashboard);
+  const activeGroup = groups.find((group) => group.id === session.overlayGroup) || groups[0];
+  const tabs = node("div", "overlay-tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Chart overlay groups");
+  groups.forEach((group) => {
+    const button = node("button", "overlay-tab");
+    button.type = "button";
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(group.id === activeGroup?.id));
+    button.setAttribute("aria-controls", "overlay-options");
+    button.textContent = group.label;
+    button.addEventListener("click", () => {
+      session.overlayGroup = group.id;
+      renderDashboard();
+      root.querySelector(`[data-overlay-tab="${group.id}"]`)?.focus();
+    });
+    button.dataset.overlayTab = group.id;
+    tabs.append(button);
+  });
+  const group = node("div", "overlay-options");
+  group.id = "overlay-options";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", `${activeGroup?.label || "Available"} chart overlays`);
+  const overlays = activeGroup?.overlays || [];
+  if (overlays.length) {
+    const allSelected = overlays.every((overlay) => settings.overlays.includes(overlay.id));
+    const allButton = node("button", "overlay-chip overlay-all", allSelected ? "Clear group" : "Add group");
+    allButton.type = "button";
+    allButton.addEventListener("click", () => {
+      const selected = new Set(settings.overlays);
+      if (allSelected) overlays.forEach((overlay) => selected.delete(overlay.id));
+      else overlays.forEach((overlay) => selected.add(overlay.id));
+      onSettingsChange({ ...settings, overlays: [...selected].slice(-5) });
+    });
+    group.append(allButton);
+  }
+  overlays.forEach((overlay) => {
+    const selected = settings.overlays.includes(overlay.id);
+    const button = node("button", `overlay-chip${selected ? " selected" : ""}`);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(selected));
+    button.title = selected ? `Remove ${overlay.label} from the chart` : `Add ${overlay.label} to the chart`;
+    button.dataset.overlay = overlay.id;
+    button.append(node("span", "overlay-swatch", ""));
+    button.querySelector(".overlay-swatch").style.setProperty("--overlay-color", overlay.color);
+    button.append(document.createTextNode(overlay.label));
+    button.addEventListener("click", () => {
+      const next = selected ? settings.overlays.filter((id) => id !== overlay.id) : [...settings.overlays.slice(-4), overlay.id];
+      onSettingsChange({ ...settings, overlays: next });
+      root.querySelector(`[data-overlay="${overlay.id}"]`)?.focus();
+    });
+    group.append(button);
+  });
+  if (!overlays.length) group.append(node("span", "overlay-empty", chartDataState === "loading" ? "Loading available series…" : "No series available in this group."));
+  panel.append(tabs, group);
+  if (settings.overlays.length) {
+    const selection = node("p", "chart-control-note", `${settings.overlays.length} of 5 overlays · market groups compare percentage change; indicators are normalized`);
+    panel.append(selection);
+  }
+
+  const laneGroup = node("div", "lane-controls");
+  laneGroup.setAttribute("role", "group");
+  laneGroup.setAttribute("aria-label", "Under-chart lanes");
+  CHART_LANES.forEach((lane) => {
+    const selected = settings.lanes.includes(lane.id);
+    const button = node("button", `lane-toggle${selected ? " selected" : ""}`, lane.label);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(selected));
+    button.addEventListener("click", () => {
+      const lanes = selected ? settings.lanes.filter((id) => id !== lane.id) : [...settings.lanes, lane.id];
+      onSettingsChange({ ...settings, lanes });
+    });
+    laneGroup.append(button);
+  });
+  panel.append(laneGroup);
+  if (session.chartSaveError) {
+    const error = node("p", "chart-save-error", `Chart settings could not be saved: ${session.chartSaveError}`);
+    error.setAttribute("role", "alert");
+    panel.append(error);
+  }
+  return panel;
+}
+
+function alignedLaneValues(points, bars, key) {
+  const ordered = [...(points || [])]
+    .filter((point) => point.date && isNumericValue(point[key]))
+    .sort((left, right) => String(left.date).localeCompare(String(right.date)));
+  let previous = null;
+  let pointIndex = 0;
+  return bars.map((bar) => {
+    const day = String(bar.date || bar.ts || "").slice(0, 10);
+    while (pointIndex < ordered.length && String(ordered[pointIndex].date).slice(0, 10) <= day) {
+      previous = Number(ordered[pointIndex][key]);
+      pointIndex += 1;
+    }
+    return previous;
+  });
+}
+
+function renderLane(lane, bars, tickerData, chartData, chartDataState) {
+  const row = node("section", "chart-lane");
+  row.setAttribute("aria-label", `${lane.label} chart lane`);
+  const info = node("div", "lane-info");
+  info.append(node("h3", "lane-title", lane.label));
+  let values = [];
+  let suffix = "";
+  if (lane.id === "VOL") {
+    values = bars.map((bar) => isNumericValue(bar.volume) ? Number(bar.volume) : null);
+    suffix = "shares · IEX volume where reported";
+  } else if (lane.id === "SI") {
+    const percentagePoints = (chartData?.short_interest || []).filter((point) => isNumericValue(point.short_pct_denominator));
+    const latestDenominator = percentagePoints.at(-1)?.denominator_type;
+    values = alignedLaneValues(
+      chartData?.short_interest || [],
+      bars,
+      percentagePoints.length ? "short_pct_denominator" : "shares_short",
+    );
+    suffix = latestDenominator === "estimated_public_float"
+      ? "Short % of estimated public float · SEC market value ÷ measurement-date close"
+      : percentagePoints.length
+        ? "Short % of shares outstanding proxy · SEC public float unavailable"
+        : "Shares sold short · denominator data unavailable";
+  } else if (lane.id === "OPT") {
+    values = alignedLaneValues(chartData?.options || [], bars, "put_call_volume_ratio");
+    suffix = "Put/call volume ratio · IV30 shown when available";
+  } else {
+    values = alignedLaneValues(chartData?.macro_pressure || [], bars, "value");
+    suffix = `Net macro tailwind (+) or headwind (−) for ${session.selected} · −1 to +1`;
+  }
+  const valid = values.filter(isNumericValue);
+  if (!valid.length) {
+    const message = chartDataState === "loading"
+      ? "Loading lane data…"
+      : chartDataState === "error"
+        ? "Lane data could not be loaded. Refresh data to retry."
+        : lane.id === "VOL"
+          ? "Volume is unavailable for this period."
+          : lane.id === "SI"
+            ? "FINRA short-interest or SEC float/share data is not available yet."
+            : lane.id === "OPT"
+              ? "Options history is unavailable for this period."
+              : "Macro pressure is unavailable for this period.";
+    info.append(node("p", "lane-subtitle", suffix));
+    row.append(info, node("p", "data-state lane-empty", message));
+    return row;
+  }
+  info.append(node("p", "lane-subtitle", suffix));
+  const latest = valid.at(-1);
+  let stat = lane.id === "VOL"
+    ? `${Math.round(latest).toLocaleString()} sh`
+    : lane.id === "PRESS"
+      ? `${latest > 0 ? "+" : ""}${latest.toFixed(2)}`
+      : lane.id === "SI"
+        ? (chartData?.short_interest || []).some((point) => isNumericValue(point.short_pct_denominator))
+          ? `${latest.toFixed(2)}%`
+          : `${Math.round(latest).toLocaleString()} sh`
+        : `${latest.toFixed(2)} P/C`;
+  if (lane.id === "OPT") {
+    const iv = alignedLaneValues(chartData?.options || [], bars, "iv30").filter(isNumericValue).at(-1);
+    if (isNumericValue(iv)) stat += ` · IV30 ${(Number(iv) * 100).toFixed(0)}%`;
+  }
+  if (lane.id === "SI") {
+    const daysToCover = alignedLaneValues(chartData?.short_interest || [], bars, "days_to_cover").filter(isNumericValue).at(-1);
+    if (isNumericValue(daysToCover)) stat += ` · ${Number(daysToCover).toFixed(1)} DTC`;
+  }
+  info.append(node("strong", `lane-stat ${lane.id === "PRESS" ? polarity(latest) : ""}`.trim(), stat));
+
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("class", `lane-chart lane-${lane.id.toLowerCase()}`);
+  svg.setAttribute("viewBox", "0 0 940 68");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${lane.label} over ${bars.length} chart observations`);
+  const title = document.createElementNS(svgNS, "title");
+  title.textContent = `${lane.label}: ${stat}`;
+  svg.append(title);
+  const left = 70;
+  const right = 890;
+  const bottom = 64;
+  const xAt = (index) => left + (index / Math.max(1, values.length - 1)) * (right - left);
+  if (lane.id === "VOL") {
+    const max = Math.max(...valid) || 1;
+    values.forEach((value, index) => {
+      if (!isNumericValue(value)) return;
+      const height = (Number(value) / max) * 54;
+      const bar = document.createElementNS(svgNS, "rect");
+      bar.setAttribute("x", String(xAt(index) - Math.max(1, 7 - values.length / 100) / 2));
+      bar.setAttribute("y", String(bottom - height));
+      bar.setAttribute("width", String(Math.max(1, 7 - values.length / 100)));
+      bar.setAttribute("height", String(height));
+      bar.setAttribute("class", "lane-volume-bar");
+      svg.append(bar);
+    });
+  } else {
+    const min = lane.id === "PRESS" ? -1 : Math.min(...valid);
+    const max = lane.id === "PRESS" ? 1 : Math.max(...valid);
+    const spread = max - min || 1;
+    const yAt = (value) => bottom - 6 - ((value - min) / spread) * 52;
+    if (lane.id === "PRESS") {
+      const zero = document.createElementNS(svgNS, "line");
+      zero.setAttribute("x1", String(left));
+      zero.setAttribute("x2", String(right));
+      zero.setAttribute("y1", String(yAt(0)));
+      zero.setAttribute("y2", String(yAt(0)));
+      zero.setAttribute("class", "lane-zero-line");
+      svg.append(zero);
+    }
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d", seriesPath(values, xAt, (value) => yAt(value)));
+    path.setAttribute("class", `lane-line ${lane.id === "PRESS" ? "lane-pressure-line" : ""}`.trim());
+    svg.append(path);
+  }
+  row.append(info, svg);
+  return row;
+}
+
+function renderChartLanes(settings, bars, tickerData, chartData, chartDataState) {
+  const lanes = node("div", "chart-lanes");
+  settings.lanes.forEach((id) => {
+    const lane = CHART_LANES.find((item) => item.id === id);
+    if (lane) lanes.append(renderLane(lane, bars, tickerData, chartData, chartDataState));
+  });
+  return lanes;
+}
+
+function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, onSettingsChange) {
   const history = tickerData?.price_history || [];
   const bars = validBars(history);
+  const chartSettings = chartSettingsFor(session.prefs, session.selected);
   const activeId = resolveChartPeriod(session.prefs.display?.chart_period, history);
   const quote = periodQuote(history, activeId);
   const intradayBars = (tickerData?.intraday?.bars || []).map((bar) => ({
+    ts: bar.ts,
     date: bar.ts,
     close: bar.close,
     adj_close: bar.close,
@@ -514,10 +874,20 @@ function renderPricePanel(tickerData, onSelectPeriod) {
   quoteBlock.append(meta);
   overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
   panel.append(overview);
+  panel.append(renderOverlayControls(tickerData, chartData, chartDataState, onSettingsChange));
+  if (chartDataState === "error") {
+    const error = node("p", "data-state error chart-data-error", "Historical overlay data could not be loaded. Use Refresh data to retry.");
+    error.setAttribute("role", "alert");
+    panel.append(error);
+  }
 
   if (chartHistory.length >= 2) {
     const wrap = node("div", "chart-wrap");
-    const chart = drawChart(chartHistory, session.selected, activeId);
+    const chart = drawChart(chartHistory, session.selected, activeId, chartSettings.overlays, {
+      tickerData,
+      chartData,
+      dashboard: session.dashboard,
+    });
     if (chart) {
       wrap.append(chart);
       panel.append(wrap);
@@ -531,8 +901,31 @@ function renderPricePanel(tickerData, onSelectPeriod) {
         ),
       );
       legend.append(
-        node("span", "", `Adjusted ${formatPrice(Math.min(...values))} – ${formatPrice(Math.max(...values))}`),
+        node(
+          "span",
+          "",
+          chart.dataset.scaleMode === "percent"
+            ? "Price and market overlays · percent change from period start"
+            : `Adjusted ${formatPrice(Math.min(...values))} – ${formatPrice(Math.max(...values))}`,
+        ),
       );
+      chartSettings.overlays.forEach((id) => {
+        const definition = overlayDefinition(id);
+        const series = valuesForOverlay(id, { bars: chartHistory, tickerData, chartData, dashboard: session.dashboard });
+        const latestValue = series.filter(isNumericValue).at(-1);
+        if (!definition || !isNumericValue(latestValue)) return;
+        const label = node("span", "chart-legend-item");
+        const swatch = node("span", "overlay-swatch");
+        swatch.style.setProperty("--overlay-color", definition.color);
+        label.append(swatch);
+        const shown = definition.kind === "market"
+          ? formatPercent(Number(latestValue) / Number(series.find(isNumericValue)) - 1, 1)
+          : definition.kind === "average"
+            ? formatPrice(latestValue)
+            : Number(latestValue).toFixed(2);
+        label.append(document.createTextNode(`${definition.label} · ${shown}`));
+        legend.append(label);
+      });
       panel.append(legend);
     } else {
       panel.append(node("p", "data-state", "Price history is incomplete; waiting for more valid observations."));
@@ -552,6 +945,7 @@ function renderPricePanel(tickerData, onSelectPeriod) {
       ),
     );
   }
+  panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState));
   return panel;
 }
 
@@ -864,6 +1258,8 @@ function renderDashboard() {
   }
 
   const tickerData = selectedData();
+  const chartData = session.chartData[session.selected] || null;
+  const chartDataState = session.chartDataState[session.selected] || "loading";
   let notice;
   const onMessage = (message, isError = false) => {
     notice = node("p", `data-state${isError ? " error" : ""}`, message);
@@ -894,7 +1290,10 @@ function renderDashboard() {
   const mainGrid = node("main", "dashboard-grid");
   mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
   const primary = node("div");
-  primary.append(renderStats(tickerData), renderPricePanel(tickerData, onSelectPeriod));
+  primary.append(
+    renderStats(tickerData),
+    renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, (next) => updateChartSettings(session.selected, next)),
+  );
   const contracts = renderContracts(tickerData);
   if (contracts) primary.append(contracts);
   primary.append(renderFundamentals());
@@ -943,6 +1342,7 @@ async function refreshData(showLoading) {
   }
   session.dashboardError = outcome.dashboardError;
   renderDashboard();
+  await loadChartData(session.selected, true);
 }
 
 async function start() {

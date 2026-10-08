@@ -387,12 +387,19 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | `daily-prices` | Weekdays 16:45 ET | Alpaca daily bars for base, user and index ETF proxy tickers (raw, split- and fully adjusted closes for the last 7 days); NYSE weekends/holidays are skipped. |
 | `q1-fundamentals` | Mondays 08:30 ET | Weekly safety refresh. |
 | `short-interest` | Weekdays 18:30 ET | FINRA only publishes on settlement cadence. |
-| `options-daily` | Weekdays 16:50 ET | Disabled by default through `enable_options_daily`; validate the feed before enabling. |
+| `options-daily` | Weekdays 16:50 ET | Enabled by default through `enable_options_daily`; uses the existing Alpaca indicative credentials. IV30 stays unavailable if the feed omits implied volatility. |
 | `backfill` | Every 15 minutes and on ticker-added events | Resumes only persisted incomplete work. |
 | `price-reconcile` | Weekdays 19:15 ET | Checks Yahoo for new splits/dividends and rewrites a ticker's adjusted history when needed (job ID `RECONCILE`). |
 | `trend-metrics` | Job events from D4, M1 or RECONCILE | M1's collector is not yet implemented. |
 | `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill and reconcile events | Publishes `serving/dashboard.json`. |
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
+
+FINRA short-interest percentages use SEC `EntityPublicFloat` when the public-float
+market-value fact and its measurement-date close are available. The estimated share
+count is that USD value divided by the split-adjusted daily close; it is not a directly
+reported float-share count. The estimate applies only to settlement dates on or after
+the filing date. Before that, or when the matching price is unavailable, the chart uses
+SEC shares outstanding and labels it as a proxy.
 
 Use a one-off Lambda invocation for manual refreshes, for example:
 

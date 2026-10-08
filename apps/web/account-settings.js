@@ -46,7 +46,18 @@ function button(label, className, onClick, key) {
 }
 
 function copyPrefs(prefs) {
-  return { ...prefs, tickers: [...prefs.tickers], pinned: [...(prefs.pinned || [])], display: { ...prefs.display } };
+  return {
+    ...prefs,
+    tickers: [...prefs.tickers],
+    pinned: [...(prefs.pinned || [])],
+    display: { ...prefs.display },
+    chart_settings: Object.fromEntries(
+      Object.entries(prefs.chart_settings || {}).map(([ticker, settings]) => [
+        ticker,
+        { overlays: [...(settings.overlays || [])], lanes: [...(settings.lanes || [])] },
+      ]),
+    ),
+  };
 }
 
 function sparkline(history) {
@@ -135,7 +146,13 @@ export function createAccountSettings(ctx) {
     const added = addedSinceSave;
     addedSinceSave = [];
     try {
-      const saved = await ctx.putPrefs({ tickers: sent.tickers, pinned: sent.pinned, display: sent.display, version: confirmed.version });
+      const saved = await ctx.putPrefs({
+        tickers: sent.tickers,
+        pinned: sent.pinned,
+        display: sent.display,
+        chart_settings: sent.chart_settings,
+        version: confirmed.version,
+      });
       confirmed = copyPrefs(saved);
       // Keep edits made while this request was in flight; they go out next with the new version.
       session.prefs = dirty ? { ...session.prefs, version: saved.version } : copyPrefs(saved);

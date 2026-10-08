@@ -1,8 +1,7 @@
 """options_daily job (DS-92): put/call volume ratio and IV30 per ticker after the close.
 
-Runs with D4. Disabled (OPTIONS_ENABLED=false) until a first manual run confirms the
-free Alpaca account returns options snapshots on the indicative feed, and whether those
-snapshots carry implied volatility. Writes curated/options_daily/date=<d>/options_daily.parquet.
+Runs after D4 on the free Alpaca indicative feed. IV30 remains null when snapshots omit
+implied volatility. Writes curated/options_daily/date=<d>/options_daily.parquet.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
 
     @job_handler("OPTIONS")
     def run(event, context):
-        if os.getenv("OPTIONS_ENABLED", "false") != "true" and not event.get("force"):
+        if os.getenv("OPTIONS_ENABLED", "true") != "true" and not event.get("force"):
             return {"skipped": "OPTIONS_ENABLED is false"}
         today = datetime.now(ZoneInfo(ET_TZ)).date()
         headers = {"APCA-API-KEY-ID": api_key("alpaca-key-id"), "APCA-API-SECRET-KEY": api_key("alpaca-secret-key")}

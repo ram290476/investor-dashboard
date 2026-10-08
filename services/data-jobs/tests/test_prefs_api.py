@@ -54,6 +54,26 @@ def test_authenticated_dashboard_and_status_routes(api, monkeypatch):
     status = json.loads(mod.handler(status_event, None)["body"])
     assert status["jobs"][0]["status"] == "ok"
 
+def test_chart_route_only_reads_a_ticker_in_the_callers_watchlist(api, monkeypatch):
+    mod, _ = api
+    mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
+    reads = []
+    chart_data = {"ticker": "TSLA", "macro_pressure": [{"date": "2026-10-01", "value": 0.2}]}
+    monkeypatch.setattr(mod, "_read_serving_json", lambda key: reads.append(key) or chart_data)
+
+    event = _event("GET")
+    event["rawPath"] = "/chart/TSLA"
+    response = mod.handler(event, None)
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"]) == chart_data
+    assert reads == ["serving/chart_data/TSLA.json"]
+
+    other_ticker = _event("GET")
+    other_ticker["rawPath"] = "/chart/SPCX"
+    denied = mod.handler(other_ticker, None)
+    assert denied["statusCode"] == 403
+    assert reads == ["serving/chart_data/TSLA.json"]
+
 
 def test_dashboard_route_reports_not_ready_instead_of_fake_data(api, monkeypatch):
     mod, _ = api
@@ -119,7 +139,6 @@ def test_chart_period_allow_list_and_unknown_fallback(api):
     )
     assert saved["display"]["chart_period"] == "5Y"
     assert saved["display"]["updown_palette"] == "green-red"
-
     coerced = json.loads(
         mod.handler(
             _event(
@@ -134,8 +153,79 @@ def test_chart_period_allow_list_and_unknown_fallback(api):
             None,
         )["body"]
     )
-    assert coerced["display"]["chart_period"] == "1M"
+    assert coerced["display"]["chart_period"] == "YTD"
     assert coerced["display"]["time_zone"] == "America/New_York"
+
+    unknown = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"chart_period": "not-a-period"},
+                    "version": coerced["version"],
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert unknown["display"]["chart_period"] == "1M"
+
+
+def test_chart_settings_are_saved_per_watchlist_ticker_and_survive_legacy_put(api):
+    mod, _ = api
+    saved = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA", "SPCX"],
+                    "pinned": [],
+                    "chart_settings": {
+                        "TSLA": {"overlays": ["SPY", "MA20"], "lanes": ["SI", "PRESS"]},
+                        "REMOVED": {"overlays": ["DGS10"], "lanes": ["OPT"]},
+                    },
+                    "version": 0,
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert saved["chart_settings"] == {"TSLA": {"overlays": ["SPY", "MA20"], "lanes": ["SI", "PRESS"]}}
+
+    legacy = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={"tickers": ["TSLA", "SPCX"], "pinned": [], "version": saved["version"]},
+            ),
+            None,
+        )["body"]
+    )
+    assert legacy["chart_settings"] == saved["chart_settings"]
+
+
+@pytest.mark.parametrize(
+    "settings,msg",
+    [
+        ({"TSLA": {"overlays": ["UNKNOWN"], "lanes": ["VOL"]}}, "unsupported overlay"),
+        ({"TSLA": {"overlays": [{}], "lanes": ["VOL"]}}, "unsupported overlay"),
+        ({"TSLA": {"overlays": [], "lanes": ["UNKNOWN"]}}, "unsupported lane"),
+        ({"TSLA": {"overlays": ["SPY"] * 6, "lanes": ["VOL"]}}, "at most 5"),
+    ],
+)
+def test_chart_settings_reject_unknown_or_excess_values(api, settings, msg):
+    mod, _ = api
+    response = mod.handler(
+        _event(
+            "PUT",
+            body={"tickers": ["TSLA"], "pinned": [], "chart_settings": settings, "version": 0},
+        ),
+        None,
+    )
+    assert response["statusCode"] == 400
+    assert msg in json.loads(response["body"])["error"]
 
 
 def test_unauthenticated(api):

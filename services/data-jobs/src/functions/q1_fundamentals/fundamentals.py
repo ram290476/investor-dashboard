@@ -38,6 +38,7 @@ SCHEMA = {
     "metric": pl.Utf8,
     "fiscal_quarter": pl.Utf8,
     "release_date": pl.Date,
+    "measurement_date": pl.Date,
     "value": pl.Float64,
     "unit": pl.Utf8,
     "source_id": pl.Utf8,
@@ -101,6 +102,57 @@ def xbrl_rows(ticker: str, companyfacts: dict, source_id: str = "DS-11") -> list
                     unit="ratio",
                 )
             )
+    dei_facts = (
+        companyfacts.get("facts", {})
+        .get("dei", {})
+        .get("EntityCommonStockSharesOutstanding", {})
+        .get("units", {})
+        .get("shares", [])
+    )
+    shares_by_quarter = {}
+    for fact in sorted(dei_facts, key=lambda item: item.get("filed", "")):
+        if fact.get("form") not in {"10-Q", "10-K", "10-Q/A", "10-K/A"} or not fact.get("end"):
+            continue
+        quarter = _quarter(date.fromisoformat(fact["end"]))
+        shares_by_quarter.setdefault(quarter, (float(fact["val"]), date.fromisoformat(fact["filed"])))
+    rows.extend(
+        dict(
+            ticker=ticker,
+            metric="shares_outstanding",
+            fiscal_quarter=quarter,
+            release_date=filed,
+            value=value,
+            unit="shares",
+            source_id=source_id,
+        )
+        for quarter, (value, filed) in shares_by_quarter.items()
+    )
+    public_float_facts = (
+        companyfacts.get("facts", {})
+        .get("dei", {})
+        .get("EntityPublicFloat", {})
+        .get("units", {})
+        .get("USD", [])
+    )
+    public_float_by_date = {}
+    for fact in sorted(public_float_facts, key=lambda item: item.get("filed", "")):
+        if fact.get("form") not in {"10-Q", "10-K", "10-Q/A", "10-K/A"} or not fact.get("end"):
+            continue
+        measured = date.fromisoformat(fact["end"])
+        public_float_by_date.setdefault(measured, (float(fact["val"]), date.fromisoformat(fact["filed"])))
+    rows.extend(
+        dict(
+            ticker=ticker,
+            metric="public_float_usd",
+            fiscal_quarter=_quarter(measured),
+            release_date=filed,
+            measurement_date=measured,
+            value=value,
+            unit="USD",
+            source_id=source_id,
+        )
+        for measured, (value, filed) in public_float_by_date.items()
+    )
     for r in rows:
         r["source_id"] = source_id
     return rows

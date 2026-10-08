@@ -62,14 +62,15 @@ jobs:
       - name: Check browser JavaScript syntax
         run: |
           node --check apps/web/app.js
+          node --check apps/web/chart-overlays.js
           node --check apps/web/chart-period.js
           node --check apps/web/api-response.js
           node --check apps/web/trend-state.js
           node --check apps/web/settings-model.js
           node --check apps/web/account-settings.js
 
-      - name: Test chart period, trend state, API response handling and account settings
-        run: node --test apps/web/chart-period.test.js apps/web/trend-state.test.js apps/web/api-response.test.js apps/web/settings-model.test.js
+      - name: Test chart periods, overlays, trend state, API responses and preferences
+        run: node --test apps/web/chart-period.test.js apps/web/chart-overlays.test.js apps/web/trend-state.test.js apps/web/api-response.test.js apps/web/settings-model.test.js
 
       - name: Format and validate Terraform
         working-directory: infra/terraform
