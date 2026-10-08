@@ -410,6 +410,7 @@ def test_handler_writes_release_dated_yoy_and_release_links(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     monkeypatch.delenv("SCHEDULER_ROLE_ARN", raising=False)
     monkeypatch.setattr(api_keys, "api_key", lambda name: secret)
+    monkeypatch.setattr("universe.user_ticker_union", lambda *args, **kwargs: [])
     emitted = []
     monkeypatch.setattr(
         observability,
@@ -518,3 +519,68 @@ def test_handler_writes_release_dated_yoy_and_release_links(monkeypatch):
             assert secret not in json.dumps(lake.read_json(key))
 
     assert emitted == ["M1"]
+
+
+def test_backfill_refresh_recognizes_a_finished_backfill_only():
+    assert release_day.backfill_refresh({"detail": {"job": "BACKFILL", "outcome": "success"}})
+    assert release_day.backfill_refresh({"detail": '{"job": "BACKFILL", "outcome": "success"}'})
+    assert not release_day.backfill_refresh({"detail": {"job": "BACKFILL", "outcome": "failure"}})
+    assert not release_day.backfill_refresh({"source": "schedule"})
+    assert not release_day.backfill_refresh(None)
+
+
+def test_backfill_event_rebuilds_links_for_a_new_ticker_without_fetching(monkeypatch):
+    import boto3
+    import polars as pl
+    from moto import mock_aws
+
+    import lake
+    import observability
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setattr("universe.user_ticker_union", lambda *args, **kwargs: ["NVDA"])
+    monkeypatch.setattr(
+        observability,
+        "emit_job_finished",
+        lambda job_id, run_id, outcome, detail=None: None,
+    )
+
+    class Context:
+        function_name = "release-day"
+        memory_limit_in_mb = 512
+        invoked_function_arn = "arn:aws:lambda:us-east-1:1:function:release-day"
+        aws_request_id = "req-backfill"
+
+    with mock_aws():
+        boto3.client("s3").create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", None)
+        monkeypatch.setattr(observability, "_events", None)
+        releases = pl.DataFrame(
+            {
+                "series_id": ["CUSR0000SA0", "CUSR0000SA0"],
+                "period": ["2024-01", "2024-02"],
+                "release_ts": ["2024-02-13T13:30:00+00:00", "2024-03-12T12:30:00+00:00"],
+                "yoy": [2.0, 2.4],
+                "actual": [100.0, 101.0],
+                "consensus": [None, None],
+            }
+        )
+        lake.write_parquet(releases, "curated/releases/series=CUSR0000SA0/year=2024/releases.parquet")
+        prices = pl.DataFrame(
+            {
+                "ticker": ["NVDA", "NVDA"],
+                "date": [date(2024, 3, 11), date(2024, 3, 12)],
+                "close": [100.0, 101.0],
+            }
+        )
+        lake.write_parquet(prices, "curated/prices_daily/ticker=NVDA/year=2024/prices.parquet")
+        result = release_day.handler({"detail": {"job": "BACKFILL", "outcome": "success"}}, Context())
+        assert result["links_only"] is True
+        assert result["tickers"] == 1
+        table = lake.read_parquet_prefix("curated/release_links/")
+        summaries = table.filter(pl.col("row_kind") == "summary")
+        assert set(summaries["ticker"].to_list()) == {"NVDA"}
+        assert summaries["correlation_surprise"].null_count() == summaries.height
+        assert "TSLA" not in summaries["ticker"].to_list()

@@ -4,8 +4,9 @@ The job has no cron. It writes one-off EventBridge Scheduler at() times in UTC f
 America/New_York release instants, then polls until a new period shows up.
 Year-over-year history is written to curated/macro_daily/source=releases/ before the
 handler returns, dated on the release date, so the Job Finished event can start
-trend-metrics without a look-ahead. Release trends and TSLA/SPCX window links go to
-curated/release_links/.
+trend-metrics without a look-ahead. Release trends and window links for every
+watchlist ticker go to curated/release_links/. A finished backfill rebuilds those
+links without fetching the agencies again.
 """
 
 from __future__ import annotations
@@ -594,6 +595,43 @@ def macro_rows(releases: list[dict]) -> list[dict]:
     return [{field: row[field] for field in row if field != "period"} for row in chosen.values()]
 
 
+def backfill_refresh(event) -> bool:
+    """True when a successful backfill finished and the new prices should be linked."""
+    if not isinstance(event, dict):
+        return False
+    detail = event.get("detail") or {}
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except ValueError:
+            return False
+    if not isinstance(detail, dict):
+        return False
+    return detail.get("job") == "BACKFILL" and detail.get("outcome", "success") == "success"
+
+
+def watchlist_equities() -> list[str]:
+    """Base tickers plus the user-prefs union, the same list the other collectors use."""
+    from universe import collection_universe, user_ticker_union
+
+    return collection_universe(user_ticker_union())["equities"]
+
+
+def publish_release_links(releases: list[dict]) -> int:
+    """Rewrite the links table for every watchlist ticker that already has closes."""
+    from lake import read_prices, write_parquet
+    from release_links import build_release_links
+
+    links = build_release_links(releases, read_prices(), YOY_SERIES, watchlist_equities())
+    if links.is_empty():
+        return 0
+    write_parquet(links, RELEASE_LINKS_KEY)
+    linked = links.filter(pl.col("row_kind") == "summary")
+    if linked.is_empty() or "ticker" not in linked.columns:
+        return 0
+    return linked["ticker"].drop_nulls().n_unique()
+
+
 def publish_macro(rows: list[dict], ingested_at: str) -> list[str]:
     """Upsert each series into its own curated folder. A later ingest overwrites the same release date."""
     from lake import upsert_ranked
@@ -625,12 +663,16 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from api_keys import api_key
     from collectors.fed_sources import parse_cleveland_html
     from http_client import get_client, request_with_retry
-    from lake import read_json, read_parquet_prefix, read_prices, write_json, write_parquet
+    from lake import read_json, read_parquet_prefix, write_json, write_parquet
     from observability import job_handler, logger, source_run
-    from release_links import build_release_links
 
     @job_handler(JOB_ID)
     def run(event, context):
+        if backfill_refresh(event):
+            frame = read_parquet_prefix("curated/releases/")
+            stored = frame.to_dicts() if not frame.is_empty() else []
+            return {"status": "success", "links_only": True, "tickers": publish_release_links(stored)}
+
         now = datetime.now(UTC)
         release_ts = now.isoformat(timespec="seconds")
         end_year = now.year
@@ -755,9 +797,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         macro = macro_rows(merged)
         if macro:
             publish_macro(macro, now.isoformat(timespec="seconds"))
-        links = build_release_links(merged, read_prices(), YOY_SERIES)
-        if not links.is_empty():
-            write_parquet(links, RELEASE_LINKS_KEY)
+        publish_release_links(merged)
         upcoming = upcoming_calendar(calendar_rows(ics_dates, fred_rows), today)
         stored = read_json("curated/release_calendar/upcoming.json")
         if not upcoming and isinstance(stored, list):
