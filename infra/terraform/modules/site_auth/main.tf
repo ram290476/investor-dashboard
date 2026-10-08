@@ -10,11 +10,18 @@ variable "logout_urls" {
   type = list(string)
 }
 
+variable "branding_version" {
+  type    = number
+  default = 1
+}
+
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
   region = data.aws_region.current.region
+  brand  = jsondecode(file("${path.module}/../../../../docs/design-roadmap/themes/themes.json")).themes[0].tokens
+  rgba   = { for key, value in local.brand : key => "${lower(trimprefix(value, "#"))}ff" }
 }
 
 # ---------------------------------------------------------------------------
@@ -89,8 +96,94 @@ resource "aws_cognito_user_pool_client" "web" {
 }
 
 resource "aws_cognito_user_pool_domain" "this" {
-  domain       = "${var.name}-${data.aws_caller_identity.current.account_id}"
+  domain                = "${var.name}-${data.aws_caller_identity.current.account_id}"
+  user_pool_id          = aws_cognito_user_pool.this.id
+  managed_login_version = var.branding_version
+}
+
+resource "aws_cognito_user_pool_ui_customization" "web" {
+  count        = var.branding_version == 1 ? 1 : 0
+  client_id    = aws_cognito_user_pool_client.web.id
   user_pool_id = aws_cognito_user_pool.this.id
+  css = templatefile("${path.module}/classic-login.css.tftpl", {
+    page    = local.brand.bg
+    surface = local.brand.surface
+    raised  = local.brand["surface-2"]
+    text    = local.brand.text
+    muted   = local.brand["text-muted"]
+    accent  = local.brand["accent-text"]
+    border  = "#728094"
+    error   = "#f07a7a"
+  })
+  depends_on = [aws_cognito_user_pool_domain.this]
+}
+
+resource "aws_cognito_managed_login_branding" "web" {
+  count        = var.branding_version == 2 ? 1 : 0
+  client_id    = aws_cognito_user_pool_client.web.id
+  user_pool_id = aws_cognito_user_pool.this.id
+  settings = jsonencode({
+    categories = {
+      global = {
+        colorSchemeMode = "DARK"
+        spacingDensity  = "REGULAR"
+      }
+    }
+    componentClasses = {
+      buttons    = { borderRadius = 9 }
+      divider    = { darkMode = { borderColor = local.rgba.border } }
+      focusState = { darkMode = { borderColor = local.rgba["accent-text"] } }
+      input = {
+        borderRadius = 8
+        darkMode = {
+          defaults         = { backgroundColor = local.rgba["surface-2"], borderColor = "728094ff" }
+          placeholderColor = local.rgba["text-muted"]
+        }
+      }
+      inputLabel       = { darkMode = { textColor = local.rgba.text } }
+      inputDescription = { darkMode = { textColor = local.rgba["text-muted"] } }
+      link             = { darkMode = { defaults = { textColor = local.rgba["accent-text"] } } }
+    }
+    components = {
+      pageBackground = {
+        darkMode = { color = local.rgba.bg }
+        image    = { enabled = false }
+      }
+      form = {
+        borderRadius    = 16
+        backgroundImage = { enabled = false }
+        darkMode        = { backgroundColor = local.rgba.surface, borderColor = local.rgba.border }
+      }
+      pageText = {
+        darkMode = {
+          bodyColor        = local.rgba.text
+          descriptionColor = local.rgba["text-muted"]
+          headingColor     = local.rgba.text
+        }
+      }
+      primaryButton = {
+        darkMode = {
+          defaults = { backgroundColor = "1b2637ff", textColor = local.rgba.text }
+          active   = { backgroundColor = "1b2637ff", textColor = local.rgba.text }
+          hover    = { backgroundColor = "202630ff", textColor = local.rgba.text }
+        }
+      }
+      secondaryButton = {
+        darkMode = {
+          defaults = {
+            backgroundColor = local.rgba.surface
+            borderColor     = local.rgba["accent-text"]
+            textColor       = local.rgba["accent-text"]
+          }
+        }
+      }
+      alert = {
+        borderRadius = 8
+        darkMode     = { error = { backgroundColor = local.rgba.surface, borderColor = "f07a7aff" } }
+      }
+    }
+  })
+  depends_on = [aws_cognito_user_pool_domain.this]
 }
 
 output "user_pool_id" {

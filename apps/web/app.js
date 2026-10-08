@@ -10,6 +10,7 @@ import {
 import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle } from "./trend-state.js";
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
+import { applyTheme, overlayColor } from "./theme.js";
 import { emailFromIdToken, fallbackSelection, parseSettingsHash, stripOrder } from "./settings-model.js";
 import {
   CHART_LANES,
@@ -408,7 +409,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     const label = document.createElementNS(svgNS, "text");
     label.setAttribute("x", "4");
     label.setAttribute("y", String(y + 4));
-    label.setAttribute("fill", "#8997a9");
+    label.setAttribute("fill", "var(--muted)");
     label.setAttribute("font-size", "11");
     label.setAttribute("font-family", "IBM Plex Mono, monospace");
     label.textContent = compareMarkets ? `${(max - ((max - min) / 3) * index).toFixed(1)}%` : formatPrice(max - ((max - min) / 3) * index);
@@ -429,7 +430,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     const path = document.createElementNS(svgNS, "path");
     path.setAttribute("class", "chart-overlay-path");
     path.setAttribute("d", seriesPath(scaled, xAt, (value) => definition.kind === "macro" || definition.kind === "fundamental" ? yNormalized(value) : yValue(value)));
-    path.setAttribute("stroke", definition.color);
+    path.setAttribute("stroke", overlayColor(definition.color, session.prefs.display.theme));
     path.setAttribute("stroke-dasharray", definition.kind === "average" ? "none" : "5 4");
     path.dataset.overlay = id;
     svg.append(path);
@@ -443,8 +444,8 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
       marker.setAttribute("cx", String(xAt(latestIndex)));
       marker.setAttribute("cy", String(yValue(latestValue)));
       marker.setAttribute("r", "4");
-      marker.setAttribute("fill", "#d8e9ff");
-      marker.setAttribute("stroke", "#7db4ff");
+      marker.setAttribute("fill", "var(--surface)");
+      marker.setAttribute("stroke", "var(--price)");
       marker.setAttribute("stroke-width", "2");
       svg.append(marker);
     }
@@ -456,7 +457,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     const label = document.createElementNS(svgNS, "text");
     label.setAttribute("x", String(x));
     label.setAttribute("y", "202");
-    label.setAttribute("fill", "#8997a9");
+    label.setAttribute("fill", "var(--muted)");
     label.setAttribute("font-size", "10");
     label.setAttribute("font-family", "IBM Plex Mono, monospace");
     label.setAttribute("text-anchor", anchor);
@@ -643,7 +644,7 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
     button.title = selected ? `Remove ${overlay.label} from the chart` : `Add ${overlay.label} to the chart`;
     button.dataset.overlay = overlay.id;
     button.append(node("span", "overlay-swatch", ""));
-    button.querySelector(".overlay-swatch").style.setProperty("--overlay-color", overlay.color);
+    button.querySelector(".overlay-swatch").style.setProperty("--overlay-color", overlayColor(overlay.color, session.prefs.display.theme));
     button.append(document.createTextNode(overlay.label));
     button.addEventListener("click", () => {
       const next = selected ? settings.overlays.filter((id) => id !== overlay.id) : [...settings.overlays.slice(-4), overlay.id];
@@ -902,7 +903,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
         if (!definition || !isNumericValue(latestValue)) return;
         const label = node("span", "chart-legend-item");
         const swatch = node("span", "overlay-swatch");
-        swatch.style.setProperty("--overlay-color", definition.color);
+        swatch.style.setProperty("--overlay-color", overlayColor(definition.color, session.prefs.display.theme));
         label.append(swatch);
         const shown = definition.kind === "market"
           ? formatPercent(Number(latestValue) / Number(series.find(isNumericValue)) - 1, 1)
@@ -1164,7 +1165,7 @@ function renderDashboard() {
   if (!session.prefs) return;
   session.selected = fallbackSelection(session.prefs, session.selected);
   root.replaceChildren();
-  root.dataset.palette = session.prefs.display.updown_palette;
+  applyTheme(session.prefs.display);
 
   const header = node("header", "app-header");
   const brand = node("div", "brand-line");
@@ -1361,4 +1362,5 @@ const settings = createAccountSettings({
   browserTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
 });
 
+applyTheme();
 start();

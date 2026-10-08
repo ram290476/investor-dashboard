@@ -111,6 +111,50 @@ def test_stale_version_is_rejected(api):
     assert mod.handler(_event("PUT", body=body), None)["statusCode"] == 409
 
 
+@pytest.mark.parametrize("theme", [
+    "industrial-dark", "terminal-amber", "charting-navy",
+    "clean-light", "colorblind-hc", "midnight-slate",
+])
+def test_themes_round_trip_with_independent_palette_and_chart_settings(api, theme):
+    mod, _ = api
+    assert json.loads(mod.handler(_event("GET"), None)["body"])["display"]["theme"] == "industrial-dark"
+    body = {
+        "tickers": ["TSLA"], "pinned": ["TSLA"], "version": 0,
+        "display": {"theme": theme, "updown_palette": "theme", "chart_period": "1Y"},
+        "chart_settings": {"TSLA": {"overlays": ["MA20"], "lanes": ["VOL"]}},
+    }
+    response = mod.handler(_event("PUT", body=body), None)
+    assert response["statusCode"] == 200
+    saved = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert saved["display"]["theme"] == theme
+    assert saved["display"]["updown_palette"] == "theme"
+    assert saved["display"]["chart_period"] == "1Y"
+    assert saved["chart_settings"] == body["chart_settings"]
+
+
+@pytest.mark.parametrize("theme", ["invalid", "", None, [], {}])
+def test_invalid_theme_returns_validation_error_without_writing(api, theme):
+    mod, _ = api
+    response = mod.handler(_event("PUT", body={"tickers": ["TSLA"], "display": {"theme": theme}}), None)
+    assert response["statusCode"] == 400
+    assert "theme must be one of" in response["body"]
+    assert json.loads(mod.handler(_event("GET"), None)["body"])["version"] == 0
+
+
+def test_legacy_stored_preferences_get_the_default_theme_without_losing_settings(api):
+    mod, _ = api
+    boto3.resource("dynamodb").Table("invdash-user-prefs").put_item(Item={
+        "user_sub": "user-a", "tickers": ["TSLA"], "pinned": [],
+        "display": {"updown_palette": "blue-orange", "chart_period": "1Y"},
+        "version": 4,
+    })
+    got = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert got["display"] == {
+        "theme": "industrial-dark", "updown_palette": "blue-orange", "chart_period": "1Y",
+    }
+    assert got["version"] == 4
+
+
 def test_users_do_not_see_each_other(api):
     mod, _ = api
     mod.handler(_event("PUT", "user-a", {"tickers": ["NVDA"], "pinned": [], "version": 0}), None)

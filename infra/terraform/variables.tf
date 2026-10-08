@@ -15,6 +15,23 @@ variable "region" {
   default     = "us-west-1"
 }
 
+variable "cognito_login_branding_version" {
+  description = "Cognito branding version: 1 keeps classic login with matching CSS; 2 enables Managed Login after the preflight/import steps in docs/operations.md."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([1, 2], var.cognito_login_branding_version)
+    error_message = "cognito_login_branding_version must be 1 or 2."
+  }
+}
+
+variable "cognito_allow_branding_migration" {
+  description = "Allow the deployment preflight to change an existing Cognito domain's branding version only after reviewing the migration and rollback procedure."
+  type        = bool
+  default     = false
+}
+
 variable "dr_region" {
   description = "Region for the replicated data lake copy (contingency planning). Must differ from region."
   type        = string
