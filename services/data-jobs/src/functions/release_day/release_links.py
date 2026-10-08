@@ -1,6 +1,9 @@
-"""Per-series release trend, and how TSLA and SPCX moved around past releases.
+"""Per-series release trend, and how each watchlist ticker moved around past releases.
 
 Stored as curated/release_links/release_links.parquet for the dashboard to serve later.
+The caller passes the watchlist (base tickers plus user prefs). A ticker is included
+when it has price history. Correlations and average moves stay empty until 12
+releases fall inside that history.
 
 Surprise is actual minus consensus, expressed in year-over-year percentage points
 when the year-ago index is known. Otherwise it is the change in the year-over-year
@@ -19,7 +22,8 @@ from datetime import date, datetime
 
 import polars as pl
 
-TICKERS = ("TSLA", "SPCX")
+# Correlations and average moves need a year of release overlap with the ticker's prices.
+MIN_RELEASES = 12
 # How many sessions before T the window starts and ends. End 1 is the session before T.
 PRIOR_WINDOWS = {"week_before": (6, 1), "days_before": (3, 1)}
 COLUMNS = [
@@ -200,10 +204,19 @@ def _blank() -> dict:
     return dict.fromkeys(COLUMNS)
 
 
-def _summary(rows: list[dict], series_id: str, ticker: str) -> list[dict]:
+def _covered(points: list[dict], ordered: list[date]) -> int:
+    """Releases whose date sits inside this ticker's stored price history."""
+    if not ordered:
+        return 0
+    first, last = ordered[0], ordered[-1]
+    return sum(1 for point in points if first <= date.fromisoformat(point["release_date"]) <= last)
+
+
+def _summary(rows: list[dict], series_id: str, ticker: str, history: int) -> list[dict]:
     latest = rows[-1] if rows else None
     direction = None if latest is None else latest["trend_direction"]
     count = None if latest is None else latest["consecutive_releases"]
+    ready = history >= MIN_RELEASES
     summaries = []
     for window, column in (
         ("week_before", "ret_week_before"),
@@ -238,23 +251,40 @@ def _summary(rows: list[dict], series_id: str, ticker: str) -> list[dict]:
                 "consecutive_releases": count,
                 "window": window,
                 "n_releases": len(paired_surprise),
-                "correlation_surprise": pearson(
-                    [pair[0] for pair in paired_surprise], [pair[1] for pair in paired_surprise]
+                "correlation_surprise": (
+                    pearson([pair[0] for pair in paired_surprise], [pair[1] for pair in paired_surprise])
+                    if ready
+                    else None
                 ),
-                "correlation_trend": pearson([pair[0] for pair in paired_trend], [pair[1] for pair in paired_trend]),
-                "avg_move_positive_surprise": None if not positive else sum(positive) / len(positive),
-                "avg_move_negative_surprise": None if not negative else sum(negative) / len(negative),
-                "n_positive_surprise": len(positive),
-                "n_negative_surprise": len(negative),
+                "correlation_trend": (
+                    pearson([pair[0] for pair in paired_trend], [pair[1] for pair in paired_trend]) if ready else None
+                ),
+                "avg_move_positive_surprise": (
+                    None if not ready or not positive else sum(positive) / len(positive)
+                ),
+                "avg_move_negative_surprise": (
+                    None if not ready or not negative else sum(negative) / len(negative)
+                ),
+                "n_positive_surprise": len(positive) if ready else None,
+                "n_negative_surprise": len(negative) if ready else None,
             }
         )
         summaries.append(item)
     return summaries
 
 
-def build_release_links(releases: list[dict], prices: pl.DataFrame, id_map: dict[str, str]) -> pl.DataFrame:
-    """Release rows, one trend row per series, and one summary per series, ticker, and window."""
-    books = {ticker: _closes(prices, ticker) for ticker in TICKERS}
+def build_release_links(
+    releases: list[dict], prices: pl.DataFrame, id_map: dict[str, str], tickers: list[str]
+) -> pl.DataFrame:
+    """Release rows, one trend row per series, and one summary per series, ticker, and window.
+
+    `tickers` is the watchlist. Names with no stored closes are skipped.
+    """
+    books = {}
+    for ticker in dict.fromkeys(tickers):
+        ordered, closes = _closes(prices, ticker)
+        if ordered:
+            books[ticker] = (ordered, closes)
     rows: list[dict] = []
     for source_id, series_id in id_map.items():
         points = _points(releases, source_id, series_id)
@@ -287,8 +317,8 @@ def build_release_links(releases: list[dict], prices: pl.DataFrame, id_map: dict
                 item["ret_release_day"] = rets["release_day"]
                 rows.append(item)
                 by_ticker.setdefault(ticker, []).append(item)
-        for ticker in TICKERS:
-            rows.extend(_summary(by_ticker.get(ticker, []), series_id, ticker))
+        for ticker, (ordered, _closes_for_ticker) in books.items():
+            rows.extend(_summary(by_ticker.get(ticker, []), series_id, ticker, _covered(points, ordered)))
     return _frame(rows)
 
 

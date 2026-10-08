@@ -181,9 +181,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                         "rows_rejected": max(0, received - len(rows)),
                         "rows_stored": len(rows),
                     }
-                    metrics.add_metric(
-                        name="BackfillDaysRequested", unit=MetricUnit.Count, value=(end - start).days
-                    )
+                    metrics.add_metric(name="BackfillDaysRequested", unit=MetricUnit.Count, value=(end - start).days)
                     metrics.add_metric(name="BackfillRowsReceived", unit=MetricUnit.Count, value=received)
                     metrics.add_metric(name="BackfillRowsProcessed", unit=MetricUnit.Count, value=len(rows))
                     metrics.add_metric(
@@ -242,6 +240,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
             "status": state["status"],
             "batches": batches_done,
             "rows_stored": stored_rows,
+            "rows_written": stored_rows,
             "pending_tickers": pending_after,
             "no_data_tickers": no_data_tickers,
             "failed_tickers": failed_tickers,

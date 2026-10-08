@@ -2,7 +2,9 @@
 
 serving/status.json, rebuilt on every 'Job Finished' event:
     {"generated_at": ISO, "jobs": [{"job", "name", "status", "last_run", "last_outcome",
-                                     "failed_sources", "next_run"}]}
+                                     "failed_sources", "next_run", "last_links_run"}]}
+A links-only M1 run (detail.mode == "links") sets last_links_run and leaves last_run.
+Tickers past the cap are stored as over_cap "over the ticker cap".
 status: "ok" | "partial" (some sources failed) | "failed" | "never_run".
 next_run: next scheduled start (ISO, UTC) from the job's schedule, skipping weekends
 and NYSE / US federal holidays per the job's calendar; null for event-driven jobs.
@@ -71,17 +73,39 @@ def apply_event(feed: dict | None, detail: dict, now: datetime) -> dict:
     by_job = {j["job"]: j for j in feed.get("jobs", [])}
     job = detail.get("job")
     if job in JOBS:
-        failed = int(detail.get("failed_sources") or 0)
-        outcome = detail.get("outcome", "success")
-        status = "failed" if outcome != "success" else ("partial" if failed else "ok")
-        by_job[job] = {
-            **by_job.get(job, {}),
-            "job": job,
-            "last_run": now.isoformat(timespec="seconds"),
-            "last_outcome": outcome,
-            "status": status,
-            "failed_sources": failed,
-        }
+        previous = by_job.get(job, {})
+        if detail.get("mode") == "links":
+            # A links rebuild is not a release-day collection, so last_run stays put.
+            entry = {
+                "status": "never_run",
+                "last_run": None,
+                "last_outcome": None,
+                "failed_sources": 0,
+                **previous,
+                "job": job,
+                "last_links_run": now.isoformat(timespec="seconds"),
+            }
+        else:
+            failed = int(detail.get("failed_sources") or 0)
+            outcome = detail.get("outcome", "success")
+            status = "failed" if outcome != "success" else ("partial" if failed else "ok")
+            entry = {
+                **previous,
+                "job": job,
+                "last_run": now.isoformat(timespec="seconds"),
+                "last_outcome": outcome,
+                "status": status,
+                "failed_sources": failed,
+            }
+        if "dropped" in detail:
+            dropped = list(detail.get("dropped") or [])
+            if dropped:
+                entry["dropped"] = dropped
+                entry["over_cap"] = "over the ticker cap"
+            else:
+                entry.pop("dropped", None)
+                entry.pop("over_cap", None)
+        by_job[job] = entry
     jobs = []
     for j, (name, _, _) in JOBS.items():
         entry = by_job.get(j, {"job": j, "status": "never_run", "last_run": None, "last_outcome": None})

@@ -32,6 +32,19 @@ def test_cap_keeps_base_and_reports_dropped():
     assert "SPY" not in u["equities"] and u["etfs"][0] == "SPY" and len(u["dropped"]) == 5
 
 
+def test_watchlist_universe_keeps_user_etfs_and_reports_the_cap():
+    users = ["NVDA", "SPY", "TSLA", "nvda"] + [f"T{i:02d}" for i in range(30)]
+    watch = universe.watchlist_universe(users, cap=25)
+    assert watch["tickers"][:2] == ["TSLA", "SPCX"]
+    assert watch["tickers"].count("TSLA") == 1
+    assert "NVDA" in watch["tickers"] and "SPY" in watch["tickers"]
+    assert len(watch["tickers"]) == 27  # two defaults plus the 25-ticker cap
+    assert "SPY" not in watch["dropped"] and "NVDA" not in watch["dropped"]
+    assert watch["dropped"] == [f"T{i:02d}" for i in range(23, 30)]
+    assert watch["over_cap"] == "over the ticker cap"
+    assert universe.watchlist_universe(["SPY"])["over_cap"] is None
+
+
 def test_sentiment_plan_respects_budget_and_rotates():
     eq = ["TSLA", "SPCX", "NVDA", "RIVN", "AAPL", "MSFT", "AMZN", "GOOG"]
     d1, d2 = universe.sentiment_plan(eq, date(2026, 10, 5)), universe.sentiment_plan(eq, date(2026, 10, 6))

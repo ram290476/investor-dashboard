@@ -56,6 +56,17 @@ _runs: list[dict[str, Any]] = []
 
 JOB_EVENT_SOURCE = f"{SERVICE}.jobs"
 _events = None
+# Keys a handler return value may add to the Job Finished detail. rows_stored is published as rows_written.
+_EVENT_FIELDS = ("batches", "rows_written", "mode", "dropped", "over_cap")
+
+
+def _finished_detail(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    detail = {key: result[key] for key in _EVENT_FIELDS if result.get(key) is not None}
+    if "rows_written" not in detail and result.get("rows_stored") is not None:
+        detail["rows_written"] = result["rows_stored"]
+    return detail
 
 
 def emit_job_finished(job_id: str, run_id: str, outcome: str, detail: dict[str, Any] | None = None) -> None:
@@ -108,8 +119,10 @@ def job_handler(
             _runs.clear()
             started = time.monotonic()
             outcome = "success"
+            result = None
             try:
-                return fn(event, context)
+                result = fn(event, context)
+                return result
             except Exception:
                 outcome = "failure"
                 logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})
@@ -138,6 +151,7 @@ def job_handler(
                         {
                             "sources": len(_runs),
                             "failed_sources": sum(r["outcome"] == "failure" for r in _runs),
+                            **_finished_detail(result),
                         },
                     )
 

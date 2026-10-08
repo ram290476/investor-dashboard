@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -410,6 +410,7 @@ def test_handler_writes_release_dated_yoy_and_release_links(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     monkeypatch.delenv("SCHEDULER_ROLE_ARN", raising=False)
     monkeypatch.setattr(api_keys, "api_key", lambda name: secret)
+    monkeypatch.setattr("universe.user_ticker_union", lambda *args, **kwargs: [])
     emitted = []
     monkeypatch.setattr(
         observability,
@@ -518,3 +519,174 @@ def test_handler_writes_release_dated_yoy_and_release_links(monkeypatch):
             assert secret not in json.dumps(lake.read_json(key))
 
     assert emitted == ["M1"]
+
+
+def test_backfill_refresh_recognizes_a_finished_backfill_only():
+    assert release_day.backfill_refresh({"detail": {"job": "BACKFILL", "outcome": "success", "batches": 2}})
+    assert release_day.backfill_refresh({"detail": '{"job": "BACKFILL", "outcome": "success", "batches": 1}'})
+    assert not release_day.backfill_refresh({"detail": {"job": "BACKFILL", "outcome": "success", "batches": 0}})
+    assert not release_day.backfill_refresh({"detail": {"job": "BACKFILL", "outcome": "success"}})
+    assert not release_day.backfill_refresh({"detail": {"job": "BACKFILL", "outcome": "failure", "batches": 3}})
+    assert not release_day.backfill_refresh({"source": "schedule"})
+    assert not release_day.backfill_refresh(None)
+
+
+def _release_context():
+    class Context:
+        function_name = "release-day"
+        memory_limit_in_mb = 512
+        invoked_function_arn = "arn:aws:lambda:us-east-1:1:function:release-day"
+        aws_request_id = "req-backfill"
+
+    return Context()
+
+
+def test_finished_event_carries_batches_and_links_mode(monkeypatch):
+    import observability
+
+    emitted = {}
+
+    def capture(job_id, run_id, outcome, detail=None):
+        emitted["detail"] = {"job": job_id, "outcome": outcome, **(detail or {})}
+
+    monkeypatch.setattr(observability, "emit_job_finished", capture)
+
+    @job_handler("BACKFILL")
+    def backfill_run(event, context):
+        return {"status": "running", "batches": 2, "rows_stored": 10}
+
+    @job_handler("M1")
+    def links_run(event, context):
+        return {"status": "success", "mode": "links", "dropped": ["ZZZ"], "over_cap": "over the ticker cap"}
+
+    assert backfill_run({}, _release_context())["batches"] == 2
+    assert emitted["detail"]["batches"] == 2 and emitted["detail"]["rows_written"] == 10
+    links_run({}, _release_context())
+    assert emitted["detail"]["mode"] == "links"
+    assert emitted["detail"]["over_cap"] == "over the ticker cap"
+
+
+def test_links_only_run_covers_nvda_and_spy_without_provider_calls(monkeypatch):
+    import boto3
+    import polars as pl
+    from moto import mock_aws
+
+    import lake
+    import observability
+    import status_feed as sf
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setattr("universe.user_ticker_union", lambda *args, **kwargs: ["NVDA", "SPY"])
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("links-only run must not read keys or call providers")
+
+    monkeypatch.setattr("api_keys.api_key", forbidden)
+    monkeypatch.setattr("http_client.get_client", forbidden)
+    monkeypatch.setattr("http_client.request_with_retry", forbidden)
+    emitted = {}
+
+    def capture(job_id, run_id, outcome, detail=None):
+        emitted["detail"] = {"job": job_id, "run_id": run_id, "outcome": outcome, **(detail or {})}
+
+    monkeypatch.setattr(observability, "emit_job_finished", capture)
+
+    with mock_aws():
+        boto3.client("s3").create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", None)
+        monkeypatch.setattr(observability, "_events", None)
+        releases = pl.DataFrame(
+            {
+                "series_id": ["CUSR0000SA0", "CUSR0000SA0"],
+                "period": ["2024-01", "2024-02"],
+                "release_ts": ["2024-02-13T13:30:00+00:00", "2024-03-12T12:30:00+00:00"],
+                "yoy": [2.0, 2.4],
+                "actual": [100.0, 101.0],
+                "consensus": [None, None],
+            }
+        )
+        lake.write_parquet(releases, "curated/releases/series=CUSR0000SA0/year=2024/releases.parquet")
+        prices = pl.DataFrame(
+            {
+                "ticker": ["NVDA", "NVDA", "SPY", "SPY"],
+                "date": [date(2024, 3, 11), date(2024, 3, 12), date(2024, 3, 11), date(2024, 3, 12)],
+                "close": [100.0, 101.0, 500.0, 505.0],
+            }
+        )
+        lake.write_parquet(prices, "curated/prices_daily/year=2024/prices.parquet")
+        result = release_day.handler(
+            {"detail": {"job": "BACKFILL", "outcome": "success", "batches": 1, "rows_written": 4}},
+            _release_context(),
+        )
+        assert result["mode"] == "links" and result["tickers"] == 2 and result["over_cap"] is None
+        table = lake.read_parquet_prefix("curated/release_links/")
+        summaries = table.filter(pl.col("row_kind") == "summary")
+        assert set(summaries["ticker"].to_list()) == {"NVDA", "SPY"}
+        assert summaries["correlation_surprise"].null_count() == summaries.height
+        assert "TSLA" not in summaries["ticker"].to_list()
+
+    assert emitted["detail"]["job"] == "M1" and emitted["detail"]["mode"] == "links"
+    prior = "2026-09-01T13:00:00+00:00"
+    feed = sf.apply_event(
+        {"jobs": [{"job": "M1", "status": "ok", "last_run": prior, "last_outcome": "success", "failed_sources": 0}]},
+        emitted["detail"],
+        datetime(2026, 10, 8, 12, tzinfo=UTC),
+    )
+    m1 = {j["job"]: j for j in feed["jobs"]}["M1"]
+    assert m1["last_run"] == prior
+    assert m1["last_links_run"] == "2026-10-08T12:00:00+00:00"
+    assert m1["status"] == "ok"
+
+
+def test_idle_backfill_does_not_fetch_or_rebuild_links(monkeypatch):
+    import observability
+
+    monkeypatch.setattr(observability, "emit_job_finished", lambda *args, **kwargs: None)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("idle backfill must not read keys or call providers")
+
+    monkeypatch.setattr("api_keys.api_key", forbidden)
+    monkeypatch.setattr("http_client.get_client", forbidden)
+    called = []
+    monkeypatch.setattr(release_day, "publish_release_links", lambda releases: called.append(releases))
+    result = release_day.handler(
+        {"detail": {"job": "BACKFILL", "outcome": "success", "batches": 0}},
+        _release_context(),
+    )
+    assert result == {"status": "skipped", "mode": "links", "batches": 0}
+    assert called == []
+
+
+def test_links_only_run_reports_tickers_over_the_cap(monkeypatch):
+    import boto3
+    from moto import mock_aws
+
+    import lake
+    import observability
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    extras = [f"T{i:02d}" for i in range(30)]
+    monkeypatch.setattr("universe.user_ticker_union", lambda *args, **kwargs: ["NVDA", "SPY", *extras])
+    monkeypatch.setattr(observability, "emit_job_finished", lambda *args, **kwargs: None)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("links-only run must not read keys or call providers")
+
+    monkeypatch.setattr("api_keys.api_key", forbidden)
+    monkeypatch.setattr("http_client.get_client", forbidden)
+
+    with mock_aws():
+        boto3.client("s3").create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", None)
+        result = release_day.handler(
+            {"detail": {"job": "BACKFILL", "outcome": "success", "batches": 1}},
+            _release_context(),
+        )
+    assert result["mode"] == "links" and result["over_cap"] == "over the ticker cap"
+    assert "NVDA" not in result["dropped"] and "SPY" not in result["dropped"]
+    assert result["dropped"] == [f"T{i:02d}" for i in range(23, 30)]
