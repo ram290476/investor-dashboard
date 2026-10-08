@@ -747,7 +747,7 @@ export function createAccountSettings(ctx) {
           job.next_run ? ctx.formatTime(job.next_run, session.prefs.display.time_zone) : "not scheduled",
         ));
 
-        const state = ["ok", "partial", "failed"].includes(job.status) ? job.status : "never_run";
+        const state = ["ok", "partial", "failed", "skipped"].includes(job.status) ? job.status : "never_run";
         const statusCell = el("td");
         const statusLabel = state === "never_run" ? "never run" : state;
         const indicator = el("span", `dot ${state === "never_run" ? "" : state}`.trim());
@@ -757,6 +757,10 @@ export function createAccountSettings(ctx) {
         statusCell.title = job.last_outcome
           ? `Last outcome: ${job.last_outcome}; failed sources: ${job.failed_sources || 0}`
           : "No successful run has been recorded.";
+        if (job.failed_source_ids?.length) {
+          statusCell.append(el("div", "settings-hint error", `Failed: ${job.failed_source_ids.join(", ")}`));
+        }
+        if (state === "skipped" && job.reason) statusCell.append(el("div", "settings-hint", job.reason));
         row.append(statusCell);
         body.append(row);
       });

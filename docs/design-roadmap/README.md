@@ -23,6 +23,7 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `trend-pill-under-price-mock-1440.png` | Same mock at 1440px |
 | `trend-pill-under-price-mock-360.png` | Same mock at 360px mobile: chips wrap under the price |
 | `themes/*-desktop-full.png` | Full desktop view in each proposed color theme (see [`themes/README.md`](themes/README.md)) |
+| `issue-26/production-*.png` | Implemented signals/rates/release/drift panels in six themes and four mobile views (see [`issue-26/README.md`](issue-26/README.md)) |
 
 **Note:** Values in these shots are **design sample data** from the artboard’s inline demo generator (dated demo facts and synthetic series), **not live lake / market data**. See the [Dashboard features](https://github.com/ram290476/investor-dashboard/wiki/Dashboard-features) wiki for what ships today vs design-only.
 
