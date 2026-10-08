@@ -208,6 +208,7 @@ data "aws_iam_policy_document" "api" {
     resources = [
       "${var.lake_bucket_arn}/serving/dashboard.json",
       "${var.lake_bucket_arn}/serving/status.json",
+      "${var.lake_bucket_arn}/serving/chart_data/*",
     ]
   }
   statement {
@@ -324,7 +325,7 @@ resource "aws_apigatewayv2_integration" "prefs" {
 }
 
 resource "aws_apigatewayv2_route" "site" {
-  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status"])
+  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}"])
   api_id             = aws_apigatewayv2_api.site.id
   route_key          = each.value
   target             = "integrations/${aws_apigatewayv2_integration.prefs.id}"
@@ -353,8 +354,13 @@ resource "aws_apigatewayv2_stage" "default" {
 }
 
 resource "aws_lambda_permission" "api_route" {
-  for_each      = toset(["prefs", "dashboard", "status"])
-  statement_id  = "AllowApiGateway-${each.value}"
+  for_each = {
+    prefs     = "prefs"
+    dashboard = "dashboard"
+    status    = "status"
+    chart     = "chart/*"
+  }
+  statement_id  = "AllowApiGateway-${each.key}"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api.function_name
   principal     = "apigateway.amazonaws.com"

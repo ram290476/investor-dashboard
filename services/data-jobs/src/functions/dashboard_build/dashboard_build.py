@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -203,6 +204,143 @@ def latest_short_interest(rows: list[dict]) -> dict[str, dict]:
     return latest
 
 
+def build_chart_data(
+    ticker: str,
+    trend_rows: list[dict],
+    short_interest_rows: list[dict],
+    options_rows: list[dict],
+    fundamentals: list[dict],
+    price_rows: list[dict] | None = None,
+    generated_at: str | None = None,
+) -> dict:
+    """Build one ticker's compact chart-only history document."""
+    def number(value):
+        return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else None
+
+    trends_by_series: dict[str, dict[str, float]] = {}
+    pressure_by_date: dict[str, float] = {}
+    for row in trend_rows:
+        if row.get("ticker") not in (None, ticker):
+            continue
+        day = str(row.get("date") or "")[:10]
+        series_id = str(row.get("series_id") or "")
+        value = number(row.get("value"))
+        pressure = number(row.get("net_pressure"))
+        if not day:
+            continue
+        if series_id and value is not None:
+            trends_by_series.setdefault(series_id, {})[day] = value
+        if pressure is not None:
+            pressure_by_date[day] = pressure
+
+    shares_rows = sorted(
+        (
+            (str(row.get("release_date") or "")[:10], number(row.get("value")))
+            for row in fundamentals
+            if row.get("ticker") == ticker and row.get("metric") == "shares_outstanding"
+        ),
+        key=lambda item: item[0],
+    )
+    prices_by_date = {
+        str(row.get("date") or "")[:10]: number(row.get("close"))
+        for row in (price_rows or [])
+        if row.get("date") and (not row.get("ticker") or str(row.get("ticker")).upper() == ticker.upper())
+    }
+    float_rows = sorted(
+        (
+            (
+                str(row.get("release_date") or "")[:10],
+                number(row.get("value")) / prices_by_date.get(str(row.get("measurement_date") or "")[:10]),
+            )
+            for row in fundamentals
+            if row.get("ticker") == ticker
+            and row.get("metric") == "public_float_usd"
+            and number(row.get("value")) is not None
+            and number(row.get("value")) > 0
+            and prices_by_date.get(str(row.get("measurement_date") or "")[:10])
+            and prices_by_date[str(row.get("measurement_date"))[:10]] > 0
+        ),
+        key=lambda item: item[0],
+    )
+    short_interest = []
+    for row in sorted(short_interest_rows, key=lambda item: str(item.get("settlement_date") or "")):
+        if str(row.get("ticker") or "").upper() != ticker.upper():
+            continue
+        day = str(row.get("settlement_date") or "")[:10]
+        shares_short = number(row.get("short_interest", row.get("shares_short")))
+        if not day or shares_short is None:
+            continue
+        float_shares_as_of = next(
+            (value for filed, value in reversed(float_rows) if filed <= day and value is not None and value > 0),
+            None,
+        )
+        shares_proxy_as_of = next(
+            (value for filed, value in reversed(shares_rows) if filed <= day and value is not None and value > 0),
+            None,
+        )
+        denominator = float_shares_as_of if float_shares_as_of is not None else shares_proxy_as_of
+        short_interest.append(
+            {
+                "date": day,
+                "shares_short": shares_short,
+                "shares_denominator": denominator,
+                "denominator_type": (
+                    "estimated_public_float" if float_shares_as_of is not None
+                    else "shares_outstanding_proxy" if shares_proxy_as_of is not None
+                    else None
+                ),
+                "short_pct_denominator": None if denominator is None else 100 * shares_short / denominator,
+                "days_to_cover": number(row.get("days_to_cover")),
+            }
+        )
+
+    options = []
+    for row in sorted(options_rows, key=lambda item: str(item.get("date") or "")):
+        if str(row.get("ticker") or "").upper() != ticker.upper():
+            continue
+        day = str(row.get("date") or "")[:10]
+        if not day:
+            continue
+        options.append(
+            {
+                "date": day,
+                "put_call_volume_ratio": number(row.get("put_call_volume_ratio")),
+                "iv30": number(row.get("iv30")),
+                "iv_available": bool(row.get("iv_available")),
+            }
+        )
+
+    company_series = [
+        {
+            "date": str(row.get("release_date") or "")[:10],
+            "series_id": str(row.get("metric")),
+            "value": number(row.get("value")),
+            "unit": row.get("unit"),
+            "fiscal_quarter": row.get("fiscal_quarter"),
+        }
+        for row in fundamentals
+        if row.get("ticker") == ticker
+        and row.get("metric") not in {"shares_outstanding", "public_float_usd"}
+        and row.get("release_date")
+        and number(row.get("value")) is not None
+    ]
+    return {
+        "schema_version": 1,
+        "ticker": ticker,
+        "generated_at": generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
+        "macro_series": {
+            series_id: [{"date": day, "value": values[day]} for day in sorted(values)[-MAX_PRICE_ROWS:]]
+            for series_id, values in sorted(trends_by_series.items())
+        },
+        "macro_pressure": [
+            {"date": day, "value": pressure_by_date[day]} for day in sorted(pressure_by_date)[-MAX_PRICE_ROWS:]
+        ],
+        "short_interest": short_interest[-MAX_PRICE_ROWS:],
+        "options": options[-MAX_PRICE_ROWS:],
+        "fundamentals": sorted(company_series, key=lambda row: (row["date"], row["series_id"])),
+    }
+
+
 def build_snapshot(
     tickers: list[str],
     prices: dict[str, list[dict]],
@@ -293,6 +431,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         tickers = collection_universe(user_ticker_union())["equities"]
         price_data: dict[str, list[dict]] = {}
         trend_data: dict[str, dict | None] = {}
+        trend_history_data: dict[str, list[dict]] = {}
         article_frame = read_parquet_prefix("curated/news_articles/")
         daily_frame = read_parquet_prefix("curated/news_daily/")
         article_rows = article_frame.to_dicts() if not article_frame.is_empty() else []
@@ -317,6 +456,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
             price_data[ticker] = frame.to_dicts() if not frame.is_empty() else []
             trend_data[ticker] = read_json(f"serving/trend_metrics/latest/{ticker}.json")
+            trend_history = read_parquet_prefix(f"serving/trend_metrics/ticker={ticker}/")
+            trend_history_data[ticker] = trend_history.to_dicts() if not trend_history.is_empty() else []
             hourly = read_parquet_prefix(f"curated/prices_hourly/ticker={ticker}/")
             hourly_data[ticker] = hourly.to_dicts() if not hourly.is_empty() else []
         short_frame = read_parquet_prefix("curated/short_interest/")
@@ -325,7 +466,14 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         for row in short_rows:
             short_by_ticker.setdefault(str(row.get("ticker") or "").upper(), []).append(row)
 
+        options_frame = read_parquet_prefix("curated/options_daily/")
+        options_rows = options_frame.to_dicts() if not options_frame.is_empty() else []
+        options_by_ticker: dict[str, list[dict]] = {}
+        for row in options_rows:
+            options_by_ticker.setdefault(str(row.get("ticker") or "").upper(), []).append(row)
+
         fundamental_doc = read_json("serving/fundamentals_quarterly.json") or {}
+        fundamental_rows = fundamental_doc.get("rows", [])
         status = read_json("serving/status.json")
         release_frame = read_parquet_prefix("curated/releases/")
         calendar = read_json("curated/release_calendar/upcoming.json") or []
@@ -333,7 +481,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             tickers=tickers,
             prices=price_data,
             trends=trend_data,
-            fundamentals=fundamental_doc.get("rows", []),
+            fundamentals=fundamental_rows,
             status=status,
             news=news_data,
             hourly=hourly_data,
@@ -344,6 +492,17 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             releases=release_frame.to_dicts() if not release_frame.is_empty() else [],
             release_calendar=calendar if isinstance(calendar, list) else [],
         )
+        for ticker in tickers:
+            chart_document = build_chart_data(
+                ticker=ticker,
+                trend_rows=trend_history_data.get(ticker, []),
+                short_interest_rows=short_by_ticker.get(ticker, []),
+                options_rows=options_by_ticker.get(ticker, []),
+                fundamentals=fundamental_rows,
+                price_rows=price_data.get(ticker, []),
+                generated_at=snapshot["generated_at"],
+            )
+            write_json(chart_document, f"serving/chart_data/{ticker}.json", cache_seconds=30)
         write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
         logger.info(
             "dashboard_snapshot_published",

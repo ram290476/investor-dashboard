@@ -11,6 +11,7 @@ export const PERIODS = Object.freeze([
   Object.freeze({ id: "1W", sessions: 5 }),
   Object.freeze({ id: "1M", sessions: 21 }),
   Object.freeze({ id: "3M", sessions: 63 }),
+  Object.freeze({ id: "YTD", sessions: null }),
   Object.freeze({ id: "1Y", sessions: 252 }),
   Object.freeze({ id: "3Y", sessions: 756 }),
   Object.freeze({ id: "5Y", sessions: 1259 }),
@@ -66,6 +67,10 @@ function spanYears(bars) {
 
 export function periodAvailable(bars, period) {
   if (!bars || bars.length < 2) return false;
+  if (period.id === "YTD") {
+    const year = String(bars.at(-1)?.date || "").slice(0, 4);
+    return bars.filter((bar) => String(bar.date || "").startsWith(year)).length > 1;
+  }
   if (period.id === "5Y") {
     if (bars.length >= MAX_PRICE_ROWS) return true;
     const span = spanYears(bars);
@@ -75,6 +80,11 @@ export function periodAvailable(bars, period) {
 }
 
 function offsetFor(bars, period) {
+  if (period.id === "YTD") {
+    const year = String(bars.at(-1)?.date || "").slice(0, 4);
+    const first = bars.findIndex((bar) => String(bar.date || "").startsWith(year));
+    return bars.length - first - 1;
+  }
   if (period.id === "5Y") return Math.min(period.sessions, bars.length - 1);
   return period.sessions;
 }
@@ -85,7 +95,7 @@ export function periodQuote(history, periodId) {
   const period = periodById(periodId) || periodById(DEFAULT_PERIOD);
   const bars = validBars(history);
   const historyStarts = bars[0]?.date || null;
-  const needed = period.id === "5Y" ? MAX_PRICE_ROWS : period.sessions + 1;
+  const needed = period.id === "5Y" ? MAX_PRICE_ROWS : period.id === "YTD" ? 2 : period.sessions + 1;
   if (!periodAvailable(bars, period)) {
     return {
       id: period.id,

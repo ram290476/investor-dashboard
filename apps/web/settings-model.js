@@ -30,6 +30,12 @@ function clone(prefs) {
     tickers: [...(prefs.tickers || [])],
     pinned: [...(prefs.pinned || [])],
     display: { ...(prefs.display || {}) },
+    chart_settings: Object.fromEntries(
+      Object.entries(prefs.chart_settings || {}).map(([ticker, settings]) => [
+        ticker,
+        { overlays: [...(settings.overlays || [])], lanes: [...(settings.lanes || [])] },
+      ]),
+    ),
   };
 }
 

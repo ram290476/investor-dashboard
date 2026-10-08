@@ -73,19 +73,19 @@ Tables are grouped by how often they change, and that sets their file layout: ho
 | filings | Hourly | accession_no | cik, form, filed_at, url | year | H3 |
 | macro_daily | Daily | series_id, obs_date | value, unit, vintage_date | year | D1, D3, D4 |
 | rate_odds | Daily | source, meeting_or_horizon, as_of, outcome | probability, yes_bid, yes_ask, volume (Kalshi); Atlanta Fed and Cleveland Fed rows by column/measure | year | D1 (DS-88), D4 (DS-89, DS-90) |
-| short_interest | Twice monthly | ticker, settlement_date | short_interest, previous_short_interest, avg_daily_volume, days_to_cover | settlement_date | short_interest (DS-91) |
-| options_daily | Daily | ticker, date | put_call_volume_ratio, call_volume, put_volume, iv30, iv30_expiration, iv_available | date | options_daily (DS-92, off until confirmed) |
+| short_interest | Twice monthly | ticker, settlement_date | short_interest, previous_short_interest, avg_daily_volume, days_to_cover | settlement_date | short_interest (DS-91); SEC public-float market value is converted to estimated shares with the split-adjusted close on its measurement date, available only after filing; SEC shares outstanding is the labeled fallback |
+| options_daily | Daily | ticker, date | put_call_volume_ratio, call_volume, put_volume, iv30, iv30_expiration, iv_available | date | options_daily (DS-92, Alpaca indicative feed; IV may be unavailable) |
 | contracts | Daily | award_id, mod_no | agency, obligated_usd, action_date, description | year | D5 |
 | launches | Daily | ll2_id | net_ts, vehicle, mission, status, outcome | year | H3, D2 |
 | robotaxi_fleet | Weekly | jurisdiction, as_of | permit_type, vehicles, cities\[\] | none | D2, W1, A1 |
 | risk_indices | Weekly | index, obs_date | value | none | W1, D1 |
 | releases | On release | series_id, ref_period | actual, nowcast, surprise, release_ts | none | M1 |
-| fundamentals_quarterly | Quarterly | ticker, metric, fiscal_quarter | release_date, value, unit, source_id; metrics gross_margin_gaap, revenue_gaap, gross_profit_gaap, deliveries, fsd_subscribers | none | q1_fundamentals (DS-11 XBRL, DS-12 manual) |
+| fundamentals_quarterly | Quarterly | ticker, metric, fiscal_quarter | release_date, measurement_date, value, unit, source_id; metrics include public_float_usd (SEC DEI, USD), shares_outstanding (SEC DEI), gross_margin_gaap, revenue_gaap, gross_profit_gaap, deliveries, fsd_subscribers | none | q1_fundamentals (DS-11 XBRL, DS-12 manual) |
 | calendar_days | Monthly | calendar, date | is_open, close_time | none | C1, A1 |
 | ingestion_runs | Every run | run_id | job, source_id, status, rows, error, duration_ms | year/month | all jobs |
 | user_prefs (DynamoDB) | On change | user_sub | tickers\[\], pinned\[\] (max 6), display.time_zone, display.updown_palette, display.chart_period, version, updated_at | n/a | prefs API |
 
-**Serving layer** — JSON files built for the screen, one per dashboard panel (e.g. serving/panel/rates.json), plus manifest.json listing each panel's version and last update.
+**Serving layer** — the compact `serving/dashboard.json` snapshot plus per-ticker `serving/chart_data/<T>.json` histories for macro overlays, macro pressure, short interest, options, and quarterly fundamentals. `GET /chart/{ticker}` serves only a ticker in the caller's watchlist.
 
 - Macro series use one long table (series_id, obs_date, value) so a new FRED or BLS series needs no schema change.
 
@@ -103,7 +103,7 @@ The dashboard now serves several signed-in users, each with their own ticker lis
 
 - **Preferences store:** DynamoDB table invdash-user-prefs, one item per user keyed by Cognito sub (user_sub). On-demand billing, encrypted with the data key, point-in-time recovery, deletion protection.
 
-- **Site API:** GET and PUT /prefs on an HTTP API with a Cognito JWT authorizer. PUT needs the version it last read (a stale version returns 409). Adding a ticker nobody else follows triggers a 5-year history backfill.
+- **Site API:** GET and PUT /prefs, GET /dashboard, GET /status, and GET /chart/{ticker} on an HTTP API with a Cognito JWT authorizer. Chart preferences are validated per ticker in the user item; chart reads are limited to the caller's watchlist. PUT needs the version it last read (a stale version returns 409). Adding a ticker nobody else follows triggers a 5-year history backfill.
 
 Who can reach the preferences table:
 
@@ -165,7 +165,7 @@ Monthly series hold their last released value until the next release. Output goe
 | trend-metrics | After D4 or M1 succeeds | curated prices and macro | serving/trend_metrics/ |
 | q1-fundamentals | Mon 08:30 + day after earnings | SEC XBRL (DS-11), manual file (DS-12) | curated/ and serving/fundamentals_quarterly.json |
 | short-interest | 18:30 Mon–Fri; stores only new settlement dates, so data lands twice a month on FINRA's publication days | FINRA (DS-91, OAuth keys in SSM) | curated/short_interest/ |
-| options-daily | 16:50 Mon–Fri, after D4 | Alpaca indicative options (DS-92) | curated/options_daily/; **off** until a manual run confirms the free feed and whether it includes IV |
+| options-daily | 16:50 Mon–Fri, after D4 | Alpaca indicative options (DS-92) | curated/options_daily/; enabled by default, with IV30 explicitly unavailable when the feed omits it |
 | backfill | When a user adds a ticker nobody followed, and once at setup (O1) | Yahoo (DS-05) | curated/prices_daily/ |
 | status-feed | After every job | Job Finished events | serving/status.json |
 | H1, D4 (extended) | Existing schedules | Alpaca bars | ETF proxies and the user-ticker union added to the same calls |

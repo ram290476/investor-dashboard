@@ -73,6 +73,57 @@ def test_snapshot_exposes_empty_dataset_as_unavailable():
     assert snapshot["status"] is None
 
 
+def test_chart_data_prefers_filed_public_float_estimate_and_falls_back_to_shares():
+    chart = dashboard_build.build_chart_data(
+        ticker="TSLA",
+        trend_rows=[
+            {"ticker": "TSLA", "date": "2026-08-15", "series_id": "DGS10", "value": 4.2, "net_pressure": 0.3},
+            {"ticker": "TSLA", "date": "2026-08-15", "series_id": "VIXCLS", "value": 18.0, "net_pressure": 0.3},
+            {"ticker": "SPCX", "date": "2026-08-15", "series_id": "DGS10", "value": 9.9, "net_pressure": -0.9},
+        ],
+        short_interest_rows=[
+            {"ticker": "TSLA", "settlement_date": "2026-08-15", "short_interest": 30_000_000, "days_to_cover": 1.2},
+            {"ticker": "TSLA", "settlement_date": "2026-09-30", "short_interest": 33_000_000, "days_to_cover": 1.3},
+            {"ticker": "SPCX", "settlement_date": "2026-09-30", "short_interest": 5, "days_to_cover": 1},
+        ],
+        options_rows=[
+            {"ticker": "TSLA", "date": "2026-09-30", "put_call_volume_ratio": 1.1, "iv30": None, "iv_available": False}
+        ],
+        fundamentals=[
+            {"ticker": "TSLA", "metric": "shares_outstanding", "release_date": "2026-07-24", "value": 3_000_000_000},
+            {"ticker": "TSLA", "metric": "shares_outstanding", "release_date": "2026-09-15", "value": 3_100_000_000},
+            {
+                "ticker": "TSLA",
+                "metric": "public_float_usd",
+                "release_date": "2026-09-15",
+                "measurement_date": "2026-06-30",
+                "value": 900_000_000_000,
+            },
+            {
+                "ticker": "TSLA",
+                "metric": "gross_margin_gaap",
+                "release_date": "2026-09-15",
+                "fiscal_quarter": "2026Q2",
+                "value": 0.18,
+                "unit": "ratio",
+            },
+        ],
+        price_rows=[{"date": "2026-06-30", "close": 100.0}],
+        generated_at="2026-10-01T00:00:00+00:00",
+    )
+
+    assert chart["macro_series"]["DGS10"] == [{"date": "2026-08-15", "value": 4.2}]
+    assert chart["macro_pressure"] == [{"date": "2026-08-15", "value": 0.3}]
+    assert chart["short_interest"][0]["denominator_type"] == "shares_outstanding_proxy"
+    assert chart["short_interest"][0]["short_pct_denominator"] == pytest.approx(1.0)
+    assert chart["short_interest"][1]["denominator_type"] == "estimated_public_float"
+    assert chart["short_interest"][1]["shares_denominator"] == pytest.approx(9_000_000_000)
+    assert chart["short_interest"][1]["short_pct_denominator"] == pytest.approx(33_000_000 / 9_000_000_000 * 100)
+    assert all(row["series_id"] != "public_float_usd" for row in chart["fundamentals"])
+    assert chart["options"][0]["iv30"] is None
+    assert chart["fundamentals"][0]["series_id"] == "gross_margin_gaap"
+
+
 def test_releases_keep_the_latest_print_and_the_next_five_dates():
     calendar = [{"series": "cpi", "release_ts": f"2026-11-{day:02d}T08:35:00-05:00"} for day in range(1, 7)]
     snapshot = dashboard_build.build_snapshot(
