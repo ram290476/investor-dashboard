@@ -141,3 +141,10 @@ hierarchy and the design's four mobile views (Chart, Signals, Calendar, More),
 with keyboard-accessible tabs and explicit missing-data states.
 Provider logs, production lake coverage, external-source repair and live
 post-deployment verification remain pending authenticated AWS access.
+
+Verified locally: 198 backend tests (15 empty-metrics warnings), 64 JavaScript
+tests, full Ruff, all application JavaScript syntax, Terraform format/validation,
+and browser checks for six themes at 1440px/390px, four keyboard mobile tabs,
+missing/zero-variation release links, persistence and failed-save rollback.
+The backend also passed PR #66 CI on Python 3.12, including dependency audits,
+the ARM64 Lambda image build and infrastructure/workflow checks.

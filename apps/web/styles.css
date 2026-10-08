@@ -1498,7 +1498,219 @@ input::placeholder {
   color: var(--blue);
 }
 
+.signals-body {
+  padding: 14px;
+}
+
+.signal-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.signal-heading h3,
+.signal-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.signal-note {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.pressure-gauge {
+  position: relative;
+  height: 10px;
+  margin: 10px 0;
+  border-radius: 6px;
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+
+.pressure-gauge::after {
+  position: absolute;
+  left: 50%;
+  height: 100%;
+  border-left: 1px solid var(--control-line);
+  content: "";
+}
+
+.pressure-fill {
+  position: absolute;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--green);
+}
+
+.pressure-fill.down {
+  background: var(--red);
+}
+
+.signal-driver-list {
+  margin: 8px 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.signal-driver-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(84px, auto);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.signal-driver-copy {
+  min-width: 0;
+}
+
+.signal-driver-copy .driver-name {
+  display: block;
+}
+
+.signal-change {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--selected);
+  color: var(--secondary);
+  font-size: 11px;
+}
+
+.signal-strength {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.signal-strength.positive { color: var(--green); }
+.signal-strength.negative { color: var(--red); }
+
+.strength-bars {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.strength-bars span {
+  width: 3px;
+  height: 12px;
+  background: var(--line);
+}
+
+.strength-bars span.active {
+  background: currentColor;
+}
+
+.signal-drawer {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.signal-drawer summary {
+  cursor: pointer;
+  min-height: 44px;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 44px;
+}
+
+.signal-drawer summary:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.macro-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.macro-panel-grid > :last-child {
+  grid-column: 1 / -1;
+}
+
+.rate-entry,
+.release-block {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.signal-sparkline {
+  display: block;
+  width: 100%;
+  height: 48px;
+  margin: 6px 0;
+}
+
+.release-window {
+  color: var(--secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.mobile-view-tabs {
+  display: none;
+}
+
 @media (max-width: 640px) {
+  .mobile-view-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin: 12px 0;
+  }
+
+  .mobile-view-tabs [aria-selected="true"] {
+    border-color: var(--blue);
+    background: var(--selected);
+  }
+
+  .dashboard-grid .primary-column,
+  .dashboard-grid .side-column {
+    display: contents;
+  }
+
+  .dashboard-grid [data-mobile-panel] {
+    display: none;
+  }
+
+  .dashboard-grid[data-mobile-view="chart"] [data-mobile-panel="chart"],
+  .dashboard-grid[data-mobile-view="signals"] [data-mobile-panel="signals"],
+  .dashboard-grid[data-mobile-view="calendar"] [data-mobile-panel="calendar"],
+  .dashboard-grid[data-mobile-view="more"] [data-mobile-panel="more"] {
+    display: block;
+  }
+
+  .dashboard-grid[data-mobile-view="chart"] .macro-panel-grid,
+  .dashboard-grid[data-mobile-view="more"] .macro-panel-grid {
+    display: none;
+  }
+
+  .dashboard-grid[data-mobile-view="signals"] .signals-panel {
+    grid-row: 1;
+  }
+
+  .macro-panel-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .account-text {
     display: none;
   }

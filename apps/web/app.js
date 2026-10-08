@@ -11,6 +11,10 @@ import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle 
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
 import { applyTheme, overlayColor } from "./theme.js";
+import {
+  correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
+  number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
+} from "./signals.js";
 import { emailFromIdToken, fallbackSelection, parseSettingsHash, stripOrder } from "./settings-model.js";
 import {
   CHART_LANES,
@@ -41,22 +45,12 @@ const session = {
   // A settings save that failed after the dialog closed: { message, reopen }.
   settingsError: null,
   selected: null,
+  mobileView: "chart",
   periodSave: false,
   chartSaveError: "",
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 let prefsSaveQueue = Promise.resolve();
-const aliases = {
-  DGS2: "2Y Treasury",
-  DGS10: "10Y Treasury",
-  DGS30: "30Y Treasury",
-  T10Y2Y: "10Y–2Y curve",
-  DFII10: "10Y real yield",
-  VIXCLS: "VIX",
-  CPI_YOY: "CPI year over year",
-  CORE_CPI_YOY: "Core CPI year over year",
-  PCE_YOY: "PCE year over year",
-};
 
 function node(tag, className, value) {
   const element = document.createElement(tag);
@@ -966,13 +960,11 @@ function renderContracts(tickerData) {
 }
 
 function renderDrivers(tickerData) {
-  const panel = node("section", "panel");
-  panel.append(sectionHeader("Macro drivers", "Trend model · latest published observation"));
-  const rows = tickerData?.trend?.rows || [];
-  const drivers = [...rows]
-    .filter((row) => row.series_id && isNumericValue(row.effect))
-    .sort((a, b) => Math.abs(Number(b.effect)) - Math.abs(Number(a.effect)))
-    .slice(0, 5);
+  const panel = node("section", "panel signals-panel");
+  panel.dataset.mobilePanel = "signals";
+  panel.id = "mobile-panel-signals";
+  panel.append(sectionHeader("Macro signals", `${session.selected} · ${tickerData?.trend?.date || "latest published observations"}`));
+  const drivers = driverRows(tickerData);
   if (!drivers.length && session.dashboardState === "loading") {
     panel.append(node("p", "data-state", "Loading driver trends…"));
     return panel;
@@ -984,34 +976,160 @@ function renderDrivers(tickerData) {
   if (!drivers.length) {
     panel.append(node("p", "data-state", "Driver trends are unavailable until daily prices and macro observations have been processed."));
   } else {
-    const list = node("ul", "driver-list");
-    drivers.forEach((row) => {
-      const item = node("li", "driver-row");
-      item.append(node("span", "driver-name", aliases[row.series_id] || row.series_id));
-      const effect = Number(row.effect);
-      item.append(node("span", `driver-value ${polarity(effect)}`, `${effect > 0 ? "+" : ""}${effect.toFixed(2)}`));
-      list.append(item);
-    });
-    const body = node("div", "panel-body");
-    body.append(list);
+    const body = node("div", "panel-body signals-body");
+    const pressure = pressureSummary(tickerData);
+    const headline = node("div", "signal-heading");
+    headline.append(node("h3", "", "Net macro pressure"),
+      node("span", `mono ${pressure.value == null ? "" : polarity(pressure.value)}`,
+        `${pressure.label}${pressure.value == null ? "" : ` ${signed(pressure.value)}`}`));
+    const gauge = node("div", "pressure-gauge");
+    gauge.setAttribute("role", "img");
+    gauge.setAttribute("aria-label", `Net macro pressure: ${pressure.label}, ${signed(pressure.value)} on a -1 to +1 scale`);
+    const fill = node("span", `pressure-fill ${pressure.value != null && pressure.value < 0 ? "down" : "up"}`);
+    fill.style.width = `${pressure.width}%`;
+    fill.style.left = `${pressure.value != null && pressure.value < 0 ? 50 - pressure.width : 50}%`;
+    gauge.append(fill);
+    body.append(headline, gauge, node("p", "signal-note",
+      `${pressure.linked} of ${pressure.total} observed drivers linked. Monthly releases use separate event windows.`));
+    const missing = tickerData?.trend?.coverage?.missing || [];
+    if (missing.length) body.append(node("p", "signal-note", `${missing.length} inputs unavailable: ${missing.map(driverLabel).join(", ")}.`));
+    body.append(node("h3", "signal-label", `Top drivers for ${session.selected}`), renderDriverList(drivers.slice(0, 5)));
+    const all = node("details", "signal-drawer");
+    all.append(node("summary", "", `All driver trends · ${drivers.length} observations`), renderDriverList(drivers));
+    body.append(all);
     panel.append(body);
   }
-  const releases = session.dashboard?.releases;
-  if (releases) {
-    const note = node("div", "release-notes");
-    const labels = { CUSR0000SA0: "CPI", CUSR0000SA0L1E: "Core CPI", PCE: "PCE" };
-    (releases.latest || [])
-      .filter((row) => labels[row.series])
-      .forEach((row) => {
-        const surprise = isNumericValue(row.surprise) ? Number(row.surprise) : null;
-        const text = surprise == null ? "no consensus" : `${surprise > 0 ? "+" : ""}${surprise.toFixed(2)} vs consensus`;
-        note.append(node("p", "release-note", `${labels[row.series]} surprise ${text}`));
-      });
-    const next = (releases.next || [])[0];
-    if (next?.release_ts) note.append(node("p", "release-note", `Next release ${next.series || ""} ${next.release_ts}`));
-    if (note.childElementCount) panel.append(note);
-  }
   return panel;
+}
+
+function renderDriverList(rows) {
+  const list = node("ul", "signal-driver-list");
+  rows.forEach(row => {
+    const item = node("li", "signal-driver-row");
+    const name = node("div", "signal-driver-copy");
+    name.append(node("span", "driver-name", driverLabel(row.series_id)),
+      node("span", "signal-note", `${driverValue(row)} · ${driverTrend(row)}`));
+    if (row.obs_date) name.title = `Observed ${row.obs_date}; available ${row.available_date || row.obs_date}. Driver trend uses the 1M z-score, not price moving averages.`;
+    const change = node("span", "signal-change mono", driverChange(row));
+    change.title = `1-month change; z-score ${signed(row.z_1m)}; 1-year range ${signed(row.range_pct_1y, 0)}`;
+    const effect = signalNumber(row.effect);
+    const direction = effect == null ? "Link unavailable" : effect > 0 ? "Tailwind" : effect < 0 ? "Headwind" : "Neutral";
+    const strength = node("span", `signal-strength ${effect == null ? "" : polarity(effect)}`, direction);
+    const bars = node("span", "strength-bars");
+    bars.setAttribute("aria-hidden", "true");
+    const count = effect == null ? 0 : Math.abs(effect) >= 1 ? 3 : Math.abs(effect) >= 0.5 ? 2 : 1;
+    for (let i = 0; i < 3; i++) bars.append(node("span", i < count ? "active" : ""));
+    strength.prepend(bars);
+    strength.title = effect == null ? "Needs finite 90-day correlation and 1-month z-score."
+      : `${row.strength || "Measured"} link; effect ${signed(effect)} = correlation(90D) × z(1M). Association, not a causal forecast.`;
+    strength.setAttribute("aria-label", `${direction}; ${count} of 3 strength bars`);
+    item.append(name, change, strength);
+    list.append(item);
+  });
+  return list;
+}
+
+function signalSparkline(points, color = "var(--price)", label = "Historical series") {
+  const values = points.map(point => signalNumber(point.value));
+  const finite = values.filter(value => value != null);
+  if (finite.length < 2) return node("span", "signal-note", "History unavailable");
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", "0 0 240 48");
+  svg.setAttribute("class", "signal-sparkline");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", label);
+  const lo = Math.min(...finite), hi = Math.max(...finite);
+  let connected = false;
+  const segments = values.map((value, i) => {
+    if (value == null) { connected = false; return ""; }
+    const command = connected ? "L" : "M";
+    connected = true;
+    return `${command}${4 + i / (values.length - 1) * 232},${44 - (hi === lo ? 0.5 : (value - lo) / (hi - lo)) * 40}`;
+  });
+  const path = document.createElementNS(svgNS, "path");
+  path.setAttribute("d", segments.join(" "));
+  path.setAttribute("stroke", color);
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke-width", "2");
+  svg.append(path);
+  return svg;
+}
+
+function renderMacroPanels(tickerData, chartData, chartDataState) {
+  const grid = node("div", "macro-panel-grid");
+  const rows = driverRows(tickerData);
+  const rates = rows.filter(row => ["DGS2", "DGS10", "DGS30", "T10Y2Y", "DFII10", "SOFR", "T10YIE"].includes(row.series_id));
+  const ratesPanel = node("section", "panel");
+  ratesPanel.dataset.mobilePanel = "signals";
+  ratesPanel.append(sectionHeader("Rates & yields", "Latest available observations · 1M change in basis points"));
+  const rateBody = node("div", "panel-body");
+  if (!rates.length) rateBody.append(node("p", "data-state", "Rates are unavailable until D1 observations reach the trend build."));
+  rates.forEach(row => {
+    const entry = node("div", "rate-entry");
+    const copy = node("div", "signal-heading");
+    copy.append(node("span", "", driverLabel(row.series_id)),
+      node("span", "mono", `${driverValue(row)} · ${driverChange(row)}`));
+    entry.append(copy, signalSparkline((chartData?.macro_series?.[row.series_id] || []).slice(-63),
+      "var(--price)", `${driverLabel(row.series_id)} over the last 63 stored sessions`));
+    rateBody.append(entry);
+  });
+  ratesPanel.append(rateBody);
+  const inflation = node("section", "panel");
+  inflation.dataset.mobilePanel = "calendar";
+  inflation.id = "mobile-panel-calendar";
+  inflation.append(sectionHeader("Inflation & release links", `YoY trend · historical links to ${session.selected}`));
+  const releaseBody = node("div", "panel-body");
+  const links = tickerData?.release_links;
+  const latest = (links?.latest || []).filter(row => /^(CORE_)?(CPI|PCE)_YOY$/.test(row.series_id));
+  if (!latest.length) releaseBody.append(node("p", "data-state", "Release history is unavailable until M1 has published release-dated data."));
+  latest.forEach(row => {
+    const block = node("div", "release-block");
+    block.append(node("h3", "signal-label", driverLabel(row.series_id)),
+      node("p", "", `${signalNumber(row.yoy) == null ? "--" : Number(row.yoy).toFixed(2)}% YoY · ${row.trend_direction || "Trend unavailable"} · ${row.consecutive_releases || 0} releases`),
+      node("p", "signal-note", `Released ${row.release_date || "--"} · ${row.surprise_basis === "consensus" ? "Consensus surprise" : "YoY change"} ${signed(row.surprise)}pp`));
+    const windows = (links?.summaries || []).filter(summary => summary.series_id === row.series_id);
+    windows.forEach(summary => {
+      const numeric = signalNumber(summary.correlation_surprise);
+      block.append(node("p", "release-window", `${RELEASE_WINDOWS[summary.window] || summary.window}: ${
+        numeric == null ? (summary.n_releases >= 12
+          ? "Link unavailable; insufficient usable history or variation"
+          : "Link unavailable; at least 12 paired releases required")
+          : `correlation ${signed(numeric)}`
+      } · n=${summary.n_releases || 0}`));
+    });
+    releaseBody.append(block);
+  });
+  const calendar = session.dashboard?.releases?.next || [];
+  if (calendar.length) {
+    const drawer = node("details", "signal-drawer");
+    drawer.append(node("summary", "", `Release calendar · ${calendar.length} upcoming`));
+    calendar.forEach(row => drawer.append(node("p", "signal-note", `${row.series} · ${formatTime(row.release_ts, session.prefs.display.time_zone)}`)));
+    releaseBody.append(drawer);
+  }
+  releaseBody.append(node("p", "signal-note", "Monthly releases are excluded from daily rolling correlations. Missing consensus uses YoY change, not a consensus surprise. Links describe historical association, not causation."));
+  inflation.append(releaseBody);
+  const drift = node("section", "panel");
+  drift.dataset.mobilePanel = "signals";
+  drift.append(sectionHeader("Correlation drift", `${session.selected} · 30D / 90D rolling correlations`));
+  const drawer = node("details", "signal-drawer panel-body");
+  drawer.append(node("summary", "", "Show correlation history and month-over-month drift"));
+  if (chartDataState === "error") drawer.append(node("p", "data-state error", "Correlation history could not be loaded. Use Try again above."));
+  else if (chartDataState === "loading") drawer.append(node("p", "data-state", "Loading correlation history…"));
+  const daily = rows.filter(row => !row.series_id.endsWith("_YOY"));
+  daily.forEach(row => {
+    const history = chartData?.correlation_history?.[row.series_id] || [];
+    const change = correlationDrift(row, history);
+    const entry = node("div", "rate-entry");
+    entry.append(node("h3", "signal-label", driverLabel(row.series_id)),
+      node("p", "mono", `30D ${signed(row.corr_30d)} · 90D ${signed(row.corr_90d)}`),
+      signalSparkline(history.map(point => ({value: point.corr_90d})), "var(--blue)", `${driverLabel(row.series_id)} 90-day correlation history`),
+      node("p", "signal-note", change ? `${change.signFlip ? "Sign flip · " : ""}${change.stronger ? "Strengthening" : "Fading"} · 1M drift ${signed(change.delta)}` : "Drift unavailable; needs 22 linked sessions."));
+    drawer.append(entry);
+  });
+  if (!daily.length) drawer.append(node("p", "data-state", "No daily driver correlations available yet."));
+  drift.append(drawer);
+  grid.append(ratesPanel, inflation, drift);
+  return grid;
 }
 
 function renderNews(tickerData) {
@@ -1233,17 +1351,60 @@ function renderDashboard() {
   };
   const mainGrid = node("main", "dashboard-grid");
   mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
-  const primary = node("div");
-  primary.append(
-    renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, (next) => updateChartSettings(session.selected, next)),
-  );
+  const primary = node("div", "primary-column");
+  const price = renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, (next) => updateChartSettings(session.selected, next));
+  price.dataset.mobilePanel = "chart";
+  price.id = "mobile-panel-chart";
+  primary.append(price);
+  primary.append(renderMacroPanels(tickerData, chartData, chartDataState));
   const contracts = renderContracts(tickerData);
-  if (contracts) primary.append(contracts);
-  primary.append(renderFundamentals());
+  if (contracts) {
+    contracts.dataset.mobilePanel = "more";
+    primary.append(contracts);
+  }
+  const fundamentals = renderFundamentals();
+  fundamentals.dataset.mobilePanel = "more";
+  fundamentals.id = "mobile-panel-more";
+  primary.append(fundamentals);
   const side = node("aside", "side-column");
   side.setAttribute("aria-label", "Macro drivers, news and filings");
-  side.append(renderDrivers(tickerData), renderNews(tickerData), renderFilings(tickerData));
+  const news = renderNews(tickerData), filings = renderFilings(tickerData);
+  news.dataset.mobilePanel = "more";
+  filings.dataset.mobilePanel = "more";
+  side.append(renderDrivers(tickerData), news, filings);
   mainGrid.append(primary, side);
+  const mobileTabs = node("div", "mobile-view-tabs");
+  mobileTabs.setAttribute("role", "tablist");
+  mobileTabs.setAttribute("aria-label", "Dashboard sections");
+  mainGrid.dataset.mobileView = session.mobileView;
+  ["chart", "signals", "calendar", "more"].forEach(view => {
+    const tab = action(view[0].toUpperCase() + view.slice(1), "", () => {
+      session.mobileView = view;
+      renderDashboard();
+      root.querySelector(`#mobile-tab-${view}`)?.focus();
+    });
+    tab.id = `mobile-tab-${view}`;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", `mobile-panel-${view}`);
+    tab.setAttribute("aria-selected", String(view === session.mobileView));
+    tab.tabIndex = view === session.mobileView ? 0 : -1;
+    tab.addEventListener("keydown", event => {
+      const views = ["chart", "signals", "calendar", "more"];
+      const index = views.indexOf(view);
+      const next = event.key === "ArrowRight" ? (index + 1) % 4
+        : event.key === "ArrowLeft" ? (index + 3) % 4 : event.key === "Home" ? 0 : event.key === "End" ? 3 : null;
+      if (next == null) return;
+      event.preventDefault();
+      root.querySelector(`#mobile-tab-${views[next]}`)?.click();
+    });
+    mobileTabs.append(tab);
+    if (window.matchMedia("(max-width: 640px)").matches) {
+      const panel = mainGrid.querySelector(`#mobile-panel-${view}`);
+      panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", tab.id);
+    }
+  });
+  root.append(mobileTabs);
   root.append(mainGrid);
   const footer = node("footer", "dashboard-footer");
   footer.append(node("span", "", "Information for research; not investment advice."));
@@ -1363,4 +1524,5 @@ const settings = createAccountSettings({
 });
 
 applyTheme();
+window.matchMedia("(max-width: 640px)").addEventListener("change", () => renderDashboard());
 start();
