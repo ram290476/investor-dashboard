@@ -33,6 +33,7 @@ COLUMNS = [
     "release_date",
     "yoy",
     "surprise",
+    "surprise_basis",
     "trend_direction",
     "consecutive_releases",
     "ret_week_before",
@@ -47,7 +48,7 @@ COLUMNS = [
     "n_positive_surprise",
     "n_negative_surprise",
 ]
-_STRINGS = ["row_kind", "series_id", "ticker", "release_date", "trend_direction", "window"]
+_STRINGS = ["row_kind", "series_id", "ticker", "release_date", "trend_direction", "window", "surprise_basis"]
 _INTS = ["consecutive_releases", "n_releases", "n_positive_surprise", "n_negative_surprise"]
 _TREND_CODE = {"accelerating": 1.0, "decelerating": -1.0, "unchanged": 0.0}
 
@@ -151,6 +152,11 @@ def _points(releases: list[dict], source_id: str, series_id: str) -> list[dict]:
                     row.get("yoy"),
                     previous,
                 ),
+                "surprise_basis": (
+                    "consensus" if _num(row.get("consensus")) is not None
+                    and year_ago is not None and _num(year_ago.get("actual")) not in {None, 0.0}
+                    else "yoy_change"
+                ),
                 "trend_direction": direction,
                 "consecutive_releases": count,
             }
@@ -162,7 +168,9 @@ def _points(releases: list[dict], source_id: str, series_id: str) -> list[dict]:
 def _closes(prices: pl.DataFrame, ticker: str) -> tuple[list[date], dict[date, float]]:
     if prices.is_empty() or not {"ticker", "date", "close"} <= set(prices.columns):
         return [], {}
-    frame = prices.filter((pl.col("ticker") == ticker) & pl.col("close").is_not_null())
+    from trend_metrics import analysis_prices
+
+    frame = analysis_prices(prices).filter((pl.col("ticker") == ticker) & pl.col("close").is_finite())
     if frame.is_empty():
         return [], {}
     frame = frame.with_columns(pl.col("date").cast(pl.Date)).unique(subset=["date"], keep="last").sort("date")
@@ -216,7 +224,6 @@ def _summary(rows: list[dict], series_id: str, ticker: str, history: int) -> lis
     latest = rows[-1] if rows else None
     direction = None if latest is None else latest["trend_direction"]
     count = None if latest is None else latest["consecutive_releases"]
-    ready = history >= MIN_RELEASES
     summaries = []
     for window, column in (
         ("week_before", "ret_week_before"),
@@ -227,12 +234,14 @@ def _summary(rows: list[dict], series_id: str, ticker: str, history: int) -> lis
         paired_trend: list[tuple[float, float]] = []
         positive: list[float] = []
         negative: list[float] = []
+        bases: set[str] = set()
         for row in rows:
             move = row.get(column)
             if move is None:
                 continue
             surprise = row.get("surprise")
             if surprise is not None:
+                bases.add(row.get("surprise_basis") or "yoy_change")
                 paired_surprise.append((float(move), float(surprise)))
                 if surprise > 0:
                     positive.append(float(move))
@@ -241,6 +250,7 @@ def _summary(rows: list[dict], series_id: str, ticker: str, history: int) -> lis
             code = _TREND_CODE.get(row.get("trend_direction"))
             if code is not None:
                 paired_trend.append((float(move), code))
+        ready = history >= MIN_RELEASES and len(paired_surprise) >= MIN_RELEASES
         item = _blank()
         item.update(
             {
@@ -251,19 +261,25 @@ def _summary(rows: list[dict], series_id: str, ticker: str, history: int) -> lis
                 "consecutive_releases": count,
                 "window": window,
                 "n_releases": len(paired_surprise),
+                "surprise_basis": (
+                    next(iter(bases)) if len(bases) == 1 else "mixed"
+                ),
                 "correlation_surprise": (
                     pearson([pair[0] for pair in paired_surprise], [pair[1] for pair in paired_surprise])
                     if ready
                     else None
                 ),
                 "correlation_trend": (
-                    pearson([pair[0] for pair in paired_trend], [pair[1] for pair in paired_trend]) if ready else None
+                    pearson([pair[0] for pair in paired_trend], [pair[1] for pair in paired_trend])
+                    if history >= MIN_RELEASES and len(paired_trend) >= MIN_RELEASES else None
                 ),
                 "avg_move_positive_surprise": (
-                    None if not ready or not positive else sum(positive) / len(positive)
+                    None if not ready or not positive
+                    else sum(positive) / len(positive)
                 ),
                 "avg_move_negative_surprise": (
-                    None if not ready or not negative else sum(negative) / len(negative)
+                    None if not ready or not negative
+                    else sum(negative) / len(negative)
                 ),
                 "n_positive_surprise": len(positive) if ready else None,
                 "n_negative_surprise": len(negative) if ready else None,

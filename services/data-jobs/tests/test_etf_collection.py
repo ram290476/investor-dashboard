@@ -14,6 +14,7 @@ from moto import mock_aws
 
 import api_keys
 import daily_prices
+import dashboard_build
 import http_client
 import lake
 import observability
@@ -128,3 +129,7 @@ def test_daily_prices_collects_etfs_and_trend_metrics_has_etf_drivers(lake_bucke
     assert full.select("series_id", "date").is_duplicated().sum() == 0
     assert rows["ETF:SPY"]["corr_90d"] > 0.5  # TSLA was generated to move with SPY
     assert rows["ETF:SPY"]["z_1m"] is not None  # SPY has enough history for z-scores
+    dashboard_build.handler({}, _Context())
+    dashboard = lake.read_json("serving/dashboard.json")
+    assert set(universe.INDEX_PROXIES) <= set(dashboard["tickers"])
+    assert dashboard["tickers"]["SPY"]["price_history"][-1]["date"] == D4_DAY.isoformat()

@@ -47,6 +47,16 @@ def test_window_returns_use_the_sessions_before_the_release_and_the_release_clos
     assert pending["week_before"] == got["week_before"]
 
 
+def test_release_links_use_adjusted_prices_not_a_split_jump():
+    days = _business_days(8)
+    frame = pl.DataFrame({
+        "ticker": ["TSLA"] * 8, "date": days, "close": [200.0] * 7 + [100.0],
+        "adj_close": [100.0] * 7 + [101.0],
+    })
+    ordered, closes = links._closes(frame, "TSLA")
+    assert abs(links.window_returns(ordered, closes, days[-1])["release_day"] - 0.01) < 1e-9
+
+
 def _releases(days, surprises):
     yoys = [2.0]
     for surprise in surprises:

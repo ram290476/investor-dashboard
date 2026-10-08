@@ -36,7 +36,7 @@ import time
 import traceback
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
@@ -57,7 +57,7 @@ _runs: list[dict[str, Any]] = []
 JOB_EVENT_SOURCE = f"{SERVICE}.jobs"
 _events = None
 # Keys a handler return value may add to the Job Finished detail. rows_stored is published as rows_written.
-_EVENT_FIELDS = ("batches", "rows_written", "mode", "dropped", "over_cap")
+_EVENT_FIELDS = ("batches", "rows_written", "mode", "dropped", "over_cap", "status", "reason")
 
 
 def _finished_detail(result: Any) -> dict[str, Any]:
@@ -74,14 +74,15 @@ def emit_job_finished(job_id: str, run_id: str, outcome: str, detail: dict[str, 
 
     EventBridge rules use it to chain work: trend_metrics after D4 and M1 succeed,
     the status feed after every job, and ticker backfill after a TickerAdded event.
-    Never raises: a failed publish is logged and the job result stands.
+    A rejected publish fails the successful job so Lambda can retry its idempotent work.
+    Failure reporting must not mask the original collector exception.
     """
     global _events
     try:
         import boto3
 
         _events = _events or boto3.client("events")
-        _events.put_events(
+        response = _events.put_events(
             Entries=[
                 {
                     "Source": JOB_EVENT_SOURCE,
@@ -90,14 +91,19 @@ def emit_job_finished(job_id: str, run_id: str, outcome: str, detail: dict[str, 
                 }
             ]
         )
-    except Exception:  # observability must not fail the job
+        if response.get("FailedEntryCount"):
+            raise RuntimeError("EventBridge rejected the job-finished event")
+    except Exception:
         logger.exception("emit_job_finished_failed")
+        if outcome == "success":
+            raise
 
 
 def job_handler(
     job_id: str,
     persist_runs: Callable[[list[dict[str, Any]]], None] | None = None,
     emit_event: bool = True,
+    lease_key: str | None = None,
 ):
     """Wrap a Lambda handler: correlation ids, tracing, metric flush, run records, job event.
 
@@ -121,13 +127,17 @@ def job_handler(
             outcome = "success"
             result = None
             try:
-                result = fn(event, context)
+                from lake import job_lease
+
+                with job_lease(lease_key) if lease_key else nullcontext():
+                    result = fn(event, context)
                 return result
             except Exception:
                 outcome = "failure"
                 logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})
                 raise  # Lambda retries twice, then sends the event to the dead-letter queue.
             finally:
+                failed_ids = sorted({r["source_id"] for r in _runs if r["outcome"] == "failure"})
                 logger.info(
                     "job_finished",
                     extra={
@@ -135,6 +145,7 @@ def job_handler(
                         "outcome": outcome,
                         "sources": len(_runs),
                         "failed_sources": sum(r["outcome"] == "failure" for r in _runs),
+                        "failed_source_ids": failed_ids,
                         "duration_ms": round((time.monotonic() - started) * 1000),
                     },
                 )
@@ -151,6 +162,7 @@ def job_handler(
                         {
                             "sources": len(_runs),
                             "failed_sources": sum(r["outcome"] == "failure" for r in _runs),
+                            "failed_source_ids": failed_ids,
                             **_finished_detail(result),
                         },
                     )

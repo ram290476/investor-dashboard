@@ -21,7 +21,7 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
         generated_at="2026-10-04T22:00:00+00:00",
     )
 
-    assert snapshot["schema_version"] == 2
+    assert snapshot["schema_version"] == 3
     assert snapshot["tickers"]["TSLA"]["news"] is None
     assert snapshot["tickers"]["TSLA"]["filings"] is None
     assert snapshot["tickers"]["TSLA"]["insider_30d"] is None
@@ -71,6 +71,27 @@ def test_snapshot_exposes_empty_dataset_as_unavailable():
     assert snapshot["tickers"]["TSLA"]["price_history"] == []
     assert snapshot["tickers"]["TSLA"]["price_as_of"] is None
     assert snapshot["status"] is None
+
+
+def test_release_links_are_scoped_to_ticker_and_missing_stats_stay_null():
+    rows = [
+        {"row_kind": "summary", "series_id": "CPI_YOY", "ticker": "TSLA", "window": "release_day",
+         "n_releases": 3, "trend_direction": "decelerating", "consecutive_releases": 2,
+         "correlation_surprise": None},
+        {"row_kind": "summary", "series_id": "CPI_YOY", "ticker": "SPCX", "window": "release_day",
+         "n_releases": 12, "correlation_surprise": 0.5},
+        {"row_kind": "event", "series_id": "CPI_YOY", "ticker": "TSLA", "release_date": "2026-09-11",
+         "yoy": 2.8, "surprise": -0.1},
+    ]
+    snapshot = dashboard_build.build_snapshot(
+        ["TSLA", "SPCX"], {}, {}, [], None, release_links=rows,
+    )
+    tsla = snapshot["tickers"]["TSLA"]["release_links"]
+    assert tsla["summaries"][0]["n_releases"] == 3
+    assert tsla["summaries"][0]["correlation_surprise"] is None
+    assert tsla["latest"][0]["yoy"] == 2.8
+    assert all(row["ticker"] == "TSLA" for row in tsla["summaries"])
+    assert snapshot["tickers"]["SPCX"]["release_links"]["summaries"][0]["correlation_surprise"] == 0.5
 
 
 def test_chart_data_prefers_filed_public_float_estimate_and_falls_back_to_shares():

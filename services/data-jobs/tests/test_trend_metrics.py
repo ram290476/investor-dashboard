@@ -46,6 +46,70 @@ def test_an_etf_is_not_its_own_driver():
     assert "DGS10" in set(out["series_id"].to_list())
 
 
+def test_macro_is_not_used_before_publication_and_keeps_provenance():
+    prices, _ = _fixture(n=10)
+    days = _days(10)
+    macro = pl.DataFrame({
+        "series_id": ["DGS10", "DGS10"],
+        "obs_date": [days[0], days[2]],
+        "available_date": [days[1], days[3]],
+        "value": [4.0, 9.0],
+    })
+    drivers = tm.split_inputs(prices, macro, [])
+    px = prices.filter(pl.col("ticker") == "TSLA").select("date", "close")
+    out = tm.driver_metrics(px, drivers["DGS10"], "DGS10", "level")
+    assert out["date"][0] == days[1]
+    assert out.filter(pl.col("date") == days[2])["value"][0] == 4.0
+    assert out.filter(pl.col("date") == days[3])["value"][0] == 9.0
+    assert out.filter(pl.col("date") == days[3])["obs_date"][0] == days[2]
+
+
+def test_unavailable_effects_do_not_fabricate_neutral_pressure():
+    prices, macro = _fixture(n=10)
+    out = tm.ticker_metrics(
+        "TSLA", prices.filter(pl.col("ticker") == "TSLA").select("date", "close"),
+        tm.split_inputs(prices, macro, []),
+    )
+    assert out["net_pressure"].null_count() == out.height
+    assert out["effect_count"].to_list() == [0] * out.height
+
+
+def test_shared_series_metrics_are_independent_of_ticker_history():
+    prices, macro = _fixture()
+    drivers = tm.split_inputs(prices, macro, ["SPY"])
+    shared = tm.shared_metrics(prices["date"].unique().sort(), drivers)
+    assert not shared.select("series_id", "date").is_duplicated().any()
+    px = prices.filter(pl.col("ticker") == "TSLA").select("date", "close")
+    full = tm.ticker_metrics("TSLA", px, drivers, shared)
+    recent = tm.ticker_metrics("NEW", px.tail(90), drivers, shared)
+    columns = ["date", "series_id", "z_1m", "range_pct_1y", "trend_state", "days_in_state"]
+    assert full.filter(pl.col("date").is_in(px.tail(90)["date"].implode())).select(columns).equals(
+        recent.select(columns),
+    )
+
+
+def test_nonfinite_changes_do_not_create_a_direction_state():
+    days = _days(200)
+    driver = pl.DataFrame({"date": days, "value": [0.0] * 179 + [1.0] * 21})
+    px = pl.DataFrame({"date": days, "close": [100.0 + i for i in range(200)]})
+    out = tm.driver_metrics(px, driver, "VIXCLS", "pct")
+    assert out["chg_1m"].drop_nulls().is_finite().all()
+    assert out["trend_state"][-1] is None
+
+
+def test_rates_are_displayed_in_basis_points_and_shared_history_is_unique():
+    prices, macro = _fixture()
+    drivers = tm.split_inputs(prices, macro, ["SPY"])
+    shared = tm.shared_metrics(prices["date"], drivers)
+    assert shared.select("series_id", "date").is_duplicated().sum() == 0
+    row = shared.filter(pl.col("series_id") == "DGS10").tail(1).row(0, named=True)
+    assert row["unit"] == "%" and row["change_unit"] == "bp"
+    assert abs(row["change_1m_display"] - row["chg_1m"] * 100) < 1e-9
+    etf = shared.filter(pl.col("series_id") == "ETF:SPY").tail(1).row(0, named=True)
+    assert etf["change_unit"] == "%"
+    assert abs(etf["change_1m_display"] - etf["chg_1m"] * 100) < 1e-9
+
+
 def test_columns_keys_and_ranges():
     prices, macro = _fixture()
     drivers = tm.split_inputs(prices, macro, ["SPY"])

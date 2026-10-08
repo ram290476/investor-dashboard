@@ -1,6 +1,6 @@
-"""M1: CPI, PCE and trade on release morning, plus a stopgap calendar until D1 exists.
+"""M1: CPI, PCE and trade on release morning, plus the release calendar.
 
-The job has no cron. It writes one-off EventBridge Scheduler at() times in UTC from
+The morning cron bootstraps the calendar. It writes one-off EventBridge Scheduler at() times in UTC from
 America/New_York release instants, then polls until a new period shows up.
 Year-over-year history is written to curated/macro_daily/source=releases/ before the
 handler returns, dated on the release date, so the Job Finished event can start
@@ -26,7 +26,7 @@ POLL_ATTEMPTS = 10
 POLL_SECONDS = 120
 BACKFILL_YEARS = 5
 SCHEDULE_PREFIX = "invdash"
-TREND_TRIGGERS = frozenset({"D4", "M1", "RECONCILE"})
+TREND_TRIGGERS = frozenset({"D4", "D1", "M1", "RECONCILE"})
 # Four minutes apart: each run waits one extra two-minute poll, and 300s cannot hold a 20-minute loop.
 FOLLOW_UP_MINUTES = (0, 4, 8, 12, 16)
 BLS_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
@@ -94,7 +94,10 @@ def schedule_name(series: str, when: datetime) -> str:
 
 
 def trend_should_run(detail: dict) -> bool:
-    return detail.get("outcome") == "success" and detail.get("job") in TREND_TRIGGERS
+    return detail.get("outcome") == "success" and (
+        detail.get("job") in TREND_TRIGGERS
+        or (detail.get("job") == "BACKFILL" and detail.get("batches", 0) > 0)
+    )
 
 
 def bls_body(start_year: int, end_year: int, api_key: str) -> dict:
@@ -122,6 +125,8 @@ def _row(series_id: str, period: str, release_ts: str, actual: float, source: st
 
 
 def parse_bls(payload: dict, release_ts: str, consensus: dict[str, float] | None = None) -> list[dict]:
+    if payload.get("status") not in (None, "REQUEST_SUCCEEDED"):
+        raise ValueError("BLS rejected the time-series request")
     rows = []
     for series in (payload.get("Results") or {}).get("series") or []:
         series_id = series.get("seriesID")
@@ -680,12 +685,26 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from lake import read_json, read_parquet_prefix, write_json, write_parquet
     from observability import job_handler, logger, source_run
 
-    @job_handler(JOB_ID)
+    incoming = event_detail(event)
+    idle = incoming and incoming.get("job") == "BACKFILL" and not backfill_refresh(event)
+    if (event or {}).get("source") == "schedule":
+        from macro_daily import is_federal_business_day
+
+        idle = not is_federal_business_day(datetime.now(ET).date())
+
+    @job_handler(JOB_ID, lease_key=None if idle else "curated/releases/_lease.json")
     def run(event, context):
+        if (event or {}).get("source") == "schedule":
+            from macro_daily import is_federal_business_day
+
+            if not is_federal_business_day(datetime.now(ET).date()):
+                return {"status": "skipped", "reason": "federal holiday or weekend"}
         detail = event_detail(event)
-        if detail and detail.get("job") == "BACKFILL":
+        if detail and detail.get("job") in {"BACKFILL", "D4", "RECONCILE"}:
             # Links only: no BLS, BEA, Census, or FRED calls, and no API keys.
-            if not backfill_refresh(event):
+            if detail.get("outcome") != "success" or (
+                detail.get("job") == "BACKFILL" and not backfill_refresh(event)
+            ):
                 return {"status": "skipped", "mode": "links", "batches": 0}
             frame = read_parquet_prefix("curated/releases/")
             stored = frame.to_dicts() if not frame.is_empty() else []
@@ -801,7 +820,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         known = {(row.get("series_id"), row.get("period")) for row in existing}
         # One invocation waits a single extra two minutes. Follow-up at() schedules cover the rest
         # of the 20-minute window. A calendar refresh only needs one pass.
-        attempts = 1 if (event or {}).get("source") == "calendar" else 2
+        attempts = 1 if (event or {}).get("source") in {"calendar", "schedule"} else 2
         fresh = poll_for_new_period(fetch_prints, known, attempts=attempts, pause=time.sleep)
         merged = merge_releases(existing, latest_rows["rows"] or fresh)
         merged = apply_vintage_dates(merged, vintages)
