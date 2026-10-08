@@ -5,8 +5,8 @@ America/New_York release instants, then polls until a new period shows up.
 Year-over-year history is written to curated/macro_daily/source=releases/ before the
 handler returns, dated on the release date, so the Job Finished event can start
 trend-metrics without a look-ahead. Release trends and window links for every
-watchlist ticker go to curated/release_links/. A finished backfill rebuilds those
-links without fetching the agencies again.
+watchlist ticker go to curated/release_links/. A backfill that wrote rows rebuilds
+those links without fetching the agencies or reading API keys.
 """
 
 from __future__ import annotations
@@ -595,41 +595,55 @@ def macro_rows(releases: list[dict]) -> list[dict]:
     return [{field: row[field] for field in row if field != "period"} for row in chosen.values()]
 
 
-def backfill_refresh(event) -> bool:
-    """True when a successful backfill finished and the new prices should be linked."""
+def event_detail(event) -> dict | None:
+    """Job Finished detail, whether EventBridge delivered it as an object or a JSON string."""
     if not isinstance(event, dict):
-        return False
+        return None
     detail = event.get("detail") or {}
     if isinstance(detail, str):
         try:
             detail = json.loads(detail)
         except ValueError:
-            return False
-    if not isinstance(detail, dict):
+            return None
+    return detail if isinstance(detail, dict) else None
+
+
+def backfill_refresh(event) -> bool:
+    """True when a backfill that wrote rows (batches > 0) finished successfully."""
+    detail = event_detail(event)
+    if not detail or detail.get("job") != "BACKFILL" or detail.get("outcome", "success") != "success":
         return False
-    return detail.get("job") == "BACKFILL" and detail.get("outcome", "success") == "success"
+    try:
+        return int(detail.get("batches") or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
-def watchlist_equities() -> list[str]:
-    """Base tickers plus the user-prefs union, the same list the other collectors use."""
-    from universe import collection_universe, user_ticker_union
+def watchlist_for_links() -> dict[str, list[str] | str | None]:
+    """Defaults plus every prefs ticker, including an index ETF a user added."""
+    from universe import user_ticker_union, watchlist_universe
 
-    return collection_universe(user_ticker_union())["equities"]
+    return watchlist_universe(user_ticker_union())
 
 
-def publish_release_links(releases: list[dict]) -> int:
+def publish_release_links(releases: list[dict]) -> dict[str, list[str] | str | int | None]:
     """Rewrite the links table for every watchlist ticker that already has closes."""
     from lake import read_prices, write_parquet
+    from observability import logger
     from release_links import build_release_links
 
-    links = build_release_links(releases, read_prices(), YOY_SERIES, watchlist_equities())
-    if links.is_empty():
-        return 0
-    write_parquet(links, RELEASE_LINKS_KEY)
-    linked = links.filter(pl.col("row_kind") == "summary")
-    if linked.is_empty() or "ticker" not in linked.columns:
-        return 0
-    return linked["ticker"].drop_nulls().n_unique()
+    uni = watchlist_for_links()
+    dropped = list(uni["dropped"] or [])
+    if dropped:
+        logger.warning("over the ticker cap", extra={"dropped": dropped, "dropped_count": len(dropped)})
+    links = build_release_links(releases, read_prices(), YOY_SERIES, list(uni["tickers"] or []))
+    linked = 0
+    if not links.is_empty():
+        write_parquet(links, RELEASE_LINKS_KEY)
+        summaries = links.filter(pl.col("row_kind") == "summary")
+        if not summaries.is_empty() and "ticker" in summaries.columns:
+            linked = summaries["ticker"].drop_nulls().n_unique()
+    return {"tickers": linked, "dropped": dropped, "over_cap": uni["over_cap"]}
 
 
 def publish_macro(rows: list[dict], ingested_at: str) -> list[str]:
@@ -668,10 +682,14 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
 
     @job_handler(JOB_ID)
     def run(event, context):
-        if backfill_refresh(event):
+        detail = event_detail(event)
+        if detail and detail.get("job") == "BACKFILL":
+            # Links only: no BLS, BEA, Census, or FRED calls, and no API keys.
+            if not backfill_refresh(event):
+                return {"status": "skipped", "mode": "links", "batches": 0}
             frame = read_parquet_prefix("curated/releases/")
             stored = frame.to_dicts() if not frame.is_empty() else []
-            return {"status": "success", "links_only": True, "tickers": publish_release_links(stored)}
+            return {"status": "success", "mode": "links", **publish_release_links(stored)}
 
         now = datetime.now(UTC)
         release_ts = now.isoformat(timespec="seconds")
@@ -797,7 +815,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         macro = macro_rows(merged)
         if macro:
             publish_macro(macro, now.isoformat(timespec="seconds"))
-        publish_release_links(merged)
+        published = publish_release_links(merged)
         upcoming = upcoming_calendar(calendar_rows(ics_dates, fred_rows), today)
         stored = read_json("curated/release_calendar/upcoming.json")
         if not upcoming and isinstance(stored, list):
@@ -818,7 +836,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 )
                 rec["rows"] = len(names)
                 logger.info("release_schedules_armed", extra={"count": len(names)})
-        return {"status": "success" if fresh else "skipped", "new_periods": len(fresh)}
+        return {"status": "success" if fresh else "skipped", "new_periods": len(fresh), **published}
 
     return run(event, context)
 

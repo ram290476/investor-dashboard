@@ -36,6 +36,16 @@ def _fixture(n=600, seed=7):
     return prices, macro
 
 
+def test_an_etf_is_not_its_own_driver():
+    prices, macro = _fixture()
+    drivers = tm.split_inputs(prices, macro, ["SPY"])
+    spy = prices.filter(pl.col("ticker") == "SPY").select("date", "close")
+    out = tm.ticker_metrics("SPY", spy, drivers)
+    assert "ETF:SPY" in drivers
+    assert "ETF:SPY" not in set(out["series_id"].to_list())
+    assert "DGS10" in set(out["series_id"].to_list())
+
+
 def test_columns_keys_and_ranges():
     prices, macro = _fixture()
     drivers = tm.split_inputs(prices, macro, ["SPY"])

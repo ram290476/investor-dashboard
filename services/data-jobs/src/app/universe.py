@@ -52,12 +52,36 @@ def user_ticker_union(table_name: str = PREFS_TABLE, dynamodb=None) -> list[str]
 
 
 def collection_universe(user_tickers: list[str], cap: int = MAX_USER_TICKERS) -> dict[str, list[str]]:
-    """Return {'equities': base + capped user tickers, 'etfs': index proxies, 'dropped': over the cap}."""
+    """Return {'equities': base + capped user tickers, 'etfs': index proxies, 'dropped': over the cap}.
+
+    Index proxies stay in `etfs` and are not repeated as equities. Per-ticker links use
+    watchlist_universe(), which keeps an ETF a user added.
+    """
     extra = [t for t in user_tickers if t not in BASE_TICKERS and t not in INDEX_PROXIES]
     return {
         "equities": list(BASE_TICKERS) + extra[:cap],
         "etfs": list(INDEX_PROXIES),
         "dropped": extra[cap:],
+    }
+
+
+def watchlist_universe(user_tickers: list[str], cap: int = MAX_USER_TICKERS) -> dict[str, list[str] | str | None]:
+    """Defaults plus every prefs ticker, including index ETFs a user added.
+
+    The cap is MAX_USER_TICKERS beyond the defaults. Names past the cap are returned in
+    `dropped` and reported as "over the ticker cap". An ETF on this list gets per-ticker
+    links; it is never its own driver.
+    """
+    extras: list[str] = []
+    for symbol in user_tickers:
+        if symbol in BASE_TICKERS or symbol in extras or not _valid(symbol):
+            continue
+        extras.append(symbol)
+    dropped = extras[cap:]
+    return {
+        "tickers": list(BASE_TICKERS) + extras[:cap],
+        "dropped": dropped,
+        "over_cap": "over the ticker cap" if dropped else None,
     }
 
 
