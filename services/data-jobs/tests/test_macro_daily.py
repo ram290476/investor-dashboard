@@ -7,6 +7,7 @@ from urllib.parse import parse_qs
 import boto3
 import httpx
 import polars as pl
+import pytest
 from moto import mock_aws
 
 import api_keys
@@ -215,3 +216,11 @@ def test_handler_skips_a_federal_holiday_and_still_finishes_as_d1(monkeypatch):
     result = macro_daily.handler({}, _Context())
     assert result["status"] == "skipped"
     assert emitted == [("D1", "success")]
+
+
+def test_fred_application_error_is_not_a_successful_empty_collection(monkeypatch):
+    monkeypatch.setattr(macro_daily, "httpx_get", lambda *args: httpx.Response(
+        200, json={"error_code": 400, "error_message": "Invalid API key"},
+    ))
+    with pytest.raises(RuntimeError, match=r"DGS10.*ValueError"):
+        macro_daily._fetch_observations(None, "DGS10", date(2026, 1, 1), date(2026, 10, 8), SECRET)

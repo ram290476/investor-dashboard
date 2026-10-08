@@ -26,14 +26,16 @@ zero-build HTML/CSS/JavaScript. It implements the repository's dark desktop/mobi
 this deliberately avoids introducing a frontend build toolchain, but differs from the architecture
 document's proposed TypeScript/Vite/Svelte implementation.
 
-The currently wired data jobs are daily Alpaca prices (`daily-prices`, emitted job ID `D4`),
+The currently wired data jobs include hourly/daily prices, news/sentiment, regulatory feeds,
+government contracts, daily FRED macro (`D1`), release-day data/calendar (`M1`),
 Yahoo historical prices (`backfill`), trend metrics, quarterly fundamentals, short interest,
 options, status-feed updates and dashboard snapshot building. The key-rotation checker is a
 separate Lambda. The job map and schedules live in `infra/terraform/variables.tf`.
 
 This is not yet the complete source catalog implementation: the architecture lists additional
-hourly, macro, release-day, regulatory, weekly and annual collectors that are not wired here.
-In particular, M1 is not implemented; configured trend refreshes can still run on D4 events.
+company-specific, weekly and annual collectors that are not wired here. Planned D2/D3/W1
+jobs are not listed as failing collectors in the status feed. D1 and M1 are implemented;
+see the [issue #26 remediation plan and schema](trend-serving.md) for collector/serving gaps.
 Do not treat missing metrics or a successful deployment as proof that every catalog source is
 being refreshed. The external freshness canary remains disabled until a safe public health
 document and publisher are configured.
@@ -390,9 +392,22 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | `options-daily` | Weekdays 16:50 ET | Enabled by default through `enable_options_daily`; uses the existing Alpaca indicative credentials. IV30 stays unavailable if the feed omits implied volatility. |
 | `backfill` | Every 15 minutes and on ticker-added events | Resumes only persisted incomplete work. |
 | `price-reconcile` | Weekdays 19:15 ET | Checks Yahoo for new splits/dividends and rewrites a ticker's adjusted history when needed (job ID `RECONCILE`). |
-| `trend-metrics` | Job events from D4, M1 or RECONCILE | M1's collector is not yet implemented. |
+| `macro-daily` | Weekdays 07:00 ET | FRED history/revisions; federal holidays skipped. |
+| `release-day` | Weekdays 06:35 ET and release-morning one-offs | Bootstraps the calendar and stores release history. D4, RECONCILE and non-idle BACKFILL events rebuild ticker links without provider calls. |
+| `trend-metrics` | D1, D4, M1, RECONCILE and non-idle BACKFILL events | Publishes shared series metrics plus per-ticker correlation/effect history. |
 | `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill and reconcile events | Publishes `serving/dashboard.json`. |
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
+
+D1, M1, TREND and DASHBOARD use conditional S3 leases to prevent concurrent
+read/build/publish runs from overwriting newer documents. Leases expire after 15
+minutes (longer than these functions' maximum ten-minute timeout); contending
+invocations fail explicitly and use Lambda retries/DLQ handling, not success-shaped
+skips. If retries exhaust, replay the affected DLQ event after the current run ends.
+Do not manually clear an unexpired lease while its function is running.
+Rejected EventBridge job-finished publishes also fail successful jobs for retry.
+Partial status includes safe failed source IDs; a holiday/no-new-print skip is not
+a successful new observation. See [trend serving](trend-serving.md) for warm-up
+thresholds and live verification.
 
 FINRA short-interest percentages use SEC `EntityPublicFloat` when the public-float
 market-value fact and its measurement-date close are available. The estimated share

@@ -1,14 +1,16 @@
 """trend_metrics build job: how each macro driver is moving and how much it matters to each ticker.
 
-Runs after D4 (daily close) and after M1 (release days), triggered by their
+Runs after D1, D4, M1, reconciliation and non-idle backfills, triggered by their
 'Job Finished' events. Reads curated/prices_daily and curated/macro_daily,
 writes Parquet and a small latest-day JSON to the serving prefix:
 
-    serving/trend_metrics/ticker=<T>/trend_metrics.parquet   full history
+    serving/trend_metrics/series/metrics.parquet             shared (series_id, date) history
+    serving/trend_metrics/ticker=<T>/trend_metrics.parquet   per-ticker links and full history
     serving/trend_metrics/latest/<T>.json                     last trading day, one row per driver
                                                           plus PX:<T>, that ticker's own 20/50-day price trend
 
-Key: (series_id, ticker, date). Columns, per the UI brief:
+Shared key: (series_id, date); ticker history key: (series_id, ticker, date).
+Observation/availability provenance and display units are retained. Columns:
     value, chg_1w, chg_1m, chg_3m, z_1w, z_1m, z_3m      changes over 5/21/63 trading days and their z-scores
                                                           against the trailing 252-day distribution of that change
     range_pct_1y                                          where today's value sits in its 1-year high-low range (0-100)
@@ -19,7 +21,7 @@ Key: (series_id, ticker, date). Columns, per the UI brief:
                                                           on the z_1m rule above.
     effect        = corr_90d * z_1m
     net_pressure  = tanh(sum of effect over all drivers for that ticker and date / 3)
-                    (the same value on every row of a ticker-date)
+                    (the same value on every row of a ticker-date; null if no finite effects)
 """
 
 from __future__ import annotations
@@ -84,33 +86,49 @@ OUTPUT_COLUMNS = [
     "corr_90d",
     "effect",
     "net_pressure",
+    "obs_date",
+    "available_date",
+    "unit",
+    "change_unit",
+    "change_1m_display",
+    "pressure_direction",
+    "strength",
+    "effect_count",
 ]
+RATE_SERIES = frozenset({
+    "DGS2", "DGS10", "DGS30", "T10Y2Y", "DFII10", "T10YIE", "DFEDTARU", "EFFR", "SOFR",
+})
 
 
 def _change(col: pl.Expr, n: int, kind: str) -> pl.Expr:
     return (col / col.shift(n) - 1.0) if kind == "pct" else (col - col.shift(n))
 
 
-def driver_metrics(ticker_px: pl.DataFrame, driver: pl.DataFrame, series_id: str, kind: str) -> pl.DataFrame:
-    """ticker_px: (date, close) for one ticker. driver: (date, value) for one series, any frequency.
+def _finite(df: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
+    return df.with_columns([
+        pl.when(pl.col(c).is_finite()).then(pl.col(c)).otherwise(None).alias(c) for c in columns
+    ])
 
-    The driver is carried forward onto the ticker's trading days, so a monthly series (CPI)
-    holds its last released value until the next release.
-    """
-    if ticker_px.is_empty() or driver.is_empty():
+
+def series_metrics(calendar: pl.Series, driver: pl.DataFrame, series_id: str, kind: str) -> pl.DataFrame:
+    """Shared metrics on stored trading sessions, aligned to when a print became available."""
+    if calendar.is_empty() or driver.is_empty():
+        return pl.DataFrame()
+    driver = _finite(driver, ["value"]).filter(pl.col("value").is_not_null()).sort("date")
+    if driver.is_empty():
         return pl.DataFrame()
     df = (
-        ticker_px.sort("date")
-        .join_asof(driver.sort("date"), on="date", strategy="backward")
+        pl.DataFrame({"date": calendar.unique().sort()})
+        .join_asof(driver.unique(subset=["date"], keep="last", maintain_order=True), on="date", strategy="backward")
         .filter(pl.col("value").is_not_null())
     )
-    v, px = pl.col("value"), pl.col("close")
+    v = pl.col("value")
     lo = v.rolling_min(RANGE_LOOKBACK, min_samples=RANGE_MIN)
     hi = v.rolling_max(RANGE_LOOKBACK, min_samples=RANGE_MIN)
     exprs = []
     for name, n in WINDOWS.items():
         exprs.append(_change(v, n, kind).alias(f"chg_{name}"))
-    df = df.with_columns(exprs)
+    df = _finite(df.with_columns(exprs), [f"chg_{w}" for w in WINDOWS])
     df = df.with_columns(
         [
             (
@@ -121,14 +139,11 @@ def driver_metrics(ticker_px: pl.DataFrame, driver: pl.DataFrame, series_id: str
         ]
         + [
             (100.0 * (v - lo) / (hi - lo)).clip(0.0, 100.0).alias("range_pct_1y"),
-            _change(v, 1, kind).alias("_d_driver"),
-            (px / px.shift(1) - 1.0).alias("_d_ticker"),
         ]
     )
+    df = _finite(df, ["z_1w", "z_1m", "z_3m", "range_pct_1y"])
     df = df.with_columns(
         [
-            pl.rolling_corr("_d_driver", "_d_ticker", window_size=30, min_samples=20).alias("corr_30d"),
-            pl.rolling_corr("_d_driver", "_d_ticker", window_size=90, min_samples=60).alias("corr_90d"),
             pl.when(pl.col("z_1m") > TREND_Z)
             .then(pl.lit("up"))
             .when(pl.col("z_1m") < -TREND_Z)
@@ -139,27 +154,64 @@ def driver_metrics(ticker_px: pl.DataFrame, driver: pl.DataFrame, series_id: str
             .alias("trend_state"),
         ]
     )
-    # Clean up NaN/inf from zero variance or a flat 1-year range.
-    float_cols = ["z_1w", "z_1m", "z_3m", "range_pct_1y", "corr_30d", "corr_90d"]
-    df = df.with_columns([pl.when(pl.col(c).is_finite()).then(pl.col(c)).otherwise(None).alias(c) for c in float_cols])
+    df = df.with_columns(pl.col("trend_state").rle_id().alias("_run"))
+    df = df.with_columns((pl.int_range(pl.len()).over("_run") + 1).alias("days_in_state"))
+    df = df.with_columns(
+        pl.when(pl.col("trend_state").is_null()).then(None).otherwise(pl.col("days_in_state")).alias("days_in_state"),
+        pl.lit(series_id).alias("series_id"),
+        pl.lit("%" if series_id in RATE_SERIES or series_id in MONTHLY_SERIES
+               else "USD" if series_id == "DCOILWTICO" or series_id.startswith("ETF:") else "index").alias("unit"),
+        pl.lit("bp" if series_id in RATE_SERIES else "%" if kind == "pct" else "pp").alias("change_unit"),
+        (pl.col("chg_1m") * (100 if kind == "pct" or series_id in RATE_SERIES else 1)).alias("change_1m_display"),
+    )
+    if "obs_date" not in df.columns:
+        df = df.with_columns(pl.col("date").alias("obs_date"), pl.col("date").alias("available_date"))
+    return df.drop("_run")
+
+
+def shared_metrics(calendar: pl.Series, drivers: dict[str, pl.DataFrame]) -> pl.DataFrame:
+    parts = [series_metrics(calendar, frame, sid, DRIVERS.get(sid, "pct")) for sid, frame in drivers.items()]
+    parts = [part for part in parts if not part.is_empty()]
+    return pl.concat(parts, how="diagonal_relaxed").sort(["date", "series_id"]) if parts else pl.DataFrame()
+
+
+def driver_metrics(
+    ticker_px: pl.DataFrame, driver: pl.DataFrame, series_id: str, kind: str,
+    shared: pl.DataFrame | None = None,
+) -> pl.DataFrame:
+    if ticker_px.is_empty() or driver.is_empty():
+        return pl.DataFrame()
+    metrics = series_metrics(ticker_px["date"], driver, series_id, kind) if shared is None else shared
+    if metrics.is_empty():
+        return pl.DataFrame()
+    df = ticker_px.sort("date").join(metrics, on="date", how="left").sort("date")
+    df = _finite(df.with_columns(
+        _change(pl.col("value"), 1, kind).alias("_d_driver"),
+        _change(pl.col("close"), 1, "pct").alias("_d_ticker"),
+    ), ["_d_driver", "_d_ticker"])
     if series_id in MONTHLY_SERIES:
         df = df.with_columns(
             pl.lit(None).cast(pl.Float64).alias("corr_30d"),
             pl.lit(None).cast(pl.Float64).alias("corr_90d"),
         )
-    df = df.with_columns(pl.col("trend_state").rle_id().alias("_run"))
-    df = df.with_columns((pl.int_range(pl.len()).over("_run") + 1).alias("days_in_state"))
-    df = df.with_columns(
-        pl.when(pl.col("trend_state").is_null()).then(None).otherwise(pl.col("days_in_state")).alias("days_in_state"),
+    else:
+        df = _finite(df.with_columns(
+            pl.rolling_corr("_d_driver", "_d_ticker", window_size=30, min_samples=20).alias("corr_30d"),
+            pl.rolling_corr("_d_driver", "_d_ticker", window_size=90, min_samples=60).alias("corr_90d"),
+        ), ["corr_30d", "corr_90d"])
+    return df.with_columns(
         (pl.col("corr_90d") * pl.col("z_1m")).alias("effect"),
-        pl.lit(series_id).alias("series_id"),
-    )
-    return df.drop(["_d_driver", "_d_ticker", "_run", "close"])
+    ).filter(pl.col("value").is_not_null()).drop(["close", "_d_driver", "_d_ticker"])
 
 
-def ticker_metrics(ticker: str, ticker_px: pl.DataFrame, drivers: dict[str, pl.DataFrame]) -> pl.DataFrame:
+def ticker_metrics(
+    ticker: str, ticker_px: pl.DataFrame, drivers: dict[str, pl.DataFrame], shared: pl.DataFrame | None = None,
+) -> pl.DataFrame:
     parts = [
-        driver_metrics(ticker_px, frame, sid, DRIVERS.get(sid, "pct"))
+        driver_metrics(
+            ticker_px, frame, sid, DRIVERS.get(sid, "pct"),
+            None if shared is None or shared.is_empty() else shared.filter(pl.col("series_id") == sid),
+        )
         for sid, frame in drivers.items()
         if sid != f"ETF:{ticker}"  # an ETF is not its own driver
     ]
@@ -167,11 +219,24 @@ def ticker_metrics(ticker: str, ticker_px: pl.DataFrame, drivers: dict[str, pl.D
     if not parts:
         return pl.DataFrame(schema={c: pl.Utf8 for c in OUTPUT_COLUMNS})
     df = pl.concat(parts, how="diagonal_relaxed").with_columns(pl.lit(ticker).alias("ticker"))
-    pressure = df.group_by("date").agg(pl.col("effect").sum().alias("_sum_effect"))
-    pressure = pressure.with_columns(
-        pl.col("_sum_effect").map_elements(lambda s: math.tanh(s / 3.0), return_dtype=pl.Float64).alias("net_pressure")
+    pressure = df.group_by("date").agg(
+        pl.col("effect").sum().alias("_sum_effect"), pl.col("effect").count().alias("effect_count"),
     )
-    df = df.join(pressure.select("date", "net_pressure"), on="date", how="left")
+    pressure = pressure.with_columns(
+        pl.when(pl.col("effect_count") > 0).then(
+            pl.col("_sum_effect").map_elements(lambda s: math.tanh(s / 3.0), return_dtype=pl.Float64),
+        ).otherwise(None).alias("net_pressure"),
+    )
+    df = df.join(pressure.select("date", "net_pressure", "effect_count"), on="date", how="left")
+    df = df.with_columns(
+        pl.when(pl.col("effect") > 0).then(pl.lit("tailwind"))
+        .when(pl.col("effect") < 0).then(pl.lit("headwind"))
+        .when(pl.col("effect").is_not_null()).then(pl.lit("neutral")).otherwise(None).alias("pressure_direction"),
+        pl.when(pl.col("effect").is_null()).then(None)
+        .when(pl.col("effect").abs() >= 1).then(pl.lit("strong"))
+        .when(pl.col("effect").abs() >= 0.5).then(pl.lit("moderate"))
+        .otherwise(pl.lit("weak")).alias("strength"),
+    )
     return df.select(OUTPUT_COLUMNS).sort(["date", "series_id"])
 
 
@@ -253,7 +318,16 @@ def latest_document(ticker: str, metrics: pl.DataFrame, prices: pl.DataFrame) ->
         as_of = as_of or price_row["date"]
     if not rows:
         return None
-    return {"ticker": ticker, "date": as_of, "rows": rows}
+    drivers = [row for row in rows if not row["series_id"].startswith("PX:")]
+    present = {row["series_id"] for row in drivers}
+    return {
+        "ticker": ticker, "date": as_of, "rows": rows,
+        "coverage": {
+            "available": len(drivers),
+            "linked": sum(row.get("effect") is not None for row in drivers),
+            "missing": sorted(set(DRIVERS) - {f"ETF:{ticker}"} - present),
+        },
+    }
 
 
 def analysis_prices(prices: pl.DataFrame) -> pl.DataFrame:
@@ -269,14 +343,23 @@ def analysis_prices(prices: pl.DataFrame) -> pl.DataFrame:
 def split_inputs(prices_daily: pl.DataFrame, macro_daily: pl.DataFrame, etfs: list[str]):
     """prices_daily: (ticker, date, close). macro_daily: (series_id, obs_date, value).
 
-    Either frame may be empty or column-less (read_parquet_prefix on an empty prefix, e.g. before
-    the M1 macro collector exists); the missing drivers are simply skipped.
+    Either frame may be empty or column-less (read_parquet_prefix before any collector
+    output); the missing drivers are simply skipped.
     """
     drivers: dict[str, pl.DataFrame] = {}
     if not macro_daily.is_empty() and MACRO_COLUMNS <= set(macro_daily.columns):
         for (sid,), frame in macro_daily.group_by(["series_id"]):
             if sid in DRIVERS:
-                drivers[sid] = frame.select(pl.col("obs_date").alias("date"), pl.col("value").cast(pl.Float64))
+                available = (
+                    pl.coalesce("available_date", "obs_date")
+                    if "available_date" in frame.columns else pl.col("obs_date")
+                )
+                drivers[sid] = frame.sort(
+                    [c for c in ["obs_date", "ingested_at"] if c in frame.columns],
+                ).select(
+                    available.cast(pl.Date).alias("date"), pl.col("obs_date").cast(pl.Date),
+                    available.cast(pl.Date).alias("available_date"), pl.col("value").cast(pl.Float64),
+                )
     if prices_daily.is_empty() or not {"ticker", "date", "close"} <= set(prices_daily.columns):
         return drivers
     for etf in etfs:
@@ -289,21 +372,26 @@ def split_inputs(prices_daily: pl.DataFrame, macro_daily: pl.DataFrame, etfs: li
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from lake import read_parquet_prefix, read_prices, write_json, write_parquet
     from observability import job_handler
-    from universe import collection_universe, user_ticker_union
+    from universe import collection_universe, user_ticker_union, watchlist_universe
 
-    @job_handler("TREND")
+    @job_handler("TREND", lease_key="serving/trend_metrics/_lease.json")
     def run(event, context):
-        uni = collection_universe(user_ticker_union())
+        users = user_ticker_union()
+        uni = collection_universe(users)
+        watch = watchlist_universe(users)
         # yearly partitions (+ any uncompacted legacy objects), deduped; adjusted closes for the math
         prices = analysis_prices(read_prices())
         macro = read_parquet_prefix("curated/macro_daily/")
         drivers = split_inputs(prices, macro, uni["etfs"])
         written = 0
         if prices.is_empty() or "ticker" not in prices.columns:
-            return {"tickers": 0, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": uni["dropped"]}
-        for t in uni["equities"]:
+            return {"tickers": 0, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": watch["dropped"]}
+        shared = shared_metrics(prices["date"], drivers)
+        if not shared.is_empty():
+            write_parquet(shared, "serving/trend_metrics/series/metrics.parquet")
+        for t in list(watch["tickers"] or []):
             px = prices.filter(pl.col("ticker") == t).select("date", pl.col("close").cast(pl.Float64))
-            out = ticker_metrics(t, px, drivers)
+            out = ticker_metrics(t, px, drivers, shared)
             document = latest_document(t, out, px)
             if document is None:
                 continue
@@ -311,6 +399,6 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 write_parquet(out, f"serving/trend_metrics/ticker={t}/trend_metrics.parquet")
             write_json(document, f"serving/trend_metrics/latest/{t}.json")
             written += 1
-        return {"tickers": written, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": uni["dropped"]}
+        return {"tickers": written, "as_of": str(datetime.now(UTC).date()), "dropped_over_cap": watch["dropped"]}
 
     return run(event, context)

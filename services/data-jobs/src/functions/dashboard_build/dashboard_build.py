@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 MAX_PRICE_ROWS = 1260
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 HEADLINE_LIMIT = 10
 ET = ZoneInfo("America/New_York")
 CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
@@ -146,6 +146,21 @@ def build_releases(rows: list[dict], calendar: list[dict]) -> dict:
     }
 
 
+def build_release_links(ticker: str, rows: list[dict]) -> dict:
+    scoped = [row for row in rows if row.get("ticker") == ticker]
+    latest: dict[str, dict] = {}
+    for row in scoped:
+        if row.get("row_kind") != "event":
+            continue
+        series = str(row.get("series_id") or "")
+        if series not in latest or str(row.get("release_date") or "") > str(latest[series].get("release_date") or ""):
+            latest[series] = row
+    return {
+        "summaries": [row for row in scoped if row.get("row_kind") == "summary"],
+        "latest": [latest[key] for key in sorted(latest)],
+    }
+
+
 def _session_date(ts: str) -> str:
     stamp = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
     if stamp.tzinfo is None:
@@ -219,6 +234,7 @@ def build_chart_data(
 
     trends_by_series: dict[str, dict[str, float]] = {}
     pressure_by_date: dict[str, float] = {}
+    correlation_by_series: dict[str, list[dict]] = {}
     for row in trend_rows:
         if row.get("ticker") not in (None, ticker):
             continue
@@ -230,6 +246,10 @@ def build_chart_data(
             continue
         if series_id and value is not None:
             trends_by_series.setdefault(series_id, {})[day] = value
+        if series_id:
+            correlation_by_series.setdefault(series_id, []).append({
+                "date": day, "corr_30d": number(row.get("corr_30d")), "corr_90d": number(row.get("corr_90d")),
+            })
         if pressure is not None:
             pressure_by_date[day] = pressure
 
@@ -335,6 +355,10 @@ def build_chart_data(
         "macro_pressure": [
             {"date": day, "value": pressure_by_date[day]} for day in sorted(pressure_by_date)[-MAX_PRICE_ROWS:]
         ],
+        "correlation_history": {
+            series: sorted(rows, key=lambda row: row["date"])[-90:]
+            for series, rows in sorted(correlation_by_series.items())
+        },
         "short_interest": short_interest[-MAX_PRICE_ROWS:],
         "options": options[-MAX_PRICE_ROWS:],
         "fundamentals": sorted(company_series, key=lambda row: (row["date"], row["series_id"])),
@@ -356,6 +380,7 @@ def build_snapshot(
     contracts: dict[str, dict] | None = None,
     releases: list[dict] | None = None,
     release_calendar: list[dict] | None = None,
+    release_links: list[dict] | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
     clock = _as_of(generated_at)
@@ -389,6 +414,7 @@ def build_snapshot(
             "ticker": ticker,
             "price_history": history,
             "trend": trends.get(ticker),
+            "release_links": None if release_links is None else build_release_links(ticker, release_links),
             "news": None
             if bundle is None
             else build_news(ticker, bundle.get("daily") or [], bundle.get("articles") or [], clock),
@@ -426,9 +452,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from observability import job_handler, logger
     from universe import collection_universe, user_ticker_union
 
-    @job_handler("DASHBOARD", emit_event=False)
+    @job_handler("DASHBOARD", emit_event=False, lease_key="serving/dashboard-build/_lease.json")
     def run(event, context):
-        tickers = collection_universe(user_ticker_union())["equities"]
+        covered = collection_universe(user_ticker_union())
+        tickers = covered["equities"] + covered["etfs"]
         price_data: dict[str, list[dict]] = {}
         trend_data: dict[str, dict | None] = {}
         trend_history_data: dict[str, list[dict]] = {}
@@ -477,6 +504,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         status = read_json("serving/status.json")
         release_frame = read_parquet_prefix("curated/releases/")
         calendar = read_json("curated/release_calendar/upcoming.json") or []
+        links = read_parquet_prefix("curated/release_links/")
         snapshot = build_snapshot(
             tickers=tickers,
             prices=price_data,
@@ -491,6 +519,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             contracts=contracts_data,
             releases=release_frame.to_dicts() if not release_frame.is_empty() else [],
             release_calendar=calendar if isinstance(calendar, list) else [],
+            release_links=links.to_dicts() if not links.is_empty() else [],
         )
         for ticker in tickers:
             chart_document = build_chart_data(

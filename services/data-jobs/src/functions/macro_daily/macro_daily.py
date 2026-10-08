@@ -143,9 +143,13 @@ def _fetch_observations(http, series_id: str, start: date, end: date, key: str) 
     """GET one series. Failures are re-raised without the request URL, which carries the key."""
     try:
         response = httpx_get(http, series_id, start, end, key)
-        return response.json()
-    except (httpx.HTTPError, RuntimeError, ValueError, TypeError):
-        raise RuntimeError(f"FRED observations request failed for {series_id}") from None
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("observations"), list):
+            raise ValueError("FRED did not return observations")
+        return payload
+    except (httpx.HTTPError, RuntimeError, ValueError, TypeError) as exc:
+        code = f", HTTP {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else ""
+        raise RuntimeError(f"FRED observations request failed for {series_id} ({type(exc).__name__}{code})") from None
 
 
 def httpx_get(http, series_id: str, start: date, end: date, key: str):
@@ -173,7 +177,9 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from lake import read_json, upsert_ranked, write_json
     from observability import job_handler, logger, source_run
 
-    @job_handler("D1")
+    @job_handler(
+        "D1", lease_key="curated/macro_daily/source=fred/_lease.json" if is_federal_business_day(today_et()) else None,
+    )
     def run(event, context):
         today = today_et()
         if not is_federal_business_day(today):

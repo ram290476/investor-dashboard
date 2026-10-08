@@ -313,10 +313,10 @@ variable "jobs" {
     trend-metrics = {
       handler        = "trend_metrics.handler"
       schedule       = ""
-      triggers       = ["job:D4", "job:M1", "job:RECONCILE", "job:D1"]
+      triggers       = ["job:D4", "job:M1", "job:RECONCILE", "job:D1", "job:BACKFILL?batches>0"]
       memory         = 2048
       timeout        = 600
-      read_prefixes  = ["curated/prices_daily/", "curated/macro_daily/"]
+      read_prefixes  = ["curated/prices_daily/", "curated/macro_daily/", "serving/trend_metrics/_lease.json"]
       write_prefixes = ["serving/trend_metrics/"]
       api_keys       = []
       reads_prefs    = true
@@ -418,10 +418,12 @@ variable "jobs" {
         "curated/options_daily/",
         "serving/fundamentals_quarterly.json",
         "serving/status.json",
+        "serving/dashboard-build/",
         "curated/releases/",
         "curated/release_calendar/",
+        "curated/release_links/",
       ]
-      write_prefixes = ["serving/dashboard.json", "serving/chart_data/"]
+      write_prefixes = ["serving/dashboard.json", "serving/chart_data/", "serving/dashboard-build/"]
       api_keys       = []
       reads_prefs    = true
     }
@@ -485,12 +487,12 @@ variable "jobs" {
       api_keys       = []
       reads_prefs    = true
     }
-    # Event-driven. One-off at() schedules are created from the stopgap release calendar.
+    # Morning calendar bootstrap plus release-morning one-off at() schedules.
     release-day = {
       handler  = "release_day.handler"
-      schedule = ""
+      schedule = "cron(35 6 ? * MON-FRI *)"
       # A backfill that wrote rows rebuilds links. Idle runs (batches = 0) do not start M1.
-      triggers = ["job:BACKFILL?batches>0"]
+      triggers = ["job:BACKFILL?batches>0", "job:D4", "job:RECONCILE"]
       memory   = 512
       timeout  = 300
       read_prefixes = [

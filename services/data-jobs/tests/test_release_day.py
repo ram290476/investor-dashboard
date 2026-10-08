@@ -81,6 +81,21 @@ def test_bls_post_covers_headline_and_core_in_one_body():
     assert abs(headline["surprise"] - 0.2) < 1e-9
 
 
+def test_bls_application_error_does_not_look_like_no_new_release():
+    with pytest.raises(ValueError, match="BLS rejected"):
+        release_day.parse_bls({"status": "REQUEST_NOT_PROCESSED", "Results": {}}, "2026-10-08")
+
+
+@pytest.mark.parametrize(("job", "batches", "outcome", "expected"), [
+    ("D1", 0, "success", True),
+    ("BACKFILL", 1, "success", True),
+    ("BACKFILL", 0, "success", False),
+    ("BACKFILL", 1, "failure", False),
+])
+def test_trend_trigger_parity(job, batches, outcome, expected):
+    assert release_day.trend_should_run({"job": job, "batches": batches, "outcome": outcome}) is expected
+
+
 def test_revision_keeps_the_prior_actual_and_release_history():
     first = release_day.parse_bls(BLS, "2026-10-15T12:35:00+00:00")
     revised = release_day.parse_bls(
@@ -566,7 +581,8 @@ def test_finished_event_carries_batches_and_links_mode(monkeypatch):
     assert emitted["detail"]["over_cap"] == "over the ticker cap"
 
 
-def test_links_only_run_covers_nvda_and_spy_without_provider_calls(monkeypatch):
+@pytest.mark.parametrize("trigger", ["BACKFILL", "D4", "RECONCILE"])
+def test_links_only_run_covers_nvda_and_spy_without_provider_calls(monkeypatch, trigger):
     import boto3
     import polars as pl
     from moto import mock_aws
@@ -617,7 +633,7 @@ def test_links_only_run_covers_nvda_and_spy_without_provider_calls(monkeypatch):
         )
         lake.write_parquet(prices, "curated/prices_daily/year=2024/prices.parquet")
         result = release_day.handler(
-            {"detail": {"job": "BACKFILL", "outcome": "success", "batches": 1, "rows_written": 4}},
+            {"detail": {"job": trigger, "outcome": "success", "batches": 1, "rows_written": 4}},
             _release_context(),
         )
         assert result["mode"] == "links" and result["tickers"] == 2 and result["over_cap"] is None

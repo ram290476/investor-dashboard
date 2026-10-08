@@ -5,7 +5,7 @@ serving/status.json, rebuilt on every 'Job Finished' event:
                                      "failed_sources", "next_run", "last_links_run"}]}
 A links-only M1 run (detail.mode == "links") sets last_links_run and leaves last_run.
 Tickers past the cap are stored as over_cap "over the ticker cap".
-status: "ok" | "partial" (some sources failed) | "failed" | "never_run".
+status: "ok" | "partial" (some sources failed) | "failed" | "skipped" | "never_run".
 next_run: next scheduled start (ISO, UTC) from the job's schedule, skipping weekends
 and NYSE / US federal holidays per the job's calendar; null for event-driven jobs.
 
@@ -29,13 +29,10 @@ JOBS: dict[str, tuple[str, str | None, str]] = {
     "H2": ("News & sentiment", "15 * * * 1-5", "nyse"),
     "H3": ("Regulatory & company feeds", "25 6-22 * * 1-5", "federal"),
     "D1": ("Morning macro & calendars", "0 7 * * 1-5", "federal"),
-    "D2": ("Regulatory & operations sweep", "30 7 * * 1-5", "federal"),
-    "D3": ("Overnight rates", "15 9 * * 1-5", "federal"),
-    "D4": ("Market close", "45 16 * * 1-5", "federal"),
+    "D4": ("Market close", "45 16 * * 1-5", "nyse"),
     "D5": ("Government contracts", "45 17 * * 1-5", "federal"),
-    "W1": ("Weekly sweep", "0 8 * * 1", "federal"),
-    "M1": ("Release-day data", None, "federal"),
-    "Q1": ("Quarterly fundamentals", None, "nyse"),
+    "M1": ("Release-day data & calendar", "35 6 * * 1-5", "federal"),
+    "Q1": ("Quarterly fundamentals", "30 8 * * 1", "nyse"),
     "SHORT": ("Short interest", "30 18 * * 1-5", "nyse"),
     "OPTIONS": ("Options put/call and IV", "50 16 * * 1-5", "nyse"),
     "TREND": ("Trend metrics", None, "nyse"),
@@ -88,7 +85,10 @@ def apply_event(feed: dict | None, detail: dict, now: datetime) -> dict:
         else:
             failed = int(detail.get("failed_sources") or 0)
             outcome = detail.get("outcome", "success")
-            status = "failed" if outcome != "success" else ("partial" if failed else "ok")
+            status = (
+                "failed" if outcome != "success" else "partial" if failed
+                else "skipped" if detail.get("status") == "skipped" else "ok"
+            )
             entry = {
                 **previous,
                 "job": job,
@@ -96,6 +96,8 @@ def apply_event(feed: dict | None, detail: dict, now: datetime) -> dict:
                 "last_outcome": outcome,
                 "status": status,
                 "failed_sources": failed,
+                "failed_source_ids": list(detail.get("failed_source_ids") or []),
+                "reason": detail.get("reason"),
             }
         if "dropped" in detail:
             dropped = list(detail.get("dropped") or [])

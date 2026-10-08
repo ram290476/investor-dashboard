@@ -20,6 +20,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import time
+from contextlib import contextmanager
 
 import boto3
 import polars as pl
@@ -37,6 +39,31 @@ def s3():
     if _s3 is None:
         _s3 = boto3.client("s3")
     return _s3
+
+
+@contextmanager
+def job_lease(key: str, ttl_seconds: int = 900):
+    """Serialize read/build/publish jobs using a lease longer than their Lambda timeout."""
+    client = s3()
+    try:
+        stored = client.get_object(Bucket=LAKE_BUCKET, Key=key)
+        lease = json.loads(stored["Body"].read())
+        if lease["expires_at"] > time.time():
+            raise RuntimeError(f"Job already running ({key}); retry the event")
+        condition = {"IfMatch": stored["ETag"]}
+    except client.exceptions.NoSuchKey:
+        condition = {"IfNoneMatch": "*"}
+    acquired = client.put_object(
+        Bucket=LAKE_BUCKET, Key=key, ContentType="application/json",
+        Body=json.dumps({"expires_at": time.time() + ttl_seconds}).encode(), **condition,
+    )
+    try:
+        yield
+    finally:
+        client.put_object(
+            Bucket=LAKE_BUCKET, Key=key, ContentType="application/json",
+            Body=b'{"expires_at":0}', IfMatch=acquired["ETag"],
+        )
 
 
 def write_parquet(df: pl.DataFrame, key: str, bucket: str | None = None) -> str:
