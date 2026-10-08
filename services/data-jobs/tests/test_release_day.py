@@ -2,6 +2,8 @@ import json
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import release_day
 from observability import emit_job_finished, job_handler
 
@@ -250,3 +252,269 @@ def test_ensure_schedules_is_idempotent_and_names_stay_on_the_m1_prefix():
     second = release_day.ensure_schedules(client, planned, "arn:function", "role")
     assert first == second
     assert len(client.created) == 1
+
+
+def test_first_vintage_date_is_the_earliest_realtime_start():
+    dates = release_day.first_release_dates(
+        {
+            "observations": [
+                {"date": "2024-09-01", "realtime_start": "2024-11-13", "value": "2"},
+                {"date": "2024-09-01", "realtime_start": "2024-10-10", "value": "1"},
+                {"date": "2024-10-01", "realtime_start": "2024-11-13", "value": "3"},
+            ]
+        }
+    )
+    assert dates == {"2024-09": "2024-10-10", "2024-10": "2024-11-13"}
+
+
+def test_vintage_date_replaces_a_backfill_stamp_and_does_not_move_forward():
+    rows = [
+        {
+            "series_id": "CUSR0000SA0",
+            "period": "2024-09",
+            "release_ts": "2026-10-08T12:00:00+00:00",
+            "release_history": ["2026-10-08T12:00:00+00:00"],
+        }
+    ]
+    release_day.apply_vintage_dates(rows, {"CUSR0000SA0": {"2024-09": "2024-10-10"}})
+    assert rows[0]["release_ts"].startswith("2024-10-10T08:35")
+    assert rows[0]["release_history"] == [rows[0]["release_ts"]]
+    release_day.apply_vintage_dates(rows, {"CUSR0000SA0": {"2024-09": "2024-11-13"}})
+    assert rows[0]["release_ts"].startswith("2024-10-10T08:35")
+
+
+def _index_history(series_id: str, start: tuple[int, int], n: int, base: float) -> list[dict]:
+    rows = []
+    year, month = start
+    for i in range(n):
+        period = f"{year:04d}-{month:02d}"
+        rel_month, rel_year = month + 1, year
+        if rel_month == 13:
+            rel_month, rel_year = 1, year + 1
+        rows.append(
+            {
+                "series_id": series_id,
+                "period": period,
+                "release_ts": f"{rel_year:04d}-{rel_month:02d}-15T13:30:00+00:00",
+                "actual": base + i,
+                "prior": None,
+                "revised_prior": None,
+                "consensus": None,
+                "surprise": None,
+                "units": "index",
+                "source": "bls",
+            }
+        )
+        month += 1
+        if month == 13:
+            month, year = 1, year + 1
+    return rows
+
+
+def test_macro_rows_store_yoy_on_the_release_date():
+    import polars as pl
+
+    import trend_metrics as tm
+
+    enriched = release_day.enrich_releases(_index_history("CUSR0000SA0", (2024, 1), 14, 100.0))
+    macro = release_day.macro_rows(enriched)
+    assert macro
+    assert {row["series_id"] for row in macro} == {"CPI_YOY"}
+    assert all(not row["obs_date"].endswith("-01") for row in macro)
+    released = next(row for row in macro if row["obs_date"] == "2025-02-15")
+    assert released["value"] == pytest.approx(12.0)
+    assert released["available_date"] == "2025-02-15"
+    assert released["source"] == "releases"
+    assert "CUSR0000SA0" not in {row["series_id"] for row in macro}
+
+    driver = pl.DataFrame(
+        {
+            "date": [date.fromisoformat(row["obs_date"]) for row in macro],
+            "value": [row["value"] for row in macro],
+        }
+    )
+    prices = pl.DataFrame({"date": [date(2025, 2, 14), date(2025, 2, 15)], "close": [100.0, 101.0]})
+    out = {row["date"]: row["value"] for row in tm.driver_metrics(prices, driver, "CPI_YOY", "level").to_dicts()}
+    assert date(2025, 2, 14) not in out
+    assert out[date(2025, 2, 15)] == pytest.approx(12.0)
+
+    trade = release_day.macro_rows(
+        [
+            {
+                "series_id": "CENSUS_IMPG",
+                "period": "2024-01",
+                "release_ts": "2024-03-07T13:35:00+00:00",
+                "yoy": 4.5,
+                "actual": 10.0,
+            }
+        ]
+    )
+    assert trade == [
+        {
+            "series_id": "CENSUS_IMPG_YOY",
+            "obs_date": "2024-03-07",
+            "value": 4.5,
+            "available_date": "2024-03-07",
+            "source": "releases",
+        }
+    ]
+
+
+def test_publish_macro_overwrites_a_revised_release_and_stays_in_its_folder(monkeypatch):
+    import boto3
+    from moto import mock_aws
+
+    import lake
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    with mock_aws():
+        boto3.client("s3").create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", None)
+        row = {
+            "series_id": "CPI_YOY",
+            "obs_date": "2025-02-15",
+            "value": 12.0,
+            "available_date": "2025-02-15",
+            "source": "releases",
+        }
+        release_day.publish_macro([row], "2026-02-15T13:30:00+00:00")
+        revised = {**row, "value": 12.4}
+        keys = release_day.publish_macro([revised], "2026-03-12T13:30:00+00:00")
+        assert keys == ["curated/macro_daily/source=releases/series_id=CPI_YOY/macro.parquet"]
+        stored = lake.read_parquet_prefix("curated/macro_daily/source=releases/")
+        assert stored.height == 1
+        assert stored["value"].to_list() == [12.4]
+        assert stored["obs_date"].to_list() == [date(2025, 2, 15)]
+        listed = boto3.client("s3").list_objects_v2(Bucket="lake", Prefix="curated/macro_daily/")["Contents"]
+        assert all("date=" not in item["Key"] for item in listed)
+
+
+def test_handler_writes_release_dated_yoy_and_release_links(monkeypatch):
+    import json
+    from urllib.parse import parse_qs
+
+    import boto3
+    import httpx
+    import polars as pl
+    from moto import mock_aws
+
+    import api_keys
+    import http_client
+    import lake
+    import observability
+
+    secret = "super-secret-fred-key"
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.delenv("SCHEDULER_ROLE_ARN", raising=False)
+    monkeypatch.setattr(api_keys, "api_key", lambda name: secret)
+    emitted = []
+    monkeypatch.setattr(
+        observability,
+        "emit_job_finished",
+        lambda job_id, run_id, outcome, detail=None: emitted.append(job_id),
+    )
+
+    months = []
+    year, month = 2023, 1
+    for i in range(20):
+        period = f"{year:04d}-{month:02d}"
+        rel_month, rel_year = month + 1, year
+        if rel_month == 13:
+            rel_month, rel_year = 1, year + 1
+        months.append((period, f"{rel_year:04d}-{rel_month:02d}-15", 100.0 + i, 200.0 + i))
+        month += 1
+        if month == 13:
+            month, year = 1, year + 1
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.startswith(release_day.BLS_URL):
+            return httpx.Response(
+                200,
+                json={
+                    "Results": {
+                        "series": [
+                            {
+                                "seriesID": "CUSR0000SA0",
+                                "data": [
+                                    {"year": p[:4], "period": f"M{p[5:7]}", "value": str(headline)}
+                                    for p, _, headline, _core in months
+                                ],
+                            },
+                            {
+                                "seriesID": "CUSR0000SA0L1E",
+                                "data": [
+                                    {"year": p[:4], "period": f"M{p[5:7]}", "value": str(core)}
+                                    for p, _, _headline, core in months
+                                ],
+                            },
+                        ]
+                    }
+                },
+            )
+        if "apps.bea.gov" in url:
+            return httpx.Response(200, json={"BEAAPI": {"Results": {"Data": []}}})
+        if "api.census.gov" in url:
+            return httpx.Response(200, json=[["time", "IMPG", "EXPG"]])
+        if url.startswith(release_day.BLS_ICS_URL):
+            return httpx.Response(200, text="")
+        if "releases/dates" in url:
+            return httpx.Response(200, json={"release_dates": []})
+        if "series/observations" in url:
+            series_id = parse_qs(request.url.query.decode())["series_id"][0]
+            observations = []
+            if series_id == "CPIAUCSL":
+                observations = [
+                    {"date": f"{period}-01", "realtime_start": release, "value": "1"}
+                    for period, release, _headline, _core in months
+                ]
+            return httpx.Response(200, json={"observations": observations})
+        if "clevelandfed.org" in url:
+            return httpx.Response(200, text="<html></html>")
+        raise AssertionError(url)
+
+    real_client = http_client.get_client
+    monkeypatch.setattr(
+        http_client, "get_client", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw)
+    )
+
+    class Context:
+        function_name = "release-day"
+        memory_limit_in_mb = 512
+        invoked_function_arn = "arn:aws:lambda:us-east-1:1:function:release-day"
+        aws_request_id = "req-m1"
+
+    with mock_aws():
+        boto3.client("s3").create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", None)
+        monkeypatch.setattr(observability, "_events", None)
+        result = release_day.handler({}, Context())
+        assert result["status"] == "success"
+        macro = lake.read_parquet_prefix("curated/macro_daily/source=releases/")
+        assert set(macro["series_id"].unique()) == {"CPI_YOY", "CORE_CPI_YOY"}
+        headline = macro.filter(pl.col("series_id") == "CPI_YOY").sort("obs_date")
+        assert headline["obs_date"][0] == date(2024, 2, 15)
+        assert headline["value"][0] == pytest.approx(12.0)
+        assert date(2024, 1, 1) not in headline["obs_date"].to_list()
+        links = lake.read_parquet_prefix("curated/release_links/")
+        trend = links.filter((pl.col("row_kind") == "trend") & (pl.col("series_id") == "CPI_YOY"))
+        assert trend.height == 1
+        assert trend["trend_direction"][0] == "decelerating"
+        assert trend["consecutive_releases"][0] >= 2
+        listed = boto3.client("s3").list_objects_v2(Bucket="lake", Prefix="curated/")["Contents"]
+        assert all("curated/macro_daily/date=" not in item["Key"] for item in listed)
+        vintage_keys = [
+            item["Key"]
+            for item in boto3.client("s3").list_objects_v2(Bucket="lake", Prefix="raw/releases/fred-vintages/")[
+                "Contents"
+            ]
+        ]
+        assert vintage_keys
+        for key in vintage_keys:
+            assert secret not in json.dumps(lake.read_json(key))
+
+    assert emitted == ["M1"]

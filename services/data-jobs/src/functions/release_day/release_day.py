@@ -2,16 +2,20 @@
 
 The job has no cron. It writes one-off EventBridge Scheduler at() times in UTC from
 America/New_York release instants, then polls until a new period shows up.
-curated/macro_daily is written before the handler returns, so the Job Finished
-event can start trend-metrics.
+Year-over-year history is written to curated/macro_daily/source=releases/ before the
+handler returns, dated on the release date, so the Job Finished event can start
+trend-metrics without a look-ahead. Release trends and TSLA/SPCX window links go to
+curated/release_links/.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 import polars as pl
 
 JOB_ID = "M1"
@@ -28,6 +32,25 @@ BLS_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BEA_URL = "https://apps.bea.gov/api/data"
 CENSUS_URL = "https://api.census.gov/data/timeseries/eits/ftd"
 FRED_URL = "https://api.stlouisfed.org/fred/releases/dates"
+FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
+# FRED vintage series -> the M1 series released that morning. The earliest realtime_start
+# is the publication date, so a backfill is not stamped with the day the job first ran.
+VINTAGE_SERIES = (
+    ("CPIAUCSL", ("CUSR0000SA0", "CUSR0000SA0L1E")),
+    ("PCEPI", ("PCE", "CORE_PCE")),
+    ("IMPGS", ("CENSUS_IMPG", "CENSUS_EXPG")),
+)
+# Names trend_metrics reads. Census goods are part of M1 but are not daily drivers.
+YOY_SERIES = {
+    "CUSR0000SA0": "CPI_YOY",
+    "CUSR0000SA0L1E": "CORE_CPI_YOY",
+    "PCE": "PCE_YOY",
+    "CORE_PCE": "CORE_PCE_YOY",
+    "CENSUS_IMPG": "CENSUS_IMPG_YOY",
+    "CENSUS_EXPG": "CENSUS_EXPG_YOY",
+}
+RELEASE_LINKS_KEY = "curated/release_links/release_links.parquet"
+_API_KEY_QUERY = re.compile(r"(api_key=)[^&\s\"]*")
 BLS_ICS_URL = "https://www.bls.gov/schedule/news_release/cpi.ics"
 CLEVELAND_PAGE = "https://www.clevelandfed.org/indicators-and-data/inflation-nowcasting"
 MEASURE_SERIES = {"CPI": "CUSR0000SA0", "Core CPI": "CUSR0000SA0L1E", "PCE": "PCE"}
@@ -486,20 +509,109 @@ def ensure_schedules(client, planned: list[dict], function_arn: str, role_arn: s
     return names
 
 
-def macro_rows(releases: list[dict]) -> list[dict]:
-    latest: dict[str, dict] = {}
-    for row in releases:
-        series_id = row.get("series_id")
-        period = str(row.get("period") or "")
-        if not series_id or not isinstance(row.get("actual"), (int, float)):
+def fred_vintage_params(series_id: str, api_key: str, start: date) -> dict:
+    return {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "observation_start": start.isoformat(),
+        "realtime_start": start.isoformat(),
+        "realtime_end": "9999-12-31",
+    }
+
+
+def first_release_dates(payload: dict) -> dict[str, str]:
+    """Reference period -> earliest vintage date. That date is when the print was public."""
+    first: dict[str, str] = {}
+    for item in payload.get("observations") or []:
+        period = str(item.get("date") or "")[:7]
+        stamp = str(item.get("realtime_start") or "")[:10]
+        if len(period) != 7 or period[4] != "-" or len(stamp) != 10 or stamp[4] != "-":
             continue
-        current = latest.get(series_id)
-        if current is None or period > current["period"]:
-            latest[series_id] = row
-    return [
-        {"series_id": row["series_id"], "obs_date": f"{row['period']}-01", "value": float(row["actual"])}
-        for row in latest.values()
-    ]
+        if period not in first or stamp < first[period]:
+            first[period] = stamp
+    return first
+
+
+def apply_vintage_dates(rows: list[dict], vintages: dict[str, dict[str, str]]) -> list[dict]:
+    """Move a backfill stamp back to the first publication date. Never move a date forward."""
+    for row in rows:
+        stamp = (vintages.get(str(row.get("series_id") or "")) or {}).get(str(row.get("period") or ""))
+        if not stamp:
+            continue
+        current = str(row.get("release_ts") or "")
+        if len(current) >= 10 and stamp[:10] >= current[:10]:
+            continue
+        year, month, day = (int(part) for part in stamp[:10].split("-"))
+        new_ts = datetime(year, month, day, 8, 35, tzinfo=ET).isoformat(timespec="minutes")
+        old = row.get("release_ts")
+        row["release_ts"] = new_ts
+        history = row.get("release_history")
+        if isinstance(history, list) and history and history[0] == old:
+            history[0] = new_ts
+    return rows
+
+
+def redact_api_key(payload: dict, secret: str) -> dict:
+    text = json.dumps(payload, default=str)
+    if secret:
+        text = text.replace(secret, "")
+    return json.loads(_API_KEY_QUERY.sub(r"\1", text))
+
+
+def _fred_json(http, url: str, params: dict, label: str) -> dict:
+    """GET FRED. A failure is re-raised without the URL, which carries the API key."""
+    from http_client import request_with_retry
+
+    try:
+        return request_with_retry(http, "GET", url, params=params).json()
+    except (httpx.HTTPError, RuntimeError, ValueError, TypeError):
+        raise RuntimeError(f"FRED request failed for {label}") from None
+
+
+def macro_rows(releases: list[dict]) -> list[dict]:
+    """Full YoY history under the names trend_metrics reads, dated by the release date."""
+    chosen: dict[tuple[str, str], dict] = {}
+    for row in releases:
+        series_id = YOY_SERIES.get(str(row.get("series_id") or ""))
+        yoy = row.get("yoy")
+        obs = str(row.get("release_ts") or "")[:10]
+        if series_id is None or not isinstance(yoy, (int, float)) or isinstance(yoy, bool) or len(obs) != 10:
+            continue
+        key = (series_id, obs)
+        period = str(row.get("period") or "")
+        current = chosen.get(key)
+        if current is not None and period <= current["period"]:
+            continue
+        chosen[key] = {
+            "series_id": series_id,
+            "obs_date": obs,
+            "value": float(yoy),
+            "available_date": obs,
+            "source": "releases",
+            "period": period,
+        }
+    return [{field: row[field] for field in row if field != "period"} for row in chosen.values()]
+
+
+def publish_macro(rows: list[dict], ingested_at: str) -> list[str]:
+    """Upsert each series into its own curated folder. A later ingest overwrites the same release date."""
+    from lake import upsert_ranked
+
+    keys = []
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row["series_id"], []).append({**row, "ingested_at": ingested_at})
+    for series_id, group in grouped.items():
+        frame = pl.DataFrame(group).with_columns(
+            pl.col("obs_date").str.to_date(),
+            pl.col("available_date").str.to_date(),
+            pl.col("value").cast(pl.Float64),
+        )
+        key = f"curated/macro_daily/source=releases/series_id={series_id}/macro.parquet"
+        upsert_ranked(frame, key, ["series_id", "obs_date"], "ingested_at")
+        keys.append(key)
+    return keys
 
 
 def release_frame(rows: list[dict]) -> pl.DataFrame:
@@ -513,8 +625,9 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from api_keys import api_key
     from collectors.fed_sources import parse_cleveland_html
     from http_client import get_client, request_with_retry
-    from lake import read_json, read_parquet_prefix, write_json, write_parquet
+    from lake import read_json, read_parquet_prefix, read_prices, write_json, write_parquet
     from observability import job_handler, logger, source_run
+    from release_links import build_release_links
 
     @job_handler(JOB_ID)
     def run(event, context):
@@ -599,6 +712,24 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             write_json(payload, f"raw/releases/fred/date={day}/{run_key}.json")
             fred_rows = parse_fred_dates(payload)
             rec["rows"] = len(fred_rows)
+        vintages: dict[str, dict[str, str]] = {}
+        vintage_start = date(start_year, 1, 1)
+        fred_key = api_key("fred")
+        with get_client() as http:
+            for fred_id, series_ids in VINTAGE_SERIES:
+                with source_run(f"fred-vintage-{fred_id}") as rec:
+                    payload = _fred_json(
+                        http,
+                        FRED_OBSERVATIONS,
+                        fred_vintage_params(fred_id, fred_key, vintage_start),
+                        fred_id,
+                    )
+                    safe = redact_api_key(payload, fred_key)
+                    write_json(safe, f"raw/releases/fred-vintages/series={fred_id}/date={day}/{run_key}.json")
+                    periods = first_release_dates(safe)
+                    rec["rows"] = len(periods)
+                    for series_id in series_ids:
+                        vintages[series_id] = periods
         with source_run("cleveland") as rec, get_client() as http:
             html = request_with_retry(http, "GET", CLEVELAND_PAGE).text
             write_json({"html": html}, f"raw/releases/cleveland/date={day}/{run_key}.json")
@@ -613,6 +744,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         attempts = 1 if (event or {}).get("source") == "calendar" else 2
         fresh = poll_for_new_period(fetch_prints, known, attempts=attempts, pause=time.sleep)
         merged = merge_releases(existing, latest_rows["rows"] or fresh)
+        merged = apply_vintage_dates(merged, vintages)
         merged = enrich_releases(apply_nowcast(merged, nowcast))
         if merged:
             frame = release_frame(merged).with_columns(pl.col("period").str.slice(0, 4).alias("_year"))
@@ -622,7 +754,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 write_parquet(part.drop("_year"), key)
         macro = macro_rows(merged)
         if macro:
-            write_parquet(pl.DataFrame(macro), f"curated/macro_daily/date={day}/macro.parquet")
+            publish_macro(macro, now.isoformat(timespec="seconds"))
+        links = build_release_links(merged, read_prices(), YOY_SERIES)
+        if not links.is_empty():
+            write_parquet(links, RELEASE_LINKS_KEY)
         upcoming = upcoming_calendar(calendar_rows(ics_dates, fred_rows), today)
         stored = read_json("curated/release_calendar/upcoming.json")
         if not upcoming and isinstance(stored, list):

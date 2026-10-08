@@ -14,7 +14,9 @@ Key: (series_id, ticker, date). Columns, per the UI brief:
     range_pct_1y                                          where today's value sits in its 1-year high-low range (0-100)
     trend_state, days_in_state                            up / down / flat from z_1m (+/-0.5), and its run length
     corr_30d, corr_90d                                    rolling correlation of the driver's daily change
-                                                          with the ticker's daily return
+                                                          with the ticker's daily return. Monthly YoY
+                                                          series leave both null; the driver arrow stays
+                                                          on the z_1m rule above.
     effect        = corr_90d * z_1m
     net_pressure  = tanh(sum of effect over all drivers for that ticker and date / 3)
                     (the same value on every row of a ticker-date)
@@ -33,6 +35,8 @@ WINDOWS = {"1w": 5, "1m": 21, "3m": 63}
 Z_LOOKBACK, Z_MIN = 252, 126
 RANGE_LOOKBACK, RANGE_MIN = 252, 60
 TREND_Z = 0.5
+# Released once a month. A 30/90-day correlation of the carried-forward value is not a daily link.
+MONTHLY_SERIES = frozenset({"CPI_YOY", "CORE_CPI_YOY", "PCE_YOY", "CORE_PCE_YOY"})
 
 # series_id -> how its change is measured: "pct" (prices, indices) or "level" (rates, spreads, ratios).
 DRIVERS: dict[str, str] = {
@@ -52,6 +56,7 @@ DRIVERS: dict[str, str] = {
     "CPI_YOY": "level",
     "CORE_CPI_YOY": "level",
     "PCE_YOY": "level",
+    "CORE_PCE_YOY": "level",
     "ETF:SPY": "pct",
     "ETF:DIA": "pct",
     "ETF:QQQ": "pct",
@@ -137,6 +142,11 @@ def driver_metrics(ticker_px: pl.DataFrame, driver: pl.DataFrame, series_id: str
     # Clean up NaN/inf from zero variance or a flat 1-year range.
     float_cols = ["z_1w", "z_1m", "z_3m", "range_pct_1y", "corr_30d", "corr_90d"]
     df = df.with_columns([pl.when(pl.col(c).is_finite()).then(pl.col(c)).otherwise(None).alias(c) for c in float_cols])
+    if series_id in MONTHLY_SERIES:
+        df = df.with_columns(
+            pl.lit(None).cast(pl.Float64).alias("corr_30d"),
+            pl.lit(None).cast(pl.Float64).alias("corr_90d"),
+        )
     df = df.with_columns(pl.col("trend_state").rle_id().alias("_run"))
     df = df.with_columns((pl.int_range(pl.len()).over("_run") + 1).alias("days_in_state"))
     df = df.with_columns(

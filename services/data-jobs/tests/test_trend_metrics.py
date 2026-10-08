@@ -78,6 +78,30 @@ def test_days_in_state_counts_runs():
         assert counts[i] == (counts[i - 1] + 1 if states[i] == states[i - 1] else 1)
 
 
+def test_monthly_series_skip_daily_correlation_and_keep_the_zscore_rule():
+    prices, macro = _fixture()
+    drivers = tm.split_inputs(prices, macro, ["SPY"])
+    px = prices.filter(pl.col("ticker") == "TSLA").select("date", "close")
+    out = tm.ticker_metrics("TSLA", px, drivers)
+    cpi = out.filter(pl.col("series_id") == "CPI_YOY")
+    assert cpi.height > 0
+    assert cpi["corr_30d"].null_count() == cpi.height
+    assert cpi["corr_90d"].null_count() == cpi.height
+    assert cpi["effect"].null_count() == cpi.height
+    daily = out.filter(pl.col("series_id") == "DGS10").drop_nulls("z_1m")
+    assert daily["corr_90d"].null_count() < daily.height
+    row = daily.row(0, named=True)
+    z = row["z_1m"]
+    if z > tm.TREND_Z:
+        assert row["trend_state"] == "up"
+    elif z < -tm.TREND_Z:
+        assert row["trend_state"] == "down"
+    else:
+        assert row["trend_state"] == "flat"
+    assert tm.DRIVERS["CORE_PCE_YOY"] == "level"
+    assert "CORE_PCE_YOY" in tm.MONTHLY_SERIES
+
+
 def test_monthly_series_is_carried_forward():
     prices, macro = _fixture()
     drivers = tm.split_inputs(prices, macro, [])
