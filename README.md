@@ -3,14 +3,88 @@
 A low-cost dashboard that combines Tesla (TSLA) and SpaceX (SPCX) prices with bond yields, rate decisions, CPI,
 tariffs, geopolitical events, robotaxi permits and SpaceX launches and contracts, to support trading decisions.
 
-## Architecture
+## Try the dashboard
+
+Use the following link and demo credentials to log in to the dashboard:
+
+| | |
+| --- | --- |
+| URL | https://investor.vellamsetti.com |
+| Email | `ram.vellamsetti@gmail.com` |
+| Password | `Serious-investor77` |
+
+![Dashboard on desktop (Industrial Dark theme)](docs/design-roadmap/issue-76/industrial-dark-1440.png)
+
+## Using the dashboard
+
+### Desktop and mobile
+The dashboard works in desktop and mobile browsers. On a wide screen the price chart and macro panels are in the main column, with macro signals, news and filings alongside. On a phone (640px wide or less) four tabs at the top switch views:
+
+- **Chart**: price, overlays, mini charts and catalyst toggles
+- **Signals**: macro signals, rates, market comparison, moving averages and other trend panels
+- **Calendar**: inflation and release links, and the catalyst calendar
+- **More**: news, filings, government contracts and company context
+
+<img src="docs/design-roadmap/issue-76/industrial-dark-390.png" alt="Dashboard on a phone, Chart tab" width="300">
+
+### Account menu and settings
+The **Signed In** button at the top right (an icon only, on phones) opens the account menu. It shows your sign-in email, a data-refresh status line and **Sign out**. Its items open the **Account settings** dialog on one of four tabs:
+
+- **My tickers**: add, remove, reorder and pin tickers (up to 25 tickers, 6 pinned). Pinned tickers come first in the ticker bar.
+- **Theme & display**: pick one of six color themes (Industrial Dark, Terminal Amber, Charting Navy, Clean Light, Colorblind High Contrast, Midnight Slate), the up/down color palette, and the default chart period.
+- **Profile & time zone**: your signed-in email and the time zone used for timestamps.
+- **Data refresh**: each data collection job with its last run, next run and status.
+
+### Picking a ticker
+The ticker bar under the header lists your watchlist (up to 25 tickers), with pinned tickers first, each showing its last price and daily change. Select a ticker to load its chart and panels. When the list is wider than the screen, the bar scrolls sideways with a trackpad, mouse wheel, the ‹ › arrow buttons, keyboard or touch, and it keeps the selected ticker in view. The **+ Add / pin** button stays fixed at the end of the bar and opens My tickers.
+
+### Price chart and periods
+The main chart shows the selected ticker's price. Period chips **1D, 1W, 1M, 3M, YTD, 1Y, 3Y, 5Y** set the chart window, and each shows the return for that period. 1D uses hourly bars when they're available; chips for periods without enough history are disabled. A trend pill under the price (for example "Uptrend · 5d") compares the price with its 20- and 50-day averages.
+
+### Chart overlays
+Above the chart, overlay groups let you add comparison series to the chart:
+
+- **Market**: index ETFs SPY, DIA, QQQ, IWM, XLY, ITA, SMH (hover, focus or long-press a chip for its full name)
+- **Moving averages**: 10, 20, 50, 100 and 200-day
+- **Rates**: 10Y and 2Y Treasury, 10Y–2Y curve, 10Y real yield, SOFR
+- **Inflation**: CPI YoY, core CPI YoY, PCE YoY, 10Y breakeven
+- **Risk**: VIX, broad dollar index, WTI crude
+- **Policy & geo**: policy uncertainty
+- **Fundamentals**: the selected ticker's quarterly revenue, gross profit, gross margin, shares outstanding, public float, and (Tesla-reported) deliveries and FSD subscribers
+- **Sentiment**: 7-day news sentiment
+
+Pick a group, then select chips to add or remove series, up to five at a time. Market overlays compare percent change; other indicators use a normalized scale, and the legend under the chart shows each series' latest value. Only series with data for the selected ticker and period are shown, and groups with nothing to show are hidden. **Add group** / **Clear group** affect the current group, and **Clear all** removes every overlay. Overlay choices are saved per ticker.
+
+### Mini charts under the price chart
+Mini charts appear below the main chart in a fixed order: **Volume**, **Short interest**, **Macro pressure**, **Options** (put/call ratio). Below them, a toggle bar switches each one on or off, and **Hide all** hides them all. A toggle only appears when that series has data for the selected ticker and period. These choices are saved per ticker.
+
+### Catalyst markers
+Dots on the price chart mark catalysts: published macro releases, curated events and SEC filings. The **Catalysts** bar below the mini-chart toggles filters them by category (Rates, Inflation, Policy & geopolitics, Robotaxi, Filings, Space operations, Other events), showing only categories with events in the current window. **Clear all** turns all markers off. Select a marker to open it in the catalyst calendar. Catalyst filters last for the current session and aren't saved.
+
+### Macro trends
+- **Macro signals** (right column on desktop, Signals tab on mobile):
+  - **Net macro pressure**: a gauge from −1 (headwind) to +1 (tailwind) for the selected ticker. It combines each macro driver's effect, which is its 90-day correlation with the ticker multiplied by its 1-month z-score, so a driver that is far from its usual level and historically tied to the stock moves the gauge more.
+  - **Top drivers**: the series with the largest effects, each labelled Tailwind, Headwind or Neutral, with 1–3 strength bars, its latest value, 1-month change and trend state (Uptrend / Downtrend / Range, based on the 1-month z-score).
+  - Regime pills, catalyst sensitivity and recent catalysts, plus an "All driver trends" list you can sort.
+- **Inflation & release links**: the latest CPI and PCE releases (YoY level, trend, surprise) and how the ticker has historically moved around release dates: correlation for the week before, the days before and release day, with sample sizes. At least 12 paired releases are required.
+- **Rates & yields, Correlation drift, Market comparison, Moving averages, Volatility, Dollar & oil** and other panels add more detail.
+
+All correlations describe historical association, not causation or a forecast.
+
+### Coming soon
+- More panels below the chart with additional trends.
+- Dedicated pages for individual stocks, with depth depending on each stock's importance.
+
+## Developer guide
+
+### Architecture
 
 Serverless on AWS: EventBridge Scheduler and events invoke Python Lambda jobs, which write Parquet and
 serving JSON to S3. A responsive static dashboard is hosted in a private S3 bucket behind CloudFront,
 authenticates through Cognito PKCE, and reads authenticated API routes for user preferences and serving
 data. Terraform also defines encryption, audit, monitoring and security services.
 
-## Repository layout
+### Repository layout
 
 | Path | What |
 | --- | --- |
@@ -26,7 +100,7 @@ data. Terraform also defines encryption, audit, monitoring and security services
 | [`docs/operations.md`](docs/operations.md) | Environment setup, deploy, historical load, refresh operations and troubleshooting |
 | [`infra/terraform/README.md`](infra/terraform/README.md) | Infrastructure/security baseline and Terraform setup |
 
-## Scope and status
+### Scope and status
 
 The wired data path includes daily prices, Yahoo five-year daily-price backfill, trends,
 fundamentals, short interest, options, status and dashboard snapshot serving. The architecture's
@@ -38,7 +112,7 @@ Validate Terraform and run tests before deployment. AWS provisioning, provider a
 production browser behavior require the corresponding AWS account and credentials; successful
 local validation alone does not establish production readiness.
 
-## Next Steps: Start the AWS deployment
+### Next Steps: Start the AWS deployment
 
 The deployment workflow is already defined. It is not live in AWS yet; the AWS state bucket and GitHub OIDC role/environment must be configured first. Follow the detailed `operations guide`.
 
