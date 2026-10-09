@@ -42,9 +42,10 @@ export const OVERLAYS = [
   { id: "FUNDAMENTAL:public_float_usd", label: "Public float", group: "Fundamentals", kind: "fundamental" },
   { id: "FUNDAMENTAL:deliveries", label: "Deliveries", group: "Fundamentals", kind: "fundamental" },
   { id: "FUNDAMENTAL:fsd_subscribers", label: "FSD subscribers", group: "Fundamentals", kind: "fundamental" },
+  { id: "NEWS:SENTIMENT", label: "7-day news sentiment", group: "Sentiment", kind: "sentiment" },
 ].map((overlay, index) => ({ ...overlay, short: overlay.kind === "market" ? overlay.id : undefined, color: index }));
 
-const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", "Policy & geo", "Fundamentals"];
+const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", "Policy & geo", "Fundamentals", "Sentiment"];
 const overlayById = new Map(OVERLAYS.map((overlay) => [overlay.id, overlay]));
 
 function dateKey(bar) {
@@ -75,10 +76,13 @@ export function overlayGroups(tickerData, chartData, dashboard) {
       if (overlay.kind === "average") return validBars(tickerData?.price_history).length >= overlay.window;
       if (overlay.kind === "macro") return Boolean(chartData?.macro_series?.[overlay.id]?.length);
       if (overlay.kind === "fundamental") return true;
+      if (overlay.kind === "sentiment") return true;
       return true;
     }).map(overlay => ({
       ...overlay,
-      available: overlay.kind !== "fundamental" || availableFundamentals.has(overlay.id.slice("FUNDAMENTAL:".length)),
+      available: overlay.kind === "sentiment"
+        ? Boolean(tickerData?.news?.sentiment_history?.some(point => isNumericValue(point.value)))
+        : overlay.kind !== "fundamental" || availableFundamentals.has(overlay.id.slice("FUNDAMENTAL:".length)),
     })),
   })).filter((group) => group.overlays.length);
 }
@@ -142,6 +146,7 @@ export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard })
   if (overlay.kind === "market") return marketValues(overlay, dashboard, bars);
   if (overlay.kind === "average") return movingAverage(tickerData?.price_history || [], overlay.window, bars);
   if (overlay.kind === "macro") return alignedValues(chartData?.macro_series?.[overlay.id], bars);
+  if (overlay.kind === "sentiment") return alignedValues(tickerData?.news?.sentiment_history, bars);
   const metric = overlay.id.slice("FUNDAMENTAL:".length);
   return alignedValues((chartData?.fundamentals || []).filter((row) => row.series_id === metric), bars);
 }

@@ -13,10 +13,27 @@ ET = ZoneInfo("America/New_York")
 CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
 
 
+def number(value: object) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else None
+
+
 def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: datetime) -> dict:
-    """Last 48 hours of headlines and the 7-day mean of daily sentiment."""
+    """Last 48 hours of headlines and observed seven-calendar-day sentiment history."""
     from news_sentiment import rolling_mean
 
+    today = now.astimezone(UTC).date()
+    daily_by_date: dict[str, dict] = {}
+    for row in daily_rows:
+        value = number(row.get("mean_sentiment"))
+        if row.get("ticker", ticker) != ticker or value is None:
+            continue
+        try:
+            day = date.fromisoformat(str(row.get("date") or "")[:10])
+        except ValueError:
+            continue
+        if day <= today:
+            daily_by_date[day.isoformat()] = {**row, "date": day.isoformat(), "mean_sentiment": value}
+    daily_rows = list(daily_by_date.values())
     cutoff = now.astimezone(UTC) - timedelta(hours=48)
     headlines = []
     seen: set[str] = set()
@@ -51,7 +68,14 @@ def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: d
             break
     return {
         "as_of": headlines[0]["published_at"] if headlines else None,
-        "sentiment_7d": rolling_mean(daily_rows, now.astimezone(UTC).date()),
+        "sentiment_7d": rolling_mean(daily_rows, today),
+        "sentiment_history": [
+            {
+                "date": day,
+                "value": rolling_mean(daily_rows, date.fromisoformat(day)),
+            }
+            for day in sorted(daily_by_date)[-90:]
+        ],
         "headlines": headlines,
     }
 
@@ -229,9 +253,6 @@ def build_chart_data(
     generated_at: str | None = None,
 ) -> dict:
     """Build one ticker's compact chart-only history document."""
-    def number(value):
-        return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else None
-
     trends_by_series: dict[str, dict[str, float]] = {}
     pressure_by_date: dict[str, float] = {}
     correlation_by_series: dict[str, list[dict]] = {}

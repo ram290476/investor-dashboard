@@ -236,6 +236,49 @@ def test_news_keeps_the_last_48_hours_and_a_seven_day_mean():
     assert news["sentiment_7d"] == pytest.approx(0.3)
     assert [item["title"] for item in news["headlines"]] == ["Tesla approval"]
     assert news["headlines"][0]["label"] == "bullish"
+    assert news["sentiment_history"] == [
+        {"date": "2026-10-01", "value": 0.2},
+        {"date": "2026-10-06", "value": pytest.approx(0.3)},
+    ]
+
+
+def test_sentiment_history_is_ticker_scoped_finite_and_only_uses_observed_days():
+    from datetime import UTC, datetime
+
+    rows = [
+        {"ticker": "TSLA", "date": "2026-09-20", "mean_sentiment": -0.9},
+        {"ticker": "TSLA", "date": "2026-10-01", "mean_sentiment": 0.2},
+        {"ticker": "TSLA", "date": "2026-10-06", "mean_sentiment": 0.4},
+        {"ticker": "TSLA", "date": "2026-10-06", "mean_sentiment": 0.6},
+        {"ticker": "SPCX", "date": "2026-10-06", "mean_sentiment": -1},
+        {"ticker": "TSLA", "date": "2026-10-07", "mean_sentiment": 1},
+        {"ticker": "TSLA", "date": "2026-10-04", "mean_sentiment": float("nan")},
+        {"ticker": "TSLA", "date": "2026-10-05", "mean_sentiment": float("inf")},
+        {"ticker": "TSLA", "date": "2026-02-30", "mean_sentiment": 1},
+    ]
+    news = dashboard_build.build_news("TSLA", rows, [], datetime(2026, 10, 6, tzinfo=UTC))
+    assert news["sentiment_7d"] == pytest.approx(0.4)
+    assert news["sentiment_history"] == [
+        {"date": "2026-09-20", "value": -0.9},
+        {"date": "2026-10-01", "value": 0.2},
+        {"date": "2026-10-06", "value": pytest.approx(0.4)},
+    ]
+    assert dashboard_build.build_news("NONE", rows, [], datetime(2026, 10, 6, tzinfo=UTC))["sentiment_history"] == []
+
+
+def test_sentiment_history_is_bounded_to_last_90_observed_days():
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 10, 6, tzinfo=UTC)
+    rows = [
+        {"ticker": "TSLA", "date": (now.date() - timedelta(days=i)).isoformat(), "mean_sentiment": 0.2}
+        for i in range(110)
+    ]
+    history = dashboard_build.build_news("TSLA", rows, [], now)["sentiment_history"]
+    assert len(history) == 90
+    assert history[0]["date"] == (now.date() - timedelta(days=89)).isoformat()
+    assert history[-1]["date"] == now.date().isoformat()
+    assert all(row["value"] == pytest.approx(0.2) for row in history)
 
 
 def test_filings_events_and_insider_flow_are_served():

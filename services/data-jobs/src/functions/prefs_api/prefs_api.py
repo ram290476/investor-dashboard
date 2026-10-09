@@ -59,6 +59,7 @@ CHART_OVERLAYS = {
     "FUNDAMENTAL:revenue_gaap", "FUNDAMENTAL:gross_profit_gaap", "FUNDAMENTAL:gross_margin_gaap",
     "FUNDAMENTAL:deliveries", "FUNDAMENTAL:fsd_subscribers",
     "FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd",
+    "NEWS:SENTIMENT",
 }
 DEFAULTS = {
     "tickers": ["TSLA", "SPCX"],

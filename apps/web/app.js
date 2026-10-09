@@ -11,6 +11,7 @@ import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle 
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
 import { applyTheme, overlayColor } from "./theme.js";
+import { CATALYST_CATEGORIES, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
 import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
   number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
@@ -50,6 +51,10 @@ const session = {
   periodSave: false,
   chartSaveError: "",
   watchlistScroll: 0,
+  catalystCategories: CATALYST_CATEGORIES.map(category => category.id),
+  focusCatalyst: null,
+  driverSort: "effect",
+  openDrawers: new Set(),
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 let prefsSaveQueue = Promise.resolve();
@@ -67,6 +72,39 @@ function action(label, className, onClick) {
   button.type = "button";
   button.addEventListener("click", onClick);
   return button;
+}
+
+function rememberDrawer(drawer, key) {
+  drawer.open = session.openDrawers.has(key);
+  drawer.addEventListener("toggle", () => {
+    if (!drawer.isConnected) return;
+    if (drawer.open) session.openDrawers.add(key);
+    else session.openDrawers.delete(key);
+  });
+  return drawer;
+}
+
+function selectCatalyst(event) {
+  session.focusCatalyst = event.id;
+  if (!session.catalystCategories.includes(event.category)) session.catalystCategories.push(event.category);
+  session.mobileView = "chart";
+  renderDashboard();
+  requestAnimationFrame(() => {
+    const marker = document.getElementById(`catalyst-${event.id}`);
+    marker?.focus();
+    marker?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+  });
+}
+
+function selectedChartBars(tickerData) {
+  const history = tickerData?.price_history || [];
+  const period = resolveChartPeriod(session.prefs.display?.chart_period, history);
+  const intraday = tickerData?.intraday?.bars || [];
+  if (period === "1D" && intraday.length >= 2) return intraday.map(bar => ({
+    ts: bar.ts, date: bar.ts, close: bar.close, adj_close: bar.close, volume: bar.volume,
+  }));
+  const quote = periodQuote(history, period);
+  return quote.available ? quote.window : validBars(history);
 }
 
 function apiUrl(path) {
@@ -430,7 +468,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     path.setAttribute("class", "chart-overlay-path");
     path.setAttribute("d", seriesPath(
       scaled, xAt,
-      (value) => definition.kind === "macro" || definition.kind === "fundamental" ? yNormalized(value) : yValue(value),
+      (value) => ["macro", "fundamental", "sentiment"].includes(definition.kind) ? yNormalized(value) : yValue(value),
       definition.kind === "fundamental",
     ));
     path.setAttribute("stroke", overlayColor(definition.color, session.prefs.display.theme));
@@ -442,6 +480,48 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
       path.append(title);
     }
     svg.append(path);
+  });
+
+  const catalysts = catalystRows(chartContext.dashboard, ticker)
+    .filter(event => session.catalystCategories.includes(event.category) && markerIndex(event, bars) >= 0);
+  const occupied = new Map();
+  catalysts.forEach(event => {
+    const index = markerIndex(event, bars);
+    if (!occupied.has(index)) occupied.set(index, []);
+    occupied.get(index).push(event);
+  });
+  catalysts.forEach(event => {
+    const index = markerIndex(event, bars);
+    const peers = occupied.get(index);
+    const spacing = Math.min(24, 132 / Math.max(1, peers.length - 1));
+    const category = CATALYST_CATEGORIES.find(category => category.id === event.category);
+    const marker = document.createElementNS(svgNS, "g");
+    marker.id = `catalyst-${event.id}`;
+    marker.setAttribute("class", `catalyst-marker${session.focusCatalyst === event.id ? " selected" : ""}`);
+    marker.setAttribute("tabindex", "0");
+    marker.setAttribute("role", "button");
+    marker.setAttribute("aria-label", `${category.label}: ${event.title}, ${event.date}`);
+    marker.setAttribute("transform", `translate(${xAt(index)},${182 - peers.indexOf(event) * spacing})`);
+    const hit = document.createElementNS(svgNS, "circle");
+    hit.setAttribute("r", String(Math.min(12, spacing / 2)));
+    hit.setAttribute("fill", "transparent");
+    const dot = document.createElementNS(svgNS, "circle");
+    dot.setAttribute("r", "4");
+    dot.setAttribute("fill", overlayColor(category.slot, session.prefs.display.theme));
+    const title = document.createElementNS(svgNS, "title");
+    title.textContent = `${event.title} · ${event.date} · ${event.source}`;
+    marker.append(hit, dot, title);
+    marker.addEventListener("click", () => {
+      session.focusCatalyst = event.id;
+      session.openDrawers.add("catalyst-calendar");
+      session.mobileView = "calendar";
+      renderDashboard();
+      document.getElementById(`calendar-${event.id}`)?.focus();
+    });
+    marker.addEventListener("keydown", key => {
+      if (key.key === "Enter" || key.key === " ") { key.preventDefault(); marker.dispatchEvent(new Event("click")); }
+    });
+    svg.append(marker);
   });
 
   if (Number.isFinite(lastPrice) && firstPrice !== 0) {
@@ -944,14 +1024,8 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   const chartSettings = chartSettingsFor(session.prefs, session.selected);
   const activeId = resolveChartPeriod(session.prefs.display?.chart_period, history);
   const quote = periodQuote(history, activeId);
-  const intradayBars = (tickerData?.intraday?.bars || []).map((bar) => ({
-    ts: bar.ts,
-    date: bar.ts,
-    close: bar.close,
-    adj_close: bar.close,
-    volume: bar.volume,
-  }));
-  const chartHistory = activeId === "1D" && intradayBars.length >= 2 ? intradayBars : quote.available ? quote.window : bars;
+  const intradayBars = tickerData?.intraday?.bars || [];
+  const chartHistory = selectedChartBars(tickerData);
   const panel = node("section", "panel price-panel");
   const overview = node("div", "overview");
   const quoteBlock = node("div", "overview-quote");
@@ -976,6 +1050,23 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
   panel.append(overview);
   panel.append(renderOverlayControls(tickerData, chartData, chartDataState, onSettingsChange));
+  const filters = node("div", "catalyst-filters");
+  filters.setAttribute("role", "group");
+  filters.setAttribute("aria-label", "Chart catalyst categories");
+  filters.append(node("span", "signal-note", "Catalysts"));
+  CATALYST_CATEGORIES.forEach(category => {
+    const enabled = session.catalystCategories.includes(category.id);
+    const toggle = action(category.label, "overlay-chip", () => {
+      session.catalystCategories = enabled ? session.catalystCategories.filter(id => id !== category.id)
+        : [...session.catalystCategories, category.id];
+      renderDashboard();
+      root.querySelector(`[data-catalyst-category="${category.id}"]`)?.focus();
+    });
+    toggle.dataset.catalystCategory = category.id;
+    toggle.setAttribute("aria-pressed", String(enabled));
+    filters.append(toggle);
+  });
+  panel.append(filters);
   if (chartDataState === "error") {
     const error = node("p", "data-state error chart-data-error", "Historical overlay data could not be loaded. Use Refresh data to retry.");
     error.setAttribute("role", "alert");
@@ -1117,8 +1208,45 @@ function renderDrivers(tickerData) {
     const missing = tickerData?.trend?.coverage?.missing || [];
     if (missing.length) body.append(node("p", "signal-note", `${missing.length} inputs unavailable: ${missing.map(driverLabel).join(", ")}.`));
     body.append(node("h3", "signal-label", `Top drivers for ${session.selected}`), renderDriverList(drivers.slice(0, 5)));
-    const all = node("details", "signal-drawer");
-    all.append(node("summary", "", `All driver trends · ${drivers.length} observations`), renderDriverList(drivers));
+    const regimes = node("div", "regime-pills");
+    const priceTrend = resolveTrend(tickerData?.price_history || [], servingPriceTrend(tickerData, session.selected));
+    regimes.append(node("span", "regime-pill", `Price · ${trendLabel(priceTrend)}`));
+    drivers.filter(row => ["DGS10", "CPI_YOY", "VIXCLS", "DTWEXBGS", "DCOILWTICO"].includes(row.series_id))
+      .forEach(row => regimes.append(node("span", "regime-pill", `${driverLabel(row.series_id)} · ${driverTrend(row)}`)));
+    body.append(regimes);
+    const sensitivity = sensitivityRows(tickerData);
+    body.append(node("h3", "signal-label", "Catalyst sensitivity"));
+    if (!sensitivity.length) body.append(node("p", "signal-note", "Sensitivity unavailable: at least 12 paired releases and finite variation are required."));
+    sensitivity.slice(0, 3).forEach(row => body.append(node("p", "signal-note",
+      `${driverLabel(row.series_id)} · ${RELEASE_WINDOWS[row.window] || row.window} · ${signed(row.correlation_surprise)} correlation · n=${row.n_releases}`)));
+    body.append(node("p", "signal-note", "Historical association, not a causal forecast."));
+    const recent = catalystRows(session.dashboard, session.selected)
+      .filter(row => String(row.date).slice(0, 10) <= String(session.dashboard?.generated_at).slice(0, 10)).slice(-5).reverse();
+    body.append(node("h3", "signal-label", `Recent ${session.selected} catalysts`));
+    if (!recent.length) body.append(node("p", "signal-note", "No recent catalysts have been published."));
+    recent.forEach(event => {
+      const button = action(`${String(event.date).slice(0, 10)} · ${event.title}`, "button-link catalyst-row-button", () => selectCatalyst(event));
+      button.disabled = markerIndex(event, selectedChartBars(tickerData)) < 0;
+      if (button.disabled) button.title = "Outside the selected chart period. Choose a longer period to focus this catalyst.";
+      body.append(button);
+    });
+    const all = rememberDrawer(node("details", "signal-drawer"), "all-drivers");
+    const sort = node("select", "driver-sort");
+    sort.setAttribute("aria-label", "Sort all driver trends");
+    [["effect", "Effect magnitude"], ["name", "Series name"], ["change", "1M change magnitude"], ["correlation", "90D correlation magnitude"]].forEach(([value, label]) => {
+      const option = node("option", "", label);
+      option.value = value;
+      option.selected = session.driverSort === value;
+      sort.append(option);
+    });
+    let list = renderDriverList(sortedDrivers(tickerData, session.driverSort));
+    sort.addEventListener("change", () => {
+      session.driverSort = sort.value;
+      const next = renderDriverList(sortedDrivers(tickerData, session.driverSort));
+      list.replaceWith(next);
+      list = next;
+    });
+    all.append(node("summary", "", `All driver trends · ${drivers.length} observations`), sort, list);
     body.append(all);
     panel.append(body);
   }
@@ -1146,6 +1274,7 @@ function renderDriverList(rows) {
     strength.title = effect == null ? "Needs finite 90-day correlation and 1-month z-score."
       : `${row.strength || "Measured"} link; effect ${signed(effect)} = correlation(90D) × z(1M). Association, not a causal forecast.`;
     strength.setAttribute("aria-label", `${direction}; ${count} of 3 strength bars`);
+    strength.append(document.createTextNode(effect == null ? "" : ` ${signed(effect)}`));
     item.append(name, change, strength);
     list.append(item);
   });
@@ -1186,7 +1315,11 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   ratesPanel.dataset.mobilePanel = "signals";
   ratesPanel.append(sectionHeader("Rates & yields", "Latest available observations · 1M change in basis points"));
   const rateBody = node("div", "panel-body");
-  if (!rates.length) rateBody.append(node("p", "data-state", "Rates are unavailable until D1 observations reach the trend build."));
+  if (!rates.length) rateBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading rates…"
+    : session.dashboardState === "error" ? "Rates could not be loaded. Refresh data to retry."
+      : "Rates are unavailable until D1 observations reach the trend build."));
+  if (chartDataState === "loading") rateBody.append(node("p", "data-state", "Loading rate history…"));
+  else if (chartDataState === "error") rateBody.append(node("p", "data-state error", "Rate history could not be loaded. Refresh data to retry."));
   rates.forEach(row => {
     const entry = node("div", "rate-entry");
     const copy = node("div", "signal-heading");
@@ -1204,7 +1337,9 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   const releaseBody = node("div", "panel-body");
   const links = tickerData?.release_links;
   const latest = (links?.latest || []).filter(row => /^(CORE_)?(CPI|PCE)_YOY$/.test(row.series_id));
-  if (!latest.length) releaseBody.append(node("p", "data-state", "Release history is unavailable until M1 has published release-dated data."));
+  if (!latest.length) releaseBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading releases…"
+    : session.dashboardState === "error" ? "Releases could not be loaded. Refresh data to retry."
+      : "Release history is unavailable until M1 has published release-dated data."));
   latest.forEach(row => {
     const block = node("div", "release-block");
     block.append(node("h3", "signal-label", driverLabel(row.series_id)),
@@ -1224,7 +1359,7 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   });
   const calendar = session.dashboard?.releases?.next || [];
   if (calendar.length) {
-    const drawer = node("details", "signal-drawer");
+    const drawer = rememberDrawer(node("details", "signal-drawer"), "release-calendar");
     drawer.append(node("summary", "", `Release calendar · ${calendar.length} upcoming`));
     calendar.forEach(row => drawer.append(node("p", "signal-note", `${row.series} · ${formatTime(row.release_ts, session.prefs.display.time_zone)}`)));
     releaseBody.append(drawer);
@@ -1234,7 +1369,7 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   const drift = node("section", "panel");
   drift.dataset.mobilePanel = "signals";
   drift.append(sectionHeader("Correlation drift", `${session.selected} · 30D / 90D rolling correlations`));
-  const drawer = node("details", "signal-drawer panel-body");
+  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "correlation");
   drawer.append(node("summary", "", "Show correlation history and month-over-month drift"));
   if (chartDataState === "error") drawer.append(node("p", "data-state error", "Correlation history could not be loaded. Use Try again above."));
   else if (chartDataState === "loading") drawer.append(node("p", "data-state", "Loading correlation history…"));
@@ -1251,8 +1386,92 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   });
   if (!daily.length) drawer.append(node("p", "data-state", "No daily driver correlations available yet."));
   drift.append(drawer);
-  grid.append(ratesPanel, inflation, drift);
+  grid.append(ratesPanel, inflation, ...renderDetailPanels(tickerData, chartData, chartDataState), drift, renderCatalystCalendar(tickerData));
   return grid;
+}
+
+function renderDetailPanels(tickerData, chartData, chartDataState) {
+  const panels = [];
+  const create = (title, subtitle) => {
+    const panel = node("section", "panel");
+    panel.dataset.mobilePanel = "signals";
+    panel.append(sectionHeader(title, subtitle));
+    const body = node("div", "panel-body");
+    panel.append(body);
+    panels.push(panel);
+    return body;
+  };
+  const market = create("Market comparison", `1M adjusted returns · ${session.selected} and ETF proxies`);
+  if (session.dashboardState === "loading") market.append(node("p", "data-state", "Loading market prices…"));
+  else if (session.dashboardState === "error") market.append(node("p", "data-state error", "Market prices could not be loaded. Refresh data to retry."));
+  [session.selected, "SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH"].filter((id, i, ids) => ids.indexOf(id) === i).forEach(id => {
+    const history = session.dashboard?.tickers?.[id]?.price_history || [];
+    const quote = periodQuote(history, "1M");
+    market.append(node("p", "signal-heading", `${id} · ${quote.available ? formatPercent(quote.returnValue, 1) : "History unavailable"}`),
+      signalSparkline(history.slice(-63).map(bar => ({ value: chartValue(bar) })), "var(--price)", `${id} adjusted closes`));
+  });
+  const averages = create("Moving averages", `${session.selected} · adjusted daily closes`);
+  if (session.dashboardState === "loading") averages.append(node("p", "data-state", "Loading daily closes…"));
+  else if (session.dashboardState === "error") averages.append(node("p", "data-state error", "Daily closes could not be loaded."));
+  movingAverageRows(tickerData?.price_history).forEach(row => averages.append(node("p", "signal-heading",
+    `${row.window}D · ${row.value == null ? "Insufficient history" : `${formatPrice(row.value)} · price ${formatPercent(row.distance, 1)} vs average`}`)));
+  const drivers = driverRows(tickerData);
+  [
+    ["Volatility", ["VIXCLS"], "VIX levels and observed trend"],
+    ["Dollar & oil", ["DTWEXBGS", "DCOILWTICO"], "Observed macro series, not forecasts"],
+    ["Tariffs & geopolitics", ["USEPUINDXD"], "Policy-uncertainty proxy and curated policy events"],
+  ].forEach(([title, ids, subtitle]) => {
+    const body = create(title, subtitle);
+    if (chartDataState === "loading") body.append(node("p", "data-state", "Loading historical series…"));
+    else if (chartDataState === "error") body.append(node("p", "data-state error", "Historical series could not be loaded. Refresh data to retry."));
+    ids.forEach(id => {
+      const row = drivers.find(row => row.series_id === id);
+      const entry = node("div", "rate-entry");
+      entry.append(node("h3", "signal-label", driverLabel(id)),
+        node("p", "", row ? `${driverValue(row)} · ${driverChange(row)} · ${driverTrend(row)}` : "Latest observation unavailable"),
+        signalSparkline((chartData?.macro_series?.[id] || []).slice(-63), "var(--price)", `${driverLabel(id)} history`));
+      if (id === "VIXCLS" && signalNumber(row?.value) != null) {
+        const value = Number(row.value);
+        entry.append(node("p", "signal-note", `${value < 15 ? "Calm" : value <= 20 ? "Normal" : value <= 25 ? "Elevated" : "Stressed"} VIX band · <15 / 15–20 / 20–25 / >25`));
+      }
+      body.append(entry);
+    });
+    if (title === "Tariffs & geopolitics") {
+      const events = catalystRows(session.dashboard, session.selected).filter(event => event.category === "policy");
+      if (!events.length) body.append(node("p", "signal-note", "No curated policy events available. Policy uncertainty is not a tariff-rate or geopolitical-risk measurement."));
+      events.slice(-3).reverse().forEach(event => body.append(node("p", "signal-note", `${String(event.date).slice(0, 10)} · ${event.title}`)));
+    }
+  });
+  return panels;
+}
+
+function renderCatalystCalendar(tickerData) {
+  const panel = node("section", "panel");
+  panel.dataset.mobilePanel = "calendar";
+  panel.append(sectionHeader("Catalyst calendar", `Published events for ${session.selected} and the macro universe`));
+  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "catalyst-calendar");
+  const events = catalystRows(session.dashboard, session.selected);
+  drawer.append(node("summary", "", `Upcoming and past catalysts · ${events.length} published`));
+  if (!events.length) drawer.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading catalysts…"
+    : session.dashboardState === "error" ? "Catalysts could not be loaded. Refresh data to retry." : "No catalyst feed has been published."));
+  const bars = selectedChartBars(tickerData);
+  events.forEach(event => {
+    const row = node("div", "catalyst-calendar-row");
+    const inRange = markerIndex(event, bars) >= 0;
+    const button = action(`${String(event.date).slice(0, 10)} · ${event.title}`, "button-link catalyst-row-button", () => selectCatalyst(event));
+    button.id = `calendar-${event.id}`;
+    button.disabled = !inRange;
+    row.append(button, node("p", "signal-note", `${event.source} · ${inRange ? "Focus chart marker" : "Outside the selected chart period"}`));
+    if (/^https?:\/\//i.test(event.url || "")) {
+      const link = node("a", "button-link", "Source");
+      link.href = event.url; link.target = "_blank"; link.rel = "noopener noreferrer";
+      row.append(link);
+    }
+    drawer.append(row);
+  });
+  drawer.append(node("p", "signal-note", "Nontrading-day catalysts align to the next stored session. Intraday markers use the first stored bar on the event date. No demo events are included."));
+  panel.append(drawer);
+  return panel;
 }
 
 function renderNews(tickerData) {
@@ -1277,6 +1496,21 @@ function renderNews(tickerData) {
   summary.append(document.createTextNode("7-day sentiment "));
   summary.append(node("span", `mono ${polarity(score)}`, score == null ? "—" : `${score > 0 ? "+" : ""}${score.toFixed(2)}`));
   body.append(summary);
+  const sentiment = news.sentiment_history || [];
+  body.append(signalSparkline(sentiment, "var(--series-3)", `${session.selected} rolling seven-day news sentiment`));
+  body.append(node("p", "signal-note", sentiment.length
+    ? `${sentiment.length} stored sentiment observations · through ${sentiment.at(-1).date}. Scores mix provider sentiment and a headline lexicon fallback.`
+    : "Rolling sentiment history has not been published yet."));
+  const chartSettings = chartSettingsFor(session.prefs, session.selected);
+  const overlaySelected = chartSettings.overlays.includes("NEWS:SENTIMENT");
+  const toggle = action(overlaySelected ? "Remove sentiment from chart" : "Overlay sentiment on chart", "overlay-chip", () => {
+    const overlays = overlaySelected ? chartSettings.overlays.filter(id => id !== "NEWS:SENTIMENT")
+      : [...chartSettings.overlays.slice(-4), "NEWS:SENTIMENT"];
+    updateChartSettings(session.selected, { ...chartSettings, overlays });
+  });
+  toggle.disabled = !overlaySelected && !sentiment.some(point => isNumericValue(point.value));
+  toggle.setAttribute("aria-pressed", String(overlaySelected));
+  body.append(toggle);
   const headlines = Array.isArray(news.headlines) ? news.headlines.slice(0, 10) : [];
   if (!headlines.length) {
     body.append(node("p", "data-state", "No headlines in the last 48 hours."));
@@ -1314,6 +1548,7 @@ function renderFilings(tickerData) {
     panel.append(node("p", "data-state", "Loading filings…"));
     return panel;
   }
+
   if (!filings && !events && session.dashboardState === "error") {
     panel.append(node("p", "data-state", "Filings could not be loaded. Use Try again above."));
     return panel;
@@ -1355,6 +1590,66 @@ function renderFilings(tickerData) {
   return panel;
 }
 
+function renderCompanyPanel(chartData, chartDataState) {
+  const panel = node("section", "panel");
+  panel.dataset.mobilePanel = "more";
+  panel.append(sectionHeader(session.selected === "TSLA" ? "Tesla · robotaxi & company themes"
+    : session.selected === "SPCX" ? "SpaceX · operations & contracts" : `${session.selected} · company themes`,
+  "Published lake data only · no design-demo facts"));
+  const body = node("div", "panel-body");
+  if (session.dashboardState === "loading") body.append(node("p", "data-state", "Loading company events…"));
+  else if (session.dashboardState === "error") body.append(node("p", "data-state error", "Company events could not be loaded. Refresh data to retry."));
+  if (session.selected === "TSLA") {
+    body.append(node("p", "signal-note", "Robotaxi fleet size, state permit counts and regional FSD approval counts have not been published as structured live measurements. Design-demo values are not shown."));
+    ["deliveries", "fsd_subscribers"].forEach(metric => body.append(node("p", "signal-note",
+      `${metric === "deliveries" ? "Reported deliveries" : "Reported FSD subscribers"} · ${
+        chartDataState === "loading" ? "Loading…" : chartDataState === "error" ? "Could not load quarterly data"
+          : fundamentalSummary(`FUNDAMENTAL:${metric}`, chartData, session.dashboard?.generated_at)
+      }`)));
+  } else if (session.selected === "SPCX") {
+    body.append(node("p", "signal-note", "Curated launch events are shown below. Active-satellite counts and launch-cadence measurements have not been published. Government awards are shown in the contracts panel."));
+  } else {
+    body.append(node("p", "signal-note", "No company-specific operating-metrics feed is configured for this symbol. Available SEC financial series remain in the Fundamentals overlays."));
+  }
+  const events = catalystRows(session.dashboard, session.selected)
+    .filter(event => event.category === (session.selected === "SPCX" ? "space" : "robotaxi"));
+  if (!events.length) body.append(node("p", "data-state", "No matching company operating events are available."));
+  events.slice(-5).reverse().forEach(event => {
+    const row = node("p", "signal-note", `${String(event.date).slice(0, 10)} · ${event.title} `);
+    if (/^https?:\/\//i.test(event.url || "")) {
+      const source = node("a", "button-link", "Source");
+      source.href = event.url; source.target = "_blank"; source.rel = "noopener noreferrer";
+      row.append(source);
+    }
+    body.append(row);
+  });
+  body.append(action("Review reported Fundamentals on the chart", "button-link", () => {
+    session.overlayGroup = "Fundamentals";
+    session.mobileView = "chart";
+    renderDashboard();
+    root.querySelector('[data-overlay-tab="Fundamentals"]')?.focus();
+  }));
+  panel.append(body);
+  return panel;
+}
+
+function renderAboutData() {
+  const panel = node("section", "panel");
+  panel.dataset.mobilePanel = "more";
+  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "about-data");
+  drawer.append(node("summary", "", "About this data · provenance and methodology"),
+    node("p", "signal-note", "Source IDs identify FRED/Treasury macro series, price-provider histories, SEC EDGAR financial facts and filings, curated release/event calendars, and provider news. Observed and available dates appear in driver tooltips; collection health and schedules are separate from observation freshness."),
+    node("p", "signal-note", "Prices use split/dividend-adjusted daily closes for historical comparisons. Intraday bars and live quotes are separate; ETF comparisons use their own stored price histories."),
+    node("p", "signal-note", "Driver trends use 5/21/63-session changes and a 1M z-score, not stock moving averages. Stock trend uses 20/50-day averages. The 1Y range is a high-low position, not an empirical percentile."),
+    node("p", "signal-note", "Daily correlation windows are 30/90 sessions with at least 20/60 paired values. Effect = 90D correlation × 1M z-score; pressure = tanh(sum of finite effects / 3). Entirely missing pressure stays unavailable."),
+    node("p", "signal-note", "Monthly macro releases use separate adjusted-return event windows and at least 12 paired releases. Without consensus, the basis is YoY change, not consensus surprise. Current/revised observations are not a real-time-vintage backtest."),
+    node("p", "signal-note", "Quarterly fundamentals change on filing/release dates. Public float is reported USD, usually annual; estimated float shares in the short-interest lane are a separate calculation."),
+    node("p", "signal-note", "News sentiment is a rolling mean of available daily scores over seven calendar days, mixing provider sentiment with a headline lexicon fallback. Missing days are not fabricated. Catalyst feeds are bounded published events, not an exhaustive corporate calendar."),
+    action("View collection schedules and source health", "button-link", () => settings.open("refresh", "about-data")));
+  panel.append(drawer);
+  return panel;
+}
+
 function renderDashboard() {
   const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
@@ -1374,7 +1669,13 @@ function renderDashboard() {
   const lastRefresh = session.dashboard?.generated_at
     ? `Data ${formatTime(session.dashboard.generated_at, session.prefs.display.time_zone)}`
     : "Refresh data";
-  actions.append(action(lastRefresh, "", () => refreshData(true)));
+  const schedule = action(lastRefresh, "", () => settings.open("refresh", "header-refresh"));
+  schedule.dataset.opener = "header-refresh";
+  schedule.setAttribute("aria-label", `${lastRefresh}; open collection schedules and data refresh status`);
+  const refresh = action("↻", "", () => refreshData(true));
+  refresh.setAttribute("aria-label", "Refresh dashboard data");
+  refresh.dataset.refresh = "data";
+  actions.append(schedule, refresh);
   actions.append(settings.renderAccountButton());
   header.append(actions);
   root.append(header);
@@ -1436,6 +1737,7 @@ function renderDashboard() {
   price.id = "mobile-panel-chart";
   primary.append(price);
   primary.append(renderMacroPanels(tickerData, chartData, chartDataState));
+  primary.append(renderCompanyPanel(chartData, chartDataState));
   const contracts = renderContracts(tickerData);
   if (contracts) {
     contracts.dataset.mobilePanel = "more";
@@ -1448,6 +1750,7 @@ function renderDashboard() {
   news.id = "mobile-panel-more";
   filings.dataset.mobilePanel = "more";
   side.append(renderDrivers(tickerData), news, filings);
+  primary.append(renderAboutData());
   mainGrid.append(primary, side);
   const mobileTabs = node("div", "mobile-view-tabs");
   mobileTabs.setAttribute("role", "tablist");
@@ -1495,10 +1798,11 @@ function renderDashboard() {
 
 async function refreshData(showLoading) {
   if (showLoading) {
-    const refreshButton = [...root.querySelectorAll("button")].find((button) => button.textContent.startsWith("Data "));
+    const refreshButton = root.querySelector('[data-refresh="data"]');
     if (refreshButton) {
       refreshButton.disabled = true;
-      refreshButton.textContent = "Refreshing…";
+      refreshButton.textContent = "…";
+      refreshButton.setAttribute("aria-label", "Refreshing dashboard data");
     }
   }
   const [dashboardResult, statusResult] = await Promise.allSettled([apiGet("dashboard"), apiGet("status")]);
