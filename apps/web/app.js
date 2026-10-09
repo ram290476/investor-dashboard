@@ -11,6 +11,7 @@ import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle 
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
 import { applyTheme, overlayColor } from "./theme.js";
+import { routeFromPath, routeStateForPath, tickerResearchPath } from "./routes.js";
 import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
 import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
@@ -36,7 +37,13 @@ import {
 const root = document.querySelector("#app");
 const chartAvailability = new Map();
 const svgNS = "http://www.w3.org/2000/svg";
-const authKeys = { state: "oauth_state", verifier: "oauth_verifier", hash: "oauth_return_hash" };
+const authKeys = {
+  state: "oauth_state",
+  verifier: "oauth_verifier",
+  hash: "oauth_return_hash",
+  path: "oauth_return_path",
+  dashboardTicker: "oauth_return_dashboard_ticker",
+};
 const session = {
   config: null,
   accessToken: null,
@@ -54,6 +61,8 @@ const session = {
   // A settings save that failed after the dialog closed: { message, reopen }.
   settingsError: null,
   selected: null,
+  dashboardSelection: null,
+  route: { page: "dashboard" },
   mobileView: "chart",
   periodSave: false,
   chartSaveError: "",
@@ -158,6 +167,16 @@ async function beginSignIn() {
     sessionStorage.setItem(authKeys.verifier, verifier);
     sessionStorage.setItem(authKeys.state, state);
     if (parseSettingsHash(location.hash)) sessionStorage.setItem(authKeys.hash, location.hash);
+    sessionStorage.setItem(
+      authKeys.path,
+      session.route.page === "research" ? tickerResearchPath(session.selected) : "/",
+    );
+    sessionStorage.setItem(
+      authKeys.dashboardTicker,
+      session.route.page === "research"
+        ? session.dashboardSelection || ""
+        : session.selected || "",
+    );
     const authorize = new URL("/oauth2/authorize", session.config.cognitoDomain);
     authorize.search = new URLSearchParams({
       client_id: session.config.clientId,
@@ -203,10 +222,11 @@ async function completeSignIn() {
   }
   session.accessToken = tokens.access_token;
   session.email = emailFromIdToken(tokens.id_token);
-  // Keep a #settings/... deep link that was saved before the Cognito round trip.
+  const pendingPath = sessionStorage.getItem(authKeys.path) || "/";
+  sessionStorage.removeItem(authKeys.path);
   const pendingHash = sessionStorage.getItem(authKeys.hash) || "";
   sessionStorage.removeItem(authKeys.hash);
-  history.replaceState({}, "", location.pathname + pendingHash);
+  history.replaceState({}, "", pendingPath + pendingHash);
   return true;
 }
 
@@ -592,13 +612,16 @@ function renderWatchlist() {
   list.id = "watchlist-scroll";
   const buttons = [];
   const ensureVisible = (button) => {
+    if (!button) return;
     const left = button.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft - list.clientLeft;
     const right = left + button.offsetWidth;
     if (left < list.scrollLeft) list.scrollLeft = left;
     else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
   };
   const { pinned, others } = stripOrder(session.prefs || {});
-  [...pinned, ...others].forEach((ticker, index) => {
+  const tickers = [...pinned, ...others];
+  const hasSelected = tickers.includes(session.selected);
+  tickers.forEach((ticker, index) => {
     if (index === pinned.length && pinned.length && others.length) {
       const divider = node("span", "watchlist-divider");
       divider.setAttribute("aria-hidden", "true");
@@ -610,7 +633,7 @@ function renderWatchlist() {
     const button = node("button", "ticker-button");
     button.type = "button";
     button.dataset.ticker = ticker;
-    button.tabIndex = ticker === session.selected ? 0 : -1;
+    button.tabIndex = ticker === session.selected || (!hasSelected && index === 0) ? 0 : -1;
     buttons.push(button);
     button.addEventListener("focus", () => ensureVisible(button));
     button.addEventListener("keydown", (event) => {
@@ -626,9 +649,14 @@ function renderWatchlist() {
     button.setAttribute("aria-pressed", String(ticker === session.selected));
     button.setAttribute("aria-label", `${ticker}, ${latest ? formatPrice(displayPrice(latest)) : "no price data"}`);
     button.addEventListener("click", () => {
-      session.selected = ticker;
-      renderDashboard();
-      loadChartData(ticker);
+      if (session.route.page !== "dashboard") {
+        navigateToDashboard(ticker);
+      } else {
+        session.selected = ticker;
+        session.dashboardSelection = ticker;
+        renderDashboard();
+        loadChartData(ticker);
+      }
       root.querySelector('.watchlist [aria-pressed="true"]')?.focus();
     });
     const symbol = node("span", "ticker-symbol", ticker);
@@ -645,7 +673,22 @@ function renderWatchlist() {
         latest ? `${formatPrice(displayPrice(latest))} · ${formatPercent(returns(history, 1))}` : "Waiting for history",
       ),
     );
-    list.append(button);
+    const item = node("div", "ticker-watch-item");
+    item.append(button);
+    const researchPath = tickerResearchPath(ticker);
+    if (researchPath) {
+      const researchLink = node("a", "ticker-research", "↗");
+      researchLink.href = researchPath;
+      researchLink.title = `Open ${ticker} research`;
+      researchLink.setAttribute("aria-label", `Open ${ticker} research page`);
+      researchLink.addEventListener("click", (event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigateToResearch(ticker);
+      });
+      item.append(researchLink);
+    }
+    list.append(item);
   });
   const manage = node("button", "ticker-button ticker-manage");
   manage.type = "button";
@@ -1753,14 +1796,7 @@ function renderAboutData() {
   return panel;
 }
 
-function renderDashboard() {
-  const errorMessage = dashboardBanner(session);
-  if (!session.prefs) return;
-  session.selected = fallbackSelection(session.prefs, session.selected);
-  const focusedTicker = document.activeElement?.closest(".watchlist .ticker-button")?.dataset.ticker;
-  root.replaceChildren();
-  applyTheme(session.prefs.display);
-
+function renderAppHeader() {
   const header = node("header", "app-header");
   const brand = node("div", "brand-line");
   brand.append(node("h1", "", "Investor Dashboard"));
@@ -1778,11 +1814,163 @@ function renderDashboard() {
   const refresh = action("↻", "", () => refreshData(true));
   refresh.setAttribute("aria-label", "Refresh dashboard data");
   refresh.dataset.refresh = "data";
-  actions.append(schedule, refresh);
-  actions.append(settings.renderAccountButton());
+  actions.append(schedule, refresh, settings.renderAccountButton());
   header.append(actions);
-  root.append(header);
-  root.append(renderWatchlist());
+  return header;
+}
+
+function renderResearchPage() {
+  const errorMessage = dashboardBanner(session);
+  const tickerData = selectedData();
+  const chartData = session.chartData[session.selected] || null;
+  const chartDataState = session.chartDataState[session.selected] || "loading";
+  root.replaceChildren();
+  applyTheme(session.prefs.display);
+  root.append(renderAppHeader(), renderWatchlist());
+
+  const heading = node("section", "panel research-heading");
+  const copy = node("div", "research-heading-copy");
+  const company = session.selected === "TSLA" ? "Tesla" : "SpaceX";
+  const title = node("h2", "", `${company} (${session.selected}) research`);
+  title.id = "research-title";
+  title.tabIndex = -1;
+  copy.append(title, node("p", "signal-note", "Published and curated data only; unsupported measurements remain unavailable."));
+  heading.append(copy, action("← Dashboard", "button-link", () => navigateToDashboard()));
+  root.append(heading);
+
+  if (session.settingsError) {
+    const { message, reopen } = session.settingsError;
+    const alert = node("p", "data-state error", `${message} `);
+    alert.setAttribute("role", "alert");
+    alert.append(action("Open settings", "button-link", reopen));
+    root.append(alert);
+  }
+
+  if (errorMessage) {
+    const alert = node("p", "data-state error");
+    alert.setAttribute("role", "alert");
+    alert.textContent = `${errorMessage} `;
+    alert.append(action("Try again", "button-link", () => refreshData(true)));
+    root.append(alert);
+  }
+
+  const main = node("main", "research-grid");
+  main.setAttribute("aria-label", `${session.selected} research`);
+  const primary = node("div", "research-column");
+  const price = renderPricePanel(
+    tickerData,
+    chartData,
+    chartDataState,
+    selectChartPeriod,
+    (next) => updateChartSettings(session.selected, next),
+  );
+  primary.append(price, renderCompanyPanel(tickerData, chartData, chartDataState));
+  const contracts = renderContracts(tickerData);
+  if (contracts) primary.append(contracts);
+  primary.append(renderAboutData());
+
+  const side = node("aside", "research-column");
+  side.setAttribute("aria-label", "News, filings and source records");
+  side.append(renderNews(tickerData), renderFilings(tickerData));
+  main.append(primary, side);
+  root.append(main);
+
+  const footer = node("footer", "dashboard-footer");
+  footer.append(node("span", "", "Information for research; not investment advice."));
+  footer.append(node("span", "", session.dashboard?.generated_at
+    ? `Snapshot ${session.dashboard.generated_at}` : "Serving snapshot unavailable"));
+  root.append(footer);
+  settings.refresh();
+}
+
+function renderNotFoundPage() {
+  root.replaceChildren();
+  applyTheme(session.prefs.display);
+  root.append(renderAppHeader(), renderWatchlist());
+  const message = node("main", "panel research-not-found");
+  message.append(node("h2", "", "Research page not found"));
+  message.append(node("p", "signal-note", "Dedicated research pages are currently available for TSLA and SPCX."));
+  message.append(action("Return to dashboard", "button-primary", () => navigateToDashboard()));
+  root.append(message);
+  settings.refresh();
+}
+
+function navigateToResearch(ticker) {
+  const path = tickerResearchPath(ticker);
+  if (!path) return;
+  if (session.route.page !== "research") session.dashboardSelection = session.selected;
+  history.pushState(history.state, "", path);
+  session.route = routeFromPath(path);
+  session.selected = session.route.ticker;
+  renderDashboard();
+  loadChartData(session.selected);
+  requestAnimationFrame(() => root.querySelector("#research-title")?.focus());
+}
+
+function navigateToDashboard(ticker = session.dashboardSelection || session.selected) {
+  session.dashboardSelection = fallbackSelection(session.prefs, ticker);
+  session.selected = session.dashboardSelection;
+  session.route = { page: "dashboard" };
+  history.pushState(history.state, "", "/");
+  renderDashboard();
+  loadChartData(session.selected);
+}
+
+function handleRoutePopstate() {
+  const state = routeStateForPath(location.pathname, session.dashboardSelection, session.selected);
+  session.route = state.route;
+  session.dashboardSelection = state.dashboardSelection
+    || fallbackSelection(session.prefs, session.selected);
+  session.selected = state.selected || fallbackSelection(session.prefs, session.dashboardSelection);
+  renderDashboard();
+  loadChartData(session.selected);
+  settings.openFromHash();
+}
+
+function notify(message, isError = false) {
+  let notice;
+  notice = node("p", `data-state${isError ? " error" : ""}`, message);
+  notice.setAttribute("role", isError ? "alert" : "status");
+  root.prepend(notice);
+  window.setTimeout(() => notice?.remove(), 6000);
+}
+
+async function selectChartPeriod(periodId) {
+  if (session.periodSave || session.prefs.display?.chart_period === periodId) return;
+  session.periodSave = true;
+  try {
+    await savePrefs({ display: { ...session.prefs.display, chart_period: periodId } });
+    if (session.prefs.display?.chart_period !== periodId) {
+      session.prefs = {
+        ...session.prefs,
+        display: { ...session.prefs.display, chart_period: periodId },
+      };
+    }
+    renderDashboard();
+    root.querySelector(`[data-period="${periodId}"]`)?.focus();
+  } catch (error) {
+    notify(error.message, true);
+  } finally {
+    session.periodSave = false;
+  }
+}
+
+function renderDashboard() {
+  const errorMessage = dashboardBanner(session);
+  if (!session.prefs) return;
+  if (session.route.page === "research") {
+    renderResearchPage();
+    return;
+  }
+  if (session.route.page === "not-found") {
+    renderNotFoundPage();
+    return;
+  }
+  session.selected = fallbackSelection(session.prefs, session.selected);
+  const focusedTicker = document.activeElement?.closest(".watchlist .ticker-button")?.dataset.ticker;
+  root.replaceChildren();
+  applyTheme(session.prefs.display);
+  root.append(renderAppHeader(), renderWatchlist());
   if (focusedTicker) root.querySelector(`[data-ticker="${focusedTicker}"]`)?.focus();
 
   if (session.settingsError) {
@@ -1805,37 +1993,10 @@ function renderDashboard() {
   const tickerData = selectedData();
   const chartData = session.chartData[session.selected] || null;
   const chartDataState = session.chartDataState[session.selected] || "loading";
-  let notice;
-  const onMessage = (message, isError = false) => {
-    notice = node("p", `data-state${isError ? " error" : ""}`, message);
-    notice.setAttribute("role", isError ? "alert" : "status");
-    root.prepend(notice);
-    window.setTimeout(() => notice?.remove(), 6000);
-  };
-  const onSelectPeriod = async (periodId) => {
-    if (session.periodSave || session.prefs.display?.chart_period === periodId) return;
-    session.periodSave = true;
-    try {
-      await savePrefs({ display: { ...session.prefs.display, chart_period: periodId } });
-      // An older prefs response can omit chart_period; keep the click for this session.
-      if (session.prefs.display?.chart_period !== periodId) {
-        session.prefs = {
-          ...session.prefs,
-          display: { ...session.prefs.display, chart_period: periodId },
-        };
-      }
-      renderDashboard();
-      root.querySelector(`[data-period="${periodId}"]`)?.focus();
-    } catch (error) {
-      onMessage(error.message, true);
-    } finally {
-      session.periodSave = false;
-    }
-  };
   const mainGrid = node("main", "dashboard-grid");
   mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
   const primary = node("div", "primary-column");
-  const price = renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, (next) => updateChartSettings(session.selected, next));
+  const price = renderPricePanel(tickerData, chartData, chartDataState, selectChartPeriod, (next) => updateChartSettings(session.selected, next));
   price.dataset.mobilePanel = "chart";
   price.id = "mobile-panel-chart";
   primary.append(price);
@@ -1966,8 +2127,19 @@ async function start() {
 
   try {
     session.prefs = await apiGet("prefs");
-    session.selected = fallbackSelection(session.prefs, null);
+    const returnTicker = sessionStorage.getItem(authKeys.dashboardTicker);
+    sessionStorage.removeItem(authKeys.dashboardTicker);
+    session.dashboardSelection = fallbackSelection(session.prefs, returnTicker);
+    const routeState = routeStateForPath(
+      location.pathname,
+      session.dashboardSelection,
+      session.dashboardSelection,
+    );
+    session.route = routeState.route;
+    session.dashboardSelection = routeState.dashboardSelection;
+    session.selected = routeState.selected;
     renderDashboard();
+    window.addEventListener("popstate", handleRoutePopstate);
     window.addEventListener("hashchange", () => settings.openFromHash());
     settings.openFromHash();
     await refreshData(false);
