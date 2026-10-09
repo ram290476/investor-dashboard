@@ -25,7 +25,11 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
         tickers = collection_universe(user_ticker_union())["equities"]
         with source_run("DS-91") as rec, get_client() as http:
             basic = base64.b64encode(f"{api_key('finra-client-id')}:{api_key('finra-client-secret')}".encode()).decode()
-            token = http.post(finra.TOKEN_URL, headers={"Authorization": f"Basic {basic}"}).json()["access_token"]
+            token_response = http.post(finra.TOKEN_URL, headers={"Authorization": f"Basic {basic}"})
+            token_response.raise_for_status()
+            token = token_response.json().get("access_token")
+            if not isinstance(token, str) or not token:
+                raise ValueError("FINRA token response omitted access_token")
             resp = http.post(
                 finra.DATA_URL,
                 json=finra.query_body(tickers, max(known) if known else None),
@@ -38,6 +42,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 part = [r for r in rows if r["settlement_date"] == d]
                 write_parquet(pl.DataFrame(part), f"curated/short_interest/settlement_date={d}/short_interest.parquet")
             rec["rows"] = sum(r["settlement_date"] in new_dates for r in rows)
+        if rec["outcome"] != "success":
+            raise RuntimeError(f"FINRA collection failed ({rec['error_type']}); see DS-91 source-run logs")
         if new_dates:
             state["settlement_dates"] = sorted(known | new_dates)
             state["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")

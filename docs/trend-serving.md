@@ -148,3 +148,30 @@ and browser checks for six themes at 1440px/390px, four keyboard mobile tabs,
 missing/zero-variation release links, persistence and failed-save rollback.
 The backend also passed PR #66 CI on Python 3.12, including dependency audits,
 the ARM64 Lambda image build and infrastructure/workflow checks.
+
+### Authenticated production checks (2026-10-09 UTC)
+
+Read-only verification confirmed account `308639168050` and deployment Region
+`us-west-1` (the CLI default Region is `us-east-1`). Before the queued #66/#67
+deployment, the dashboard was schema v2, lacked release links/ETF proxy histories,
+and the shared series artifact/morning M1 schedule were absent. TREND failed with
+a Date/string join mismatch, matching the macro normalization fixed in #66.
+
+Logs distinguish actual provider issues from unimplemented catalog placeholders:
+
+| Source | Observed failure | Operational disposition |
+| --- | --- | --- |
+| FINRA DS-91 | Token JSON/key failures followed by `UnboundLocalError` for `new_dates` | Validate token HTTP status/body; propagate an explicit failed collection after the source bulkhead; never advance the watermark on failure |
+| Yahoo DS-05 | APPL HTTP404; SPCX historical window HTTP400 | APPL is not AAPL; do not silently rewrite user symbols. SPCX's cursor is before its stored price inception; confirm the provider response before treating it as a terminal history boundary |
+| DoD | HTTP403 | Provider access restriction; do not bypass it |
+| SAM opportunities | HTTP400 | Validate the request against provider requirements before spending more daily quota |
+| NASA / USAspending | HTTP429 / HTTP422 in the sampled period | Respect provider throttling; verify request fields for the rejected query |
+| Census | HTTP400 | Validate the foreign-trade dataset/variables, rather than rotating a key without evidence |
+| BLS calendar | HTTP404 from Lambda; public local request HTTP403 | Provider endpoint/access issue; no fabricated release dates |
+| Cleveland Fed | `LayoutChangedError`; public HTML has measures in columns, not rows | Adapter layout needs separately tested migration, retaining MoM/YoY/quarterly distinctions and not manufacturing historical consensus from current nowcasts |
+
+These are source-specific follow-ups, not proof that every collector is unhealthy.
+Existing FRED, price, news, regulatory, fundamentals and options jobs had successful
+status records. A successful status alone still does not prove complete coverage.
+Deployments use the existing GitHub OIDC IAM role; no root credential or provider
+secret was copied into source or workflow configuration.
