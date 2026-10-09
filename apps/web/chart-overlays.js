@@ -178,11 +178,15 @@ export function overlayDefinition(id) {
   return overlayById.get(id) || null;
 }
 
-export function fundamentalSummary(id, chartData, through) {
-  const row = (chartData?.fundamentals || [])
+export function fundamentalObservation(id, chartData, through) {
+  return (chartData?.fundamentals || [])
     .filter(row => row.series_id === id.slice("FUNDAMENTAL:".length)
       && isNumericValue(row.value) && String(row.date) <= String(through).slice(0, 10))
     .sort((a, b) => String(a.date).localeCompare(String(b.date))).at(-1);
+}
+
+export function fundamentalSummary(id, chartData, through) {
+  const row = fundamentalObservation(id, chartData, through);
   if (!row) return "not available";
   const value = row.unit === "ratio" ? `${(Number(row.value) * 100).toFixed(1)}%`
     : row.unit === "USD" ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(row.value)

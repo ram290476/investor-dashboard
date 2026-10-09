@@ -8,6 +8,7 @@ import {
   overlayGroups,
   OVERLAYS,
   fundamentalSummary,
+  fundamentalObservation,
   addOverlay,
   availableLanes,
   laneValues,
@@ -143,15 +144,24 @@ test("ETF overlays match timestamps for intraday bars", () => {
 
 test("fundamental summaries are unit-aware, quarter-labelled and publication-date safe", () => {
   const chart = { fundamentals: [
-    { series_id: "revenue_gaap", date: "2026-01-01", value: 27000000000, unit: "USD", fiscal_quarter: "2025Q4" },
+    {
+      series_id: "revenue_gaap",
+      date: "2026-01-01",
+      value: 27000000000,
+      unit: "USD",
+      fiscal_quarter: "2025Q4",
+      source_id: "DS-11",
+    },
     { series_id: "gross_margin_gaap", date: "2026-01-01", value: 0.205, unit: "ratio", fiscal_quarter: "2025Q4" },
     { series_id: "shares_outstanding", date: "2026-01-01", value: 1234567, unit: "shares", fiscal_quarter: "2025Q4" },
-    { series_id: "revenue_gaap", date: "2026-05-01", value: 999, unit: "USD", fiscal_quarter: "2026Q1" },
+    { series_id: "revenue_gaap", date: "2026-05-01", value: 999, unit: "USD", fiscal_quarter: "2026Q1", source_id: "DS-11" },
   ] };
   assert.equal(fundamentalSummary("FUNDAMENTAL:revenue_gaap", chart, "2026-02-01"), "$27.0B · 2025Q4");
   assert.equal(fundamentalSummary("FUNDAMENTAL:gross_margin_gaap", chart, "2026-02-01"), "20.5% · 2025Q4");
   assert.equal(fundamentalSummary("FUNDAMENTAL:shares_outstanding", chart, "2026-02-01"), "1,234,567 · 2025Q4");
   assert.equal(fundamentalSummary("FUNDAMENTAL:revenue_gaap", chart, "2025-12-31"), "not available");
+  assert.equal(fundamentalObservation("FUNDAMENTAL:revenue_gaap", chart, "2026-02-01").source_id, "DS-11");
+  assert.equal(fundamentalObservation("FUNDAMENTAL:revenue_gaap", chart, "2025-12-31"), undefined);
 });
 
 test("sentiment overlays leave unobserved dates empty instead of carrying stale scores", () => {

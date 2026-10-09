@@ -25,6 +25,7 @@ import {
   availableLanes,
   chartSettingsFor,
   fundamentalSummary,
+  fundamentalObservation,
   isMarketOverlay,
   overlayDefinition,
   overlayGroups,
@@ -1218,8 +1219,23 @@ function renderContracts(tickerData) {
   if (!contracts) return null;
   const panel = node("section", "panel");
   panel.append(sectionHeader("Government contracts", "Trailing 12 months · SpaceX and Tesla awards"));
-  const total = isNumericValue(contracts.ttm_obligated) ? formatPrice(contracts.ttm_obligated) : "—";
-  panel.append(node("p", "news-score", `TTM obligated ${total}`));
+  const total = isNumericValue(contracts.ttm_obligated)
+    ? formatPrice(contracts.ttm_obligated)
+    : "unavailable (no dated source rows)";
+  panel.append(node("p", "news-score", `TTM federal obligations ${total}`));
+  const freshness = contracts.freshness === "stale" ? "stale (>7 days old)"
+    : contracts.freshness === "fresh" ? "current"
+      : "unavailable";
+  const sourceIds = contracts.source_ids?.length ? contracts.source_ids.join(", ") : "source unavailable";
+  const observed = contracts.observed_at ? formatTime(contracts.observed_at, session.prefs.display.time_zone)
+    : "observation date unavailable";
+  panel.append(node("p", "signal-note",
+    `Rollup ${freshness} · as of ${contracts.as_of || "date unavailable"} · sources ${sourceIds} · last source observation ${observed}`));
+  if (contracts.coverage === "unavailable") {
+    panel.append(node("p", "data-state", "No dated source rows support a trailing-12-month amount; zero is not inferred."));
+  }
+  const quarters = (contracts.by_agency || []).map(row => `${row.quarter}: ${formatPrice(row.obligated)}`);
+  if (quarters.length) panel.append(node("p", "signal-note", `Agency/fiscal-quarter breakdown · ${quarters.join(" · ")}`));
   const list = node("ul", "news-list");
   (contracts.recent || []).slice(0, 5).forEach((row) => {
     const item = node("li", "news-item");
@@ -1231,7 +1247,10 @@ function renderContracts(tickerData) {
     }
     item.append(link);
     const amount = isNumericValue(row.amount) ? formatPrice(row.amount) : "—";
-    item.append(node("p", "news-meta", `${row.date || ""} · ${amount}`));
+    item.append(node("p", "news-meta",
+      `${row.date || "award date unavailable"} · ${amount} · ${row.source_id || "source unavailable"} · collected ${
+        row.observed_at ? String(row.observed_at).slice(0, 10) : "date unavailable"
+      }`));
     list.append(item);
   });
   if (!list.childElementCount) {
@@ -1661,7 +1680,7 @@ function renderFilings(tickerData) {
   return panel;
 }
 
-function renderCompanyPanel(chartData, chartDataState) {
+function renderCompanyPanel(tickerData, chartData, chartDataState) {
   const panel = node("section", "panel");
   panel.dataset.mobilePanel = "more";
   panel.append(sectionHeader(session.selected === "TSLA" ? "Tesla · robotaxi & company themes"
@@ -1672,13 +1691,24 @@ function renderCompanyPanel(chartData, chartDataState) {
   else if (session.dashboardState === "error") body.append(node("p", "data-state error", "Company events could not be loaded. Refresh data to retry."));
   if (session.selected === "TSLA") {
     body.append(node("p", "signal-note", "Robotaxi fleet size, state permit counts and regional FSD approval counts have not been published as structured live measurements. Design-demo values are not shown."));
-    ["deliveries", "fsd_subscribers"].forEach(metric => body.append(node("p", "signal-note",
-      `${metric === "deliveries" ? "Reported deliveries" : "Reported FSD subscribers"} · ${
-        chartDataState === "loading" ? "Loading…" : chartDataState === "error" ? "Could not load quarterly data"
-          : fundamentalSummary(`FUNDAMENTAL:${metric}`, chartData, session.dashboard?.generated_at)
-      }`)));
+    ["deliveries", "fsd_subscribers"].forEach(metric => {
+      const id = `FUNDAMENTAL:${metric}`;
+      const observation = chartDataState === "ready"
+        ? fundamentalObservation(id, chartData, session.dashboard?.generated_at) : null;
+      const value = chartDataState === "loading" ? "Loading…"
+        : chartDataState === "error" ? "Quarterly data could not be loaded"
+          : observation ? fundamentalSummary(id, chartData, session.dashboard?.generated_at)
+            : "No reported observation available";
+      const source = observation?.source_id || (observation ? "source unavailable" : null);
+      const provenance = observation
+        ? ` · ${source} · reported ${observation.date || "date unavailable"}`
+        : "";
+      body.append(node("p", "signal-note",
+        `${metric === "deliveries" ? "Reported deliveries" : "Reported FSD subscribers"} · ${value}${provenance}`));
+    });
   } else if (session.selected === "SPCX") {
-    body.append(node("p", "signal-note", "Curated launch events are shown below. Active-satellite counts and launch-cadence measurements have not been published. Government awards are shown in the contracts panel."));
+    body.append(node("p", "signal-note", "Active-satellite counts and launch-cadence measurements are unavailable as verified structured observations. Curated launch events and sourced federal awards are shown when present."));
+    if (!tickerData?.contracts) body.append(node("p", "data-state", "Government-award data is unavailable in this snapshot; no zero or trend is inferred."));
   } else {
     body.append(node("p", "signal-note", "No company-specific operating-metrics feed is configured for this symbol. Available SEC financial series remain in the Fundamentals overlays."));
   }
@@ -1686,7 +1716,9 @@ function renderCompanyPanel(chartData, chartDataState) {
     .filter(event => event.category === (session.selected === "SPCX" ? "space" : "robotaxi"));
   if (!events.length) body.append(node("p", "data-state", "No matching company operating events are available."));
   events.slice(-5).reverse().forEach(event => {
-    const row = node("p", "signal-note", `${String(event.date).slice(0, 10)} · ${event.title} `);
+    const observed = event.observed_at ? ` · collected ${String(event.observed_at).slice(0, 10)}` : "";
+    const sourceName = event.source || "source unavailable";
+    const row = node("p", "signal-note", `${String(event.date).slice(0, 10)} · ${event.title} · ${sourceName}${observed} `);
     if (/^https?:\/\//i.test(event.url || "")) {
       const source = node("a", "button-link", "Source");
       source.href = event.url; source.target = "_blank"; source.rel = "noopener noreferrer";
@@ -1808,7 +1840,7 @@ function renderDashboard() {
   price.id = "mobile-panel-chart";
   primary.append(price);
   primary.append(renderMacroPanels(tickerData, chartData, chartDataState));
-  primary.append(renderCompanyPanel(chartData, chartDataState));
+  primary.append(renderCompanyPanel(tickerData, chartData, chartDataState));
   const contracts = renderContracts(tickerData);
   if (contracts) {
     contracts.dataset.mobilePanel = "more";

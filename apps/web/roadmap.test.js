@@ -18,7 +18,16 @@ test("category controls include only events aligned inside the selected window i
 test("catalysts combine scoped events, filings and global macro releases without demo facts", () => {
   const dashboard = {
     events: [
-      { event_ts: "2026-10-05", type: "launch", title: "Space launch", tickers: ["SPCX"] },
+      {
+        event_ts: "2026-10-05",
+        type: "launch",
+        title: "Space launch",
+        source: "launch-library",
+        source_url: "https://ll.thespacedevs.com/launch/1",
+        ingested_at: "2026-10-05T12:00:00Z",
+        observed_at: "2026-10-05T12:00:00Z",
+        tickers: ["SPCX"],
+      },
       { event_ts: "2026-10-02", type: "av_permit", title: "Permit", tickers: ["TSLA"] },
       { event_ts: "bad", title: "Invalid date", tickers: [] },
     ],
@@ -27,7 +36,11 @@ test("catalysts combine scoped events, filings and global macro releases without
   };
   const rows = catalystRows(dashboard, "TSLA");
   assert.deepEqual(rows.map(row => row.category), ["filings", "robotaxi", "inflation"]);
-  assert.ok(rows.every(row => row.source && row.id));
+  const spaceLaunch = catalystRows(dashboard, "SPCX").find(row => row.title === "Space launch");
+  assert.equal(spaceLaunch?.source, "launch-library");
+  assert.equal(spaceLaunch?.observed_at, "2026-10-05T12:00:00Z");
+  assert.equal(rows.find(row => row.title === "Permit").source, null);
+  assert.ok(rows.every(row => row.id));
   assert.equal(catalystRows({}, "TSLA").length, 0);
   assert.equal(catalystCategory("tariff"), "policy");
   assert.equal(catalystCategory("FOMC"), "rates");
