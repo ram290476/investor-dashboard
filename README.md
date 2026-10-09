@@ -13,7 +13,7 @@ Use the following link and demo credentials to log in to the dashboard:
 | Email | `ram.vellamsetti@gmail.com` |
 | Password | `Serious-investor77` |
 
-![Dashboard on desktop (Industrial Dark theme)](docs/design-roadmap/issue-76/industrial-dark-1440.png)
+![Dashboard on desktop (Industrial Dark theme)](docs/design-roadmap/desktop-full.png)
 
 ## Using the dashboard
 
