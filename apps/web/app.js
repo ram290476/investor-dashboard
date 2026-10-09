@@ -19,6 +19,7 @@ import { emailFromIdToken, fallbackSelection, parseSettingsHash, stripOrder } fr
 import {
   CHART_LANES,
   chartSettingsFor,
+  fundamentalSummary,
   isMarketOverlay,
   overlayDefinition,
   overlayGroups,
@@ -48,9 +49,11 @@ const session = {
   mobileView: "chart",
   periodSave: false,
   chartSaveError: "",
+  watchlistScroll: 0,
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 let prefsSaveQueue = Promise.resolve();
+let watchlistResize;
 
 function node(tag, className, value) {
   const element = document.createElement(tag);
@@ -301,7 +304,7 @@ function polarity(value) {
   return Number(value) > 0 ? "positive" : "negative";
 }
 
-function seriesPath(values, xAt, yAt) {
+function seriesPath(values, xAt, yAt, step = false) {
   let path = "";
   let drawing = false;
   values.forEach((value, index) => {
@@ -309,7 +312,9 @@ function seriesPath(values, xAt, yAt) {
       drawing = false;
       return;
     }
-    path += `${drawing ? "L" : "M"}${xAt(index).toFixed(2)} ${yAt(Number(value), index).toFixed(2)} `;
+    path += drawing && step
+      ? `H${xAt(index).toFixed(2)} V${yAt(Number(value), index).toFixed(2)} `
+      : `${drawing ? "L" : "M"}${xAt(index).toFixed(2)} ${yAt(Number(value), index).toFixed(2)} `;
     drawing = true;
   });
   return path.trim();
@@ -423,10 +428,19 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     if (!definition || !scaled.some(isNumericValue)) return;
     const path = document.createElementNS(svgNS, "path");
     path.setAttribute("class", "chart-overlay-path");
-    path.setAttribute("d", seriesPath(scaled, xAt, (value) => definition.kind === "macro" || definition.kind === "fundamental" ? yNormalized(value) : yValue(value)));
+    path.setAttribute("d", seriesPath(
+      scaled, xAt,
+      (value) => definition.kind === "macro" || definition.kind === "fundamental" ? yNormalized(value) : yValue(value),
+      definition.kind === "fundamental",
+    ));
     path.setAttribute("stroke", overlayColor(definition.color, session.prefs.display.theme));
     path.setAttribute("stroke-dasharray", definition.kind === "average" ? "none" : "5 4");
     path.dataset.overlay = id;
+    if (definition.kind === "fundamental") {
+      const title = document.createElementNS(svgNS, "title");
+      title.textContent = `${definition.label} · ${fundamentalSummary(id, chartContext.chartData, bars.at(-1)?.ts || bars.at(-1)?.date)}`;
+      path.append(title);
+    }
     svg.append(path);
   });
 
@@ -472,8 +486,17 @@ function sectionHeader(title, subtitle = "") {
 }
 
 function renderWatchlist() {
-  const list = node("nav", "watchlist");
-  list.setAttribute("aria-label", "Watchlist");
+  const wrapper = node("nav", "watchlist-bar");
+  wrapper.setAttribute("aria-label", "Watchlist");
+  const list = node("div", "watchlist");
+  list.id = "watchlist-scroll";
+  const buttons = [];
+  const ensureVisible = (button) => {
+    const left = button.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft - list.clientLeft;
+    const right = left + button.offsetWidth;
+    if (left < list.scrollLeft) list.scrollLeft = left;
+    else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
+  };
   const { pinned, others } = stripOrder(session.prefs || {});
   [...pinned, ...others].forEach((ticker, index) => {
     if (index === pinned.length && pinned.length && others.length) {
@@ -486,12 +509,27 @@ function renderWatchlist() {
     const latest = history.at(-1);
     const button = node("button", "ticker-button");
     button.type = "button";
+    button.dataset.ticker = ticker;
+    button.tabIndex = ticker === session.selected ? 0 : -1;
+    buttons.push(button);
+    button.addEventListener("focus", () => ensureVisible(button));
+    button.addEventListener("keydown", (event) => {
+      const index = buttons.indexOf(button);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+        : event.key === "ArrowRight" ? Math.min(index + 1, buttons.length - 1)
+        : event.key === "ArrowLeft" ? Math.max(index - 1, 0) : null;
+      if (next === null) return;
+      event.preventDefault();
+      buttons.forEach((item, i) => { item.tabIndex = i === next ? 0 : -1; });
+      buttons[next].focus();
+    });
     button.setAttribute("aria-pressed", String(ticker === session.selected));
     button.setAttribute("aria-label", `${ticker}, ${latest ? formatPrice(displayPrice(latest)) : "no price data"}`);
     button.addEventListener("click", () => {
       session.selected = ticker;
       renderDashboard();
       loadChartData(ticker);
+      root.querySelector('.watchlist [aria-pressed="true"]')?.focus();
     });
     const symbol = node("span", "ticker-symbol", ticker);
     if (pinned.includes(ticker)) {
@@ -515,8 +553,48 @@ function renderWatchlist() {
   manage.setAttribute("aria-label", "My tickers: add, pin or reorder");
   manage.append(node("span", "ticker-symbol", "+ Add / pin"), node("span", "ticker-meta", "My tickers"));
   manage.addEventListener("click", () => settings.open("tickers", "strip"));
-  list.append(manage);
-  return list;
+  const scrollButton = (label, direction) => {
+    const button = node("button", "watchlist-arrow", direction < 0 ? "‹" : "›");
+    button.type = "button";
+    button.tabIndex = -1;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-controls", list.id);
+    button.addEventListener("click", () => list.scrollBy({
+      left: direction * list.clientWidth * 0.8,
+      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+    }));
+    return button;
+  };
+  const left = scrollButton("Scroll tickers left", -1);
+  const right = scrollButton("Scroll tickers right", 1);
+  const update = () => {
+    left.disabled = list.scrollLeft <= 1;
+    right.disabled = list.scrollLeft + list.clientWidth >= list.scrollWidth - 1;
+    wrapper.classList.toggle("can-scroll-left", !left.disabled);
+    wrapper.classList.toggle("can-scroll-right", !right.disabled);
+    session.watchlistScroll = list.scrollLeft;
+  };
+  watchlistResize?.disconnect();
+  watchlistResize = new ResizeObserver(update);
+  watchlistResize.observe(list);
+  list.addEventListener("scroll", update, { passive: true });
+  list.addEventListener("wheel", (event) => {
+    if (event.deltaX || event.ctrlKey || !event.deltaY) return;
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? list.clientWidth : 1);
+    if ((delta > 0 && list.scrollLeft + list.clientWidth < list.scrollWidth - 1)
+      || (delta < 0 && list.scrollLeft > 1)) {
+      event.preventDefault();
+      list.scrollLeft += delta;
+    }
+  }, { passive: false });
+  wrapper.append(left, list, right, manage);
+  requestAnimationFrame(() => {
+    if (!list.isConnected) return;
+    list.scrollLeft = session.watchlistScroll;
+    ensureVisible(list.querySelector('[aria-pressed="true"]'));
+    update();
+  });
+  return wrapper;
 }
 
 function periodDirection(value) {
@@ -618,14 +696,16 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", `${activeGroup?.label || "Available"} chart overlays`);
   const overlays = activeGroup?.overlays || [];
-  if (overlays.length) {
-    const allSelected = overlays.every((overlay) => settings.overlays.includes(overlay.id));
+  const available = overlays.filter(overlay => overlay.available);
+  if (available.length && (available.length <= 5 || activeGroup?.id === "Market")) {
+    const allSelected = available.every((overlay) => settings.overlays.includes(overlay.id));
     const allButton = node("button", "overlay-chip overlay-all", allSelected ? "Clear group" : "Add group");
     allButton.type = "button";
+    allButton.title = "Add group selects at most five overlays.";
     allButton.addEventListener("click", () => {
       const selected = new Set(settings.overlays);
-      if (allSelected) overlays.forEach((overlay) => selected.delete(overlay.id));
-      else overlays.forEach((overlay) => selected.add(overlay.id));
+      if (allSelected) available.forEach((overlay) => selected.delete(overlay.id));
+      else available.forEach((overlay) => selected.add(overlay.id));
       onSettingsChange({ ...settings, overlays: [...selected].slice(-5) });
     });
     group.append(allButton);
@@ -634,20 +714,60 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
     const selected = settings.overlays.includes(overlay.id);
     const button = node("button", `overlay-chip${selected ? " selected" : ""}`);
     button.type = "button";
+    button.disabled = !overlay.available && !selected;
     button.setAttribute("aria-pressed", String(selected));
-    button.title = selected ? `Remove ${overlay.label} from the chart` : `Add ${overlay.label} to the chart`;
+    button.title = !overlay.available ? `${overlay.label} is not available for ${session.selected}`
+      : selected ? `Remove ${overlay.label} from the chart` : `Add ${overlay.label} to the chart`;
+    button.setAttribute("aria-label", `${selected ? "Remove" : "Add"} ${overlay.label} ${selected ? "from" : "to"} the chart${overlay.available ? "" : `, not available for ${session.selected}`}`);
     button.dataset.overlay = overlay.id;
     button.append(node("span", "overlay-swatch", ""));
     button.querySelector(".overlay-swatch").style.setProperty("--overlay-color", overlayColor(overlay.color, session.prefs.display.theme));
-    button.append(document.createTextNode(overlay.label));
+    button.append(document.createTextNode(`${overlay.short || overlay.label}${overlay.available ? "" : " · not available"}`));
+    let longPress = false;
+    let timer;
     button.addEventListener("click", () => {
+      if (longPress) { longPress = false; return; }
       const next = selected ? settings.overlays.filter((id) => id !== overlay.id) : [...settings.overlays.slice(-4), overlay.id];
       onSettingsChange({ ...settings, overlays: next });
       root.querySelector(`[data-overlay="${overlay.id}"]`)?.focus();
     });
-    group.append(button);
+    if (overlay.kind === "market") {
+      const choice = node("span", "overlay-choice");
+      const tooltip = node("span", "overlay-tooltip", overlay.label);
+      tooltip.id = `overlay-tooltip-${overlay.id}`;
+      tooltip.setAttribute("role", "tooltip");
+      tooltip.hidden = true;
+      button.setAttribute("aria-describedby", tooltip.id);
+      const show = () => {
+        tooltip.hidden = false;
+        tooltip.style.left = "0px";
+        const bounds = tooltip.getBoundingClientRect();
+        if (bounds.right > innerWidth - 12) tooltip.style.left = `${innerWidth - 12 - bounds.right}px`;
+      };
+      const hide = () => { tooltip.hidden = true; clearTimeout(timer); };
+      button.addEventListener("mouseenter", show);
+      button.addEventListener("mouseleave", hide);
+      button.addEventListener("focus", show);
+      button.addEventListener("blur", hide);
+      button.addEventListener("keydown", event => { if (event.key === "Escape") hide(); });
+      button.addEventListener("pointerdown", event => {
+        longPress = false;
+        if (event.pointerType === "touch") timer = setTimeout(() => { longPress = true; show(); }, 500);
+      });
+      button.addEventListener("pointerup", () => clearTimeout(timer));
+      button.addEventListener("pointercancel", hide);
+      button.addEventListener("contextmenu", event => { if (longPress) event.preventDefault(); });
+      choice.append(button, tooltip);
+      group.append(choice);
+    } else group.append(button);
   });
   if (!overlays.length) group.append(node("span", "overlay-empty", chartDataState === "loading" ? "Loading available series…" : "No series available in this group."));
+  if (activeGroup?.id === "Fundamentals" && (!available.length || chartDataState !== "ready")) {
+    const message = chartDataState === "loading" ? "Loading quarterly fundamentals…"
+      : chartDataState === "error" ? "Quarterly fundamentals could not be loaded. Try refreshing data."
+      : `No quarterly fundamentals have been published for ${session.selected} yet.`;
+    group.append(node("p", "overlay-empty", message));
+  }
   panel.append(tabs, group);
   if (settings.overlays.length) {
     const selection = node("p", "chart-control-note", `${settings.overlays.length} of 5 overlays · market groups compare percentage change; indicators are normalized`);
@@ -894,12 +1014,15 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
         const definition = overlayDefinition(id);
         const series = valuesForOverlay(id, { bars: chartHistory, tickerData, chartData, dashboard: session.dashboard });
         const latestValue = series.filter(isNumericValue).at(-1);
-        if (!definition || !isNumericValue(latestValue)) return;
+        if (!definition) return;
         const label = node("span", "chart-legend-item");
         const swatch = node("span", "overlay-swatch");
         swatch.style.setProperty("--overlay-color", overlayColor(definition.color, session.prefs.display.theme));
         label.append(swatch);
-        const shown = definition.kind === "market"
+        const shown = !isNumericValue(latestValue) ? "not available"
+          : definition.kind === "fundamental"
+            ? fundamentalSummary(id, chartData, chartHistory.at(-1)?.ts || chartHistory.at(-1)?.date)
+          : definition.kind === "market"
           ? formatPercent(Number(latestValue) / Number(series.find(isNumericValue)) - 1, 1)
           : definition.kind === "average"
             ? formatPrice(latestValue)
@@ -1182,52 +1305,6 @@ function renderNews(tickerData) {
   return panel;
 }
 
-function renderFundamentals() {
-  const panel = node("section", "panel");
-  panel.append(sectionHeader("Company fundamentals", "Quarterly release data"));
-  const rows = (session.dashboard?.fundamentals || [])
-    .filter((row) => row.ticker === session.selected)
-    .sort((a, b) => String(b.release_date).localeCompare(String(a.release_date)))
-    .slice(0, 8);
-  if (!rows.length && session.dashboardState === "loading") {
-    panel.append(node("p", "data-state", "Loading quarterly fundamentals…"));
-    return panel;
-  }
-  if (!rows.length && session.dashboardState === "error") {
-    panel.append(node("p", "data-state", "Quarterly fundamentals could not be loaded. Use Try again above."));
-    return panel;
-  }
-  if (!rows.length) {
-    panel.append(node("p", "data-state", "No quarterly fundamentals have been published for this ticker yet."));
-    return panel;
-  }
-  const scroll = node("div", "table-scroll");
-  const table = node("table", "fundamentals-table");
-  const caption = node("caption", "visually-hidden", `${session.selected} quarterly fundamentals`);
-  const head = node("thead");
-  const headerRow = node("tr");
-  ["Metric", "Quarter", "Value", "Released"].forEach((label) => headerRow.append(node("th", "", label)));
-  head.append(headerRow);
-  const body = node("tbody");
-  rows.forEach((row) => {
-    const tr = node("tr");
-    tr.append(node("td", "", String(row.metric).replaceAll("_", " ")));
-    tr.append(node("td", "mono", row.fiscal_quarter || "—"));
-    const value = isNumericValue(row.value)
-      ? row.unit === "ratio"
-        ? `${(Number(row.value) * 100).toFixed(1)}%`
-        : Number(row.value).toLocaleString()
-      : "—";
-    tr.append(node("td", "mono", value));
-    tr.append(node("td", "mono", row.release_date || "—"));
-    body.append(tr);
-  });
-  table.append(caption, head, body);
-  scroll.append(table);
-  panel.append(scroll);
-  return panel;
-}
-
 function renderFilings(tickerData) {
   const panel = node("section", "panel");
   panel.append(sectionHeader("Filings & events", "Latest SEC filings and the last 14 days of events"));
@@ -1282,6 +1359,7 @@ function renderDashboard() {
   const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
   session.selected = fallbackSelection(session.prefs, session.selected);
+  const focusedTicker = document.activeElement?.closest(".watchlist .ticker-button")?.dataset.ticker;
   root.replaceChildren();
   applyTheme(session.prefs.display);
 
@@ -1301,6 +1379,7 @@ function renderDashboard() {
   header.append(actions);
   root.append(header);
   root.append(renderWatchlist());
+  if (focusedTicker) root.querySelector(`[data-ticker="${focusedTicker}"]`)?.focus();
 
   if (session.settingsError) {
     const { message, reopen } = session.settingsError;
@@ -1362,14 +1441,11 @@ function renderDashboard() {
     contracts.dataset.mobilePanel = "more";
     primary.append(contracts);
   }
-  const fundamentals = renderFundamentals();
-  fundamentals.dataset.mobilePanel = "more";
-  fundamentals.id = "mobile-panel-more";
-  primary.append(fundamentals);
   const side = node("aside", "side-column");
   side.setAttribute("aria-label", "Macro drivers, news and filings");
   const news = renderNews(tickerData), filings = renderFilings(tickerData);
   news.dataset.mobilePanel = "more";
+  news.id = "mobile-panel-more";
   filings.dataset.mobilePanel = "more";
   side.append(renderDrivers(tickerData), news, filings);
   mainGrid.append(primary, side);

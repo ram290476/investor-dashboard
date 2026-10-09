@@ -337,10 +337,11 @@ def build_chart_data(
             "value": number(row.get("value")),
             "unit": row.get("unit"),
             "fiscal_quarter": row.get("fiscal_quarter"),
+            "measurement_date": row.get("measurement_date"),
+            "source_id": row.get("source_id"),
         }
         for row in fundamentals
         if row.get("ticker") == ticker
-        and row.get("metric") not in {"shares_outstanding", "public_float_usd"}
         and row.get("release_date")
         and number(row.get("value")) is not None
     ]

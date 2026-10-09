@@ -140,9 +140,9 @@ def test_chart_data_prefers_filed_public_float_estimate_and_falls_back_to_shares
     assert chart["short_interest"][1]["denominator_type"] == "estimated_public_float"
     assert chart["short_interest"][1]["shares_denominator"] == pytest.approx(9_000_000_000)
     assert chart["short_interest"][1]["short_pct_denominator"] == pytest.approx(33_000_000 / 9_000_000_000 * 100)
-    assert all(row["series_id"] != "public_float_usd" for row in chart["fundamentals"])
+    assert {"public_float_usd", "shares_outstanding"} <= {row["series_id"] for row in chart["fundamentals"]}
     assert chart["options"][0]["iv30"] is None
-    assert chart["fundamentals"][0]["series_id"] == "gross_margin_gaap"
+    assert any(row["series_id"] == "gross_margin_gaap" for row in chart["fundamentals"])
 
 
 def test_releases_keep_the_latest_print_and_the_next_five_dates():

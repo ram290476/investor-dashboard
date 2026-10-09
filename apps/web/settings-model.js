@@ -2,7 +2,7 @@
 // Limits mirror services/data-jobs/src/functions/prefs_api/prefs_api.py.
 
 export const MAX_PINNED = 6;
-export const MAX_TICKERS = 50;
+export const MAX_TICKERS = 25;
 export const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 export const PIN_LIMIT_MESSAGE = `Pin limit reached (${MAX_PINNED}). Unpin one first.`;
 
@@ -67,8 +67,14 @@ export function validateNewTicker(raw, prefs) {
   if (!ticker) return { error: "Enter a ticker symbol." };
   if (!SYMBOL_RE.test(ticker)) return { error: `${ticker} is not a valid ticker symbol.` };
   if ((prefs.tickers || []).includes(ticker)) return { error: `${ticker} is already in My tickers.` };
-  if ((prefs.tickers || []).length >= MAX_TICKERS) return { error: `At most ${MAX_TICKERS} tickers.` };
+  if ((prefs.tickers || []).length >= MAX_TICKERS) return { error: tickerLimitMessage(prefs.tickers.length) };
   return { ticker };
+}
+
+export function tickerLimitMessage(count) {
+  return count > MAX_TICKERS
+    ? `Your watchlist has ${count} tickers; the limit is ${MAX_TICKERS}. Remove ${count - MAX_TICKERS + 1} to add another.`
+    : `At most ${MAX_TICKERS} tickers. Remove one to add another.`;
 }
 
 /** New tickers go to the end, unpinned. */

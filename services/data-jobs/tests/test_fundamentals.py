@@ -82,6 +82,92 @@ def test_quarters_and_derived_q4():
     assert str(public_float[0]["release_date"]) == "2026-01-29"
 
 
+def test_resolve_any_sec_ticker_and_non_filer():
+    assert fq.resolve_ciks(["TSLA", "AAPL", "BRK.B", "UNKNOWN"], {
+        "0": {"ticker": "TSLA", "cik_str": 1318605},
+        "1": {"ticker": "AAPL", "cik_str": 320193},
+        "2": {"ticker": "BRK-B", "cik_str": 1067983},
+    }) == {"TSLA": "0001318605", "AAPL": "0000320193", "BRK.B": "0001067983"}
+
+
+def test_non_calendar_fiscal_year_and_q4_derivation():
+    facts = [
+        _fact("2024-10-01", "2024-12-31", 100, "2025-02-01"),
+        _fact("2025-01-01", "2025-03-31", 120, "2025-05-01"),
+        _fact("2025-04-01", "2025-06-30", 130, "2025-08-01"),
+        _fact("2024-10-01", "2025-09-30", 500, "2025-11-01", form="10-K"),
+    ]
+    rows = fq.xbrl_rows("AAPL", {"facts": {"us-gaap": {"Revenues": {"units": {"USD": facts}}}}})
+    by_quarter = {row["fiscal_quarter"]: row["value"] for row in rows}
+    assert by_quarter == {"2025Q1": 100, "2025Q2": 120, "2025Q3": 130, "2025Q4": 150}
+
+
+@pytest.mark.parametrize("provider_failure", [False, True])
+def test_added_ticker_collection_and_failure_does_not_publish(monkeypatch, provider_failure):
+    from contextlib import contextmanager, nullcontext
+
+    import httpx
+
+    import http_client
+    import lake
+    import observability
+    import universe
+
+    monkeypatch.setenv("LAKE_BUCKET", "test-lake")
+    monkeypatch.setattr(universe, "user_ticker_union", lambda: ["AAPL", "UNKNOWN", "SPY"])
+    monkeypatch.setattr(observability, "job_handler", lambda _job: lambda fn: fn)
+    monkeypatch.setattr(lake, "job_lease", lambda _key: nullcontext())
+    writes = []
+    monkeypatch.setattr(lake, "write_parquet", lambda table, key: writes.append((key, table.to_dicts())))
+    monkeypatch.setattr(lake, "write_json", lambda doc, key, **_kwargs: writes.append((key, doc)))
+
+    @contextmanager
+    def source(_source):
+        record = {"outcome": "success"}
+        try:
+            yield record
+        except httpx.HTTPStatusError as exc:
+            record.update(outcome="failure", error=str(exc))
+
+    monkeypatch.setattr(observability, "source_run", source)
+
+    class FakeS3:
+        class exceptions:
+            class NoSuchKey(Exception):
+                pass
+
+        def get_object(self, **_kwargs):
+            raise self.exceptions.NoSuchKey
+
+    monkeypatch.setattr(lake, "s3", FakeS3)
+    requests = []
+
+    def respond(request):
+        requests.append(str(request.url))
+        if request.url.path.endswith("company_tickers.json"):
+            return httpx.Response(200, json={
+                "0": {"ticker": "AAPL", "cik_str": 320193},
+                "1": {"ticker": "SPY", "cik_str": 884394},
+            })
+        if "0000884394" in request.url.path:
+            return httpx.Response(404)
+        return httpx.Response(503 if provider_failure else 200, json=COMPANYFACTS)
+
+    monkeypatch.setattr(http_client, "get_client", lambda: httpx.Client(transport=httpx.MockTransport(respond)))
+    if provider_failure:
+        with pytest.raises(RuntimeError, match="Fundamentals failed for AAPL"):
+            fq.handler({"detail-type": "TickerAdded", "detail": {"ticker": "AAPL"}}, None)
+        assert writes == []
+    else:
+        result = fq.handler({"detail-type": "TickerAdded", "detail": {"ticker": "AAPL"}}, None)
+        doc = writes[-1][1]
+        assert result["rows"] > 0
+        assert {row["ticker"] for row in doc["rows"]} == {"AAPL"}
+        assert doc["ticker_status"]["UNKNOWN"] == "not_an_sec_filer"
+        assert doc["ticker_status"]["SPY"] == "no_xbrl"
+        assert any("CIK0000320193" in url for url in requests)
+
+
 def test_manual_csv_validation_and_override():
     text = (
         "ticker,metric,fiscal_quarter,release_date,value,source_id,note\n"

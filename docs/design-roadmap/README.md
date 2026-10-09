@@ -24,8 +24,12 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `trend-pill-under-price-mock-360.png` | Same mock at 360px mobile: chips wrap under the price |
 | `themes/*-desktop-full.png` | Full desktop view in each proposed color theme (see [`themes/README.md`](themes/README.md)) |
 | `issue-26/production-*.png` | Implemented signals/rates/release/drift panels in six themes and four mobile views (see [`issue-26/README.md`](issue-26/README.md)) |
+| `issue-71/*-1440.png`, `issue-71/*-390.png` | Fundamentals overlays and fixed Add/pin watchlist control in Industrial Dark and Clean Light; local app using a captured October 8, 2026 live market snapshot, mock sign-in and synthetic 25-ticker preferences |
 
 **Note:** Values in these shots are **design sample data** from the artboard’s inline demo generator (dated demo facts and synthetic series), **not live lake / market data**. See the [Dashboard features](https://github.com/ram290476/investor-dashboard/wiki/Dashboard-features) wiki for what ships today vs design-only.
+
+The `issue-71/` captures are an exception: their market values come from a live lake capture,
+but authentication and watchlist preferences are local test fixtures, not a production user session.
 
 ## Regenerating
 

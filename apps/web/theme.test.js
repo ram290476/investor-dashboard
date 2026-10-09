@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { applyTheme, contrastRatio, DEFAULT_THEME, mixColor, overlayColor, THEMES, themeFor, themeProperties } from "./theme.js";
+import { OVERLAYS } from "./chart-overlays.js";
 
 test("production palettes match all six existing design references", () => {
   const reference = JSON.parse(readFileSync(new URL("../../docs/design-roadmap/themes/themes.json", import.meta.url)));
@@ -50,11 +51,11 @@ test("direction palette overrides do not change chart or category colors", () =>
 });
 
 test("all overlay colors are theme-aware and readable on the chart background", () => {
-  const source = readFileSync(new URL("./chart-overlays.js", import.meta.url), "utf8");
-  const colors = [...source.matchAll(/color: "(#[a-fA-F0-9]{6})"/g)].map((match) => match[1]);
+  const colors = OVERLAYS.map(overlay => overlay.color);
   assert.ok(colors.length > 20);
   for (const theme of THEMES) {
     const p = themeProperties(theme.id);
+    assert.equal(new Set(colors.map(slot => overlayColor(slot, theme.id))).size, colors.length, `${theme.id} has duplicate overlay colors`);
     const fill = mixColor(p["--surface"], p["--price"], 0.08);
     assert.ok(contrastRatio(p["--price"], fill) >= 3, `${theme.id} price on area fill`);
     for (const color of colors) {
@@ -63,6 +64,7 @@ test("all overlay colors are theme-aware and readable on the chart background", 
       }
     }
   }
+  assert.notEqual(overlayColor(0, "industrial-dark"), overlayColor(0, "terminal-amber"));
 });
 
 test("theme application targets the document, updates metadata, and changes only styling", () => {

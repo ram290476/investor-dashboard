@@ -100,6 +100,16 @@ variable "function_names" {
   ]
 }
 
+variable "max_tickers_per_user" {
+  description = "Per-user watchlist limit, mirrored by the frontend. Legacy lists may shrink but not grow."
+  type        = number
+  default     = 25
+  validation {
+    condition     = var.max_tickers_per_user == 25
+    error_message = "The frontend watchlist limit is 25; update both surfaces before changing this limit."
+  }
+}
+
 variable "metrics_namespace" {
   description = "CloudWatch namespace for the app's custom metrics. Keep the metric set at 10 or fewer to stay in the free tier."
   type        = string
@@ -431,13 +441,13 @@ variable "jobs" {
     q1-fundamentals = {
       handler        = "fundamentals.handler"
       schedule       = "cron(30 8 ? * MON *)"
-      triggers       = []
+      triggers       = ["ticker-added"]
       memory         = 1024
       timeout        = 300
-      read_prefixes  = ["manual/fundamentals/"]
+      read_prefixes  = ["manual/fundamentals/", "curated/fundamentals_quarterly/"]
       write_prefixes = ["curated/fundamentals_quarterly/", "serving/fundamentals_quarterly.json"]
       api_keys       = []
-      reads_prefs    = false
+      reads_prefs    = true
     }
     # Daily poll; writes only when FINRA publishes a new settlement date (twice a month)
     short-interest = {
