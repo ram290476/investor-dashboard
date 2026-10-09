@@ -41,7 +41,8 @@ def test_ticker_cap_and_new_fundamental_ids(api):
     body = {
         "tickers": tickers,
         "chart_settings": {"T0": {
-            "overlays": ["FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd"], "lanes": [],
+            "overlays": ["FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd", "NEWS:SENTIMENT"],
+            "lanes": [],
         }},
     }
     assert len(mod.validate(body)["tickers"]) == 25

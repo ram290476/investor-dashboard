@@ -427,6 +427,45 @@ To change schedules, update the relevant job entry in `infra/terraform/variables
 Check `/status` in the signed-in dashboard or `serving/status.json` for the latest run and
 failure state. The `/dashboard` and `/status` API routes require a Cognito access token.
 
+### Dashboard panels, catalysts and sentiment
+
+The #27 roadmap UI consumes the existing schema-v3 serving document and chart histories:
+
+- Signals rank finite driver effects, show price/macro regime labels and report release
+  sensitivity only with a finite correlation and at least 12 paired releases. Sensitivity
+  is historical association, not a causal forecast.
+- Market comparisons use each symbol's adjusted daily history. Moving averages require
+  all 10/20/50/100/200 observations; missing history is never replaced with demo series.
+  Rates, inflation, volatility, dollar/oil and policy panels identify missing inputs.
+  Policy uncertainty is a proxy, not a tariff-rate or geopolitical-risk measurement.
+- Catalysts combine scoped `events` (`event_ts`, `type`, `title`, `source_url`, `tickers`),
+  ticker filings (`filed_at`, `form`, `title`, `url`), upcoming `releases.next`
+  (`series`, `release_ts`) and stored release dates. Category filters control chart markers.
+  Distinct filing URLs are preserved even when titles/dates match. Nontrading-day events
+  align to the next stored session; intraday events use the first stored bar on that date.
+  Calendar rows outside the selected period cannot focus a marker. The feed is bounded
+  published history, not an exhaustive corporate calendar.
+- `news.sentiment_history` contains up to 90 observed `{date, value}` points. Each value
+  averages the selected ticker's finite daily `mean_sentiment` over seven calendar days;
+  missing days are not fabricated, future/invalid dates are excluded, and duplicate dates
+  use the last valid row. H2 already publishes `ticker`, `date`, `mean_sentiment`,
+  `weighted_sentiment`, `articles`, `bullish` and `bearish` in `curated/news_daily/`.
+  The panel and `NEWS:SENTIMENT` overlay use this history, not other tickers' scores.
+  The existing five-overlay cap and explicit preference-save errors remain unchanged.
+- Tesla shows reported deliveries/FSD subscribers only when quarterly facts exist.
+  Robotaxi fleet counts, state permit counts and regional FSD approval counts have no
+  structured live feed. SpaceX shows curated launch events and existing government awards;
+  active-satellite counts and a measured launch-cadence series are also unavailable.
+  Neither panel treats design sample values as live facts. Fundamentals remain chart
+  overlays; the removed bottom table and above-chart summary cards are not restored.
+- All-driver, correlation, catalyst and methodology drawers retain their open state
+  during redraws without changing ticker, period or overlays. Driver sorting is local
+  session state. The header data-time button opens collection schedules; its separate
+  refresh button still reloads serving documents, not provider jobs.
+
+Local roadmap captures use captured live market/news data with mock authentication and
+preferences; they do not verify a production Cognito sign-in or deployment.
+
 ## Build, run and verify the web application
 
 For local UI work, create a local runtime config based on `apps/web/config.example.json` or

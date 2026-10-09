@@ -27,8 +27,18 @@ test("overlay groups only expose series present for the selected ticker", () => 
     { macro_series: { DGS10: [{ date: "2026-10-01", value: 4.2 }] }, fundamentals: [{ series_id: "deliveries", value: 10 }] },
     { tickers: { SPY: { price_history: [{ date: "2026-10-01", close: 500 }] }, TSLA: { price_history: [] } } },
   );
-  assert.deepEqual(groups.map((group) => group.id), ["Market", "Rates", "Fundamentals"]);
+  assert.deepEqual(groups.map((group) => group.id), ["Market", "Rates", "Fundamentals", "Sentiment"]);
   assert.deepEqual(groups.find((group) => group.id === "Rates").overlays.map((overlay) => overlay.id), ["DGS10"]);
+});
+
+test("sentiment overlays remain discoverable and use only the selected ticker's history", () => {
+  const group = overlayGroups({ ticker: "AAPL" }, null, {}).find(group => group.id === "Sentiment");
+  assert.equal(group.overlays[0].available, false);
+  const values = valuesForOverlay("NEWS:SENTIMENT", {
+    bars: [{ date: "2026-10-01" }, { date: "2026-10-02" }],
+    tickerData: { news: { sentiment_history: [{ date: "2026-10-01", value: -0.2 }] } },
+  });
+  assert.deepEqual(values, [-0.2, -0.2]);
 });
 
 test("fundamentals always expose seven metrics, marking unavailable ones explicitly", () => {
