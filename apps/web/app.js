@@ -11,7 +11,7 @@ import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle 
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
 import { applyTheme, overlayColor } from "./theme.js";
-import { CATALYST_CATEGORIES, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
 import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
   number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
@@ -19,15 +19,21 @@ import {
 import { emailFromIdToken, fallbackSelection, parseSettingsHash, stripOrder } from "./settings-model.js";
 import {
   CHART_LANES,
+  OVERLAYS,
+  addOverlay,
+  alignedLaneValues,
+  availableLanes,
   chartSettingsFor,
   fundamentalSummary,
   isMarketOverlay,
   overlayDefinition,
   overlayGroups,
+  laneValues,
   valuesForOverlay,
 } from "./chart-overlays.js";
 
 const root = document.querySelector("#app");
+const chartAvailability = new Map();
 const svgNS = "http://www.w3.org/2000/svg";
 const authKeys = { state: "oauth_state", verifier: "oauth_verifier", hash: "oauth_return_hash" };
 const session = {
@@ -761,20 +767,49 @@ function renderTrend(history, tickerData, ticker) {
   return row;
 }
 
-function renderOverlayControls(tickerData, chartData, chartDataState, onSettingsChange) {
+function chartControlsFor(tickerData, chartData, chartDataState, bars) {
+  const key = `${session.selected}|${session.prefs.display?.chart_period}|${bars[0]?.ts || bars[0]?.date}|${bars.at(-1)?.ts || bars.at(-1)?.date}`;
+  const groups = overlayGroups(tickerData, chartDataState === "ready" ? chartData : null, session.dashboard, bars);
+  const lanes = availableLanes(bars, chartDataState === "ready" ? chartData : null);
+  const historyBacked = overlay => ["macro", "fundamental"].includes(overlay.kind);
+  if (chartDataState === "ready") {
+    chartAvailability.set(key, { groups, lanes });
+    return { groups, lanes };
+  }
+  const saved = chartSettingsFor(session.prefs, session.selected);
+  const previous = chartAvailability.get(key);
+  const pending = previous?.groups.flatMap(group => group.overlays).filter(historyBacked)
+    || OVERLAYS.filter(overlay => saved.overlays.includes(overlay.id) && historyBacked(overlay));
+  pending.forEach(overlay => {
+    let group = groups.find(group => group.id === overlay.group);
+    if (!group) {
+      group = { id: overlay.group, label: overlay.group, overlays: [] };
+      groups.push(group);
+    }
+    group.overlays.push({ ...overlay, available: false });
+  });
+  const order = [...new Set(OVERLAYS.map(overlay => overlay.group))];
+  groups.sort((left, right) => order.indexOf(left.id) - order.indexOf(right.id));
+  const pendingLanes = previous?.lanes || CHART_LANES.filter(lane => saved.lanes.includes(lane.id));
+  return { groups, lanes: CHART_LANES.filter(lane => lanes.some(item => item.id === lane.id)
+    || (lane.id !== "VOL" && pendingLanes.some(item => item.id === lane.id))) };
+}
+
+function renderOverlayControls(groups, chartDataState, onSettingsChange) {
   const panel = node("section", "chart-controls");
   const settings = chartSettingsFor(session.prefs, session.selected);
-  const groups = overlayGroups(tickerData, chartData, session.dashboard);
   const activeGroup = groups.find((group) => group.id === session.overlayGroup) || groups[0];
   const tabs = node("div", "overlay-tabs");
   tabs.setAttribute("role", "tablist");
   tabs.setAttribute("aria-label", "Chart overlay groups");
-  groups.forEach((group) => {
+  groups.forEach((group, index) => {
     const button = node("button", "overlay-tab");
     button.type = "button";
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", String(group.id === activeGroup?.id));
     button.setAttribute("aria-controls", "overlay-options");
+    button.id = `overlay-tab-${index}`;
+    button.tabIndex = group.id === activeGroup?.id ? 0 : -1;
     button.textContent = group.label;
     button.addEventListener("click", () => {
       session.overlayGroup = group.id;
@@ -782,11 +817,18 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
       root.querySelector(`[data-overlay-tab="${group.id}"]`)?.focus();
     });
     button.dataset.overlayTab = group.id;
+    button.addEventListener("keydown", event => {
+      const offsets = { ArrowRight: 1, ArrowLeft: -1, Home: -index, End: groups.length - 1 - index };
+      if (!(event.key in offsets)) return;
+      event.preventDefault();
+      tabs.children[(index + offsets[event.key] + groups.length) % groups.length].click();
+    });
     tabs.append(button);
   });
   const group = node("div", "overlay-options");
   group.id = "overlay-options";
-  group.setAttribute("role", "group");
+  group.setAttribute("role", activeGroup ? "tabpanel" : "group");
+  if (activeGroup) group.setAttribute("aria-labelledby", `overlay-tab-${groups.indexOf(activeGroup)}`);
   group.setAttribute("aria-label", `${activeGroup?.label || "Available"} chart overlays`);
   const overlays = activeGroup?.overlays || [];
   const available = overlays.filter(overlay => overlay.available);
@@ -798,8 +840,10 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
     allButton.addEventListener("click", () => {
       const selected = new Set(settings.overlays);
       if (allSelected) available.forEach((overlay) => selected.delete(overlay.id));
-      else available.forEach((overlay) => selected.add(overlay.id));
-      onSettingsChange({ ...settings, overlays: [...selected].slice(-5) });
+      let next = [...selected];
+      if (!allSelected) available.forEach(overlay => { next = addOverlay(next, overlay.id, groups.flatMap(group => group.overlays).filter(item => item.available).map(item => item.id)); });
+      onSettingsChange({ ...settings, overlays: next });
+      root.querySelector(".overlay-all")?.focus();
     });
     group.append(allButton);
   }
@@ -807,7 +851,7 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
     const selected = settings.overlays.includes(overlay.id);
     const button = node("button", `overlay-chip${selected ? " selected" : ""}`);
     button.type = "button";
-    button.disabled = !overlay.available && !selected;
+    button.disabled = !overlay.available;
     button.setAttribute("aria-pressed", String(selected));
     button.title = !overlay.available ? `${overlay.label} is not available for ${session.selected}`
       : selected ? `Remove ${overlay.label} from the chart` : `Add ${overlay.label} to the chart`;
@@ -815,12 +859,13 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
     button.dataset.overlay = overlay.id;
     button.append(node("span", "overlay-swatch", ""));
     button.querySelector(".overlay-swatch").style.setProperty("--overlay-color", overlayColor(overlay.color, session.prefs.display.theme));
-    button.append(document.createTextNode(`${overlay.short || overlay.label}${overlay.available ? "" : " · not available"}`));
+    button.append(document.createTextNode(overlay.short || overlay.label));
     let longPress = false;
     let timer;
     button.addEventListener("click", () => {
       if (longPress) { longPress = false; return; }
-      const next = selected ? settings.overlays.filter((id) => id !== overlay.id) : [...settings.overlays.slice(-4), overlay.id];
+      const next = selected ? settings.overlays.filter((id) => id !== overlay.id)
+        : addOverlay(settings.overlays, overlay.id, groups.flatMap(group => group.overlays).filter(item => item.available).map(item => item.id));
       onSettingsChange({ ...settings, overlays: next });
       root.querySelector(`[data-overlay="${overlay.id}"]`)?.focus();
     });
@@ -854,34 +899,25 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
       group.append(choice);
     } else group.append(button);
   });
-  if (!overlays.length) group.append(node("span", "overlay-empty", chartDataState === "loading" ? "Loading available series…" : "No series available in this group."));
-  if (activeGroup?.id === "Fundamentals" && (!available.length || chartDataState !== "ready")) {
-    const message = chartDataState === "loading" ? "Loading quarterly fundamentals…"
-      : chartDataState === "error" ? "Quarterly fundamentals could not be loaded. Try refreshing data."
-      : `No quarterly fundamentals have been published for ${session.selected} yet.`;
-    group.append(node("p", "overlay-empty", message));
-  }
-  panel.append(tabs, group);
+  if (!overlays.length) group.append(node("span", "overlay-empty", chartDataState === "loading" ? "Loading available series…"
+    : chartDataState === "error" ? "Available series could not be loaded. Refresh data to retry." : "No overlays have data in this chart period."));
+  const tabsRow = node("div", "overlay-groups-row");
+  const clear = action("Clear all", "overlay-chip", () => {
+    onSettingsChange({ ...settings, overlays: [] });
+    (root.querySelector(".overlay-tab[aria-selected='true']") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus();
+  });
+  clear.dataset.clear = "overlays";
+  clear.setAttribute("aria-label", "Clear all chart overlays");
+  clear.disabled = !settings.overlays.length;
+  if (groups.length) tabsRow.append(tabs);
+  tabsRow.append(clear);
+  panel.append(tabsRow, group);
+  if (chartDataState === "loading") panel.append(node("p", "overlay-empty", "Loading historical chart data…"));
   if (settings.overlays.length) {
     const selection = node("p", "chart-control-note", `${settings.overlays.length} of 5 overlays · market groups compare percentage change; indicators are normalized`);
     panel.append(selection);
   }
 
-  const laneGroup = node("div", "lane-controls");
-  laneGroup.setAttribute("role", "group");
-  laneGroup.setAttribute("aria-label", "Under-chart lanes");
-  CHART_LANES.forEach((lane) => {
-    const selected = settings.lanes.includes(lane.id);
-    const button = node("button", `lane-toggle${selected ? " selected" : ""}`, lane.label);
-    button.type = "button";
-    button.setAttribute("aria-pressed", String(selected));
-    button.addEventListener("click", () => {
-      const lanes = selected ? settings.lanes.filter((id) => id !== lane.id) : [...settings.lanes, lane.id];
-      onSettingsChange({ ...settings, lanes });
-    });
-    laneGroup.append(button);
-  });
-  panel.append(laneGroup);
   if (session.chartSaveError) {
     const error = node("p", "chart-save-error", `Chart settings could not be saved: ${session.chartSaveError}`);
     error.setAttribute("role", "alert");
@@ -890,50 +926,28 @@ function renderOverlayControls(tickerData, chartData, chartDataState, onSettings
   return panel;
 }
 
-function alignedLaneValues(points, bars, key) {
-  const ordered = [...(points || [])]
-    .filter((point) => point.date && isNumericValue(point[key]))
-    .sort((left, right) => String(left.date).localeCompare(String(right.date)));
-  let previous = null;
-  let pointIndex = 0;
-  return bars.map((bar) => {
-    const day = String(bar.date || bar.ts || "").slice(0, 10);
-    while (pointIndex < ordered.length && String(ordered[pointIndex].date).slice(0, 10) <= day) {
-      previous = Number(ordered[pointIndex][key]);
-      pointIndex += 1;
-    }
-    return previous;
-  });
-}
-
 function renderLane(lane, bars, tickerData, chartData, chartDataState) {
   const row = node("section", "chart-lane");
   row.setAttribute("aria-label", `${lane.label} chart lane`);
   const info = node("div", "lane-info");
   info.append(node("h3", "lane-title", lane.label));
-  let values = [];
+  const values = lane.id === "VOL" || chartDataState === "ready" ? laneValues(lane.id, bars, chartData) : [];
   let suffix = "";
   if (lane.id === "VOL") {
-    values = bars.map((bar) => isNumericValue(bar.volume) ? Number(bar.volume) : null);
     suffix = "shares · IEX volume where reported";
   } else if (lane.id === "SI") {
-    const percentagePoints = (chartData?.short_interest || []).filter((point) => isNumericValue(point.short_pct_denominator));
-    const latestDenominator = percentagePoints.at(-1)?.denominator_type;
-    values = alignedLaneValues(
-      chartData?.short_interest || [],
-      bars,
-      percentagePoints.length ? "short_pct_denominator" : "shares_short",
-    );
+    const percentagePoints = alignedLaneValues(chartData?.short_interest, bars, "short_pct_denominator").filter(isNumericValue);
+    const latestDenominator = (chartData?.short_interest || []).filter(point => String(point.date).slice(0, 10)
+      <= String(bars.at(-1)?.date || bars.at(-1)?.ts).slice(0, 10) && isNumericValue(point.short_pct_denominator))
+      .sort((left, right) => String(left.date).localeCompare(String(right.date))).at(-1)?.denominator_type;
     suffix = latestDenominator === "estimated_public_float"
       ? "Short % of estimated public float · SEC market value ÷ measurement-date close"
       : percentagePoints.length
         ? "Short % of shares outstanding proxy · SEC public float unavailable"
         : "Shares sold short · denominator data unavailable";
   } else if (lane.id === "OPT") {
-    values = alignedLaneValues(chartData?.options || [], bars, "put_call_volume_ratio");
     suffix = "Put/call volume ratio · IV30 shown when available";
   } else {
-    values = alignedLaneValues(chartData?.macro_pressure || [], bars, "value");
     suffix = `Net macro tailwind (+) or headwind (−) for ${session.selected} · −1 to +1`;
   }
   const valid = values.filter(isNumericValue);
@@ -960,7 +974,7 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState) {
     : lane.id === "PRESS"
       ? `${latest > 0 ? "+" : ""}${latest.toFixed(2)}`
       : lane.id === "SI"
-        ? (chartData?.short_interest || []).some((point) => isNumericValue(point.short_pct_denominator))
+        ? alignedLaneValues(chartData?.short_interest, bars, "short_pct_denominator").some(isNumericValue)
           ? `${latest.toFixed(2)}%`
           : `${Math.round(latest).toLocaleString()} sh`
         : `${latest.toFixed(2)} P/C`;
@@ -1022,13 +1036,38 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState) {
   return row;
 }
 
-function renderChartLanes(settings, bars, tickerData, chartData, chartDataState) {
+function renderChartLanes(settings, bars, tickerData, chartData, chartDataState, available) {
   const lanes = node("div", "chart-lanes");
-  settings.lanes.forEach((id) => {
-    const lane = CHART_LANES.find((item) => item.id === id);
-    if (lane) lanes.append(renderLane(lane, bars, tickerData, chartData, chartDataState));
+  available.filter(lane => settings.lanes.includes(lane.id)).forEach(lane => {
+    lanes.append(renderLane(lane, bars, tickerData, chartData, chartDataState));
   });
   return lanes;
+}
+
+function renderLaneControls(settings, available, chartDataState, onSettingsChange) {
+  const group = node("div", "lane-controls");
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", "Under-chart lanes");
+  available.forEach(lane => {
+    const selected = settings.lanes.includes(lane.id);
+    const button = action(lane.label, "lane-toggle", () => {
+      onSettingsChange({ ...settings, lanes: selected ? settings.lanes.filter(id => id !== lane.id) : [...settings.lanes, lane.id] });
+      root.querySelector(`[data-lane="${lane.id}"]`)?.focus();
+    });
+    button.dataset.lane = lane.id;
+    button.setAttribute("aria-pressed", String(selected));
+    button.disabled = lane.id !== "VOL" && chartDataState !== "ready";
+    group.append(button);
+  });
+  const hide = action("Hide all", "lane-toggle bulk-control", () => {
+    onSettingsChange({ ...settings, lanes: [] });
+    (root.querySelector(".lane-controls [data-lane]:not(:disabled)") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus();
+  });
+  hide.dataset.clear = "lanes";
+  hide.setAttribute("aria-label", "Hide all under-chart lanes");
+  hide.disabled = !available.some(lane => settings.lanes.includes(lane.id));
+  group.append(hide);
+  return group;
 }
 
 function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, onSettingsChange) {
@@ -1039,6 +1078,9 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   const quote = periodQuote(history, activeId);
   const intradayBars = tickerData?.intraday?.bars || [];
   const chartHistory = selectedChartBars(tickerData);
+  const controls = chartControlsFor(tickerData, chartData, chartDataState, chartHistory);
+  const visibleOverlayIds = controls.groups.flatMap(group => group.overlays).filter(overlay => overlay.available).map(overlay => overlay.id);
+  const visibleOverlays = chartSettings.overlays.filter(id => visibleOverlayIds.includes(id));
   const panel = node("section", "panel price-panel");
   const overview = node("div", "overview");
   const quoteBlock = node("div", "overview-quote");
@@ -1062,12 +1104,13 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   quoteBlock.append(meta);
   overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
   panel.append(overview);
-  panel.append(renderOverlayControls(tickerData, chartData, chartDataState, onSettingsChange));
+  panel.append(renderOverlayControls(controls.groups, chartDataState, onSettingsChange));
   const filters = node("div", "catalyst-filters");
   filters.setAttribute("role", "group");
   filters.setAttribute("aria-label", "Chart catalyst categories");
   filters.append(node("span", "signal-note", "Catalysts"));
-  CATALYST_CATEGORIES.forEach(category => {
+  const categories = catalystCategoriesInWindow(session.dashboard, session.selected, chartHistory);
+  categories.forEach(category => {
     const enabled = session.catalystCategories.includes(category.id);
     const toggle = action(category.label, "overlay-chip", () => {
       session.catalystCategories = enabled ? session.catalystCategories.filter(id => id !== category.id)
@@ -1079,7 +1122,15 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
     toggle.setAttribute("aria-pressed", String(enabled));
     filters.append(toggle);
   });
-  panel.append(filters);
+  const clearCatalysts = action("Clear all", "overlay-chip bulk-control", () => {
+    session.catalystCategories = [];
+    renderDashboard();
+    (root.querySelector("[data-catalyst-category]") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus();
+  });
+  clearCatalysts.dataset.clear = "catalysts";
+  clearCatalysts.setAttribute("aria-label", "Clear all catalyst markers");
+  clearCatalysts.disabled = !session.catalystCategories.length;
+  filters.append(clearCatalysts);
   if (chartDataState === "error") {
     const error = node("p", "data-state error chart-data-error", "Historical overlay data could not be loaded. Use Refresh data to retry.");
     error.setAttribute("role", "alert");
@@ -1088,7 +1139,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
 
   if (chartHistory.length >= 2) {
     const wrap = node("div", "chart-wrap");
-    const chart = drawChart(chartHistory, session.selected, activeId, chartSettings.overlays, {
+    const chart = drawChart(chartHistory, session.selected, activeId, visibleOverlays, {
       tickerData,
       chartData,
       dashboard: session.dashboard,
@@ -1114,7 +1165,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
             : `Adjusted ${formatPrice(Math.min(...values))} – ${formatPrice(Math.max(...values))}`,
         ),
       );
-      chartSettings.overlays.forEach((id) => {
+      visibleOverlays.forEach((id) => {
         const definition = overlayDefinition(id);
         const series = valuesForOverlay(id, { bars: chartHistory, tickerData, chartData, dashboard: session.dashboard });
         const lastObservationIndex = series.findLastIndex(isNumericValue);
@@ -1156,7 +1207,9 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       ),
     );
   }
-  panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState));
+  panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes),
+    renderLaneControls(chartSettings, controls.lanes, chartDataState, onSettingsChange));
+  if (categories.length) panel.append(filters);
   return panel;
 }
 
@@ -1521,7 +1574,9 @@ function renderNews(tickerData) {
   const overlaySelected = chartSettings.overlays.includes("NEWS:SENTIMENT");
   const toggle = action(overlaySelected ? "Remove sentiment from chart" : "Overlay sentiment on chart", "overlay-chip", () => {
     const overlays = overlaySelected ? chartSettings.overlays.filter(id => id !== "NEWS:SENTIMENT")
-      : [...chartSettings.overlays.slice(-4), "NEWS:SENTIMENT"];
+      : addOverlay(chartSettings.overlays, "NEWS:SENTIMENT", overlayGroups(tickerData,
+        session.chartDataState[session.selected] === "ready" ? session.chartData[session.selected] : null,
+        session.dashboard, selectedChartBars(tickerData)).flatMap(group => group.overlays).map(item => item.id));
     updateChartSettings(session.selected, { ...chartSettings, overlays });
   });
   toggle.disabled = !overlaySelected && !sentiment.some(point => isNumericValue(point.value));

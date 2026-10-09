@@ -26,11 +26,14 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `issue-26/production-*.png` | Implemented signals/rates/release/drift panels in six themes and four mobile views (see [`issue-26/README.md`](issue-26/README.md)) |
 | `issue-71/*-1440.png`, `issue-71/*-390.png` | Fundamentals overlays and fixed Add/pin watchlist control in Industrial Dark and Clean Light; local app using a captured October 8, 2026 live market snapshot, mock sign-in and synthetic 25-ticker preferences |
 | `issue-27/*-1440.png`, `issue-27/*-390-*.png` | Implemented catalysts, signals, macro/company panels, sentiment and drawers in Industrial Dark and Clean Light; captured live market data and actual stored daily news scores, with mock sign-in/preferences |
+| `issue-76/*-1440.png`, `issue-76/*-390.png` | Period-aware available overlays, fixed-order under-chart lanes, below-chart lane/catalyst controls, pinned bulk actions and Signed In header in Industrial Dark and Clean Light; captured live market data with mock sign-in/preferences |
 
 **Note:** Values in these shots are **design sample data** from the artboard’s inline demo generator (dated demo facts and synthetic series), **not live lake / market data**. See the [Dashboard features](https://github.com/ram290476/investor-dashboard/wiki/Dashboard-features) wiki for what ships today vs design-only.
 
-The `issue-71/` and `issue-27/` captures are exceptions: their market values come from a live lake capture,
+The `issue-71/`, `issue-27/` and `issue-76/` captures are exceptions: their market values come from a live lake capture,
 but authentication and watchlist preferences are local test fixtures, not a production user session.
+Earlier Account header labels and always-visible unavailable Fundamentals chips in the
+older screenshots are superseded by #76; those historical captures are not overwritten.
 
 ## Regenerating
 

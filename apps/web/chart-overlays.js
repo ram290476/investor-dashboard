@@ -3,8 +3,8 @@ import { chartValue, isNumericValue, validBars } from "./chart-period.js";
 export const CHART_LANES = Object.freeze([
   { id: "VOL", label: "Volume" },
   { id: "SI", label: "Short interest" },
-  { id: "OPT", label: "Options" },
   { id: "PRESS", label: "Macro pressure" },
+  { id: "OPT", label: "Options" },
 ]);
 
 export const DEFAULT_CHART_SETTINGS = Object.freeze({ overlays: [], lanes: ["VOL", "PRESS"] });
@@ -65,26 +65,46 @@ export function chartSettingsFor(prefs, ticker) {
   };
 }
 
-export function overlayGroups(tickerData, chartData, dashboard) {
-  const availableFundamentals = new Set((chartData?.fundamentals || []).filter(row => isNumericValue(row.value)).map((row) => row.series_id));
+export function overlayGroups(tickerData, chartData, dashboard, bars = validBars(tickerData?.price_history)) {
   return GROUP_ORDER.map((label) => ({
     id: label,
     label,
-    overlays: OVERLAYS.filter((overlay) => {
-      if (overlay.group !== label) return false;
-      if (overlay.kind === "market") return Boolean(dashboard?.tickers?.[overlay.id]?.price_history?.length);
-      if (overlay.kind === "average") return validBars(tickerData?.price_history).length >= overlay.window;
-      if (overlay.kind === "macro") return Boolean(chartData?.macro_series?.[overlay.id]?.length);
-      if (overlay.kind === "fundamental") return true;
-      if (overlay.kind === "sentiment") return true;
-      return true;
-    }).map(overlay => ({
-      ...overlay,
-      available: overlay.kind === "sentiment"
-        ? Boolean(tickerData?.news?.sentiment_history?.some(point => isNumericValue(point.value)))
-        : overlay.kind !== "fundamental" || availableFundamentals.has(overlay.id.slice("FUNDAMENTAL:".length)),
-    })),
+    overlays: OVERLAYS.filter(overlay => overlay.group === label
+      && valuesForOverlay(overlay.id, { bars, tickerData, chartData, dashboard }).some(isNumericValue))
+      .map(overlay => ({ ...overlay, available: true })),
   })).filter((group) => group.overlays.length);
+}
+
+export function addOverlay(selected, id, visibleIds) {
+  const next = [...selected.filter(value => value !== id), id];
+  while (next.length > 5) {
+    const hidden = next.findIndex(value => value !== id && !visibleIds.includes(value));
+    next.splice(hidden < 0 ? 0 : hidden, 1);
+  }
+  return next;
+}
+
+export function alignedLaneValues(points, bars, key) {
+  return alignedValues(points, bars, key);
+}
+
+export function laneValues(id, bars, chartData) {
+  if (id === "VOL") return bars.map(bar => isNumericValue(bar.volume) ? Number(bar.volume) : null);
+  if (id === "SI") {
+    const points = chartData?.short_interest || [];
+    const percent = alignedLaneValues(points, bars, "short_pct_denominator");
+    return percent.some(isNumericValue) ? percent : alignedLaneValues(points, bars, "shares_short");
+  }
+  if (id === "OPT") return alignedLaneValues(chartData?.options, bars, "put_call_volume_ratio");
+  return alignedLaneValues(chartData?.macro_pressure, bars, "value");
+}
+
+export function availableLanes(bars, chartData) {
+  return CHART_LANES.filter(lane => laneValues(lane.id, bars, chartData).some(isNumericValue));
+}
+
+export function visibleLanes(selected, bars, chartData) {
+  return availableLanes(bars, chartData).filter(lane => selected.includes(lane.id));
 }
 
 function alignedValues(points, bars, valueKey = "value") {

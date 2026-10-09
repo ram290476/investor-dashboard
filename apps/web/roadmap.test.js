@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { catalystCategory, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+import { catalystCategory, catalystCategoriesInWindow, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+
+test("category controls include only events aligned inside the selected window in catalog order", () => {
+  const dashboard = { events: [
+    { event_ts: "2026-10-03", type: "launch", title: "Launch", tickers: ["TSLA"] },
+    { event_ts: "2026-10-02", type: "filing", title: "Filing", tickers: ["TSLA"] },
+    { event_ts: "2026-10-07", type: "cpi", title: "Future", tickers: ["TSLA"] },
+    { event_ts: "2026-10-02", type: "tariff", title: "Other ticker", tickers: ["SPCX"] },
+  ] };
+  assert.deepEqual(catalystCategoriesInWindow(dashboard, "TSLA", [
+    { date: "2026-10-02" }, { date: "2026-10-05" },
+  ]).map(category => category.id), ["filings", "space"]);
+  assert.deepEqual(catalystCategoriesInWindow(dashboard, "TSLA", []), []);
+});
 
 test("catalysts combine scoped events, filings and global macro releases without demo facts", () => {
   const dashboard = {

@@ -175,6 +175,20 @@ def test_themes_round_trip_with_independent_palette_and_chart_settings(api, them
     assert saved["display"]["chart_period"] == "1Y"
     assert saved["chart_settings"] == body["chart_settings"]
 
+def test_empty_chart_choices_round_trip_without_restoring_defaults(api):
+    mod, _ = api
+    body = {
+        "tickers": ["TSLA", "SPCX"], "version": 0,
+        "chart_settings": {
+            "TSLA": {"overlays": [], "lanes": []},
+            "SPCX": {"overlays": ["MA20"], "lanes": ["OPT", "PRESS", "VOL"]},
+        },
+    }
+    response = mod.handler(_event("PUT", body=body), None)
+    assert response["statusCode"] == 200
+    saved = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert saved["chart_settings"] == body["chart_settings"]
+
 
 @pytest.mark.parametrize("theme", ["invalid", "", None, [], {}])
 def test_invalid_theme_returns_validation_error_without_writing(api, theme):

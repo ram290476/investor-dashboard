@@ -53,6 +53,12 @@ export function markerIndex(event, bars) {
   return days.findIndex(date => date >= day);
 }
 
+export function catalystCategoriesInWindow(dashboard, ticker, bars) {
+  const categories = new Set(catalystRows(dashboard, ticker)
+    .filter(event => markerIndex(event, bars) >= 0).map(event => event.category));
+  return CATALYST_CATEGORIES.filter(category => categories.has(category.id));
+}
+
 export function sortedDrivers(tickerData, sort = "effect") {
   const rows = driverRows(tickerData);
   if (sort === "name") return rows.sort((a, b) => a.series_id.localeCompare(b.series_id));
