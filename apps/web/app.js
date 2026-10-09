@@ -462,7 +462,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
   priceLine.setAttribute("d", pricePath);
   svg.append(area, priceLine);
 
-  configured.forEach(({ id, definition, scaled }) => {
+  configured.forEach(({ id, definition, scaled, values }) => {
     if (!definition || !scaled.some(isNumericValue)) return;
     const path = document.createElementNS(svgNS, "path");
     path.setAttribute("class", "chart-overlay-path");
@@ -480,6 +480,19 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
       path.append(title);
     }
     svg.append(path);
+    if (definition.kind === "sentiment") scaled.forEach((value, index) => {
+      if (!isNumericValue(value)) return;
+      const dot = document.createElementNS(svgNS, "circle");
+      dot.setAttribute("cx", String(xAt(index)));
+      dot.setAttribute("cy", String(yNormalized(value)));
+      dot.setAttribute("r", "3");
+      dot.setAttribute("fill", path.getAttribute("stroke"));
+      dot.dataset.sentimentObservation = String(bars[index]?.ts || bars[index]?.date).slice(0, 10);
+      const title = document.createElementNS(svgNS, "title");
+      title.textContent = `${definition.label} · ${Number(values[index]).toFixed(2)} · ${dot.dataset.sentimentObservation}`;
+      dot.append(title);
+      svg.append(dot);
+    });
   });
 
   const catalysts = catalystRows(chartContext.dashboard, ticker)
@@ -1104,7 +1117,8 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       chartSettings.overlays.forEach((id) => {
         const definition = overlayDefinition(id);
         const series = valuesForOverlay(id, { bars: chartHistory, tickerData, chartData, dashboard: session.dashboard });
-        const latestValue = series.filter(isNumericValue).at(-1);
+        const lastObservationIndex = series.findLastIndex(isNumericValue);
+        const latestValue = series[lastObservationIndex];
         if (!definition) return;
         const label = node("span", "chart-legend-item");
         const swatch = node("span", "overlay-swatch");
@@ -1117,6 +1131,8 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
           ? formatPercent(Number(latestValue) / Number(series.find(isNumericValue)) - 1, 1)
           : definition.kind === "average"
             ? formatPrice(latestValue)
+            : definition.kind === "sentiment"
+              ? `${Number(latestValue).toFixed(2)} · observed ${String(chartHistory[lastObservationIndex]?.ts || chartHistory[lastObservationIndex]?.date).slice(0, 10)}`
             : Number(latestValue).toFixed(2);
         label.append(document.createTextNode(`${definition.label} · ${shown}`));
         legend.append(label);

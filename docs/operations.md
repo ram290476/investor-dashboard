@@ -451,6 +451,8 @@ The #27 roadmap UI consumes the existing schema-v3 serving document and chart hi
   use the last valid row. H2 already publishes `ticker`, `date`, `mean_sentiment`,
   `weighted_sentiment`, `articles`, `bullish` and `bearish` in `curated/news_daily/`.
   The panel and `NEWS:SENTIMENT` overlay use this history, not other tickers' scores.
+  Sentiment overlays match observed dates exactly rather than carrying an old score
+  into unobserved sessions; the legend identifies the last observed date in the window.
   The existing five-overlay cap and explicit preference-save errors remain unchanged.
 - Tesla shows reported deliveries/FSD subscribers only when quarterly facts exist.
   Robotaxi fleet counts, state permit counts and regional FSD approval counts have no

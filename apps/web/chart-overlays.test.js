@@ -38,7 +38,7 @@ test("sentiment overlays remain discoverable and use only the selected ticker's 
     bars: [{ date: "2026-10-01" }, { date: "2026-10-02" }],
     tickerData: { news: { sentiment_history: [{ date: "2026-10-01", value: -0.2 }] } },
   });
-  assert.deepEqual(values, [-0.2, -0.2]);
+  assert.deepEqual(values, [-0.2, null]);
 });
 
 test("fundamentals always expose seven metrics, marking unavailable ones explicitly", () => {
@@ -96,4 +96,14 @@ test("fundamental summaries are unit-aware, quarter-labelled and publication-dat
   assert.equal(fundamentalSummary("FUNDAMENTAL:gross_margin_gaap", chart, "2026-02-01"), "20.5% · 2025Q4");
   assert.equal(fundamentalSummary("FUNDAMENTAL:shares_outstanding", chart, "2026-02-01"), "1,234,567 · 2025Q4");
   assert.equal(fundamentalSummary("FUNDAMENTAL:revenue_gaap", chart, "2025-12-31"), "not available");
+});
+
+test("sentiment overlays leave unobserved dates empty instead of carrying stale scores", () => {
+  const bars = ["2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-20"]
+    .map(date => ({ date }));
+  const tickerData = { news: { sentiment_history: [
+    { date: "2026-10-01", value: 0.2 },
+    { date: "2026-10-06", value: 0.4 },
+  ] } };
+  assert.deepEqual(valuesForOverlay("NEWS:SENTIMENT", { bars, tickerData }), [0.2, null, null, 0.4, null]);
 });

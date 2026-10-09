@@ -146,7 +146,10 @@ export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard })
   if (overlay.kind === "market") return marketValues(overlay, dashboard, bars);
   if (overlay.kind === "average") return movingAverage(tickerData?.price_history || [], overlay.window, bars);
   if (overlay.kind === "macro") return alignedValues(chartData?.macro_series?.[overlay.id], bars);
-  if (overlay.kind === "sentiment") return alignedValues(tickerData?.news?.sentiment_history, bars);
+  if (overlay.kind === "sentiment") {
+    const observed = new Map((tickerData?.news?.sentiment_history || []).map(point => [dateKey(point), pointValue(point)]));
+    return bars.map(bar => observed.get(dateKey(bar)) ?? null);
+  }
   const metric = overlay.id.slice("FUNDAMENTAL:".length);
   return alignedValues((chartData?.fundamentals || []).filter((row) => row.series_id === metric), bars);
 }
