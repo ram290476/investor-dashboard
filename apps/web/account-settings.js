@@ -782,11 +782,11 @@ export function createAccountSettings(ctx) {
     trigger.dataset.opener = "account";
     trigger.setAttribute("aria-haspopup", "menu");
     trigger.setAttribute("aria-expanded", "false");
-    trigger.setAttribute("aria-label", `Account menu · signed in · data refresh: ${summary.text}`);
+    trigger.setAttribute("aria-label", `Signed In · open account menu · data refresh: ${summary.text}`);
     const icon = el("span", "account-icon");
     icon.setAttribute("aria-hidden", "true");
     icon.append(el("span", `dot ${summary.tone}`.trim()));
-    trigger.append(icon, el("span", "account-text", "Account"));
+    trigger.append(icon, el("span", "account-text", "Signed In"));
 
     const menu = el("div", "account-menu");
     menu.setAttribute("role", "menu");

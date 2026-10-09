@@ -645,6 +645,32 @@ a {
   scrollbar-width: thin;
 }
 
+.overlay-groups-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.overlay-groups-row .overlay-tabs {
+  flex: 1;
+}
+
+.overlay-groups-row > button {
+  flex-shrink: 0;
+}
+
+.price-panel > .lane-controls {
+  flex-wrap: wrap;
+  overflow: visible;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.bulk-control {
+  margin-left: auto;
+}
+
 .overlay-tab,
 .overlay-chip,
 .lane-toggle {
@@ -1734,7 +1760,7 @@ input::placeholder {
 }
 
 .catalyst-filters {
-  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
 }
 
 .regime-pill {
@@ -1953,7 +1979,10 @@ input::placeholder {
 }
 
 @media (pointer: coarse) {
-  .period-chip {
+  .period-chip,
+  .overlay-tab,
+  .overlay-chip,
+  .lane-toggle {
     min-height: 44px;
   }
 }

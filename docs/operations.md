@@ -609,9 +609,26 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
   cap). Legacy over-limit lists are never trimmed: display/chart/pin/reorder/removal saves work,
   but new symbols are blocked until capacity is available.
 * Fundamentals are chart overlays, not a separate bottom table. The snapshot's existing
-  fundamentals array is retained for compatibility. Seven metrics remain visible, including
-  unavailable states; the five-overlay cap is unchanged. Large Fundamentals groups have no
+  fundamentals array is retained for compatibility. Seven metrics remain supported; #76
+  supersedes #71's always-visible unavailable chips. Overlay chips/groups and lane toggles
+  appear only when their aligned series has a finite value in the selected ticker/period.
+  Pre-window macro/fundamental/FINRA/options values retain existing carry-forward behavior,
+  moving averages use prior daily history, and sentiment uses observed dates only.
+* The chart order is overview, overlay tabs with pinned **Clear all**, active-group chips,
+  chart/legend, selected data-bearing lanes (**Volume, Short interest, Macro pressure,
+  Options**), lane controls with **Hide all**, then in-window catalyst categories with
+  **Clear all**. Lane display order never rewrites saved selection order.
+  Loading/error states preserve known chart-backed controls without drawing stale values;
+  the existing historical-data error and Refresh data retry remain visible.
+* Hidden saved choices remain in preferences and reappear when data returns. Adding above
+  the unchanged five-overlay cap evicts hidden choices before the oldest visible choice.
+  Overlay Clear all also clears hidden choices; Hide all persists an empty lane array.
+  Both actions affect only the selected ticker. Catalyst Clear all remains session-only;
+  choosing a calendar event re-enables its category. Large Fundamentals groups have no
   bulk-add button, and Market bulk-add selects at most five.
+* The signed-in header reads **Signed In**; its accessible name includes the account.
+  The menu is still named Account and the settings dialog Account settings. The text stays
+  hidden at phone widths, where the account icon remains accessible.
 * Overlay colors use the active theme's six series tokens. Extra stable slots blend adjacent
   series tokens in 13% increments per cycle and retain at least 3:1 chart contrast. Shadows
   and the settings backdrop use light/dark theme tokens.
