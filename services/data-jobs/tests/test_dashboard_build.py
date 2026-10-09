@@ -127,6 +127,7 @@ def test_chart_data_prefers_filed_public_float_estimate_and_falls_back_to_shares
                 "fiscal_quarter": "2026Q2",
                 "value": 0.18,
                 "unit": "ratio",
+                "source_id": "DS-11",
             },
         ],
         price_rows=[{"date": "2026-06-30", "close": 100.0}],
@@ -141,6 +142,7 @@ def test_chart_data_prefers_filed_public_float_estimate_and_falls_back_to_shares
     assert chart["short_interest"][1]["shares_denominator"] == pytest.approx(9_000_000_000)
     assert chart["short_interest"][1]["short_pct_denominator"] == pytest.approx(33_000_000 / 9_000_000_000 * 100)
     assert {"public_float_usd", "shares_outstanding"} <= {row["series_id"] for row in chart["fundamentals"]}
+    assert next(row for row in chart["fundamentals"] if row["series_id"] == "gross_margin_gaap")["source_id"] == "DS-11"
     assert chart["options"][0]["iv30"] is None
     assert any(row["series_id"] == "gross_margin_gaap" for row in chart["fundamentals"])
 
@@ -326,7 +328,9 @@ def test_filings_events_and_insider_flow_are_served():
                 "event_ts": "2026-10-05T14:00:00+00:00",
                 "type": "monetary",
                 "title": "FOMC",
+                "source": "federal-register",
                 "source_url": "https://www.federalreserve.gov/new",
+                "ingested_at": "2026-10-05T15:00:00+00:00",
                 "tickers": [],
             },
             {
@@ -343,11 +347,17 @@ def test_filings_events_and_insider_flow_are_served():
     assert [row["title"] for row in filings] == ["Duplicate accession", "Form 4"]
     assert snapshot["tickers"]["TSLA"]["insider_30d"] == {"net_shares": 100.0, "net_value": 1000.0}
     assert [event["title"] for event in snapshot["events"]] == ["FOMC"]
+    assert snapshot["events"][0]["source"] == "federal-register"
+    assert snapshot["events"][0]["observed_at"] == "2026-10-05T15:00:00+00:00"
 
 
 def test_contracts_are_served_only_for_mapped_tickers():
     award = {
         "ttm_obligated": 1200.0,
+        "ttm_awards_count": 1,
+        "as_of": "2026-10-06",
+        "source_ids": ["usaspending"],
+        "observed_at": "2026-10-06T18:00:00+00:00",
         "by_agency": [{"agency": "NASA", "quarter": "FY2026Q4", "obligated": 1200.0}],
         "recent": [
             {
@@ -355,7 +365,9 @@ def test_contracts_are_served_only_for_mapped_tickers():
                 "agency": "NASA",
                 "amount": 1200.0,
                 "date": "2026-10-01",
-                "url": "https://sam.gov/x",
+                "source_id": "usaspending",
+                "observed_at": "2026-10-06T18:00:00+00:00",
+                "url": "https://www.usaspending.gov/award/x",
             }
         ],
     }
@@ -365,11 +377,52 @@ def test_contracts_are_served_only_for_mapped_tickers():
         trends={},
         fundamentals=[],
         status=None,
+        generated_at="2026-10-13T18:00:00+00:00",
         contracts={"SPCX": award, "AAPL": award},
     )
     assert snapshot["tickers"]["SPCX"]["contracts"]["ttm_obligated"] == 1200.0
+    assert snapshot["tickers"]["SPCX"]["contracts"]["coverage"] == "available"
+    assert snapshot["tickers"]["SPCX"]["contracts"]["source_ids"] == ["usaspending"]
+    assert snapshot["tickers"]["SPCX"]["contracts"]["observed_at"] == "2026-10-06T18:00:00+00:00"
+    assert snapshot["tickers"]["SPCX"]["contracts"]["freshness"] == "fresh"
     assert snapshot["tickers"]["TSLA"]["contracts"] is None
     assert snapshot["tickers"]["AAPL"]["contracts"] is None
+
+
+def test_stale_and_undated_contract_rollups_are_distinguishable():
+    base = {
+        "ttm_obligated": None,
+        "ttm_awards_count": 0,
+        "by_agency": [],
+        "recent": [],
+    }
+    stale = dashboard_build.build_snapshot(
+        ["SPCX"], {}, {}, [], None, generated_at="2026-10-09T12:00:00+00:00",
+        contracts={"SPCX": {**base, "as_of": "2026-10-01"}},
+    )
+    unknown = dashboard_build.build_snapshot(
+        ["SPCX"], {}, {}, [], None, generated_at="2026-10-09T12:00:00+00:00",
+        contracts={"SPCX": base},
+    )
+    assert stale["tickers"]["SPCX"]["contracts"]["ttm_obligated"] is None
+    assert stale["tickers"]["SPCX"]["contracts"]["freshness"] == "stale"
+    assert unknown["tickers"]["SPCX"]["contracts"]["freshness"] == "unknown"
+
+
+def test_legacy_or_empty_award_rollup_does_not_serve_zero_without_source_rows():
+    snapshot = dashboard_build.build_snapshot(
+        ["SPCX"],
+        {},
+        {},
+        [],
+        None,
+        generated_at="2026-10-09T12:00:00+00:00",
+        contracts={"SPCX": {"as_of": "2026-10-09", "ttm_obligated": 0.0}},
+    )
+
+    contracts = snapshot["tickers"]["SPCX"]["contracts"]
+    assert contracts["ttm_obligated"] is None
+    assert contracts["coverage"] == "unavailable"
 
 
 def test_intraday_is_today_only_and_short_interest_is_the_latest_settlement():

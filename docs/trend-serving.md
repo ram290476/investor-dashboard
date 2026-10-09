@@ -123,6 +123,17 @@ correlations. Monthly points stay null. Null pressure is excluded from the
 renderable pressure history. UI correlation drift compares the latest 90D link
 with 21 stored linked sessions earlier, requiring 22 finite points.
 
+Company context reuses the existing data jobs. Company events retain their
+provider `source` and collection timestamp as `observed_at`; event dates remain
+separate from collection dates. Quarterly fundamentals carry their existing
+`source_id` and release date through chart serving. Contract rollups include
+`ttm_awards_count`, source IDs and the latest ingested award timestamp. A
+trailing-12-month amount is null unless at least one dated source row supports
+it, so missing coverage is never shown as zero. Rollup freshness is measured
+from its `as_of` date: older than seven days is stale; missing or future dates
+are unknown. The UI displays the last source observation independently from
+rollup freshness. No new provider, schedule or infrastructure is required.
+
 Job status includes `skipped`, `reason` and safe `failed_source_ids`. D2/D3/W1
 remain unimplemented catalog tiers, not failing deployed jobs.
 

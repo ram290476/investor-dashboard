@@ -12,6 +12,7 @@ from regulatory_feeds import (
     dedupe_filings,
     insider_flows,
     parse_form4,
+    parse_launches,
     parse_submissions,
     resolve_cik,
 )
@@ -48,6 +49,19 @@ FORM4 = """<?xml version="1.0"?>
   </nonDerivativeTable>
 </ownershipDocument>
 """
+
+
+def test_launches_keep_provider_and_collection_timestamp_for_provenance():
+    ingested_at = "2026-10-08T18:00:00+00:00"
+    events = parse_launches(
+        {"results": [{"name": "Starship test", "net": "2026-10-15T12:00:00Z", "url": "https://provider.test/1"}]},
+        ingested_at,
+    )
+
+    assert events[0]["source"] == "launch-library"
+    assert events[0]["source_url"] == "https://provider.test/1"
+    assert events[0]["event_ts"] == "2026-10-15T12:00:00Z"
+    assert events[0]["ingested_at"] == ingested_at
 
 
 def test_submissions_fixture_becomes_recent_filings():

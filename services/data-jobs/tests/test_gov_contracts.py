@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from gov_contracts import (
@@ -7,6 +9,7 @@ from gov_contracts import (
     parse_sam,
     parse_usaspending,
     reconcile,
+    rollup_contracts,
     sam_budget,
     sam_status,
     ticker_for,
@@ -76,6 +79,42 @@ def test_modifications_sum_and_keep_the_latest_action():
     assert merged[0]["obligated_amount"] == 1250
     assert merged[0]["action_date"] == "2026-10-01"
     assert merged[0]["description"] == "Modification"
+
+
+def test_contract_rollup_keeps_source_observation_and_does_not_invent_zero_coverage():
+    rows = [
+        {
+            "ticker": "SPCX",
+            "award_id": "NASA-1",
+            "agency": "NASA",
+            "action_date": "2026-10-01",
+            "obligated_amount": 1250,
+            "source": "usaspending",
+            "ingested_at": "2026-10-02T12:00:00+00:00",
+            "source_url": "https://www.usaspending.gov/award/1",
+        },
+        {
+            "ticker": "TSLA",
+            "award_id": "DOD-1",
+            "agency": "DoD",
+            "action_date": "2025-01-01",
+            "obligated_amount": 25,
+            "source": "DoD",
+            "ingested_at": "2026-10-02T12:00:00+00:00",
+        },
+    ]
+
+    spcx, tsla = rollup_contracts(rows, date(2026, 10, 6))
+
+    assert spcx["ttm_obligated"] == 1250
+    assert spcx["ttm_awards_count"] == 1
+    assert spcx["source_ids"] == ["usaspending"]
+    assert spcx["observed_at"] == "2026-10-02T12:00:00+00:00"
+    assert spcx["recent"][0]["source_id"] == "usaspending"
+    assert spcx["recent"][0]["observed_at"] == "2026-10-02T12:00:00+00:00"
+    assert tsla["ttm_obligated"] is None
+    assert tsla["ttm_awards_count"] == 0
+    assert tsla["source_ids"] == []
 
 
 def test_uei_map_wins_over_the_recipient_name():

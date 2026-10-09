@@ -71,6 +71,8 @@ Dots on the price chart mark catalysts: published macro releases, curated events
 
 All correlations describe historical association, not causation or a forecast.
 
+Company context uses only curated events, released fundamentals and federal-award records already present in the serving data. Tesla-reported values show their source ID and release date; SpaceX launches and awards show their source and observation date. Robotaxi fleet size, state permit counts, regional FSD approvals, active-satellite counts and launch cadence remain explicitly unavailable until verified structured observations are collected. An absent or stale awards rollup is not presented as zero.
+
 ### Coming soon
 - More panels below the chart with additional trends.
 - Dedicated pages for individual stocks, with depth depending on each stock's importance.

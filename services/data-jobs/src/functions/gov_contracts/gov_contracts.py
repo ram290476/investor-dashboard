@@ -263,11 +263,12 @@ def rollup_contracts(rows: list[dict], as_of: date) -> list[dict]:
             continue
         bucket = by_ticker.setdefault(
             ticker,
-            {"ttm_obligated": 0.0, "by_agency": {}, "recent": [], "largest": None},
+            {"ttm_obligated": 0.0, "ttm_rows": [], "by_agency": {}, "recent": [], "largest": None},
         )
         action = str(row.get("action_date") or "")
         amount = _amount(row.get("obligated_amount"))
         if action >= ttm_start:
+            bucket["ttm_rows"].append(row)
             bucket["ttm_obligated"] += amount
             agency = row.get("agency") or "Unknown"
             quarter = fiscal_quarter(date.fromisoformat(action)) if len(action) == 10 else ""
@@ -285,11 +286,16 @@ def rollup_contracts(rows: list[dict], as_of: date) -> list[dict]:
         ]
         recent = sorted(bucket["recent"], key=lambda row: str(row.get("action_date") or ""), reverse=True)[:10]
         largest = bucket["largest"]
+        ttm_rows = bucket["ttm_rows"]
+        observations = [str(row.get("ingested_at")) for row in ttm_rows if row.get("ingested_at")]
         rolled.append(
             {
                 "ticker": ticker,
                 "as_of": as_of.isoformat(),
-                "ttm_obligated": bucket["ttm_obligated"],
+                "ttm_obligated": bucket["ttm_obligated"] if ttm_rows else None,
+                "ttm_awards_count": len(ttm_rows),
+                "source_ids": sorted({str(row["source"]) for row in ttm_rows if row.get("source")}),
+                "observed_at": max(observations) if observations else None,
                 "by_agency": agencies,
                 "new_awards_30d": len(bucket["recent"]),
                 "largest_award_30d": None if largest is None else largest.get("award_id"),
@@ -299,6 +305,8 @@ def rollup_contracts(rows: list[dict], as_of: date) -> list[dict]:
                         "agency": row.get("agency"),
                         "amount": row.get("obligated_amount"),
                         "date": row.get("action_date"),
+                        "source_id": row.get("source"),
+                        "observed_at": row.get("ingested_at"),
                         "url": row.get("source_url"),
                     }
                     for row in recent

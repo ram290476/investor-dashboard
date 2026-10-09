@@ -26,7 +26,14 @@ export function catalystRows(dashboard, ticker) {
   const data = dashboard?.tickers?.[ticker];
   const records = [
     ...(dashboard?.events || []).filter(row => !row.tickers?.length || row.tickers.includes(ticker))
-      .map(row => ({ date: row.event_ts, type: row.type, title: row.title, url: row.source_url, source: "Curated event" })),
+      .map(row => ({
+        date: row.event_ts,
+        type: row.type,
+        title: row.title,
+        url: row.source_url,
+        source: row.source || null,
+        observed_at: row.observed_at || null,
+      })),
     ...(data?.filings || []).map(row => ({
       date: row.filed_at, type: "filing", title: row.title || row.form, url: row.url, source: "SEC filing",
     })),

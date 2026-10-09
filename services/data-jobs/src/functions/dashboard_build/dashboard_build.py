@@ -138,7 +138,9 @@ def build_events(rows: list[dict], as_of: date) -> list[dict]:
                 "event_ts": row.get("event_ts"),
                 "type": row.get("type"),
                 "title": row.get("title"),
+                "source": row.get("source"),
                 "source_url": row.get("source_url"),
+                "observed_at": row.get("ingested_at"),
                 "tickers": row.get("tickers") or [],
             }
         )
@@ -217,6 +219,18 @@ def build_intraday(rows: list[dict], daily_history: list[dict]) -> dict | None:
         "change_pct": None if not prior else last / prior - 1,
         "bars": today,
     }
+
+
+def contract_freshness(as_of: object, generated_at: datetime) -> str:
+    """Describe the age of the stored rollup, not the age of its underlying awards."""
+    try:
+        rollup_date = date.fromisoformat(str(as_of)[:10])
+    except ValueError:
+        return "unknown"
+    age = (generated_at.date() - rollup_date).days
+    if age < 0:
+        return "unknown"
+    return "stale" if age > 7 else "fresh"
 
 
 def latest_short_interest(rows: list[dict]) -> dict[str, dict]:
@@ -431,6 +445,21 @@ def build_snapshot(
         award = None
         if contracts is not None and ticker in CONTRACT_TICKERS:
             award = contracts.get(ticker)
+            if award is not None:
+                award_count = award.get("ttm_awards_count")
+                coverage = (
+                    "available"
+                    if isinstance(award_count, int)
+                    and award_count > 0
+                    and number(award.get("ttm_obligated")) is not None
+                    else "unavailable"
+                )
+                award = {
+                    **award,
+                    "coverage": coverage,
+                    "freshness": contract_freshness(award.get("as_of"), clock),
+                    "ttm_obligated": award.get("ttm_obligated") if coverage == "available" else None,
+                }
         interest = latest_short_interest((short_interest or {}).get(ticker, []))
         instruments[ticker] = {
             "ticker": ticker,
