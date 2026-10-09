@@ -90,15 +90,22 @@ export function themeProperties(id = DEFAULT_THEME, palette = "green-red") {
     "--hover": hover, "--selected": selected,
     "--palette-green": green, "--palette-red": red, "--palette-blue": blue, "--palette-orange": orange,
     "--theme-up": text(t.up), "--theme-down": text(t.down),
+    "--shadow-panel": scheme === "light" ? "rgba(22, 34, 50, 0.08)" : "rgba(0, 0, 0, 0.12)",
+    "--shadow-menu": scheme === "light" ? "rgba(22, 34, 50, 0.18)" : "rgba(0, 0, 0, 0.45)",
+    "--shadow-dialog": scheme === "light" ? "rgba(22, 34, 50, 0.22)" : "rgba(0, 0, 0, 0.55)",
+    "--backdrop": scheme === "light" ? "rgba(22, 34, 50, 0.35)" : "rgba(5, 8, 12, 0.72)",
     ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [
       `--series-${i + 1}`, readable(t[`series-${i + 1}`], backgrounds, scheme, 3),
     ])),
   };
 }
 
-export function overlayColor(color, id = DEFAULT_THEME) {
+export function overlayColor(slot, id = DEFAULT_THEME) {
   const { tokens, scheme } = themeFor(id);
   const fill = mixColor(tokens.surface, themeProperties(id)["--price"], 0.08);
+  const base = tokens[`series-${slot % 6 + 1}`];
+  const color = slot < 6 ? base
+    : mixColor(base, tokens[`series-${(slot + 1) % 6 + 1}`], Math.floor(slot / 6) * 0.13);
   return readable(color, [tokens.surface, tokens["surface-2"], fill], scheme, 3);
 }
 

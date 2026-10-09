@@ -9,7 +9,7 @@ or write another user's item.
 
 Item (table user_prefs, partition key user_sub):
     user_sub      string   Cognito sub
-    tickers       list     "My tickers", in display order (max 50)
+    tickers       list     "My tickers", in display order (max 25; legacy lists may shrink, not grow)
     pinned        list     pinned tickers, in order (max 6, each also in tickers)
     display       map      time_zone (IANA, e.g. America/Los_Angeles), updown_palette (see PALETTES),
                            chart_period (1D|1W|1M|3M|YTD|1Y|3Y|5Y; unknown values are stored as 1M),
@@ -41,7 +41,7 @@ TABLE = os.environ.get("PREFS_TABLE", "invdash-user-prefs")
 LAKE_BUCKET = os.environ.get("LAKE_BUCKET", "")
 ACCESS_ROLE_ARN = os.environ.get("PREFS_ACCESS_ROLE_ARN", "")
 EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "invdash.prefs")
-MAX_TICKERS = int(os.environ.get("MAX_TICKERS_PER_USER", "50"))
+MAX_TICKERS = int(os.environ.get("MAX_TICKERS_PER_USER", "25"))
 MAX_PINNED = 6
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 PALETTES = {"theme", "green-red", "red-green", "blue-orange"}
@@ -58,6 +58,7 @@ CHART_OVERLAYS = {
     "CPI_YOY", "CORE_CPI_YOY", "PCE_YOY", "VIXCLS", "DTWEXBGS", "DCOILWTICO", "USEPUINDXD",
     "FUNDAMENTAL:revenue_gaap", "FUNDAMENTAL:gross_profit_gaap", "FUNDAMENTAL:gross_margin_gaap",
     "FUNDAMENTAL:deliveries", "FUNDAMENTAL:fsd_subscribers",
+    "FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd",
 }
 DEFAULTS = {
     "tickers": ["TSLA", "SPCX"],
@@ -81,7 +82,7 @@ class ValidationError(ValueError):
     pass
 
 
-def validate(body: dict) -> dict:
+def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
     """Return a clean preferences dict or raise ValidationError with a user-facing message."""
     if not isinstance(body, dict):
         raise ValidationError("Body must be a JSON object")
@@ -96,7 +97,15 @@ def validate(body: dict) -> dict:
         raise ValidationError(f"Not valid ticker symbols: {', '.join(bad[:5])}")
     if len(clean) != len(set(clean)):
         raise ValidationError("tickers contains duplicates")
-    if len(clean) > MAX_TICKERS:
+    stored = stored_tickers or []
+    if len(clean) > MAX_TICKERS and not (
+        len(clean) <= len(stored) and set(clean) <= set(stored)
+    ):
+        if len(stored) > MAX_TICKERS:
+            raise ValidationError(
+                f"Your watchlist has {len(stored)} tickers; the limit is {MAX_TICKERS}. "
+                f"Remove {len(stored) - MAX_TICKERS + 1} to add another."
+            )
         raise ValidationError(f"At most {MAX_TICKERS} tickers")
     if not isinstance(pinned, list):
         raise ValidationError("pinned must be a list")
@@ -220,6 +229,7 @@ def get_prefs(table, sub: str) -> dict:
 def put_prefs(table, sub: str, prefs: dict) -> tuple[dict, list[str]]:
     """Write with optimistic concurrency. Returns (saved prefs, tickers new to this user)."""
     before = get_prefs(table, sub)
+    prefs = validate(prefs, before["tickers"])
     new_version = prefs["version"] + 1
     item = {
         "user_sub": sub,
@@ -314,13 +324,15 @@ def handler(event, context):
         if method == "PUT":
             try:
                 body = json.loads(event.get("body") or "{}")
-                prefs = validate(body)
+                prefs = validate(body, get_prefs(table, sub)["tickers"])
                 if "chart_settings" not in body:
                     prefs["chart_settings"] = get_prefs(table, sub)["chart_settings"]
             except (ValidationError, json.JSONDecodeError) as exc:
                 return _response(400, {"error": str(exc)})
             try:
                 saved, added = put_prefs(table, sub, prefs)
+            except ValidationError as exc:
+                return _response(400, {"error": str(exc)})
             except ClientError as exc:
                 if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
                     return _response(409, {"error": "Preferences changed in another tab; reload and try again"})

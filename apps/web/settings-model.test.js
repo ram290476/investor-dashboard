@@ -50,7 +50,9 @@ test("new tickers are validated for format, duplicates and the cap", () => {
   assert.match(validateNewTicker("1ABC", prefs(["TSLA"])).error, /not a valid/);
   assert.equal(validateNewTicker("tsla", prefs(["TSLA"])).error, "TSLA is already in My tickers.");
   const full = prefs(Array.from({ length: MAX_TICKERS }, (_, i) => `T${i}`));
-  assert.equal(validateNewTicker("NVDA", full).error, `At most ${MAX_TICKERS} tickers.`);
+  assert.equal(validateNewTicker("NVDA", full).error, `At most ${MAX_TICKERS} tickers. Remove one to add another.`);
+  const legacy = prefs(Array.from({ length: 30 }, (_, i) => `T${i}`));
+  assert.equal(validateNewTicker("NVDA", legacy).error, "Your watchlist has 30 tickers; the limit is 25. Remove 6 to add another.");
 });
 
 test("added tickers go to the end, unpinned, without mutating the input", () => {

@@ -156,7 +156,8 @@ module "site_hosting" {
 # Per-user preferences (DynamoDB) and the site API (HTTP API + JWT authorizer), with
 # IAM-enforced per-user isolation (AC-3, AC-6, SC-28, CP-9).
 module "user_prefs" {
-  source = "./modules/user_prefs"
+  source               = "./modules/user_prefs"
+  max_tickers_per_user = var.max_tickers_per_user
 
   permissions_boundary_arn = module.workload_boundary.arn
 

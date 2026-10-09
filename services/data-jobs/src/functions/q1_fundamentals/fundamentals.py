@@ -13,8 +13,9 @@ Metrics
                      Neither is in XBRL, so both come from a reviewed manual file:
                      s3://<lake>/manual/fundamentals/fundamentals_manual.csv (see scripts/add_fundamental.py).
 
-Fiscal quarters assume a calendar fiscal year (true for Tesla). SPCX's fiscal year must be
-confirmed from its 10-K before its rows are trusted.
+Fiscal quarters are inferred from annual duration facts' end month. Fiscal-year labels use
+the year the fiscal year ends. Companies changing their fiscal calendar and 52/53-week
+years crossing month boundaries need a reviewed fiscal-calendar mapping.
 """
 
 from __future__ import annotations
@@ -45,8 +46,10 @@ SCHEMA = {
 }
 
 
-def _quarter(end: date) -> str:
-    return f"{end.year}Q{(end.month - 1) // 3 + 1}"
+def _quarter(end: date, fiscal_end_month: int = 12) -> str:
+    year = end.year + int(end.month > fiscal_end_month)
+    quarter = ((end.month - fiscal_end_month - 1) % 12) // 3 + 1
+    return f"{year}Q{quarter}"
 
 
 def _duration_days(f: dict) -> int:
@@ -62,7 +65,7 @@ def _usd_facts(companyfacts: dict, tags: list[str]) -> list[dict]:
     return []
 
 
-def quarterly_series(facts: list[dict]) -> dict[str, tuple[float, date]]:
+def quarterly_series(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, tuple[float, date]]:
     """{fiscal_quarter: (value, filed)} using the first filing that reported each period.
 
     Quarters come from ~3-month facts; Q4 = full-year fact minus that year's Q1-Q3.
@@ -72,7 +75,7 @@ def quarterly_series(facts: list[dict]) -> dict[str, tuple[float, date]]:
     for f in sorted(facts, key=lambda x: x["filed"]):
         end, filed, days = date.fromisoformat(f["end"]), date.fromisoformat(f["filed"]), _duration_days(f)
         if 80 <= days <= 100:
-            quarters.setdefault(_quarter(end), (float(f["val"]), filed))
+            quarters.setdefault(_quarter(end, fiscal_end_month), (float(f["val"]), filed))
         elif 350 <= days <= 380:
             annual.setdefault(end.year, (float(f["val"]), filed))
     for year, (fy_val, filed) in annual.items():
@@ -84,7 +87,16 @@ def quarterly_series(facts: list[dict]) -> dict[str, tuple[float, date]]:
 
 
 def xbrl_rows(ticker: str, companyfacts: dict, source_id: str = "DS-11") -> list[dict]:
-    series = {m: quarterly_series(_usd_facts(companyfacts, tags)) for m, tags in XBRL_TAGS.items()}
+    revenue_facts = _usd_facts(companyfacts, XBRL_TAGS["revenue_gaap"])
+    annual = sorted(
+        (fact for fact in revenue_facts if 350 <= _duration_days(fact) <= 380),
+        key=lambda fact: fact["filed"],
+    )
+    fiscal_end_month = date.fromisoformat(annual[0]["end"]).month if annual else 12
+    series = {
+        m: quarterly_series(_usd_facts(companyfacts, tags), fiscal_end_month)
+        for m, tags in XBRL_TAGS.items()
+    }
     rows = []
     for metric, by_q in series.items():
         for q, (val, filed) in by_q.items():
@@ -113,7 +125,7 @@ def xbrl_rows(ticker: str, companyfacts: dict, source_id: str = "DS-11") -> list
     for fact in sorted(dei_facts, key=lambda item: item.get("filed", "")):
         if fact.get("form") not in {"10-Q", "10-K", "10-Q/A", "10-K/A"} or not fact.get("end"):
             continue
-        quarter = _quarter(date.fromisoformat(fact["end"]))
+        quarter = _quarter(date.fromisoformat(fact["end"]), fiscal_end_month)
         shares_by_quarter.setdefault(quarter, (float(fact["val"]), date.fromisoformat(fact["filed"])))
     rows.extend(
         dict(
@@ -144,7 +156,7 @@ def xbrl_rows(ticker: str, companyfacts: dict, source_id: str = "DS-11") -> list
         dict(
             ticker=ticker,
             metric="public_float_usd",
-            fiscal_quarter=_quarter(measured),
+            fiscal_quarter=_quarter(measured, fiscal_end_month),
             release_date=filed,
             measurement_date=measured,
             value=value,
@@ -200,32 +212,49 @@ def build_table(xbrl: list[dict], manual: list[dict]) -> pl.DataFrame:
     )
 
 
-CIKS = {"TSLA": "0001318605"}  # SPCX: resolved from company_tickers.json at run time
+def resolve_ciks(tickers: list[str], records: dict) -> dict[str, str]:
+    by_ticker = {str(rec["ticker"]).upper(): f"{int(rec['cik_str']):010d}" for rec in records.values()}
+    return {ticker: by_ticker[ticker.replace(".", "-")] for ticker in tickers if ticker.replace(".", "-") in by_ticker}
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
     import os
 
     from http_client import get_client
-    from lake import s3, write_json, write_parquet
+    from lake import job_lease, s3, write_json, write_parquet
     from observability import job_handler, source_run
+    from universe import BASE_TICKERS, user_ticker_union
 
     @job_handler("Q1")
     def run(event, context):
+        with job_lease("curated/fundamentals_quarterly/_lease.json"):
+            return collect()
+
+    def collect():
         bucket = os.environ["LAKE_BUCKET"]
         xbrl: list[dict] = []
+        ticker_status = {}
+        tickers = list(dict.fromkeys([*BASE_TICKERS, *user_ticker_union()]))
         with get_client() as http:
-            ciks = dict(CIKS)
-            tickers_map = http.get("https://www.sec.gov/files/company_tickers.json").json()
-            for rec in tickers_map.values():
-                if rec["ticker"] == "SPCX":
-                    ciks["SPCX"] = f"{int(rec['cik_str']):010d}"
+            response = http.get("https://www.sec.gov/files/company_tickers.json")
+            response.raise_for_status()
+            ciks = resolve_ciks(tickers, response.json())
+            for ticker in tickers:
+                if ticker not in ciks:
+                    ticker_status[ticker] = "not_an_sec_filer"
             for ticker, cik in ciks.items():
-                with source_run("DS-11" if ticker == "TSLA" else "DS-75") as run_rec:
-                    facts = http.get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json").json()
-                    rows = xbrl_rows(ticker, facts, "DS-11" if ticker == "TSLA" else "DS-75")
-                    xbrl.extend(rows)
-                    run_rec["rows"] = len(rows)
+                with source_run("DS-75" if ticker == "SPCX" else "DS-11") as run_rec:
+                    response = http.get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json")
+                    if response.status_code == 404:
+                        ticker_status[ticker] = "no_xbrl"
+                    else:
+                        response.raise_for_status()
+                        rows = xbrl_rows(ticker, response.json(), "DS-75" if ticker == "SPCX" else "DS-11")
+                        xbrl.extend(rows)
+                        run_rec["rows"] = len(rows)
+                        ticker_status[ticker] = "available" if rows else "no_supported_facts"
+                if run_rec["outcome"] == "failure":
+                    raise RuntimeError(f"Fundamentals failed for {ticker}: {run_rec['error']}")
         manual: list[dict] = []
         with source_run("DS-12") as run_rec:
             try:
@@ -234,9 +263,14 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             except s3().exceptions.NoSuchKey:
                 manual = []
             run_rec["rows"] = len(manual)
+        if run_rec["outcome"] == "failure":
+            raise RuntimeError(f"Manual fundamentals failed: {run_rec['error']}")
         table = build_table(xbrl, manual)
         write_parquet(table, "curated/fundamentals_quarterly/fundamentals_quarterly.parquet")
-        write_json({"rows": table.to_dicts()}, "serving/fundamentals_quarterly.json", cache_seconds=3600)
-        return {"rows": table.height}
+        write_json(
+            {"rows": table.to_dicts(), "ticker_status": ticker_status},
+            "serving/fundamentals_quarterly.json", cache_seconds=3600,
+        )
+        return {"rows": table.height, "ticker_status": ticker_status}
 
     return run(event, context)

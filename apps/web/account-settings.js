@@ -23,6 +23,7 @@ import {
   tabAfterKey,
   timeZoneLabel,
   togglePin,
+  tickerLimitMessage,
   validateNewTicker,
 } from "./settings-model.js";
 
@@ -515,6 +516,7 @@ export function createAccountSettings(ctx) {
     input.value = addDraft;
     input.setAttribute("aria-describedby", "settings-add-help");
     const full = session.prefs.tickers.length >= MAX_TICKERS;
+    input.disabled = full;
     const submit = el("button", "button-primary", "Add");
     submit.type = "submit";
     submit.dataset.key = "add-submit";
@@ -556,7 +558,7 @@ export function createAccountSettings(ctx) {
   }
 
   function helpText(full) {
-    return full ? `At most ${MAX_TICKERS} tickers. Remove one to add another.` : "New tickers go to the end of the list, unpinned. History backfills automatically.";
+    return full ? tickerLimitMessage(session.prefs.tickers.length) : "New tickers go to the end of the list, unpinned. History backfills automatically.";
   }
 
   // ---------------------------------------------------------------- Theme & display

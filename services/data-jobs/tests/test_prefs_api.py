@@ -35,6 +35,49 @@ def _event(method, sub="user-a", body=None):
     }
 
 
+def test_ticker_cap_and_new_fundamental_ids(api):
+    mod, _ = api
+    tickers = [f"T{i}" for i in range(25)]
+    body = {
+        "tickers": tickers,
+        "chart_settings": {"T0": {
+            "overlays": ["FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd"], "lanes": [],
+        }},
+    }
+    assert len(mod.validate(body)["tickers"]) == 25
+    with pytest.raises(mod.ValidationError, match="At most 25"):
+        mod.validate({**body, "tickers": [*tickers, "NEW"]})
+
+
+@pytest.mark.parametrize("change,accepted", [
+    ("display", True), ("remove", True), ("reorder", True), ("pins", True),
+    ("swap", False), ("grow", False),
+])
+def test_legacy_over_limit_watchlists_remain_editable_without_growth(api, change, accepted):
+    mod, _ = api
+    stored = [f"T{i}" for i in range(30)]
+    boto3.resource("dynamodb").Table("invdash-user-prefs").put_item(Item={
+        "user_sub": "user-a", "tickers": stored, "pinned": [], "display": {},
+        "chart_settings": {}, "version": 1,
+    })
+    assert json.loads(mod.handler(_event("GET"), None)["body"])["tickers"] == stored
+    tickers = stored[:-1] if change == "remove" else stored[::-1] if change == "reorder" else list(stored)
+    if change == "swap":
+        tickers[-1] = "NEW"
+    if change == "grow":
+        tickers.append("NEW")
+    body = {
+        "tickers": tickers, "version": 1, "display": {"theme": "clean-light"},
+        "pinned": ["T0"] if change == "pins" else [],
+    }
+    response = mod.handler(_event("PUT", body=body), None)
+    assert response["statusCode"] == (200 if accepted else 400)
+    result = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert result["tickers"] == (tickers if accepted else stored)
+    if not accepted:
+        assert "Remove 6" in json.loads(response["body"])["error"]
+
+
 def test_authenticated_dashboard_and_status_routes(api, monkeypatch):
     mod, _ = api
     documents = {

@@ -9,40 +9,42 @@ export const CHART_LANES = Object.freeze([
 
 export const DEFAULT_CHART_SETTINGS = Object.freeze({ overlays: [], lanes: ["VOL", "PRESS"] });
 
-const OVERLAYS = [
-  { id: "SPY", label: "S&P 500 (SPY)", group: "Market", kind: "market", color: "#e6eaf0" },
-  { id: "DIA", label: "Dow Jones (DIA)", group: "Market", kind: "market", color: "#f2a33a" },
-  { id: "QQQ", label: "Nasdaq-100 (QQQ)", group: "Market", kind: "market", color: "#39c5b0" },
-  { id: "IWM", label: "Russell 2000 (IWM)", group: "Market", kind: "market", color: "#ec7ba6" },
-  { id: "XLY", label: "Consumer discretionary", group: "Market", kind: "market", color: "#b392f0" },
-  { id: "ITA", label: "Aerospace & defense", group: "Market", kind: "market", color: "#60a5fa" },
-  { id: "SMH", label: "Semiconductors", group: "Market", kind: "market", color: "#fb7185" },
-  { id: "MA10", label: "10-day", group: "Moving averages", kind: "average", window: 10, color: "#7dd3fc" },
-  { id: "MA20", label: "20-day", group: "Moving averages", kind: "average", window: 20, color: "#fde68a" },
-  { id: "MA50", label: "50-day", group: "Moving averages", kind: "average", window: 50, color: "#fb923c" },
-  { id: "MA100", label: "100-day", group: "Moving averages", kind: "average", window: 100, color: "#f9a8d4" },
-  { id: "MA200", label: "200-day", group: "Moving averages", kind: "average", window: 200, color: "#a5b4fc" },
-  { id: "DGS10", label: "10Y Treasury", group: "Rates", kind: "macro", inverse: true, color: "#e3b341" },
-  { id: "DGS2", label: "2Y Treasury", group: "Rates", kind: "macro", inverse: true, color: "#fdbA74" },
-  { id: "T10Y2Y", label: "10Y–2Y curve", group: "Rates", kind: "macro", color: "#8ebbff" },
-  { id: "DFII10", label: "10Y real yield", group: "Rates", kind: "macro", inverse: true, color: "#5eead4" },
-  { id: "SOFR", label: "SOFR", group: "Rates", kind: "macro", inverse: true, color: "#c084fc" },
-  { id: "CPI_YOY", label: "CPI YoY", group: "Inflation", kind: "macro", inverse: true, color: "#ff8fa3" },
-  { id: "CORE_CPI_YOY", label: "Core CPI YoY", group: "Inflation", kind: "macro", inverse: true, color: "#f472b6" },
-  { id: "PCE_YOY", label: "PCE YoY", group: "Inflation", kind: "macro", inverse: true, color: "#e879f9" },
-  { id: "T10YIE", label: "10Y breakeven", group: "Inflation", kind: "macro", color: "#a78bfa" },
-  { id: "VIXCLS", label: "VIX", group: "Risk", kind: "macro", inverse: true, color: "#c084fc" },
-  { id: "DTWEXBGS", label: "Broad dollar index", group: "Risk", kind: "macro", inverse: true, color: "#5eead4" },
-  { id: "DCOILWTICO", label: "WTI crude", group: "Risk", kind: "macro", color: "#a3e635" },
-  { id: "USEPUINDXD", label: "Policy uncertainty", group: "Policy & geo", kind: "macro", inverse: true, color: "#fca5a5" },
-  { id: "FUNDAMENTAL:revenue_gaap", label: "Revenue", group: "Company", kind: "fundamental", color: "#60a5fa" },
-  { id: "FUNDAMENTAL:gross_profit_gaap", label: "Gross profit", group: "Company", kind: "fundamental", color: "#facc15" },
-  { id: "FUNDAMENTAL:gross_margin_gaap", label: "Gross margin", group: "Company", kind: "fundamental", color: "#fb7185" },
-  { id: "FUNDAMENTAL:deliveries", label: "Deliveries", group: "Company", kind: "fundamental", color: "#39c5b0" },
-  { id: "FUNDAMENTAL:fsd_subscribers", label: "FSD subscribers", group: "Company", kind: "fundamental", color: "#b392f0" },
-];
+export const OVERLAYS = [
+  { id: "SPY", label: "S&P 500 (SPY)", group: "Market", kind: "market" },
+  { id: "DIA", label: "Dow Jones (DIA)", group: "Market", kind: "market" },
+  { id: "QQQ", label: "Nasdaq-100 (QQQ)", group: "Market", kind: "market" },
+  { id: "IWM", label: "Russell 2000 (IWM)", group: "Market", kind: "market" },
+  { id: "XLY", label: "Consumer discretionary", group: "Market", kind: "market" },
+  { id: "ITA", label: "Aerospace & defense", group: "Market", kind: "market" },
+  { id: "SMH", label: "Semiconductors", group: "Market", kind: "market" },
+  { id: "MA10", label: "10-day", group: "Moving averages", kind: "average", window: 10 },
+  { id: "MA20", label: "20-day", group: "Moving averages", kind: "average", window: 20 },
+  { id: "MA50", label: "50-day", group: "Moving averages", kind: "average", window: 50 },
+  { id: "MA100", label: "100-day", group: "Moving averages", kind: "average", window: 100 },
+  { id: "MA200", label: "200-day", group: "Moving averages", kind: "average", window: 200 },
+  { id: "DGS10", label: "10Y Treasury", group: "Rates", kind: "macro", inverse: true },
+  { id: "DGS2", label: "2Y Treasury", group: "Rates", kind: "macro", inverse: true },
+  { id: "T10Y2Y", label: "10Y–2Y curve", group: "Rates", kind: "macro" },
+  { id: "DFII10", label: "10Y real yield", group: "Rates", kind: "macro", inverse: true },
+  { id: "SOFR", label: "SOFR", group: "Rates", kind: "macro", inverse: true },
+  { id: "CPI_YOY", label: "CPI YoY", group: "Inflation", kind: "macro", inverse: true },
+  { id: "CORE_CPI_YOY", label: "Core CPI YoY", group: "Inflation", kind: "macro", inverse: true },
+  { id: "PCE_YOY", label: "PCE YoY", group: "Inflation", kind: "macro", inverse: true },
+  { id: "T10YIE", label: "10Y breakeven", group: "Inflation", kind: "macro" },
+  { id: "VIXCLS", label: "VIX", group: "Risk", kind: "macro", inverse: true },
+  { id: "DTWEXBGS", label: "Broad dollar index", group: "Risk", kind: "macro", inverse: true },
+  { id: "DCOILWTICO", label: "WTI crude", group: "Risk", kind: "macro" },
+  { id: "USEPUINDXD", label: "Policy uncertainty", group: "Policy & geo", kind: "macro", inverse: true },
+  { id: "FUNDAMENTAL:revenue_gaap", label: "Revenue", group: "Fundamentals", kind: "fundamental" },
+  { id: "FUNDAMENTAL:gross_profit_gaap", label: "Gross profit", group: "Fundamentals", kind: "fundamental" },
+  { id: "FUNDAMENTAL:gross_margin_gaap", label: "Gross margin", group: "Fundamentals", kind: "fundamental" },
+  { id: "FUNDAMENTAL:shares_outstanding", label: "Shares outstanding", group: "Fundamentals", kind: "fundamental" },
+  { id: "FUNDAMENTAL:public_float_usd", label: "Public float", group: "Fundamentals", kind: "fundamental" },
+  { id: "FUNDAMENTAL:deliveries", label: "Deliveries", group: "Fundamentals", kind: "fundamental" },
+  { id: "FUNDAMENTAL:fsd_subscribers", label: "FSD subscribers", group: "Fundamentals", kind: "fundamental" },
+].map((overlay, index) => ({ ...overlay, short: overlay.kind === "market" ? overlay.id : undefined, color: index }));
 
-const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", "Policy & geo", "Company"];
+const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", "Policy & geo", "Fundamentals"];
 const overlayById = new Map(OVERLAYS.map((overlay) => [overlay.id, overlay]));
 
 function dateKey(bar) {
@@ -63,18 +65,21 @@ export function chartSettingsFor(prefs, ticker) {
 }
 
 export function overlayGroups(tickerData, chartData, dashboard) {
-  const availableFundamentals = new Set((chartData?.fundamentals || []).map((row) => row.series_id));
+  const availableFundamentals = new Set((chartData?.fundamentals || []).filter(row => isNumericValue(row.value)).map((row) => row.series_id));
   return GROUP_ORDER.map((label) => ({
     id: label,
-    label: label === "Company" ? (tickerData?.ticker || "Company") : label,
+    label,
     overlays: OVERLAYS.filter((overlay) => {
       if (overlay.group !== label) return false;
       if (overlay.kind === "market") return Boolean(dashboard?.tickers?.[overlay.id]?.price_history?.length);
       if (overlay.kind === "average") return validBars(tickerData?.price_history).length >= overlay.window;
       if (overlay.kind === "macro") return Boolean(chartData?.macro_series?.[overlay.id]?.length);
-      if (overlay.kind === "fundamental") return availableFundamentals.has(overlay.id.slice("FUNDAMENTAL:".length));
+      if (overlay.kind === "fundamental") return true;
       return true;
-    }),
+    }).map(overlay => ({
+      ...overlay,
+      available: overlay.kind !== "fundamental" || availableFundamentals.has(overlay.id.slice("FUNDAMENTAL:".length)),
+    })),
   })).filter((group) => group.overlays.length);
 }
 
@@ -143,6 +148,18 @@ export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard })
 
 export function overlayDefinition(id) {
   return overlayById.get(id) || null;
+}
+
+export function fundamentalSummary(id, chartData, through) {
+  const row = (chartData?.fundamentals || [])
+    .filter(row => row.series_id === id.slice("FUNDAMENTAL:".length)
+      && isNumericValue(row.value) && String(row.date) <= String(through).slice(0, 10))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date))).at(-1);
+  if (!row) return "not available";
+  const value = row.unit === "ratio" ? `${(Number(row.value) * 100).toFixed(1)}%`
+    : row.unit === "USD" ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(row.value)
+    : Number(row.value).toLocaleString("en-US");
+  return `${value}${row.fiscal_quarter ? ` · ${row.fiscal_quarter}` : ""}`;
 }
 
 export function isMarketOverlay(id) {

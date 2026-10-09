@@ -9,6 +9,11 @@ terraform {
   }
 }
 
+variable "max_tickers_per_user" {
+  type    = number
+  default = 25
+}
+
 variable "permissions_boundary_arn" {
   description = "Permissions boundary set on every IAM role in this module (modules/workload_boundary)."
   type        = string
@@ -275,6 +280,7 @@ resource "aws_lambda_function" "api" {
   environment {
     variables = {
       PREFS_TABLE           = aws_dynamodb_table.prefs.name
+      MAX_TICKERS_PER_USER  = tostring(var.max_tickers_per_user)
       PREFS_ACCESS_ROLE_ARN = aws_iam_role.access.arn
       EVENT_SOURCE          = local.event_source
       LAKE_BUCKET           = var.lake_bucket_name

@@ -387,7 +387,7 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | Job | Schedule / trigger | Notes |
 | --- | --- | --- |
 | `daily-prices` | Weekdays 16:45 ET | Alpaca daily bars for base, user and index ETF proxy tickers (raw, split- and fully adjusted closes for the last 7 days); NYSE weekends/holidays are skipped. |
-| `q1-fundamentals` | Mondays 08:30 ET | Weekly safety refresh. |
+| `q1-fundamentals` | Mondays 08:30 ET and `TickerAdded` | Resolves SEC CIKs for base tickers and all stored watchlist tickers, then publishes quarterly series. Q1 completion triggers dashboard/chart rebuilding. Non-filers and missing XBRL are explicit availability states. |
 | `short-interest` | Weekdays 18:30 ET | FINRA only publishes on settlement cadence. |
 | `options-daily` | Weekdays 16:50 ET | Enabled by default through `enable_options_daily`; uses the existing Alpaca indicative credentials. IV30 stays unavailable if the feed omits implied volatility. |
 | `backfill` | Every 15 minutes and on ticker-added events | Resumes only persisted incomplete work. |
@@ -558,8 +558,25 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 
 * The full source catalog and all documented collection frequencies have not been implemented.
   Existing job-map entries and status-feed job names are not evidence that collectors exist.
-* The initial historical loader is for daily prices only; it does not backfill macro, news,
-  fundamentals or other data sources.
+* The historical price loader does not backfill macro or news. Adding a ticker also triggers
+  Q1 to collect available SEC fundamental history, independently of price backfill.
+* Fundamentals infer fiscal quarters from the annual duration fact's end month, using the
+  fiscal-year end year as the label. Changing fiscal calendars and 52/53-week years crossing
+  month boundaries still require a reviewed fiscal-calendar mapping. Public float is a sparse,
+  usually annual USD series; deliveries/FSD subscribers remain reviewed manual observations.
+* The watchlist limit is 25 per user (separate from the existing 25-ticker cross-user collector
+  cap). Legacy over-limit lists are never trimmed: display/chart/pin/reorder/removal saves work,
+  but new symbols are blocked until capacity is available.
+* Fundamentals are chart overlays, not a separate bottom table. The snapshot's existing
+  fundamentals array is retained for compatibility. Seven metrics remain visible, including
+  unavailable states; the five-overlay cap is unchanged. Large Fundamentals groups have no
+  bulk-add button, and Market bulk-add selects at most five.
+* Overlay colors use the active theme's six series tokens. Extra stable slots blend adjacent
+  series tokens in 13% increments per cycle and retain at least 3:1 chart contrast. Shadows
+  and the settings backdrop use light/dark theme tokens.
+* Deployment-review notifications remain GitHub environment notifications. AWS SMS was checked
+  on October 8, 2026: the account was in sandbox with no sending number, so no approval texts
+  were sent and no SMS resources or spend were provisioned.
 * The UI is a zero-build vanilla JavaScript implementation rather than the architecture
   document's proposed TypeScript/Vite/Svelte stack.
 * No public freshness document is currently published, so the external Synthetics canary is
