@@ -80,7 +80,7 @@ def test_release_links_are_scoped_to_ticker_and_missing_stats_stay_null():
          "correlation_surprise": None},
         {"row_kind": "summary", "series_id": "CPI_YOY", "ticker": "SPCX", "window": "release_day",
          "n_releases": 12, "correlation_surprise": 0.5},
-        {"row_kind": "event", "series_id": "CPI_YOY", "ticker": "TSLA", "release_date": "2026-09-11",
+        {"row_kind": "release", "series_id": "CPI_YOY", "ticker": "TSLA", "release_date": "2026-09-11",
          "yoy": 2.8, "surprise": -0.1},
     ]
     snapshot = dashboard_build.build_snapshot(

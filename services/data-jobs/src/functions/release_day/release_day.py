@@ -708,6 +708,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 return {"status": "skipped", "mode": "links", "batches": 0}
             frame = read_parquet_prefix("curated/releases/")
             stored = frame.to_dicts() if not frame.is_empty() else []
+            publish_macro(macro_rows(stored), datetime.now(UTC).isoformat(timespec="seconds"))
             return {"status": "success", "mode": "links", **publish_release_links(stored)}
 
         now = datetime.now(UTC)

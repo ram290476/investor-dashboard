@@ -642,6 +642,15 @@ def test_links_only_run_covers_nvda_and_spy_without_provider_calls(monkeypatch, 
         assert set(summaries["ticker"].to_list()) == {"NVDA", "SPY"}
         assert summaries["correlation_surprise"].null_count() == summaries.height
         assert "TSLA" not in summaries["ticker"].to_list()
+        macro = lake.read_parquet_prefix("curated/macro_daily/source=releases/")
+        assert macro["series_id"].to_list() == ["CPI_YOY", "CPI_YOY"]
+        assert macro["value"].to_list() == [2.0, 2.4]
+        assert macro["available_date"].to_list() == [date(2024, 2, 13), date(2024, 3, 12)]
+        from dashboard_build import build_release_links
+
+        served = build_release_links("NVDA", table.to_dicts())
+        assert served["latest"][0]["release_date"] == "2024-03-12"
+        assert served["latest"][0]["yoy"] == 2.4
 
     assert emitted["detail"]["job"] == "M1" and emitted["detail"]["mode"] == "links"
     prior = "2026-09-01T13:00:00+00:00"
