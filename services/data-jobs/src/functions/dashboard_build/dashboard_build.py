@@ -150,7 +150,7 @@ def build_release_links(ticker: str, rows: list[dict]) -> dict:
     scoped = [row for row in rows if row.get("ticker") == ticker]
     latest: dict[str, dict] = {}
     for row in scoped:
-        if row.get("row_kind") != "event":
+        if row.get("row_kind") != "release":
             continue
         series = str(row.get("series_id") or "")
         if series not in latest or str(row.get("release_date") or "") > str(latest[series].get("release_date") or ""):

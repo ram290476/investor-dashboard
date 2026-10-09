@@ -175,3 +175,18 @@ Existing FRED, price, news, regulatory, fundamentals and options jobs had succes
 status records. A successful status alone still does not prove complete coverage.
 Deployments use the existing GitHub OIDC IAM role; no root credential or provider
 secret was copied into source or workflow configuration.
+
+The first provider-free production refresh verified schema v3, 16 served
+instruments, October 8 trend dates, 20 linked daily drivers, shared-series output,
+removal of phantom status jobs and the 06:35 ET M1 schedule. Both #66/#67
+deployments succeeded, and CloudFront application/helper assets matched the
+merged source byte-for-byte.
+
+That check exposed two producer/consumer gaps not caught by synthetic fixtures:
+the curated table uses `row_kind=release`, while serving selected `event`, hiding
+latest release facts despite 54/55 paired CPI/PCE observations. Also, stored
+release history existed without the monthly macro projection. The provider-free
+M1 refresh now reprojects stored release YoY values with original availability
+dates and serves the actual release row kind. Integration tests build the real
+curated table and verify both projections, without keys/provider calls. This does
+not fetch missing Core PCE history or reinterpret current forecasts as consensus.
