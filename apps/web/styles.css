@@ -260,6 +260,38 @@ a {
   overscroll-behavior-x: contain;
 }
 
+.ticker-watch-item {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.ticker-watch-item .ticker-button {
+  min-width: 155px;
+  flex: 0 0 155px;
+}
+
+.ticker-research {
+  display: grid;
+  width: 38px;
+  min-height: 44px;
+  flex: 0 0 38px;
+  place-items: center;
+  align-self: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 16px;
+  text-decoration: none;
+}
+
+.ticker-research:hover {
+  border-color: var(--blue);
+  background: var(--hover);
+  color: var(--blue);
+}
+
 .watchlist-bar {
   display: flex;
   align-items: center;
@@ -365,6 +397,50 @@ a {
   grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.8fr);
   gap: 12px;
   align-items: start;
+}
+
+.research-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 12px;
+  padding: 16px 18px;
+}
+
+.research-heading h2,
+.research-not-found h2 {
+  margin: 0;
+  font-size: clamp(20px, 3vw, 28px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.research-heading .signal-note {
+  margin: 6px 0 0;
+}
+
+.research-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.8fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.research-column {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 12px;
+}
+
+.research-not-found {
+  margin-top: 18px;
+  padding: 24px;
+}
+
+.research-not-found .button-primary {
+  margin-top: 12px;
 }
 
 .panel {
@@ -1876,6 +1952,14 @@ input::placeholder {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .research-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .research-column:last-child {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .side-column {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1914,6 +1998,16 @@ input::placeholder {
     padding-right: 12px;
   }
 
+  .ticker-watch-item .ticker-button {
+    min-width: 142px;
+    flex-basis: 142px;
+  }
+
+  .ticker-research {
+    width: 34px;
+    flex-basis: 34px;
+  }
+
   .ticker-button {
     min-width: 142px;
     flex: 0 0 142px;
@@ -1926,6 +2020,16 @@ input::placeholder {
   }
 
   .side-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .research-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 14px;
+  }
+
+  .research-column:last-child {
     grid-template-columns: minmax(0, 1fr);
   }
 
