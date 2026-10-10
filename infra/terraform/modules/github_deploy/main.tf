@@ -240,6 +240,23 @@ data "aws_iam_policy_document" "iam_for_stack" {
     }
   }
 
+  # First DynamoDB auto scaling registration creates this service-linked role.
+  # PowerUserAccess does not include that IAM write.
+  statement {
+    sid     = "DynamoDbAutoscalingServiceRole"
+    actions = ["iam:CreateServiceLinkedRole"]
+    resources = [join("", [
+      "arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/",
+      "dynamodb.application-autoscaling.amazonaws.com/",
+      "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable",
+    ])]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:AWSServiceName"
+      values   = ["dynamodb.application-autoscaling.amazonaws.com"]
+    }
+  }
+
   statement {
     sid       = "AccountPasswordPolicy"
     actions   = ["iam:UpdateAccountPasswordPolicy", "iam:DeleteAccountPasswordPolicy"]
