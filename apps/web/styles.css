@@ -927,6 +927,32 @@ a {
   gap: 5px;
 }
 
+/* chart legend keys (#93) */
+.chart-legend-summary {
+  flex: 1 0 100%;
+}
+
+.chart-legend-item {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.legend-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.legend-line {
+  width: 28px;
+  height: 8px;
+  flex: none;
+}
+
+.legend-line line {
+  fill: none;
+}
+/* end chart legend keys (#93) */
+
 .chart-lanes {
   display: grid;
   min-width: 0;

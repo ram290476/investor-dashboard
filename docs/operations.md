@@ -642,9 +642,17 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
   Pre-window macro/fundamental/FINRA/options values retain existing carry-forward behavior,
   moving averages use prior daily history, and sentiment uses observed dates only.
 * The chart order is overview, overlay tabs with pinned **Clear all**, active-group chips,
-  chart/legend, selected data-bearing lanes (**Volume, Short interest, Macro pressure,
-  Options**), lane controls with **Hide all**, then in-window catalyst categories with
-  **Clear all**. Lane display order never rewrites saved selection order.
+  the price chart, selected data-bearing lanes (**Volume, Short interest, Macro pressure,
+  Options**), the shared time axis, the legend, lane controls with **Hide all**, then
+  in-window catalyst categories with **Clear all**. Volume stays directly under the price
+  chart. Ram has not answered #84 question 3, so the legend is not moved above the chart
+  or below the lane toggles. The legend names the price line and each visible overlay
+  with a line key whose dash matches the plot. The adjusted range is the price key's
+  tooltip. Averages say how far price is above or below. Market series show the percent
+  change from the period start. Macro series say own scale, inverted when the plot
+  flips them, and the 90-day correlation from the trend row when that row has one,
+  otherwise the latest finite correlation history point. Lane display order never
+  rewrites saved selection order.
   Loading/error states preserve known chart-backed controls without drawing stale values;
   the existing historical-data error and Refresh data retry remain visible.
 * Hidden saved choices remain in preferences and reappear when data returns. Adding above

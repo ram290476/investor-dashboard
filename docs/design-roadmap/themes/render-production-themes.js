@@ -131,7 +131,7 @@ async function main() {
         theme: document.documentElement.dataset.theme,
         width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
         stroke: getComputedStyle(document.querySelector(".chart-overlay-path")).stroke,
-        swatch: getComputedStyle(document.querySelector(".chart-legend .overlay-swatch")).backgroundColor,
+        swatch: getComputedStyle(document.querySelector(".chart-legend [data-overlay] .legend-line line")).stroke,
       }));
       assert.equal(state.theme, id);
       assert.equal(state.stroke, state.swatch);
