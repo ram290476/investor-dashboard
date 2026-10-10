@@ -2,7 +2,7 @@
 body{margin:0;background:#0B0E13;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#E6EAF0;padding:16px;width:440px}
 .note{font-size:11px;color:#E3C05C;margin:0 0 8px}
 </style></head><body>
-<p class="note">DESIGN REFERENCE: re-rendered from design/ai-generated/Main.dc.html lines 426–440 (TSLA, sentiment overlay on). Headlines/scores are the design's own placeholders; sparkline path approximated.</p>
+<p class="note">DESIGN REFERENCE: re-rendered from design/ai-generated/Main.dc.html lines 426–440 (TSLA, sentiment overlay on). Headlines/scores are the design's own placeholders; sparkline path approximated. Row times use the design's tm(4, m) helper in PT.</p>
 <section style="min-width:0;background:#12161D;border:1px solid #222A35;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px">
 <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><h2 style="margin:0;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#9BA6B5">TSLA news sentiment</h2><span style="display:flex;align-items:center;gap:8px"><span style="font-size:10px;color:#8B96A6">H2 · 7-day rolling</span><span style="width:16px;height:0;border-top:2px dashed #A78BFA"></span><button style="width:26px;height:26px;border-radius:6px;border:1px solid #2A323E;background:transparent;color:#9BA6B5">✕</button></span></div>
 <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:10px;align-items:center">
@@ -11,8 +11,8 @@ body{margin:0;background:#0B0E13;font-family:"IBM Plex Sans",system-ui,sans-seri
 <div style="display:flex;flex-direction:column;border-top:1px solid #1A2029" id="rows"></div>
 </section>
 <script>
-const rows=[['TSLA','[Headline · Finnhub company news]','Finnhub','9:42 AM',0.31],['TSLA','[Headline · Google News RSS: Robotaxi]','Google News','6:80 → 7:20 AM',null],['TSLA','[Headline · Alpha Vantage NEWS_SENTIMENT]','Alpha Vantage','6:00 AM',-0.12]];
-rows[1][3]='7:20 AM';
+// age = tm(4, minutes) at Main.dc.html:1472 with tz = 'PT' (line 879): weekday + 24h clock, no date
+const rows=[['TSLA','[Headline · Finnhub company news]','Finnhub','Fri 12:42',0.31],['TSLA','[Headline · Google News RSS: Robotaxi]','Google News','Fri 08:20',null],['TSLA','[Headline · Alpha Vantage NEWS_SENTIMENT]','Alpha Vantage','Fri 07:00',-0.12]];
 for(const r of rows){const s=r[4]==null?'n/a':(r[4]>=0?'+':'')+r[4].toFixed(2);const c=r[4]==null?'#8B96A6':(r[4]>=0?'#3FB950':'#F85149');
 document.getElementById('rows').insertAdjacentHTML('beforeend',`<a style="display:grid;grid-template-columns:44px minmax(0,1fr) 46px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #1A2029;text-decoration:none;color:#E6EAF0"><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 4px;border-radius:4px;background:#1C232D;color:#C5CDD8;text-align:center">${r[0]}</span><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r[1]}</span><span style="font-size:10px;color:#8B96A6">${r[2]} · ${r[3]}</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:right;color:${c}">${s}</span></a>`)}
 </script></body></html>

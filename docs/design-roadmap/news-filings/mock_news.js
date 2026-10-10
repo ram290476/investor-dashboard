@@ -30,19 +30,19 @@ const css = `
 document.head.insertAdjacentHTML('beforeend', `<style>${css}</style>`);
 const chip=(v)=>{if(v==null)return '<span class="mk-chip flat">n/a</span>';const c=v>=0.15?'up':v<=-0.15?'down':'flat';return `<span class="mk-chip ${c}">${v>=0?'+':''}${v.toFixed(2)}</span>`};
 const news=[
- {tk:'TSLA',t:'Tesla opens its largest East Coast Semi Megacharger site',src:'Basenor',when:'2h ago · Oct 8, 7:06 PM PT',s:0.34,ai:'Tesla opened a Semi charging site in Georgia; the article gives no capacity or opening-date figures beyond the headline.',react:{pub:'+0.9%',d1:'+1.4%',d3:'−0.6%',note:'Oct 8 7:06 PM PT → next close Oct 9 · TSLA 1D/3D from that close'}},
- {tk:'TSLA',t:'Institutional holder trims Tesla stake in Q3 filing',src:'MarketBeat',when:'5h ago · Oct 8, 4:02 PM PT',s:-0.21,ai:'A fund reported selling part of its Tesla position in its latest 13F; the stake was small relative to shares outstanding.'},
- {tk:'TSLA',t:'Track Mode arrives on non-Performance Model Y',src:'Not a Tesla App',when:'Oct 7, 3:22 PM PT',s:0.08,ai:'A software update adds Track Mode to standard Model Y trims, according to release notes cited in the article.'},
- {tk:'TSLA',t:'Croatian robotaxi startup announces Tesla investment',src:'Dealroom',when:'Oct 7, 2:11 PM PT',s:null,ai:'The headline says Tesla took a stake in robotaxi startup Verne; no deal size is given in the snippet.'},
+ {tk:'TSLA',t:'Tesla opens its largest East Coast Semi Megacharger site',src:'Basenor',when:'2h',s:0.34,ai:'Tesla opened a Semi charging site in Georgia; the article gives no capacity or opening-date figures beyond the headline.',react:{pub:'+0.9%',d1:'+1.4%',d3:'−0.6%',note:'Published Wed Oct 7 19:06 PT → next close Thu Oct 8 · 1D/3D from that close'}},
+ {tk:'TSLA',t:'Institutional holder trims Tesla stake in Q3 filing',src:'MarketBeat',when:'5h',s:-0.21,ai:'A fund reported selling part of its Tesla position in its latest 13F; the stake was small relative to shares outstanding.'},
+ {tk:'TSLA',t:'Track Mode arrives on non-Performance Model Y',src:'Not a Tesla App',when:'Oct 7',s:0.08,ai:'A software update adds Track Mode to standard Model Y trims, according to release notes cited in the article.'},
+ {tk:'TSLA',t:'Croatian robotaxi startup announces Tesla investment',src:'Dealroom',when:'Oct 7',s:null,ai:'The headline says Tesla took a stake in robotaxi startup Verne; no deal size is given in the snippet.'},
 ];
 const filings=[
- {form:'8-K',title:'Results of operations (Q3 2026 deliveries release)',when:'Oct 2, 1:30 PM PT',items:['2.02 Results','9.01 Exhibits'],ai:'Tesla furnished its Q3 production and deliveries release as an exhibit; no guidance change is stated in the filing text.'},
- {form:'4',title:'Insider sale · director',when:'Sep 9, 3:00 PM PT',items:['S · 12,000 sh','10b5-1'],ai:'A director sold 12,000 shares under a pre-arranged 10b5-1 trading plan.'},
- {form:'10-Q',title:'Quarterly report for Q2 2026',when:'Jul 23, 2:05 PM PT',items:['Periodic'],ai:'Quarterly report covering Q2 results; summary drawn from the MD&A overview section only.'},
+ {form:'8-K',title:'Results of operations (Q3 2026 deliveries release)',when:'Filed Oct 2',items:['2.02 Results','9.01 Exhibits'],ai:'Tesla furnished its Q3 production and deliveries release as an exhibit; no guidance change is stated in the filing text.'},
+ {form:'4',title:'Insider sale · director',when:'Filed Sep 9',items:['S · 12,000 sh','10b5-1'],ai:'A director sold 12,000 shares under a pre-arranged 10b5-1 trading plan.'},
+ {form:'10-Q',title:'Quarterly report for Q2 2026',when:'Filed Jul 23 · period Jun 30',items:['Periodic'],ai:'Quarterly report covering Q2 results; summary drawn from the MD&A overview section only.'},
 ];
 const events=[
- {tk:'SPCX',t:'Falcon 9 · Starlink Group 15-25',when:'Oct 11, 4:00 PM PT',type:'Launch'},
- {tk:'Macro',t:'FOMC minutes (Sep 15–16 meeting)',when:'Oct 7, 11:00 AM PT',type:'Policy'},
+ {tk:'SPCX',t:'Falcon 9 · Starlink Group 15-25',when:'Sun Oct 11 · 16:00 PT · in 3d',type:'Launch'},
+ {tk:'Macro',t:'FOMC minutes (Sep 15–16 meeting)',when:'8h',type:'Policy'},
 ];
 const panels=[...document.querySelectorAll('main section.panel')];
 const np=panels.find(p=>/News & sentiment/.test(p.querySelector('h2,summary')?.textContent||''));
@@ -63,8 +63,8 @@ if(fp){
  fp.insertAdjacentHTML('beforeend',`
  <p class="mk-banner">MOCKUP · filing titles from SEC item codes · every AI summary and all Form 4 details are made up</p>
  <p class="mk-sub">Filings · TSLA</p>
- <ul class="mk-list">${filings.map(f=>`<li class="mk-row"><span class="mk-tag form">${f.form}</span><span class="mk-body"><a class="mk-title" href="#">${f.title}</a><span class="mk-meta">SEC EDGAR · ${f.when}</span><span class="mk-items">${f.items.map(x=>`<span>${x}</span>`).join('')}</span><span class="mk-ai"><b>AI</b>${f.ai}</span></span><span></span></li>`).join('')}</ul>
- <p class="mk-sub">Events · next 7 and last 14 days</p>
+ <ul class="mk-list">${filings.map(f=>`<li class="mk-row"><span class="mk-tag form">${f.form}</span><span class="mk-body"><a class="mk-title" href="#">${f.title}</a><span class="mk-meta">${f.when} · SEC EDGAR</span><span class="mk-items">${f.items.map(x=>`<span>${x}</span>`).join('')}</span><span class="mk-ai"><b>AI</b>${f.ai}</span></span><span></span></li>`).join('')}</ul>
+ <p class="mk-sub">Events · upcoming and past 14 days</p>
  <ul class="mk-list">${events.map(e=>`<li class="mk-row"><span class="mk-tag ${e.tk==='Macro'?'macro':''}">${e.tk}</span><span class="mk-body"><span class="mk-title">${e.t}</span><span class="mk-meta">${e.type} · ${e.when}</span></span><span></span></li>`).join('')}</ul>`);
 }
 return {np:!!np, fp:!!fp};
