@@ -392,8 +392,10 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
   ok_actions          = [var.ops_topic_arn]
 }
 
-# Per-code visibility for prefs_api structured errors. The filter phrases match
-# _log_event() in prefs_api.py (json.dumps default spacing).
+# Per-code visibility for prefs_api structured errors. _log_event() in prefs_api.py
+# prints one JSON object per line, so match it with a JSON metric filter on the
+# "event" and "code" keys. (A quoted-term pattern such as `"event": "x"` is rejected
+# by PutMetricFilter: the bare colon is not valid filter syntax.)
 locals {
   prefs_api_error_alarms = {
     STS_UNAVAILABLE = {
@@ -427,7 +429,7 @@ resource "aws_cloudwatch_log_metric_filter" "prefs_api_error" {
   for_each       = local.prefs_api_error_alarms
   name           = "${var.name}-prefs-api-${lower(replace(each.key, "_", "-"))}"
   log_group_name = aws_cloudwatch_log_group.api_fn.name
-  pattern        = "\"event\": \"${each.value.event}\" \"code\": \"${each.key}\""
+  pattern        = "{ ($.event = \"${each.value.event}\") && ($.code = \"${each.key}\") }"
 
   metric_transformation {
     name      = each.key
