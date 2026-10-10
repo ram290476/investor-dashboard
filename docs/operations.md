@@ -318,6 +318,22 @@ no-data boundary. It cannot guarantee five years for a newly listed or unsupport
 Verify the earliest and latest `date` values in each ticker's yearly parquet objects and inspect
 `complete`, `earliest_date`, `no_data_before`, and `failed_tickers` in the checkpoint.
 
+Yahoo chart calls from `backfill` and `price-reconcile` do not retry HTTP 429. A 429 stops
+that invocation, leaves the cursor where it is, and sets checkpoint `status` to `rate_limited`.
+The next schedule retries after quota recovers. HTTP 404 marks that exact symbol
+`invalid_symbol` and `stopped=unknown_symbol`. The loader does not rewrite it (APPL stays
+APPL). Re-queue a corrected symbol with a new ticker; `force` is required to retry the same
+symbol. HTTP 400 is a completed pre-inception boundary only when Yahoo's body says the
+requested dates have no data and the whole batch ends on or before the earliest stored bar.
+Any other 400 stays a source failure and the cursor does not move. A ticker with no stored
+prices is not treated as pre-inception.
+
+Production checks use account `308639168050` and Region `us-west-1`. The CLI default Region
+is `us-east-1`, so pass `--region us-west-1` on every command below. Do not invoke Yahoo
+collectors while a chart request is still HTTP 429. Do not rotate the FINRA or Census keys
+unless the source-run error is an authentication failure. The steps and the coverage checks
+that follow a deploy are in [trend serving](trend-serving.md#provider-failure-remediation-issue-69).
+
 ## Price storage layout
 
 Daily prices are stored as one Parquet object per ticker per calendar year:

@@ -26,6 +26,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
         with source_run("DS-91") as rec, get_client() as http:
             basic = base64.b64encode(f"{api_key('finra-client-id')}:{api_key('finra-client-secret')}".encode()).decode()
             token_response = http.post(finra.TOKEN_URL, headers={"Authorization": f"Basic {basic}"})
+            if token_response.status_code in (401, 403):
+                raise RuntimeError("FINRA authentication failed")
             token_response.raise_for_status()
             token = token_response.json().get("access_token")
             if not isinstance(token, str) or not token:
@@ -35,6 +37,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 json=finra.query_body(tickers, max(known) if known else None),
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             )
+            if resp.status_code in (401, 403):
+                raise RuntimeError("FINRA authentication failed")
             resp.raise_for_status()
             rows = finra.parse(resp.json())
             new_dates = finra.new_settlement_dates(rows, known)

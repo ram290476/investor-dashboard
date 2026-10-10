@@ -1,16 +1,26 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
 from gov_contracts import (
+    DOD_FEED_URL,
     JOB_ID,
+    NASA_FEED_URL,
+    SAM_CALLS_PER_DAY,
+    SAM_CALLS_PER_RUN,
     UEI_TO_TICKER,
+    USASPENDING_CONTRACT_FIELDS,
+    ProviderStatus,
+    feed_coverage,
     merge_awards,
     parse_sam,
     parse_usaspending,
+    provider_failure,
+    raise_for_provider,
     reconcile,
     rollup_contracts,
     sam_budget,
+    sam_opportunity_params,
     sam_status,
     ticker_for,
     usaspending_body,
@@ -159,6 +169,71 @@ def test_expired_sam_key_is_partial_and_does_not_raise_as_a_job_failure():
     by_id = {row["award_id"]: row for row in rows}
     assert by_id["80NSSC26C0001"]["obligated_amount"] == 1250
     assert by_id["DoD-SPCX-2026-10-06-0"]["source"] == "DoD"
+
+
+def test_sam_opportunity_window_is_one_call_inside_the_daily_budget():
+    today = date(2026, 10, 10)
+    params = sam_opportunity_params(today, "sam-key")
+    assert params["postedFrom"] == "10/11/2025"
+    assert params["postedTo"] == "10/10/2026"
+    assert (today - (today - timedelta(days=364))).days == 364
+    assert params["title"] == "SpaceX"
+    assert params["limit"] == 10 and params["offset"] == 0
+    assert params["api_key"] == "sam-key"
+    assert SAM_CALLS_PER_RUN == 3 and SAM_CALLS_PER_DAY == 10
+    assert sam_budget(0) == 3
+
+
+DOD_SUMMARY = """<?xml version="1.0"?>
+<rss><channel><item>
+<title>Contracts for Oct. 9, 2026</title>
+<description>Today's Department of War contracts valued at $7.5 million or more are now live.</description>
+<link>https://www.war.gov/News/Contracts/Article/example/</link>
+</item></channel></rss>
+"""
+
+DOD_AWARD = """<?xml version="1.0"?>
+<rss><channel><item>
+<title>Contracts for Oct. 9, 2026</title>
+<description>SpaceX, Hawthorne, California, was awarded a $12,000,000 contract (FA8801-26-C-0001).</description>
+<link>https://www.war.gov/News/Contracts/Article/example/</link>
+</item></channel></rss>
+"""
+
+
+def test_dod_rss_keeps_summary_coverage_and_does_not_fetch_articles():
+    assert "RSS.ashx" in DOD_FEED_URL and DOD_FEED_URL.startswith("https://www.defense.gov/")
+    empty, coverage = feed_coverage(DOD_SUMMARY, "2026-10-09T16:00:00+00:00", date(2026, 10, 9))
+    assert empty == []
+    assert coverage == {"feed_items": 1, "award_rows": 0, "article_urls_fetched": 0}
+    awards, award_coverage = feed_coverage(DOD_AWARD, "2026-10-09T16:00:00+00:00", date(2026, 10, 9))
+    assert award_coverage["feed_items"] == 1
+    assert award_coverage["award_rows"] == 1
+    assert award_coverage["article_urls_fetched"] == 0
+    assert awards[0]["ticker"] == "SPCX"
+    assert awards[0]["source"] == "DoD"
+    with pytest.raises(ValueError, match="not an RSS feed"):
+        feed_coverage("<html>blocked</html>", "2026-10-09T16:00:00+00:00", date(2026, 10, 9))
+
+
+def test_usaspending_fields_stay_on_the_contract_allowlist():
+    body = usaspending_body("Space Exploration Technologies", "2021-10-10", "2026-10-10")
+    assert body["subawards"] is False
+    assert set(body["fields"]) <= USASPENDING_CONTRACT_FIELDS
+    assert provider_failure(422) == "request_rejected"
+    with pytest.raises(ProviderStatus, match="USAspending HTTP 422") as caught:
+        raise_for_provider(422, "USAspending")
+    assert "://" not in str(caught.value)
+
+
+def test_nasa_429_is_throttle_before_any_parse():
+    assert NASA_FEED_URL == "https://www.nasa.gov/news-release/feed/"
+    assert provider_failure(429) == "rate_limited"
+    with pytest.raises(ProviderStatus, match="throttled, not a parser failure") as caught:
+        raise_for_provider(429, "NASA")
+    assert "://" not in str(caught.value)
+    with pytest.raises(ProviderStatus, match="access restricted, no rows synthesized"):
+        raise_for_provider(403, "DoD contracts feed")
 
 
 def test_handler_emits_job_d5(monkeypatch):

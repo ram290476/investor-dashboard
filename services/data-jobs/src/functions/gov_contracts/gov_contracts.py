@@ -20,6 +20,50 @@ STATE_KEY = "curated/contracts/_state.json"
 USASPENDING_CONTRACT_CODES = ("A", "B", "C", "D")
 USASPENDING_PAGE_SIZE = 100
 USASPENDING_MAX_PAGES = 20
+# Contract award fields from the spending_by_award contract (base fields plus contract fields).
+USASPENDING_CONTRACT_FIELDS = frozenset(
+    {
+        "Award ID",
+        "Recipient Name",
+        "Recipient DUNS Number",
+        "recipient_id",
+        "Awarding Agency",
+        "Awarding Agency Code",
+        "Awarding Sub Agency",
+        "Awarding Sub Agency Code",
+        "Funding Agency",
+        "Funding Agency Code",
+        "Funding Sub Agency",
+        "Funding Sub Agency Code",
+        "Place of Performance City Code",
+        "Place of Performance State Code",
+        "Place of Performance Country Code",
+        "Place of Performance Zip5",
+        "Description",
+        "Last Modified Date",
+        "Base Obligation Date",
+        "prime_award_recipient_id",
+        "generated_internal_id",
+        "def_codes",
+        "COVID-19 Obligations",
+        "COVID-19 Outlays",
+        "Infrastructure Obligations",
+        "Infrastructure Outlays",
+        "Recipient UEI",
+        "Recipient Location",
+        "Primary Place of Performance",
+        "Start Date",
+        "End Date",
+        "Award Amount",
+        "Total Outlays",
+        "Contract Award Type",
+        "NAICS",
+        "PSC",
+    }
+)
+DOD_FEED_URL = "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=400&Site=945&max=10"
+NASA_FEED_URL = "https://www.nasa.gov/news-release/feed/"
+SAM_OPPORTUNITIES_URL = "https://api.sam.gov/opportunities/v2/search"
 NAME_TO_TICKER = (
     ("space exploration technologies", "SPCX"),
     ("spacex", "SPCX"),
@@ -95,26 +139,74 @@ def _amount(value) -> float:
 
 
 def usaspending_body(recipient: str, start: str, end: str, page: int = 1) -> dict:
-    """spending_by_award request. award_type_codes is required (422 without it); A-D are contracts."""
+    """spending_by_award request. award_type_codes is required; fields stay on the contract allowlist."""
+    fields = [
+        "Award ID",
+        "Recipient Name",
+        "Recipient UEI",
+        "Award Amount",
+        "Awarding Agency",
+        "Awarding Sub Agency",
+        "Start Date",
+        "Description",
+    ]
+    unknown = [name for name in fields if name not in USASPENDING_CONTRACT_FIELDS]
+    if unknown:
+        raise ValueError("USAspending fields are not in the contract allowlist: " + ", ".join(unknown))
+    if not USASPENDING_CONTRACT_CODES:
+        raise ValueError("award_type_codes is required")
     return {
+        "subawards": False,
         "filters": {
             "recipient_search_text": [recipient],
             "award_type_codes": list(USASPENDING_CONTRACT_CODES),
             "time_period": [{"start_date": start, "end_date": end}],
         },
-        "fields": [
-            "Award ID",
-            "Recipient Name",
-            "Recipient UEI",
-            "Award Amount",
-            "Awarding Agency",
-            "Awarding Sub Agency",
-            "Start Date",
-            "Description",
-        ],
+        "fields": fields,
         "limit": USASPENDING_PAGE_SIZE,
         "page": page,
     }
+
+
+def sam_opportunity_params(today: date, api_key: str, title: str = "SpaceX") -> dict:
+    """One opportunities search. postedFrom and postedTo are required and span at most a year."""
+    start = today - timedelta(days=364)
+    return {
+        "api_key": api_key,
+        "postedFrom": start.strftime("%m/%d/%Y"),
+        "postedTo": today.strftime("%m/%d/%Y"),
+        "title": title,
+        "limit": 10,
+        "offset": 0,
+    }
+
+
+def provider_failure(status: int) -> str | None:
+    """Name a non-2xx response. 429 is throttling, not a parser failure."""
+    if status == 429:
+        return "rate_limited"
+    if status in (401, 403):
+        return "access_restricted"
+    if status in (400, 404, 422):
+        return "request_rejected"
+    if status >= 400:
+        return "upstream"
+    return None
+
+
+class ProviderStatus(RuntimeError):
+    """Safe source failure. The message has a status, not a URL or key."""
+
+
+def raise_for_provider(status: int, source: str) -> None:
+    kind = provider_failure(status)
+    if kind is None:
+        return
+    if kind == "rate_limited":
+        raise ProviderStatus(f"{source} HTTP 429; throttled, not a parser failure")
+    if kind == "access_restricted":
+        raise ProviderStatus(f"{source} HTTP {status}; access restricted, no rows synthesized")
+    raise ProviderStatus(f"{source} HTTP {status}")
 
 
 def parse_usaspending(payload: dict, ingested_at: str) -> list[dict]:
@@ -180,11 +272,54 @@ def parse_sam(payload: dict, ingested_at: str, kind: str = "sam-awards") -> list
     return rows
 
 
+def _item_text(item, tag: str) -> str:
+    found = item.find(tag)
+    if found is None or not found.text:
+        return ""
+    return " ".join(found.text.split())
+
+
+def rss_items(text: str) -> list[dict]:
+    """Title and description from an RSS document. Item links are not requested."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        raise ValueError("response was not an RSS feed") from None
+    root_name = root.tag.rsplit("}", 1)[-1].lower()
+    if root_name not in {"rss", "rdf"}:
+        raise ValueError("response was not an RSS feed")
+    return [
+        {
+            "title": _item_text(item, "title"),
+            "description": _item_text(item, "description"),
+            "link": _item_text(item, "link"),
+        }
+        for item in root.iter("item")
+    ]
+
+
+def feed_coverage(text: str, ingested_at: str, day: date) -> tuple[list[dict], dict]:
+    """Awards found in feed text, plus coverage. Article URLs are never fetched."""
+    items = rss_items(text)
+    awards: list[dict] = []
+    for item in items:
+        body = "\n\n".join(part for part in (item["title"], item["description"]) if part)
+        awards.extend(parse_dod(body, ingested_at, day))
+    return awards, {
+        "feed_items": len(items),
+        "award_rows": len(awards),
+        "article_urls_fetched": 0,
+    }
+
+
 def parse_dod(text: str, ingested_at: str, day: date) -> list[dict]:
     """DoD paragraphs that name SpaceX or Tesla. A PIID is reconciled; otherwise the row stays provisional."""
     rows = []
     for paragraph in (text or "").split("\n\n"):
-        if "contract" not in paragraph.lower():
+        folded = paragraph.lower()
+        if "contract" not in folded and "award" not in folded:
             continue
         ticker = ticker_for(paragraph)
         if not ticker:
@@ -343,12 +478,20 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             for index, name in enumerate(("Space Exploration Technologies", "Tesla")):
                 with source_run("usaspending") as record:
                     for page in range(1, USASPENDING_MAX_PAGES + 1):
-                        payload = request_with_retry(
-                            http,
-                            "POST",
-                            "https://api.usaspending.gov/api/v2/search/spending_by_award/",
-                            json=usaspending_body(name, start, now.date().isoformat(), page),
-                        ).json()
+                        try:
+                            response = request_with_retry(
+                                http,
+                                "POST",
+                                "https://api.usaspending.gov/api/v2/search/spending_by_award/",
+                                json=usaspending_body(name, start, now.date().isoformat(), page),
+                            )
+                        except Exception as exc:
+                            status = getattr(getattr(exc, "response", None), "status_code", None)
+                            if isinstance(status, int):
+                                raise_for_provider(status, "USAspending")
+                            raise
+                        raise_for_provider(response.status_code, "USAspending")
+                        payload = response.json()
                         found = parse_usaspending(payload, ingested_at)
                         day = now.date().isoformat()
                         write_json(payload, f"raw/contracts/usaspending/date={day}/{run_id}-{index}-{page}.json")
@@ -380,28 +523,53 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             if budget >= 2:
                 with source_run("sam-opportunities") as record:
                     response = http.get(
-                        "https://api.sam.gov/opportunities/v2/search",
-                        params={"api_key": api_key("sam-gov"), "title": "SpaceX", "limit": 10},
+                        SAM_OPPORTUNITIES_URL,
+                        params=sam_opportunity_params(now.date(), api_key("sam-gov")),
                     )
                     used += 1
+                    if response.status_code == 429:
+                        raise_for_provider(429, "SAM opportunities")
                     if sam_status(response.status_code) == "partial":
                         partial = True
                         logger.warning("sam_key_rejected", extra={"hint": "rotate sam-gov"})
                         raise RuntimeError("SAM.gov rejected the key")
+                    raise_for_provider(response.status_code, "SAM opportunities")
                     payload = response.json()
                     found = parse_sam(payload, ingested_at, kind="sam-opportunities")
                     opportunities.extend(found)
                     record["rows"] = len(found)
+                    record["coverage"] = f"opportunity_rows={len(found)}"
             with source_run("dod") as record:
-                text = request_with_retry(http, "GET", "https://www.defense.gov/News/Contracts/").text
-                found = parse_dod(text, ingested_at, now.date())
+                response = request_with_retry(
+                    http,
+                    "GET",
+                    DOD_FEED_URL,
+                    return_statuses=frozenset({403, 404}),
+                )
+                raise_for_provider(response.status_code, "DoD contracts feed")
+                found, coverage = feed_coverage(response.text, ingested_at, now.date())
                 awards.extend(found)
-                record["rows"] = len(found)
+                record["rows"] = coverage["award_rows"]
+                record["coverage"] = (
+                    f"feed_items={coverage['feed_items']};award_rows={coverage['award_rows']};"
+                    "article_urls_fetched=0"
+                )
             with source_run("nasa") as record:
-                text = request_with_retry(http, "GET", "https://www.nasa.gov/news/releases/latest/feed/").text
-                found = parse_dod(text, ingested_at, now.date()) if "contract" in text.lower() else []
+                try:
+                    response = request_with_retry(http, "GET", NASA_FEED_URL)
+                except Exception as exc:
+                    status = getattr(getattr(exc, "response", None), "status_code", None)
+                    if status == 429:
+                        raise_for_provider(429, "NASA")
+                    raise
+                raise_for_provider(response.status_code, "NASA")
+                found, coverage = feed_coverage(response.text, ingested_at, now.date())
                 awards.extend(found)
-                record["rows"] = len(found)
+                record["rows"] = coverage["award_rows"]
+                record["coverage"] = (
+                    f"feed_items={coverage['feed_items']};award_rows={coverage['award_rows']};"
+                    "article_urls_fetched=0"
+                )
 
         merged = reconcile(awards)
         if merged:

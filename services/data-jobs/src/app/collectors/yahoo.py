@@ -14,6 +14,22 @@ from datetime import UTC, date, datetime, timedelta
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
 
 
+class YahooRateLimited(RuntimeError):
+    """HTTP 429 from the chart host. Do not send another chart request in this run."""
+
+
+# A 400 is a pre-inception candidate only when Yahoo says the requested dates have no bars.
+# Other 400s (and every 404) stay failures. 404 is an unknown symbol: never rewrite it.
+_DATE_WINDOW_MARKERS = (
+    "data doesn't exist",
+    "data does not exist",
+    "invalid date",
+    "startdate",
+    "period1",
+    "period2",
+)
+
+
 def chart_params(years: int = 5, start: date | None = None, end: date | None = None) -> dict:
     """Return a historical range or an explicit [start, end) batch."""
     params = {"interval": "1d", "events": "split,div", "includeAdjustedClose": "true"}
@@ -58,6 +74,34 @@ def parse_events(payload: dict) -> list[dict]:
     for div in (events.get("dividends") or {}).values():
         out.append({"type": "dividend", "date": _local_date(div["date"], offset), "amount": float(div["amount"])})
     return sorted(out, key=lambda e: (e["date"], e["type"]))
+
+
+def classify_chart(status: int, payload: dict | None) -> str:
+    """Classify one chart response. The caller decides whether a date-window 400 is terminal.
+
+    unknown_symbol: HTTP 404. The requested ticker is kept as-is.
+    pre_inception_candidate: HTTP 400 whose body says the requested dates have no data.
+    client_error: any other HTTP 400, including a 400 whose text only says the symbol is missing.
+    rate_limited: HTTP 429. Do not retry it in this call.
+    ok: HTTP 200 with a JSON object. An empty window is still ok; the backfill checks the body.
+    """
+    if status == 429:
+        return "rate_limited"
+    if status == 404:
+        return "unknown_symbol"
+    if status == 400:
+        error = ((payload or {}).get("chart") or {}).get("error") or {}
+        text = f"{error.get('code') or ''} {error.get('description') or ''}".lower()
+        if "not found" in text:
+            return "client_error"
+        if any(marker in text for marker in _DATE_WINDOW_MARKERS):
+            return "pre_inception_candidate"
+        return "client_error"
+    if status >= 500:
+        return "upstream"
+    if status >= 400 or not isinstance(payload, dict):
+        return "client_error"
+    return "ok"
 
 
 def parse_chart(payload: dict, ticker: str) -> list[dict]:

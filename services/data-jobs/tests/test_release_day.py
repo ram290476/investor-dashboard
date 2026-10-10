@@ -2,6 +2,7 @@ import json
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 
 import release_day
@@ -30,7 +31,14 @@ BEA = {
     }
 }
 
-CENSUS = [["time", "IMPG", "EXPG"], ["2026-09", "280000", "170000"]]
+CENSUS = [
+    ["cell_value", "time_slot_id", "category_code", "data_type_code", "seasonally_adj", "time"],
+    ["280000", "2026-09", "BOPG", "IMP", "yes", "2026-09"],
+    ["170000", "2026-09", "BOPG", "EXP", "yes", "2026-09"],
+    ["100", "2026-09", "BOPG", "BAL", "yes", "2026-09"],
+    ["999", "2026-09", "BOPGS", "IMP", "yes", "2026-09"],
+    ["1", "2026-09", "BOPG", "IMP", "no", "2026-09"],
+]
 
 ICS = """BEGIN:VEVENT
 DTSTART;VALUE=DATE:20261015
@@ -187,7 +195,30 @@ def test_bea_and_census_parse_into_release_rows():
     assert next(row for row in pce if row["series_id"] == "PCE")["period"] == "2026-09"
     trade = release_day.parse_census(CENSUS, "2026-11-05T13:35:00+00:00")
     assert {row["series_id"] for row in trade} == {"CENSUS_IMPG", "CENSUS_EXPG"}
-    assert next(row for row in trade if row["series_id"] == "CENSUS_IMPG")["actual"] == 280000
+    imports = next(row for row in trade if row["series_id"] == "CENSUS_IMPG")
+    assert imports["actual"] == 280000 and imports["units"] == "usd_millions" and imports["period"] == "2026-09"
+    params = release_day.census_params(2021, date(2026, 10, 10), "census-key")
+    assert release_day.census_request_problems(params) == []
+    assert "IMPG" not in params["get"] and "EXPG" not in params["get"]
+    assert params["category_code"] == "BOPG" and params["time"] == "from 2021-01 to 2026-10"
+    assert params["key"] == "census-key"
+
+
+def test_bls_calendar_failure_names_the_status_and_does_not_invent_dates():
+    assert release_day.BLS_ICS_URL == "https://www.bls.gov/schedule/news_release/bls.ics"
+    request = httpx.Request("GET", release_day.BLS_ICS_URL)
+    denied = httpx.Response(403, request=request, text="denied")
+    with pytest.raises(release_day.ProviderStatus, match="access denied, no dates") as caught:
+        release_day.raise_without_url(
+            httpx.HTTPStatusError("denied", request=request, response=denied), "BLS calendar"
+        )
+    assert "bls.gov" not in str(caught.value)
+    missing = httpx.Response(404, request=request, text="missing")
+    with pytest.raises(release_day.ProviderStatus, match="HTTP 404"):
+        release_day.raise_without_url(
+            httpx.HTTPStatusError("missing", request=request, response=missing), "BLS calendar"
+        )
+    assert release_day.parse_ics("") == []
 
 
 def test_stopgap_calendar_prefers_bls_ics_and_keeps_fred_pce_and_trade():
@@ -204,9 +235,20 @@ def test_stopgap_calendar_prefers_bls_ics_and_keeps_fred_pce_and_trade():
 def test_nowcast_becomes_an_index_consensus_and_enrichment_is_derived():
     rows = release_day.parse_bls(BLS, "2026-10-15T12:35:00+00:00")
     merged = release_day.merge_releases([], rows)
-    release_day.apply_nowcast(merged, [{"measure": "CPI", "value": 0.25}, {"measure": "Core CPI", "value": 0.1}])
+    nowcast = [
+        {"measure": "CPI", "basis": "mom", "period": "September 2026", "value": 0.25},
+        {"measure": "Core CPI", "basis": "mom", "period": "September 2026", "value": 0.1},
+        {"measure": "CPI", "basis": "yoy", "period": "September 2026", "value": 3.63},
+        {"measure": "CPI", "basis": "annualized_quarterly", "period": "2026:Q3", "value": 4.39},
+        {"measure": "CPI", "basis": "mom", "period": "October 2026", "value": 0.27},
+    ]
+    known = {("CUSR0000SA0", "2026-08")}
+    release_day.apply_nowcast(merged, nowcast, known)
+    august = next(row for row in merged if row["series_id"] == "CUSR0000SA0" and row["period"] == "2026-08")
+    assert august["consensus"] is None
     headline = next(row for row in merged if row["series_id"] == "CUSR0000SA0" and row["period"] == "2026-09")
     assert headline["consensus"] == release_day.consensus_index(320.0, 0.25)
+    assert headline["consensus"] != release_day.consensus_index(320.0, 3.63)
     assert headline["surprise"] == release_day.surprise(321.2, headline["consensus"])
     release_day.enrich_releases(merged)
     assert abs(headline["mom"] - ((321.2 / 320.0 - 1) * 100)) < 1e-9
@@ -411,7 +453,6 @@ def test_handler_writes_release_dated_yoy_and_release_links(monkeypatch):
     from urllib.parse import parse_qs
 
     import boto3
-    import httpx
     import polars as pl
     from moto import mock_aws
 
@@ -474,7 +515,16 @@ def test_handler_writes_release_dated_yoy_and_release_links(monkeypatch):
         if "apps.bea.gov" in url:
             return httpx.Response(200, json={"BEAAPI": {"Results": {"Data": []}}})
         if "api.census.gov" in url:
-            return httpx.Response(200, json=[["time", "IMPG", "EXPG"]])
+            query = parse_qs(request.url.query.decode())
+            requested = query.get("get", [""])[0]
+            assert "IMPG" not in requested and "EXPG" not in requested
+            assert query.get("category_code") == ["BOPG"]
+            assert query.get("time", [""])[0].startswith("from ")
+            assert query.get("key") == [secret]
+            return httpx.Response(
+                200,
+                json=[["cell_value", "time_slot_id", "category_code", "data_type_code", "seasonally_adj", "time"]],
+            )
         if url.startswith(release_day.BLS_ICS_URL):
             return httpx.Response(200, text="")
         if "releases/dates" in url:

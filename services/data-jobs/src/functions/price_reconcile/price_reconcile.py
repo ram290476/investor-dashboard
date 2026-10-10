@@ -302,7 +302,18 @@ def handler(event, context):
 
     def chart(http, ticker: str, start: date, end: date) -> dict:
         params = yahoo.chart_params(start=start, end=end)
-        return request_with_retry(http, "GET", yahoo.CHART_URL.format(ticker=ticker), params=params).json()
+        response = request_with_retry(
+            http,
+            "GET",
+            yahoo.CHART_URL.format(ticker=ticker),
+            params=params,
+            retry_statuses=frozenset({500, 502, 503, 504}),
+            return_statuses=frozenset({429}),
+        )
+        if response.status_code == 429:
+            raise yahoo.YahooRateLimited("Yahoo returned HTTP 429; stopped until quota permits")
+        response.raise_for_status()
+        return response.json()
 
     @job_handler("RECONCILE")
     def run(event, context):
@@ -349,6 +360,8 @@ def handler(event, context):
                     state["tickers"][ticker] = entry
                 if record["outcome"] == "failure":
                     failed.append(ticker)
+                    if record["error_type"] == "YahooRateLimited":
+                        break
 
         state["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         write_json(state, STATE_KEY, cache_seconds=0)
