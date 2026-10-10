@@ -60,6 +60,25 @@ export function markerIndex(event, bars) {
   return days.findIndex(date => date >= day);
 }
 
+// 1-session percent change of the session markerIndex aligns to.
+// A weekend or holiday lands on the next stored session, so the move is that
+// session versus the previous stored close. An after-close print on a trading
+// day still uses that same session; whether it should use the next session is open.
+export function catalystMove(event, bars) {
+  const index = markerIndex(event, bars || []);
+  if (index < 1) return null;
+  const previous = chartValue(bars[index - 1]);
+  const close = chartValue(bars[index]);
+  if (previous == null || close == null || previous === 0) return null;
+  return close / previous - 1;
+}
+
+export function catalystDateLabel(value) {
+  const day = String(value || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "—";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`));
+}
+
 export function catalystCategoriesInWindow(dashboard, ticker, bars) {
   const categories = new Set(catalystRows(dashboard, ticker)
     .filter(event => markerIndex(event, bars) >= 0).map(event => event.category));

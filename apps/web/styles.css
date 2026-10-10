@@ -319,8 +319,8 @@ a {
 }
 
 .ticker-watch-item .ticker-button {
-  min-width: 155px;
-  flex: 0 0 155px;
+  min-width: 148px;
+  flex: 0 0 148px;
 }
 
 .ticker-research {
@@ -369,7 +369,7 @@ a {
 }
 
 .watchlist-bar .ticker-button {
-  flex: 0 0 155px;
+  flex: 0 0 148px;
 }
 
 .watchlist-bar .ticker-manage {
@@ -1660,6 +1660,46 @@ body.modal-open {
   stroke: var(--red);
 }
 
+/* watchlist sparklines (#92) */
+.watchlist .ticker-button {
+  grid-template-columns: minmax(0, 1fr) 60px;
+  column-gap: 6px;
+  align-items: center;
+}
+
+.watchlist .ticker-meta {
+  grid-column: 1 / -1;
+}
+
+.watchlist .spark,
+.watchlist .spark-empty {
+  width: 60px;
+  height: 18px;
+}
+
+.watchlist .spark-empty {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.spark.flat {
+  stroke: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .watchlist .ticker-button {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .watchlist .spark,
+  .watchlist .spark-empty {
+    width: 44px;
+    height: 14px;
+  }
+}
+/* end watchlist sparklines (#92) */
+
 .spark-empty,
 .row-price,
 .row-change {
@@ -2271,6 +2311,97 @@ input::placeholder {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* recent catalyst rows (#91) */
+.catalyst-recent-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.catalyst-recent-row {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 0;
+  height: 28px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.catalyst-recent-row:hover {
+  border-color: transparent;
+  border-bottom-color: var(--line);
+  background: var(--hover);
+}
+
+.catalyst-recent-row:disabled,
+.catalyst-recent-row:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.catalyst-recent-row:disabled .catalyst-recent-name,
+.catalyst-recent-row:disabled .catalyst-recent-move {
+  color: var(--muted);
+}
+
+.catalyst-recent-date,
+.catalyst-recent-move {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.catalyst-recent-date {
+  color: var(--muted);
+}
+
+.catalyst-recent-move {
+  text-align: right;
+}
+
+.catalyst-recent-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.catalyst-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--catalyst-color, var(--subtle));
+}
+
+.catalyst-recent-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .catalyst-recent-row {
+    height: auto;
+    min-height: 44px;
+  }
+}
+/* end recent catalyst rows (#91) */
 
 .catalyst-calendar-row {
   padding: 10px 0;

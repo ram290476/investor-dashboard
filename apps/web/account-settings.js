@@ -2,7 +2,8 @@
 // My tickers (add, pin, reorder, remove), Theme & display, Profile & time zone, Data refresh.
 // Changes apply at once and autosave through PUT /prefs, one request at a time.
 
-import { PERIODS, chartValue, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
+import { PERIODS, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
+import { sparkline } from "./sparkline.js";
 import { DEFAULT_THEME, THEMES, themeProperties } from "./theme.js";
 import {
   MAX_PINNED,
@@ -27,7 +28,6 @@ import {
   validateNewTicker,
 } from "./settings-model.js";
 
-const svgNS = "http://www.w3.org/2000/svg";
 const REORDER_DEBOUNCE_MS = 400;
 const UNDO_MS = 5000;
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -60,25 +60,6 @@ function copyPrefs(prefs) {
       ]),
     ),
   };
-}
-
-function sparkline(history) {
-  const values = validBars(history).slice(-22).map(chartValue);
-  if (values.length < 2) return el("span", "spark-empty", "—");
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("viewBox", "0 0 64 20");
-  svg.setAttribute("class", `spark ${values.at(-1) >= values[0] ? "positive" : "negative"}`);
-  svg.setAttribute("aria-hidden", "true");
-  const line = document.createElementNS(svgNS, "polyline");
-  line.setAttribute(
-    "points",
-    values.map((value, index) => `${((index / (values.length - 1)) * 64).toFixed(1)},${(18 - ((value - min) / span) * 16).toFixed(1)}`).join(" "),
-  );
-  svg.append(line);
-  return svg;
 }
 
 /**

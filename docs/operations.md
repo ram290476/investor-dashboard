@@ -460,7 +460,10 @@ The #27 roadmap UI consumes the existing schema-v3 serving document and chart hi
   (`series`, `release_ts`) and stored release dates. Category filters control chart markers.
   Distinct filing URLs are preserved even when titles/dates match. Nontrading-day events
   align to the next stored session; intraday events use the first stored bar on that date.
-  Calendar rows outside the selected period cannot focus a marker. The feed is bounded
+  Calendar rows outside the selected period cannot focus a marker. Recent catalyst rows
+  show the same aligned session's 1-day move from adjusted closes (`close[i] / close[i-1] - 1`),
+  or "—" when that close is missing. An after-close print on a trading day still uses that
+  day's session; Ram has not decided whether it should use the next session. The feed is bounded
   published history, not an exhaustive corporate calendar.
 - `news.sentiment_history` contains up to 90 observed `{date, value}` points. Each value
   averages the selected ticker's finite daily `mean_sentiment` over seven calendar days;
@@ -627,7 +630,11 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
   usually annual USD series; deliveries/FSD subscribers remain reviewed manual observations.
 * The watchlist limit is 25 per user (separate from the existing 25-ticker cross-user collector
   cap). Legacy over-limit lists are never trimmed: display/chart/pin/reorder/removal saves work,
-  but new symbols are blocked until capacity is available.
+  but new symbols are blocked until capacity is available. Each chip draws that ticker's last
+  22 adjusted closes (the 1M window) with the shared sparkline helper. Ram has not decided
+  whether the window should follow the selected chart period, whether chips should show a
+  short company name, or whether phones should hide the line. The name is not in the snapshot,
+  so it is not shown. Phones keep a smaller line.
 * Fundamentals are chart overlays, not a separate bottom table. The snapshot's existing
   fundamentals array is retained for compatibility. Seven metrics remain supported; #76
   supersedes #71's always-visible unavailable chips. Overlay chips/groups and lane toggles

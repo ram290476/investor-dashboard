@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { catalystCategory, catalystCategoriesInWindow, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+import { readFile } from "node:fs/promises";
+import { catalystCategory, catalystCategoriesInWindow, catalystDateLabel, catalystMove, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+
+const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
+const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 
 test("category controls include only events aligned inside the selected window in catalog order", () => {
   const dashboard = { events: [
@@ -65,6 +69,54 @@ test("markers use the next stored session on nontrading days and exclude out-of-
   assert.equal(markerIndex({ date: "2026-10-05T15:00:00Z" }, [
     { ts: "2026-10-05T14:00:00Z" }, { ts: "2026-10-05T15:00:00Z" },
   ]), 0);
+});
+
+test("catalyst moves use the aligned session close and stay null outside history", () => {
+  const bars = [
+    { date: "2026-10-02", close: 50, adj_close: 100 },
+    { date: "2026-10-05", adj_close: 90 },
+    { date: "2026-10-06", adj_close: 99 },
+    { date: "2026-10-07", adj_close: 99 },
+  ];
+  assert.equal(catalystMove({ date: "2026-10-02" }, bars), null);
+  assert.equal(catalystMove({ date: "2026-10-03" }, bars), 90 / 100 - 1);
+  assert.equal(catalystMove({ date: "2026-10-04" }, bars), 90 / 100 - 1);
+  assert.equal(catalystMove({ date: "2026-10-05T20:05:00Z" }, bars), 90 / 100 - 1);
+  assert.equal(catalystMove({ date: "2026-10-06" }, bars), 99 / 90 - 1);
+  assert.equal(catalystMove({ date: "2026-10-07" }, bars), 0);
+  assert.equal(catalystMove({ date: "2026-09-01" }, bars), null);
+  assert.equal(catalystMove({ date: "2026-10-08" }, bars), null);
+  assert.equal(catalystMove({ date: "2026-10-05" }, []), null);
+  assert.equal(catalystMove({ date: "2026-10-06" }, [
+    { date: "2026-10-05", adj_close: 0 },
+    { date: "2026-10-06", adj_close: 10 },
+  ]), null);
+  assert.equal(catalystMove({ date: "2026-10-06" }, [
+    { date: "2026-10-05", close: 10 },
+    { date: "2026-10-06" },
+  ]), null);
+  assert.equal(catalystDateLabel("2026-10-02"), "Oct 2");
+  assert.equal(catalystDateLabel("2026-10-05T20:05:00Z"), "Oct 5");
+  assert.equal(catalystDateLabel("not-a-date"), "—");
+});
+
+test("recent catalyst rows reuse the chart marker color and stay one line", () => {
+  const block = styles.slice(styles.indexOf("/* recent catalyst rows (#91) */"), styles.indexOf("/* end recent catalyst rows (#91) */"));
+  assert.match(block, /\.catalyst-dot[\s\S]*background:\s*var\(--catalyst-color, var\(--subtle\)\)/);
+  assert.match(block, /\.catalyst-recent-name[\s\S]*text-overflow:\s*ellipsis/);
+  assert.match(block, /\.catalyst-recent-row[\s\S]*height:\s*28px/);
+  assert.match(block, /\.catalyst-recent-date[\s\S]*color:\s*var\(--muted\)/);
+  assert.match(block, /\.catalyst-recent-row:disabled[\s\S]*color:\s*var\(--muted\)/);
+  assert.match(block, /@media \(pointer: coarse\)[\s\S]*min-height:\s*44px/);
+  assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}/);
+  const render = app.slice(app.indexOf("function catalystMoveLabel"), app.indexOf("function renderDrivers"));
+  assert.match(render, /overlayColor\(category\.slot/);
+  assert.match(render, /visually-hidden/);
+  assert.match(render, /catalystMove\(event, daily\)/);
+  assert.match(render, /selectCatalyst\(event\)/);
+  assert.match(render, /Outside the selected chart period/);
+  assert.match(render, /▲/);
+  assert.match(render, /▼/);
 });
 
 test("driver drawer sorts finite values ahead of unavailable ones", () => {
