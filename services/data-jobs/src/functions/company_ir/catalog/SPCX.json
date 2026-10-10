@@ -1,0 +1,334 @@
+{
+  "ticker": "SPCX",
+  "catalog_version": 1,
+  "fiscal_year_end_month": 12,
+  "approval_note": "Company-specific rows only. Shared GAAP rows are added when the catalog is loaded. Every entry is proposed. Nothing is auto-approved.",
+  "metrics": [
+    {
+      "metric_id": "revenue_space",
+      "display_name": "Space segment revenue",
+      "unit": "USD",
+      "definition": "Space segment revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "Space revenue",
+        "Space revenues",
+        "Revenue Space"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_connectivity",
+      "display_name": "Connectivity segment revenue",
+      "unit": "USD",
+      "definition": "Connectivity segment revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "Connectivity revenue",
+        "Connectivity revenues",
+        "Revenue Connectivity"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_ai",
+      "display_name": "AI segment revenue",
+      "unit": "USD",
+      "definition": "AI segment revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 30,
+      "aliases": [
+        "AI revenue",
+        "AI revenues",
+        "Revenue AI"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "segment_adj_ebitda_connectivity",
+      "display_name": "Connectivity Adjusted EBITDA",
+      "unit": "USD",
+      "definition": "Connectivity Adjusted EBITDA. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 40,
+      "aliases": [
+        "Connectivity Adjusted EBITDA"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "adjusted_ebitda",
+      "display_name": "Adjusted EBITDA",
+      "unit": "USD",
+      "definition": "Adjusted EBITDA. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 50,
+      "aliases": [
+        "Adjusted EBITDA",
+        "Total Adjusted EBITDA",
+        "adjusted ebitda total"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "capex_total",
+      "display_name": "Capex, all segments",
+      "unit": "USD",
+      "definition": "Capex, all segments. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 60,
+      "aliases": [
+        "Capex Total",
+        "Total capex",
+        "capex total"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "total_launches",
+      "display_name": "Total launches",
+      "unit": "launches",
+      "definition": "Total launches. Proposed from the company's filing. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 70,
+      "aliases": [
+        "Total launches",
+        "Total launches (#)"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "mass_to_orbit",
+      "display_name": "Mass to orbit",
+      "unit": "metric tons",
+      "definition": "Mass to orbit. Proposed from the company's filing. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 80,
+      "aliases": [
+        "Mass to orbit",
+        "Mass to orbit (in metric tons)"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starlink_subscribers",
+      "display_name": "Starlink subscribers",
+      "unit": "subscribers",
+      "definition": "Starlink subscribers. Proposed from the company's filing. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 90,
+      "aliases": [
+        "Starlink Subscribers",
+        "Starlink Subscribers (#, in millions, as of period end)"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starlink_arpu",
+      "display_name": "Starlink ARPU",
+      "unit": "USD/month",
+      "definition": "Starlink ARPU. Proposed from the company's filing. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 100,
+      "aliases": [
+        "Starlink ARPU",
+        "Starlink ARPU ($ per month)"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "ai_nameplate_compute",
+      "display_name": "AI nameplate compute",
+      "unit": "GW",
+      "definition": "AI nameplate compute. Proposed from the company's filing. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 110,
+      "aliases": [
+        "Nameplate compute",
+        "Nameplate compute (in GW)",
+        "AI nameplate compute"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "backlog",
+      "display_name": "Backlog",
+      "unit": "USD",
+      "definition": "Narrative backlog from the earnings release. Proposed.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 120,
+      "aliases": [
+        "Backlog"
+      ],
+      "disclosure_status": "narrative",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starship_flights",
+      "display_name": "Starship flight tests",
+      "unit": "narrative",
+      "definition": "Starship flight tests. Proposed from the company's filing. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 130,
+      "aliases": [
+        "Starship flight tests",
+        "Starship"
+      ],
+      "disclosure_status": "narrative",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "remaining_performance_obligation",
+      "display_name": "Remaining performance obligations",
+      "unit": "USD",
+      "definition": "Remaining performance obligations. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 140,
+      "aliases": [
+        "Remaining performance obligations"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "xbrl"
+      ],
+      "xbrl_tags": [
+        "RevenueRemainingPerformanceObligation"
+      ],
+      "xbrl_kind": "instant",
+      "xbrl_unit": "USD"
+    },
+    {
+      "metric_id": "long_term_debt",
+      "display_name": "Long-term debt",
+      "unit": "USD",
+      "definition": "Long-term debt. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 150,
+      "aliases": [
+        "Long-term debt"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "xbrl"
+      ],
+      "xbrl_tags": [
+        "LongTermDebt",
+        "LongTermDebtNoncurrent"
+      ],
+      "xbrl_kind": "instant",
+      "xbrl_unit": "USD"
+    }
+  ]
+}

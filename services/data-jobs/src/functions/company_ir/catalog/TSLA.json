@@ -648,7 +648,8 @@
       "panel_order": 260,
       "aliases": [
         "Revenue",
-        "Total revenue"
+        "Total revenue",
+        "Total revenues"
       ],
       "disclosure_status": "numeric",
       "scale": 1000000,
@@ -803,7 +804,8 @@
       "panel_order": 262,
       "aliases": [
         "Automotive revenue",
-        "Automotive revenues"
+        "Automotive revenues",
+        "Total automotive revenues"
       ],
       "disclosure_status": "numeric",
       "source_priority": [

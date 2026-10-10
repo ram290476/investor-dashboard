@@ -89,19 +89,16 @@ def test_operational_summary_scales_units_flags_bounds_and_proposes_new_labels()
         **_meta(source_kind="deck", fiscal_period="2026Q2", published_date="2026-07-22"),
     )
     fsd = next(
-        row for row in parsed["rows"]
-        if row["metric_id"] == "fsd_subscriptions" and row["fiscal_period"] == "2026Q2"
+        row for row in parsed["rows"] if row["metric_id"] == "fsd_subscriptions" and row["fiscal_period"] == "2026Q2"
     )
     assert fsd["value"] == pytest.approx(1_480_000)
     assert fsd["approved"] is False
     q3_2025 = next(
-        row for row in parsed["rows"]
-        if row["metric_id"] == "total_deliveries" and row["fiscal_period"] == "2025Q3"
+        row for row in parsed["rows"] if row["metric_id"] == "total_deliveries" and row["fiscal_period"] == "2025Q3"
     )
     assert q3_2025["value"] == 497_099
     q2_2026 = next(
-        row for row in parsed["rows"]
-        if row["metric_id"] == "total_deliveries" and row["fiscal_period"] == "2026Q2"
+        row for row in parsed["rows"] if row["metric_id"] == "total_deliveries" and row["fiscal_period"] == "2026Q2"
     )
     assert q2_2026["value"] == 480_126
     capacity = next(row for row in parsed["proposals"] if "california" in row["metric_id"])
@@ -118,13 +115,11 @@ def test_financial_summary_scales_millions_and_keeps_parenthesized_negatives():
         **_meta(source_kind="deck", fiscal_period="2026Q2", published_date="2026-07-22"),
     )
     revenue = next(
-        row for row in parsed["rows"]
-        if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2026Q2"
+        row for row in parsed["rows"] if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2026Q2"
     )
     assert revenue["value"] == pytest.approx(28_236_000_000)
     cash = next(
-        row for row in parsed["rows"]
-        if row["metric_id"] == "free_cash_flow" and row["fiscal_period"] == "2026Q2"
+        row for row in parsed["rows"] if row["metric_id"] == "free_cash_flow" and row["fiscal_period"] == "2026Q2"
     )
     assert cash["value"] == pytest.approx(-1_092_000_000)
 
@@ -149,8 +144,13 @@ def test_xbrl_drops_scale_errors_and_beats_the_deck_for_gaap():
         if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2026Q2":
             row["value"] = 20_000_000_000
     xbrl_rows, _flags = ir.companyfacts_observations(
-        facts, catalog, ticker="TSLA", source_url="https://data.sec.gov/api/xbrl/companyfacts/CIK0001318605.json",
-        source_doc_hash="e" * 64, extracted_at=EXTRACTED, published_date="2026-07-23",
+        facts,
+        catalog,
+        ticker="TSLA",
+        source_url="https://data.sec.gov/api/xbrl/companyfacts/CIK0001318605.json",
+        source_doc_hash="e" * 64,
+        extracted_at=EXTRACTED,
+        published_date="2026-07-23",
     )
     mismatches = ir.reconcile_rows(
         [row for row in deck if row["metric_id"] == "revenue_gaap"],
@@ -159,10 +159,7 @@ def test_xbrl_drops_scale_errors_and_beats_the_deck_for_gaap():
     assert mismatches[0]["status"] == "mismatch"
     winners, revisions = ir.dedupe_observations(deck + xbrl_rows)
     assert revisions
-    revenue = next(
-        row for row in winners
-        if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2026Q2"
-    )
+    revenue = next(row for row in winners if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2026Q2")
     assert revenue["value"] == 28_236_000_000
     assert revenue["source_kind"] == "xbrl"
     assert revenue["supersedes"] == "d" * 64
@@ -170,26 +167,50 @@ def test_xbrl_drops_scale_errors_and_beats_the_deck_for_gaap():
 
 def test_operating_dedupe_prefers_the_latest_deck_and_news_never_wins():
     common = {
-        "ticker": "TSLA", "metric_id": "total_deliveries", "fiscal_period": "2026Q2",
-        "period_end": date(2026, 6, 30), "unit": "vehicles", "extracted_at": EXTRACTED,
-        "method": "table", "catalog_status": "approved", "category": "operating", "approved": True,
+        "ticker": "TSLA",
+        "metric_id": "total_deliveries",
+        "fiscal_period": "2026Q2",
+        "period_end": date(2026, 6, 30),
+        "unit": "vehicles",
+        "extracted_at": EXTRACTED,
+        "method": "table",
+        "catalog_status": "approved",
+        "category": "operating",
+        "approved": True,
     }
     rows = [
         {
-            **common, "value": 480_000, "source_kind": "press_release",
-            "published_date": "2026-07-02", "source_doc_hash": "1" * 64, "source_url": SEC_URL,
+            **common,
+            "value": 480_000,
+            "source_kind": "press_release",
+            "published_date": "2026-07-02",
+            "source_doc_hash": "1" * 64,
+            "source_url": SEC_URL,
         },
         {
-            **common, "value": 480_126, "source_kind": "deck",
-            "published_date": "2026-07-22", "source_doc_hash": "2" * 64, "source_url": SEC_URL,
+            **common,
+            "value": 480_126,
+            "source_kind": "deck",
+            "published_date": "2026-07-22",
+            "source_doc_hash": "2" * 64,
+            "source_url": SEC_URL,
         },
         {
-            **common, "value": 1, "source_kind": "news", "published_date": "2026-07-23",
-            "source_doc_hash": "3" * 64, "source_url": "https://news.example/tsla", "method": "llm",
+            **common,
+            "value": 1,
+            "source_kind": "news",
+            "published_date": "2026-07-23",
+            "source_doc_hash": "3" * 64,
+            "source_url": "https://news.example/tsla",
+            "method": "llm",
         },
         {
-            **common, "value": 470_000, "source_kind": "deck",
-            "published_date": "2026-04-22", "source_doc_hash": "4" * 64, "source_url": SEC_URL,
+            **common,
+            "value": 470_000,
+            "source_kind": "deck",
+            "published_date": "2026-04-22",
+            "source_doc_hash": "4" * 64,
+            "source_url": SEC_URL,
         },
     ]
     winners, revisions = ir.dedupe_observations(rows)
@@ -207,7 +228,9 @@ def test_narrative_candidates_stay_unapproved_and_off_without_a_secret():
     assert found and all(item["confidence"] == ir.CONFIDENCE["llm"] for item in found)
     catalog = ir.load_catalog("TSLA")
     parsed = ir.parse_company_document(
-        text, catalog, **_meta(source_kind="deck", fiscal_period="2026Q2", llm_enabled=True),
+        text,
+        catalog,
+        **_meta(source_kind="deck", fiscal_period="2026Q2", llm_enabled=True),
     )
     llm_rows = [row for row in parsed["rows"] if row["method"] == "llm"]
     assert llm_rows and all(row["approved"] is False for row in llm_rows)
@@ -263,10 +286,15 @@ def test_collection_plan_skips_an_hourly_h3_without_a_new_exhibit():
 
 
 def test_h3_emits_a_filing_only_for_todays_item_202():
-    rows = [{
-        "form": "8-K", "items": ["2.02", "9.01"], "filed_at": "2026-10-02",
-        "ticker": "TSLA", "accession_no": "0001628280-26-064366",
-    }]
+    rows = [
+        {
+            "form": "8-K",
+            "items": ["2.02", "9.01"],
+            "filed_at": "2026-10-02",
+            "ticker": "TSLA",
+            "accession_no": "0001628280-26-064366",
+        }
+    ]
     detail = earnings_filing_detail(rows, date(2026, 10, 2))
     assert detail["exhibits"] == ["EX-99.1"] and detail["ticker"] == "TSLA"
     assert earnings_filing_detail(rows, date(2026, 10, 3)) is None
@@ -278,9 +306,14 @@ def _edgar_routes(exhibit_status=200):
     exhibit_url = ir.archive_url("0001318605", accession, "exhibit991.htm")
     facts_url = "https://data.sec.gov/api/xbrl/companyfacts/CIK0001318605.json"
     routes = {
-        "https://www.sec.gov/files/company_tickers.json": _Response(200, json.dumps({
-            "0": {"cik_str": 1318605, "ticker": "TSLA", "title": "Tesla"},
-        })),
+        "https://www.sec.gov/files/company_tickers.json": _Response(
+            200,
+            json.dumps(
+                {
+                    "0": {"cik_str": 1318605, "ticker": "TSLA", "title": "Tesla"},
+                }
+            ),
+        ),
         "https://data.sec.gov/submissions/CIK0001318605.json": _Response(200, _load("submissions_tsla.json")),
         index_url: _Response(200, _load("filing_index.json")),
         exhibit_url: _Response(exhibit_status, _load("tsla_q3_2026_deliveries.html") if exhibit_status == 200 else ""),
@@ -355,20 +388,26 @@ def test_collect_stores_edgar_once_and_stops_on_429_without_retry(monkeypatch):
 
 
 def test_robots_denied_and_tesla_html_are_not_fetched(monkeypatch):
-    monkeypatch.setattr(ir, "load_catalog", lambda ticker: {
-        "ticker": ticker,
-        "metrics": [],
-        "ir_sources": [{
-            "id": "tesla-ir-pdf",
-            "robots_url": "https://ir.tesla.com/robots.txt",
-            "urls": [
-                "https://www.tesla.com/fsd/safety",
-                "https://ir.tesla.com/press",
-                "https://ir.tesla.com/private/deck.pdf",
-                "https://ir.tesla.com/_flysystem/s3/sec/deck.pdf",
+    monkeypatch.setattr(
+        ir,
+        "load_catalog",
+        lambda ticker: {
+            "ticker": ticker,
+            "metrics": [],
+            "ir_sources": [
+                {
+                    "id": "tesla-ir-pdf",
+                    "robots_url": "https://ir.tesla.com/robots.txt",
+                    "urls": [
+                        "https://www.tesla.com/fsd/safety",
+                        "https://ir.tesla.com/press",
+                        "https://ir.tesla.com/private/deck.pdf",
+                        "https://ir.tesla.com/_flysystem/s3/sec/deck.pdf",
+                    ],
+                }
             ],
-        }],
-    })
+        },
+    )
     calls = []
 
     def fetch(url, headers):
@@ -410,18 +449,34 @@ def test_extract_and_serve_round_trip_filters_proposed_and_keeps_last_good(tmp_p
     }
     manifests = [
         {
-            "ticker": "TSLA", "key": "deliveries", "source_kind": "press_release", "period": "2026Q3",
-            "source_url": SEC_URL, "sha256": "a" * 64, "published_date": "2026-10-02",
+            "ticker": "TSLA",
+            "key": "deliveries",
+            "source_kind": "press_release",
+            "period": "2026Q3",
+            "source_url": SEC_URL,
+            "sha256": "a" * 64,
+            "published_date": "2026-10-02",
             "accession": "0001628280-26-064366",
         },
         {
-            "ticker": "TSLA", "key": "deck", "source_kind": "deck", "period": "2026Q2",
-            "source_url": SEC_URL, "sha256": "b" * 64, "published_date": "2026-07-22",
+            "ticker": "TSLA",
+            "key": "deck",
+            "source_kind": "deck",
+            "period": "2026Q2",
+            "source_url": SEC_URL,
+            "sha256": "b" * 64,
+            "published_date": "2026-07-22",
             "accession": "0001628280-26-049213",
         },
-        {"ticker": "TSLA", "key": "facts", "source_kind": "xbrl", "period": "companyfacts",
-         "source_url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0001318605.json",
-         "sha256": "c" * 64, "published_date": "2026-07-23"},
+        {
+            "ticker": "TSLA",
+            "key": "facts",
+            "source_kind": "xbrl",
+            "period": "companyfacts",
+            "source_url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0001318605.json",
+            "sha256": "c" * 64,
+            "published_date": "2026-07-23",
+        },
     ]
     written = {}
 
@@ -444,8 +499,7 @@ def test_extract_and_serve_round_trip_filters_proposed_and_keeps_last_good(tmp_p
     assert any(flag.get("status") == "scale_error" for flag in result["mismatches"])
     observations = written[ir.curated_observations_key("TSLA")]["rows"]
     deliveries = next(
-        row for row in observations
-        if row["metric_id"] == "total_deliveries" and row["fiscal_period"] == "2026Q3"
+        row for row in observations if row["metric_id"] == "total_deliveries" and row["fiscal_period"] == "2026Q3"
     )
     assert deliveries["value"] == 486_532
     assert deliveries["approved"] is False
@@ -499,17 +553,42 @@ def test_extract_and_serve_round_trip_filters_proposed_and_keeps_last_good(tmp_p
 
 
 def test_q1_uses_approved_curated_counts_and_warns_when_the_csv_is_missing():
-    manual = [{
-        "ticker": "TSLA", "metric": "deliveries", "fiscal_quarter": "2026Q3",
-        "release_date": date(2026, 10, 2), "value": 497099.0, "unit": "vehicles", "source_id": "DS-12",
-    }]
+    manual = [
+        {
+            "ticker": "TSLA",
+            "metric": "deliveries",
+            "fiscal_quarter": "2026Q3",
+            "release_date": date(2026, 10, 2),
+            "value": 497099.0,
+            "unit": "vehicles",
+            "source_id": "DS-12",
+        }
+    ]
     curated = [
-        {"ticker": "TSLA", "metric_id": "total_deliveries", "fiscal_period": "2026Q3", "value": 486532,
-         "approved": True, "published_date": "2026-10-02"},
-        {"ticker": "TSLA", "metric_id": "fsd_subscriptions", "fiscal_period": "2026Q2", "value": 1_480_000,
-         "approved": True, "published_date": "2026-07-22"},
-        {"ticker": "TSLA", "metric_id": "total_deliveries", "fiscal_period": "2026Q2", "value": 1,
-         "approved": False, "published_date": "2026-07-02"},
+        {
+            "ticker": "TSLA",
+            "metric_id": "total_deliveries",
+            "fiscal_period": "2026Q3",
+            "value": 486532,
+            "approved": True,
+            "published_date": "2026-10-02",
+        },
+        {
+            "ticker": "TSLA",
+            "metric_id": "fsd_subscriptions",
+            "fiscal_period": "2026Q2",
+            "value": 1_480_000,
+            "approved": True,
+            "published_date": "2026-07-22",
+        },
+        {
+            "ticker": "TSLA",
+            "metric_id": "total_deliveries",
+            "fiscal_period": "2026Q2",
+            "value": 1,
+            "approved": False,
+            "published_date": "2026-07-02",
+        },
     ]
     approved = {("TSLA", "total_deliveries"), ("TSLA", "fsd_subscriptions")}
     rows = fq.rows_from_company_metrics(curated, approved)
@@ -521,12 +600,20 @@ def test_q1_uses_approved_curated_counts_and_warns_when_the_csv_is_missing():
     summed = fq.rows_from_company_metrics(
         [
             {
-                "ticker": "TSLA", "metric_id": "deliveries_model_3y", "fiscal_period": "2026Q1",
-                "value": 10, "approved": True, "published_date": "2026-04-02",
+                "ticker": "TSLA",
+                "metric_id": "deliveries_model_3y",
+                "fiscal_period": "2026Q1",
+                "value": 10,
+                "approved": True,
+                "published_date": "2026-04-02",
             },
             {
-                "ticker": "TSLA", "metric_id": "deliveries_other_models", "fiscal_period": "2026Q1",
-                "value": 3, "approved": True, "published_date": "2026-04-02",
+                "ticker": "TSLA",
+                "metric_id": "deliveries_other_models",
+                "fiscal_period": "2026Q1",
+                "value": 3,
+                "approved": True,
+                "published_date": "2026-04-02",
             },
         ],
         {("TSLA", "deliveries_model_3y"), ("TSLA", "deliveries_other_models")},
@@ -545,12 +632,17 @@ def test_propose_and_approve_helpers_never_invent_an_approval(tmp_path):
     import propose_catalog
     from approve_metric import apply_status
 
-    catalog = propose_catalog.build_proposed_catalog("SPCX", [{
-        "text": _load("spcx_exhibit.html"),
-        "source_kind": "deck",
-        "fiscal_period": "2026Q3",
-        "source_url": "https://www.sec.gov/Archives/edgar/data/fixture/spcx.htm",
-    }])
+    catalog = propose_catalog.build_proposed_catalog(
+        "SPCX",
+        [
+            {
+                "text": _load("spcx_exhibit.html"),
+                "source_kind": "deck",
+                "fiscal_period": "2026Q3",
+                "source_url": "https://www.sec.gov/Archives/edgar/data/fixture/spcx.htm",
+            }
+        ],
+    )
     assert catalog["metrics"]
     assert all(item["status"] == "proposed" and item["approved_by"] is None for item in catalog["metrics"])
     with pytest.raises(ValueError, match="--by"):
@@ -579,28 +671,48 @@ def test_cash_and_investments_uses_current_concepts_then_older_fallbacks():
     cash_2021 = 17_576_000_000
     short_2021 = 131_000_000
     gaap = {
-        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents": {"units": {"USD": [
-            _instant("2018-09-30", 3_522_966_000, "2018-11-02"),
-            _instant("2017-09-30", 3_000_000_000, "2017-11-03"),
-        ]}},
-        "CashAndCashEquivalentsAtCarryingValue": {"units": {"USD": [
-            _instant("2018-09-30", cash_2018, "2018-11-02"),
-            _instant("2021-12-31", cash_2021, "2022-02-07", "10-K"),
-            _instant("2022-09-30", cash_2022, "2022-10-24"),
-            _instant("2026-06-30", cash_2026, "2026-07-23"),
-        ]}},
-        "ShortTermInvestments": {"units": {"USD": [
-            _instant("2021-12-31", short_2021, "2022-02-07", "10-K"),
-            _instant("2024-12-31", 20_424_000_000, "2025-01-30", "10-K"),
-            _instant("2026-06-30", short_2026, "2026-07-23"),
-        ]}},
-        "MarketableSecuritiesCurrent": {"units": {"USD": [
-            _instant("2021-12-31", short_2021, "2022-02-07", "10-K"),
-            _instant("2022-09-30", marketable_2022, "2022-10-24"),
-        ]}},
-        "CashCashEquivalentsAndShortTermInvestments": {"units": {"USD": [
-            _instant("2012-03-31", 900_000_000, "2012-05-10"),
-        ]}},
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents": {
+            "units": {
+                "USD": [
+                    _instant("2018-09-30", 3_522_966_000, "2018-11-02"),
+                    _instant("2017-09-30", 3_000_000_000, "2017-11-03"),
+                ]
+            }
+        },
+        "CashAndCashEquivalentsAtCarryingValue": {
+            "units": {
+                "USD": [
+                    _instant("2018-09-30", cash_2018, "2018-11-02"),
+                    _instant("2021-12-31", cash_2021, "2022-02-07", "10-K"),
+                    _instant("2022-09-30", cash_2022, "2022-10-24"),
+                    _instant("2026-06-30", cash_2026, "2026-07-23"),
+                ]
+            }
+        },
+        "ShortTermInvestments": {
+            "units": {
+                "USD": [
+                    _instant("2021-12-31", short_2021, "2022-02-07", "10-K"),
+                    _instant("2024-12-31", 20_424_000_000, "2025-01-30", "10-K"),
+                    _instant("2026-06-30", short_2026, "2026-07-23"),
+                ]
+            }
+        },
+        "MarketableSecuritiesCurrent": {
+            "units": {
+                "USD": [
+                    _instant("2021-12-31", short_2021, "2022-02-07", "10-K"),
+                    _instant("2022-09-30", marketable_2022, "2022-10-24"),
+                ]
+            }
+        },
+        "CashCashEquivalentsAndShortTermInvestments": {
+            "units": {
+                "USD": [
+                    _instant("2012-03-31", 900_000_000, "2012-05-10"),
+                ]
+            }
+        },
     }
     rows, _flags = ir.companyfacts_observations(
         {"facts": {"us-gaap": gaap}},
@@ -610,10 +722,7 @@ def test_cash_and_investments_uses_current_concepts_then_older_fallbacks():
         source_doc_hash="e" * 64,
         extracted_at=EXTRACTED,
     )
-    series = {
-        row["fiscal_period"]: row["value"]
-        for row in rows if row["metric_id"] == "cash_and_investments"
-    }
+    series = {row["fiscal_period"]: row["value"] for row in rows if row["metric_id"] == "cash_and_investments"}
     assert series["2018Q3"] == cash_2018
     assert series["2026Q2"] == cash_2026 + short_2026
     assert series["2022Q3"] == cash_2022 + marketable_2022
@@ -630,15 +739,17 @@ def test_extract_still_parses_a_partial_collect():
             "outcome": "partial",
             "status": "partial",
             "run_status": "partial",
-            "manifests": [{
-                "ticker": "TSLA",
-                "key": "deliveries",
-                "source_kind": "press_release",
-                "period": "2026Q3",
-                "source_url": SEC_URL,
-                "sha256": "a" * 64,
-                "published_date": "2026-10-02",
-            }],
+            "manifests": [
+                {
+                    "ticker": "TSLA",
+                    "key": "deliveries",
+                    "source_kind": "press_release",
+                    "period": "2026Q3",
+                    "source_url": SEC_URL,
+                    "sha256": "a" * 64,
+                    "published_date": "2026-10-02",
+                }
+            ],
         },
         read_bytes=lambda key: _load("tsla_q3_2026_deliveries.html").encode(),
         read_json=lambda key: None,
@@ -649,3 +760,314 @@ def test_extract_still_parses_a_partial_collect():
     assert result["run_status"] == "ok"
     assert result["extracted"] > 0
     assert written[ir.curated_parquet_key("TSLA")] > 0
+
+
+REAL = FIXTURES / "real"
+
+
+def _real(name: str) -> str:
+    return (REAL / name).read_text(encoding="utf-8")
+
+
+def _value(rows, metric_id, fiscal_period):
+    return next(row["value"] for row in rows if row["metric_id"] == metric_id and row["fiscal_period"] == fiscal_period)
+
+
+def test_exhibits_come_from_the_index_table_or_submission_type_not_the_filename():
+    gif_index = {
+        "directory": {
+            "item": [
+                {"name": "exhibit991.htm", "type": "text.gif"},
+                {"name": "q2fy27pr.htm", "type": "text.gif"},
+                {"name": "earningsreleaseq22608042.htm", "type": "text.gif"},
+            ]
+        }
+    }
+    assert ir.exhibits_from_index(gif_index) == []
+    tesla = ir.exhibits_from_index_page(_real("tsla_q3_2026_index.html"))
+    assert tesla == [{"name": "exhibit991111111.htm", "type": "EX-99.1", "description": "EX-99.1"}] or (
+        tesla[0]["name"] == "exhibit991111111.htm" and tesla[0]["type"] == "EX-99.1"
+    )
+    nvidia = ir.exhibits_from_index_page(_real("nvda_q2_fy27_index.html"))
+    assert [item["name"] for item in nvidia] == ["q2fy27pr.htm", "q2fy27cfocommentary.htm"]
+    assert [item["type"] for item in nvidia] == ["EX-99.1", "EX-99.2"]
+    spacex = ir.exhibits_from_index_page(_real("spcx_q2_2026_index.html"))
+    assert spacex[0]["name"] == "earningsreleaseq22608042.htm"
+    assert spacex[0]["type"] == "EX-99.1"
+    submitted = ir.exhibits_from_submission(_real("tsla_q3_2026_submission.txt"))
+    assert submitted == [{"name": "exhibit991111111.htm", "type": "EX-99.1", "description": "EX-99.1"}]
+
+
+def test_deliveries_release_is_classified_from_body_text_and_not_the_filing_date():
+    text = _real("tsla_q3_2026_deliveries.htm")
+    assert ir.title_from_html(text) == "Document"
+    assert ir.classify_release("Document", text) == "press_release"
+    assert ir.fiscal_period_for_end(date(2026, 10, 2)) == "2026Q4"
+    assert ir.fiscal_period_from_text(text) == "2026Q3"
+    catalog = ir.load_catalog("TSLA")
+    parsed = ir.parse_company_document(text, catalog, **_meta(source_kind="deck", fiscal_period="2026Q4"))
+    rows = parsed["rows"]
+    assert _value(rows, "total_deliveries", "2026Q3") == 486_532
+    assert _value(rows, "energy_storage_deployed", "2026Q3") == pytest.approx(13.7)
+    assert not any(row["fiscal_period"] == "2026Q4" for row in rows)
+
+
+def test_update_deck_period_and_flowing_text_rows():
+    text = _real("tsla_q2_2026_deck.htm")
+    assert ir.classify_release(ir.title_from_html(text), text) == "deck"
+    assert ir.fiscal_period_for_end(date(2026, 7, 22)) == "2026Q3"
+    assert ir.fiscal_period_from_text(text) == "2026Q2"
+    catalog = ir.load_catalog("TSLA")
+    parsed = ir.parse_company_document(
+        text,
+        catalog,
+        **_meta(source_kind="press_release", fiscal_period="2026Q3", published_date="2026-07-22"),
+    )
+    rows = parsed["rows"]
+    assert _value(rows, "revenue_gaap", "2026Q2") == pytest.approx(28_236_000_000)
+    assert _value(rows, "total_deliveries", "2026Q2") == 480_126
+    assert _value(rows, "fsd_subscriptions", "2026Q2") == pytest.approx(1_480_000)
+    assert _value(rows, "free_cash_flow", "2026Q2") == pytest.approx(-1_092_000_000)
+    assert _value(rows, "energy_storage_deployed", "2026Q2") == pytest.approx(13.5)
+
+
+def test_flowing_text_keeps_lower_bounds_nulls_and_footnotes():
+    catalog = ir.load_catalog("TSLA")
+    text = """
+    ($ in millions)
+    Q2-2025 Q3-2025 Q4-2025 Q1-2026 Q2-2026 YoY
+    California Model 3/Y >550,000 >550,000 >550,000 >550,000 >550,000 —
+    Active FSD Subscriptions(2) (mil) 0.95 1.04 1.10 1.28 1.48 56%
+    Robotaxi fleet — — — — — —
+    """
+    parsed = ir.parse_company_document(text, catalog, **_meta(source_kind="deck", fiscal_period="2026Q2"))
+    capacity = next(row for row in parsed["proposals"] if "california" in row["metric_id"])
+    assert capacity["lower_bound"] is True
+    fsd = next(
+        row for row in parsed["rows"] if row["metric_id"] == "fsd_subscriptions" and row["fiscal_period"] == "2026Q2"
+    )
+    assert fsd["value"] == pytest.approx(1_480_000)
+    assert not any(row["metric_id"] == "robotaxi_fleet" and row["value"] == 0 for row in parsed["rows"])
+
+
+def test_spacex_release_parses_segment_rows_without_html_tables():
+    text = _real("spcx_q2_2026_release.htm")
+    assert ir.fiscal_period_from_text(text) == "2026Q2"
+    catalog = ir.load_catalog("SPCX")
+    parsed = ir.parse_company_document(
+        text,
+        catalog,
+        **_meta(ticker="SPCX", source_kind="press_release", fiscal_period="2026Q4"),
+    )
+    rows = parsed["rows"]
+    assert _value(rows, "revenue_space", "2026Q2") == pytest.approx(962_000_000)
+    assert _value(rows, "revenue_connectivity", "2026Q2") == pytest.approx(4_291_000_000)
+    assert _value(rows, "revenue_ai", "2026Q2") == pytest.approx(2_561_000_000)
+    assert _value(rows, "total_launches", "2026Q2") == 38
+    assert _value(rows, "mass_to_orbit", "2026Q2") == 485
+    assert _value(rows, "starlink_subscribers", "2026Q2") == pytest.approx(12_000_000)
+    assert _value(rows, "starlink_arpu", "2026Q2") == 66
+    assert _value(rows, "ai_nameplate_compute", "2026Q2") == pytest.approx(1.4)
+    assert _value(rows, "segment_adj_ebitda_connectivity", "2026Q2") == pytest.approx(2_597_000_000)
+    assert _value(rows, "adjusted_ebitda", "2026Q2") == pytest.approx(3_538_000_000)
+    assert _value(rows, "capex_total", "2026Q2") == pytest.approx(18_369_000_000)
+
+
+def test_nvidia_exhibits_use_fiscal_q2_fy27_not_the_august_filing_date():
+    commentary = _real("nvda_q2_fy27_cfo_commentary.htm")
+    release = _real("nvda_q2_fy27_press_release.htm")
+    assert ir.classify_release("Document", commentary) == "press_release"
+    assert ir.fiscal_end_month_from_submissions({"fiscalYearEnd": "0131"}) == 1
+    assert ir.fiscal_period_for_end(date(2026, 8, 26)) == "2026Q3"
+    assert ir.fiscal_period_for_end(date(2026, 7, 26), 1) == "2027Q2"
+    assert ir.fiscal_period_from_text(commentary, 1) == "2027Q2"
+    assert ir.fiscal_period_from_text(release, 1) == "2027Q2"
+    catalog = ir.load_catalog("NVDA")
+    parsed = ir.parse_company_document(
+        commentary,
+        catalog,
+        **_meta(ticker="NVDA", fiscal_end_month=1, fiscal_period="2026Q3"),
+    )
+    rows = parsed["rows"]
+    assert _value(rows, "revenue_gaap", "2027Q2") == pytest.approx(96_221_000_000)
+    assert _value(rows, "revenue_hyperscale", "2027Q2") == pytest.approx(48_710_000_000)
+    assert _value(rows, "revenue_acie", "2027Q2") == pytest.approx(40_313_000_000)
+    assert _value(rows, "revenue_edge_computing", "2027Q2") == pytest.approx(7_198_000_000)
+    assert _value(rows, "revenue_compute_networking", "2027Q2") == pytest.approx(88_299_000_000)
+    assert _value(rows, "revenue_graphics", "2027Q2") == pytest.approx(7_922_000_000)
+    assert _value(rows, "revenue_data_center", "2027Q2") == pytest.approx(89_023_000_000)
+    assert _value(rows, "gross_margin_gaap", "2027Q2") == pytest.approx(0.75)
+
+
+def test_scale_flags_do_not_leak_across_tickers():
+    flags = [
+        {
+            "ticker": "TSLA",
+            "metric_id": "capex",
+            "fiscal_period": "2026Q1",
+            "status": "scale_error",
+            "reason": "scale_error",
+        }
+    ]
+    run = ir.run_record(status="ok", sources={"tickers": 2}, mismatches=flags)
+    tesla = ir.build_serving(
+        "TSLA",
+        ir.load_catalog("TSLA"),
+        [],
+        run=run,
+        generated_at="2026-10-10T00:00:00Z",
+        mismatches=flags,
+    )
+    spacex = ir.build_serving(
+        "SPCX",
+        ir.load_catalog("SPCX"),
+        [],
+        run=run,
+        generated_at="2026-10-10T00:00:00Z",
+        mismatches=flags,
+    )
+    assert tesla["mismatches"] == flags
+    assert spacex["mismatches"] == []
+
+
+def test_generic_catalog_is_proposed_and_company_files_stay_specific():
+    generic = ir.load_catalog("RIVN")
+    ids = {item["metric_id"] for item in generic["metrics"]}
+    expected = {
+        "revenue_gaap",
+        "gross_profit",
+        "operating_cash_flow",
+        "capex",
+        "share_repurchases",
+        "dividends_paid",
+    }
+    assert expected <= ids
+    assert all(item["status"] == "proposed" and item["approved_by"] is None for item in generic["metrics"])
+    assert ir.validate_catalog(generic) == []
+    for ticker, specific in (
+        ("SPCX", {"revenue_space", "starlink_subscribers", "ai_nameplate_compute", "total_launches"}),
+        ("NVDA", {"revenue_hyperscale", "revenue_acie", "revenue_edge_computing", "revenue_graphics"}),
+    ):
+        loaded = ir.load_catalog(ticker)
+        loaded_ids = {item["metric_id"] for item in loaded["metrics"]}
+        assert specific <= loaded_ids
+        assert "revenue_gaap" in loaded_ids
+        assert "share_repurchases" in loaded_ids
+        on_disk = json.loads((Path(ir.__file__).resolve().parent / "catalog" / f"{ticker}.json").read_text())
+        disk_ids = {item["metric_id"] for item in on_disk["metrics"]}
+        assert "revenue_gaap" not in disk_ids
+        assert specific <= disk_ids
+        assert all(item["status"] == "proposed" and item["approved_by"] is None for item in on_disk["metrics"])
+
+
+def _cash_fact(start, end, value, form="10-Q", fp=None, fy=None):
+    fact = {"form": form, "start": start, "end": end, "val": value, "filed": end}
+    if fp:
+        fact["fp"] = fp
+    if fy:
+        fact["fy"] = fy
+    return fact
+
+
+def test_ytd_cash_flow_becomes_single_quarters():
+    facts = [
+        _cash_fact("2025-01-01", "2025-03-31", 100),
+        _cash_fact("2025-01-01", "2025-06-30", 250),
+        _cash_fact("2025-01-01", "2025-09-30", 400),
+        _cash_fact("2025-01-01", "2025-12-31", 500, form="10-K"),
+    ]
+    series = ir.discrete_cashflow_quarters(facts)
+    assert series == {"2025Q1": 100, "2025Q2": 150, "2025Q3": 150, "2025Q4": 100}
+    discrete = ir.discrete_cashflow_quarters(
+        [
+            _cash_fact("2025-01-01", "2025-03-31", 100),
+            _cash_fact("2025-04-01", "2025-06-30", 80),
+            _cash_fact("2025-01-01", "2025-06-30", 999),
+        ]
+    )
+    assert discrete["2025Q2"] == 80
+    companyfacts = {
+        "facts": {
+            "us-gaap": {
+                "PaymentsToAcquirePropertyPlantAndEquipment": {
+                    "units": {
+                        "USD": [
+                            _cash_fact("2025-01-01", "2025-03-31", 10),
+                            _cash_fact("2025-01-01", "2025-06-30", 40),
+                            _cash_fact("2025-01-01", "2025-09-30", 70),
+                            _cash_fact("2025-01-01", "2025-12-31", 100, form="10-K"),
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    rows, _flags = ir.companyfacts_observations(
+        companyfacts,
+        ir.load_catalog("TSLA"),
+        ticker="TSLA",
+        source_url="https://data.sec.gov/x",
+        source_doc_hash="c" * 64,
+        extracted_at=EXTRACTED,
+    )
+    capex = {row["fiscal_period"]: row["value"] for row in rows if row["metric_id"] == "capex"}
+    assert capex["2025Q1"] == 10
+    assert capex["2025Q2"] == 30
+    assert capex["2025Q3"] == 30
+    assert capex["2025Q4"] == 30
+
+
+def test_xbrl_period_uses_fiscal_year_and_tag_gaps():
+    nvidia_quarter = ir.parse_xbrl_quarters(
+        [
+            _cash_fact("2026-04-27", "2026-07-26", 96, fp="Q2", fy=2027),
+        ],
+        fiscal_end_month=1,
+    )
+    assert nvidia_quarter == {"2027Q2": 96}
+    assert ir._fiscal_period(date(2026, 7, 26), 12) == "2026Q3"
+
+    def observe(gaap, ticker):
+        rows, _flags = ir.companyfacts_observations(
+            {"facts": {"us-gaap": gaap}},
+            ir.load_catalog(ticker),
+            ticker=ticker,
+            source_url="https://data.sec.gov/x",
+            source_doc_hash="d" * 64,
+            extracted_at=EXTRACTED,
+        )
+        return rows
+
+    def usd(facts):
+        return {"units": {"USD": facts}}
+
+    qs_rows = observe({"OperatingIncomeLoss": usd([_cash_fact("2026-04-01", "2026-06-30", -20)])}, "QS")
+    assert qs_rows and all(row["metric_id"] != "revenue_gaap" for row in qs_rows)
+    goog = observe(
+        {
+            "Revenues": usd([_cash_fact("2026-04-01", "2026-06-30", 100)]),
+            "CostOfRevenue": usd([_cash_fact("2026-04-01", "2026-06-30", 40)]),
+        },
+        "GOOG",
+    )
+    assert _value(goog, "gross_profit", "2026Q2") == 60
+    assert _value(goog, "revenue_gaap", "2026Q2") == 100
+    meta = observe(
+        {
+            "RevenueFromContractWithCustomerExcludingAssessedTax": usd([_cash_fact("2026-04-01", "2026-06-30", 80)]),
+            "CostOfRevenue": usd([_cash_fact("2026-04-01", "2026-06-30", 15)]),
+        },
+        "META",
+    )
+    assert _value(meta, "gross_profit", "2026Q2") == 65
+    amzn = observe(
+        {
+            "GrossProfit": usd([_cash_fact("2009-04-01", "2009-06-30", 5)]),
+            "RevenueFromContractWithCustomerExcludingAssessedTax": usd([_cash_fact("2026-04-01", "2026-06-30", 200)]),
+            "CostOfRevenue": usd([_cash_fact("2026-04-01", "2026-06-30", 110)]),
+        },
+        "AMZN",
+    )
+    assert _value(amzn, "gross_profit", "2026Q2") == 90
+    assert not any(row["metric_id"] == "gross_profit" and row["fiscal_period"].startswith("2009") for row in amzn)
+    assert all(row["metric_id"] != "research_and_development" for row in amzn)

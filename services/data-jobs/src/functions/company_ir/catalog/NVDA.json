@@ -1,0 +1,232 @@
+{
+  "ticker": "NVDA",
+  "catalog_version": 1,
+  "fiscal_year_end_month": 1,
+  "approval_note": "Company-specific rows only. Shared GAAP rows, including share repurchases and dividends, are added when the catalog is loaded. Every entry is proposed. Nothing is auto-approved.",
+  "metrics": [
+    {
+      "metric_id": "revenue_data_center",
+      "display_name": "Data Center revenue",
+      "unit": "USD",
+      "definition": "Data Center revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "Data Center"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_hyperscale",
+      "display_name": "Hyperscale revenue",
+      "unit": "USD",
+      "definition": "Hyperscale revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "Hyperscale"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_acie",
+      "display_name": "AI Clouds, Industrial & Enterprise revenue",
+      "unit": "USD",
+      "definition": "AI Clouds, Industrial & Enterprise revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 30,
+      "aliases": [
+        "AI Clouds, Industrial, & Enterprise",
+        "AI Clouds, Industrial & Enterprise"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_edge_computing",
+      "display_name": "Edge Computing revenue",
+      "unit": "USD",
+      "definition": "Edge Computing revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 40,
+      "aliases": [
+        "Edge Computing"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_compute_networking",
+      "display_name": "Compute & Networking revenue",
+      "unit": "USD",
+      "definition": "Compute & Networking revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 50,
+      "aliases": [
+        "Compute & Networking"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_graphics",
+      "display_name": "Graphics revenue",
+      "unit": "USD",
+      "definition": "Graphics revenue. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 60,
+      "aliases": [
+        "Graphics"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "gross_margin_gaap",
+      "display_name": "GAAP gross margin",
+      "unit": "ratio",
+      "definition": "GAAP gross margin. Proposed from the company's filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 70,
+      "aliases": [
+        "Gross margin",
+        "GAAP gross margin"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "guidance_revenue_next_q",
+      "display_name": "Next-quarter revenue outlook",
+      "unit": "USD",
+      "definition": "Next-quarter revenue outlook. Proposed from the company's filing. Nothing here is approved.",
+      "category": "guidance",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 80,
+      "aliases": [
+        "Next-quarter revenue outlook"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "guidance_gross_margin_next_q",
+      "display_name": "Next-quarter gross margin outlook",
+      "unit": "ratio",
+      "definition": "Next-quarter gross margin outlook. Proposed from the company's filing. Nothing here is approved.",
+      "category": "guidance",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 90,
+      "aliases": [
+        "Next-quarter gross margin outlook",
+        "GAAP gross margin outlook"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "days_sales_outstanding",
+      "display_name": "Days sales outstanding",
+      "unit": "days",
+      "definition": "Days sales outstanding. Proposed from the company's filing. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 100,
+      "aliases": [
+        "Days sales outstanding",
+        "DSO"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "china_disclosure",
+      "display_name": "China / export-control notes",
+      "unit": "narrative",
+      "definition": "China / export-control notes. Proposed from the company's filing. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 110,
+      "aliases": [
+        "China disclosure"
+      ],
+      "disclosure_status": "narrative",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    }
+  ]
+}
