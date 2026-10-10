@@ -270,6 +270,18 @@ export function createAccountSettings(ctx) {
     if (tabId !== activeTabBefore) tabError = null;
     history.replaceState(history.state, "", settingsHash(activeTab));
     renderPanel();
+    revealActiveTab();
+  }
+
+  function revealActiveTab() {
+    const activeButton = tabButtons.find((tabButton) => tabButton.dataset.tab === activeTab);
+    const tablist = activeButton?.closest(".settings-tabs");
+    if (!activeButton || !tablist || tablist.clientWidth === 0) return;
+    const left = activeButton.offsetLeft;
+    const right = left + activeButton.offsetWidth;
+    const viewRight = tablist.scrollLeft + tablist.clientWidth;
+    if (left < tablist.scrollLeft) tablist.scrollLeft = left;
+    else if (right > viewRight) tablist.scrollLeft = right - tablist.clientWidth;
   }
 
   function open(tabId = "tickers", from = null) {
@@ -721,29 +733,37 @@ export function createAccountSettings(ctx) {
       .sort((a, b) => String(a.job).localeCompare(String(b.job)))
       .forEach((job) => {
         const row = el("tr");
-        row.append(el("td", "mono", job.job || "—"));
-        row.append(el("td", "", job.name || job.job || "—"));
-        row.append(el("td", "mono", ctx.formatTime(job.last_run, session.prefs.display.time_zone)));
-        row.append(el(
+        const jobCell = el("td", "mono", job.job || "—");
+        jobCell.dataset.label = "Job";
+        const nameCell = el("td", "", job.name || job.job || "—");
+        nameCell.dataset.label = "Name";
+        const lastCell = el("td", "mono", ctx.formatTime(job.last_run, session.prefs.display.time_zone));
+        lastCell.dataset.label = "Last";
+        const nextCell = el(
           "td",
           "mono",
           job.next_run ? ctx.formatTime(job.next_run, session.prefs.display.time_zone) : "not scheduled",
-        ));
+        );
+        nextCell.dataset.label = "Next";
+        row.append(jobCell, nameCell, lastCell, nextCell);
 
         const state = ["ok", "partial", "failed", "skipped"].includes(job.status) ? job.status : "never_run";
         const statusCell = el("td");
         const statusLabel = state === "never_run" ? "never run" : state;
         const indicator = el("span", `dot ${state === "never_run" ? "" : state}`.trim());
         indicator.setAttribute("aria-hidden", "true");
-        statusCell.append(indicator, document.createTextNode(` ${statusLabel}`));
+        const statusLine = el("span", "refresh-status-line");
+        statusLine.append(indicator, document.createTextNode(` ${statusLabel}`));
+        statusCell.append(statusLine);
         statusCell.className = `refresh-status ${state}`;
+        statusCell.dataset.label = "Status";
         statusCell.title = job.last_outcome
           ? `Last outcome: ${job.last_outcome}; failed sources: ${job.failed_sources || 0}`
           : "No successful run has been recorded.";
         if (job.failed_source_ids?.length) {
-          statusCell.append(el("div", "settings-hint error", `Failed: ${job.failed_source_ids.join(", ")}`));
+          statusCell.append(el("div", "settings-hint error refresh-detail", `Failed: ${job.failed_source_ids.join(", ")}`));
         }
-        if (state === "skipped" && job.reason) statusCell.append(el("div", "settings-hint", job.reason));
+        if (state === "skipped" && job.reason) statusCell.append(el("div", "settings-hint refresh-detail", job.reason));
         row.append(statusCell);
         body.append(row);
       });
