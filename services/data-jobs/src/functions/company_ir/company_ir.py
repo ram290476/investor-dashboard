@@ -16,6 +16,7 @@ import json
 import os
 import re
 from datetime import UTC, date, datetime, timedelta
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -97,19 +98,81 @@ SOURCE_PRIORITY = {
     "guidance": {"deck": 80, "press_release": 70, "note": 30, "news": 0, "llm": 0},
 }
 # Tags used only to reconcile a deck figure. XBRL wins; a deck value never replaces these.
+# Cash-flow concepts are filed year-to-date; mode "ytd" differences them into quarters.
+# Tag order is a tie-break. The tag whose newest fact is most recent wins, so a
+# concept that died in 2009 does not block the one the company uses now.
 GAAP_XBRL_TAGS = {
-    "revenue_gaap": ("duration", ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"]),
-    "operating_income": ("duration", ["OperatingIncomeLoss"]),
-    "net_income_gaap": ("duration", ["NetIncomeLoss"]),
-    "research_and_development": ("duration", ["ResearchAndDevelopmentExpense"]),
-    "sga": ("duration", ["SellingGeneralAndAdministrativeExpense"]),
-    "operating_cash_flow": ("duration", ["NetCashProvidedByUsedInOperatingActivities"]),
-    "capex": ("duration", ["PaymentsToAcquirePropertyPlantAndEquipment"]),
-    "eps_diluted": ("duration", ["EarningsPerShareDiluted"]),
-    "deferred_revenue": ("instant", ["ContractWithCustomerLiability"]),
+    "revenue_gaap": {
+        "kind": "duration",
+        "tags": ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax", "SalesRevenueNet"],
+        "mode": "duration",
+    },
+    "gross_profit": {"kind": "duration", "tags": ["GrossProfit"], "mode": "duration"},
+    "cost_of_revenue": {
+        "kind": "duration",
+        "tags": ["CostOfRevenue", "CostOfGoodsAndServicesSold"],
+        "mode": "duration",
+    },
+    "operating_income": {"kind": "duration", "tags": ["OperatingIncomeLoss"], "mode": "duration"},
+    "net_income_gaap": {"kind": "duration", "tags": ["NetIncomeLoss"], "mode": "duration"},
+    "research_and_development": {
+        "kind": "duration",
+        "tags": ["ResearchAndDevelopmentExpense"],
+        "mode": "duration",
+    },
+    "sga": {
+        "kind": "duration",
+        "tags": ["SellingGeneralAndAdministrativeExpense", "GeneralAndAdministrativeExpense"],
+        "mode": "duration",
+    },
+    "operating_cash_flow": {
+        "kind": "duration",
+        "tags": ["NetCashProvidedByUsedInOperatingActivities"],
+        "mode": "ytd",
+    },
+    "capex": {
+        "kind": "duration",
+        "tags": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+        "mode": "ytd",
+    },
+    "share_repurchases": {
+        "kind": "duration",
+        "tags": ["PaymentsForRepurchaseOfCommonStock"],
+        "mode": "ytd",
+    },
+    "dividends_paid": {
+        "kind": "duration",
+        "tags": ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"],
+        "mode": "ytd",
+    },
+    "eps_diluted": {
+        "kind": "duration",
+        "tags": ["EarningsPerShareDiluted"],
+        "mode": "duration",
+        "unit": "USD/shares",
+    },
+    "deferred_revenue": {
+        "kind": "instant",
+        "tags": [
+            "ContractWithCustomerLiabilityCurrent",
+            "ContractWithCustomerLiabilityNoncurrent",
+            "DeferredRevenueCurrent",
+            "ContractWithCustomerLiability",
+        ],
+        "mode": "deferred",
+    },
+    "inventory": {"kind": "instant", "tags": ["InventoryNet"], "mode": "instant"},
+    "cash_and_equivalents": {
+        "kind": "instant",
+        "tags": [
+            "CashAndCashEquivalentsAtCarryingValue",
+            "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+        ],
+        "mode": "instant",
+    },
     # Composed per period in cash_and_investments_series. The retired restricted-cash
     # concept stops at 2018Q3 and must not win just because it has older facts.
-    "cash_and_investments": ("instant", []),
+    "cash_and_investments": {"kind": "instant", "tags": [], "mode": "cash_investments"},
 }
 _FOOTNOTE_TAIL = re.compile(r"(?:\s*[\u00b9\u00b2\u00b3\u2070-\u2079]+|\s*\(\d+\))+\s*$")
 _UNIT_PAREN = re.compile(
@@ -234,13 +297,100 @@ def sanitize_html(html: str) -> str:
     return _HANDLER.sub("", cleaned)
 
 
+def generic_gaap_metrics() -> list[dict]:
+    """Minimal GAAP catalog shared by every filer. Every row stays proposed.
+
+    Company JSON files add only the rows that are not in this list. A ticker with
+    no file still keeps XBRL instead of dropping it.
+    """
+    rows = [
+        ("revenue_gaap", "Revenue", "USD", ["Revenue", "Total revenue", "Total revenues", "revenue total"]),
+        ("gross_profit", "Gross profit", "USD", ["Gross profit"]),
+        ("cost_of_revenue", "Cost of revenue", "USD", ["Cost of revenue"]),
+        (
+            "operating_income",
+            "Operating income (loss)",
+            "USD",
+            ["Operating income", "Income from operations", "Loss from operations"],
+        ),
+        (
+            "net_income_gaap",
+            "Net income (loss)",
+            "USD",
+            ["Net income", "Net loss", "Net income attributable to common stockholders (GAAP)"],
+        ),
+        (
+            "eps_diluted",
+            "Diluted EPS",
+            "USD/share",
+            ["Diluted EPS", "EPS attributable to common stockholders, diluted (GAAP)"],
+        ),
+        ("research_and_development", "R&D expense", "USD", ["Research and development", "R&D"]),
+        ("sga", "SG&A", "USD", ["SG&A", "Selling, general and administrative"]),
+        ("cash_and_equivalents", "Cash and cash equivalents", "USD", ["Cash and cash equivalents"]),
+        ("deferred_revenue", "Deferred revenue", "USD", ["Deferred revenue"]),
+        ("inventory", "Inventory", "USD", ["Inventory", "Inventory, net"]),
+        (
+            "operating_cash_flow",
+            "Operating cash flow",
+            "USD",
+            ["Operating cash flow", "Net cash provided by operating activities"],
+        ),
+        (
+            "capex",
+            "Capital expenditures",
+            "USD",
+            ["Capital expenditures", "Capex", "Payments to acquire property, plant and equipment"],
+        ),
+        (
+            "share_repurchases",
+            "Share repurchases",
+            "USD",
+            ["Share repurchases", "Payments related to repurchases of common stock"],
+        ),
+        ("dividends_paid", "Dividends paid", "USD", ["Dividends paid", "Dividends"]),
+    ]
+    metrics = []
+    for order, (metric_id, display_name, unit, aliases) in enumerate(rows, start=1):
+        metrics.append(
+            {
+                "metric_id": metric_id,
+                "display_name": display_name,
+                "unit": unit,
+                "definition": f"{display_name} from SEC companyfacts. Proposed until a reviewer approves it.",
+                "category": "fundamentals",
+                "status": "proposed",
+                "approved_by": None,
+                "approved_at": None,
+                "panel_order": 400 + order,
+                "aliases": aliases,
+                "disclosure_status": "numeric",
+                "scale": 1,
+                "source_priority": ["xbrl", "deck", "press_release"],
+            }
+        )
+    return metrics
+
+
 def load_catalog(ticker: str) -> dict:
+    """Ticker file plus any generic GAAP rows the file does not already define."""
     symbol = str(ticker or "").upper()
     path = Path(__file__).resolve().parent / "catalog" / f"{symbol}.json"
-    if not path.is_file():
-        return {"ticker": symbol, "catalog_version": 1, "metrics": []}
-    document = json.loads(path.read_text(encoding="utf-8"))
+    if path.is_file():
+        document = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        document = {
+            "ticker": symbol,
+            "catalog_version": 1,
+            "approval_note": "Generic GAAP rows only. Every entry is proposed. Nothing is auto-approved.",
+            "metrics": [],
+        }
     document["ticker"] = symbol
+    present = {item.get("metric_id") for item in document.get("metrics") or []}
+    for item in generic_gaap_metrics():
+        if item["metric_id"] not in present:
+            document.setdefault("metrics", []).append(item)
+            present.add(item["metric_id"])
     return document
 
 
@@ -249,7 +399,11 @@ def catalog_entry(catalog: dict, metric_id: str) -> dict | None:
 
 
 def set_catalog_status(
-    catalog: dict, metric_id: str, status: str, approved_by: str | None, approved_at: str | None,
+    catalog: dict,
+    metric_id: str,
+    status: str,
+    approved_by: str | None,
+    approved_at: str | None,
 ) -> dict:
     """Reviewed JSON/CLI approval. Does not invent an approval Ram has not made."""
     if status not in {"proposed", "approved", "rejected"}:
@@ -266,7 +420,9 @@ def set_catalog_status(
 
 def normalize_label(text: str) -> str:
     """Lowercase a row label and drop footnote markers and unit parentheticals."""
-    cleaned = _FOOTNOTE_TAIL.sub("", str(text).replace("_", " "))
+    cleaned = str(text).replace("_", " ")
+    cleaned = re.sub(r"\(\d+\)", " ", cleaned)
+    cleaned = _FOOTNOTE_TAIL.sub("", cleaned)
     cleaned = _UNIT_PAREN.sub("", cleaned)
     cleaned = cleaned.replace("%", " ")
     return " ".join(cleaned.lower().split())
@@ -468,13 +624,20 @@ def text_tables(text: str) -> list[list[list[str]]]:
 
 
 def quarter_token(header: str) -> str | None:
-    """`2026Q3` and `Q3-26` are the same fiscal period. A YoY column is not a period."""
+    """`2026Q3`, `Q3-26` and `Q2 FY27` are fiscal periods. A YoY column is not a period."""
     text = " ".join(str(header).replace("'", " ").split())
-    if text.lower() in _YOY_HEADER:
+    lowered = text.lower()
+    if lowered in _YOY_HEADER or lowered in {"q/q", "y/y", "ytd"}:
         return None
     compact = text.upper().replace(" ", "")
     if _QUARTER.fullmatch(compact):
         return compact
+    fiscal = re.fullmatch(r"Q([1-4])\s*FY\s*(\d{2}|\d{4})", text, re.IGNORECASE)
+    if fiscal:
+        year = int(fiscal.group(2))
+        if year < 100:
+            year += 2000
+        return f"{year}Q{fiscal.group(1)}"
     match = _QSHORT.fullmatch(text.strip())
     if not match:
         return None
@@ -482,6 +645,54 @@ def quarter_token(header: str) -> str | None:
     if year < 100:
         year += 2000
     return f"{year}Q{match.group(1)}"
+
+
+def _coalesce_percent_cells(row: list[str]) -> list[str]:
+    """EDGAR sometimes puts the percent sign in the next cell. Glue it back."""
+    cells: list[str] = []
+    index = 0
+    while index < len(row):
+        cell = row[index]
+        if index + 1 < len(row) and row[index + 1].strip() == "%" and _parse_cell(cell)[0] is not None:
+            cells.append(f"{cell}%")
+            index += 2
+            continue
+        cells.append(cell)
+        index += 1
+    return cells
+
+
+def _prepare_quarter_table(table: list[list[str]]) -> list[list[str]] | None:
+    """Find the header row. A caption above it still supplies `($ in millions)`."""
+    prepared = [_coalesce_percent_cells(row) for row in table]
+    header_at = None
+    for index, row in enumerate(prepared[:6]):
+        if len(_quarter_headers(row)) >= 2:
+            header_at = index
+            break
+    if header_at is None:
+        return None
+    header = list(prepared[header_at])
+    caption = " ".join(" ".join(row) for row in prepared[:header_at]).strip()
+    if caption:
+        header[0] = f"{caption} {header[0]}".strip()
+    return [header, *prepared[header_at + 1 :]]
+
+
+_TABLE_SCALE_SKIP = re.compile(
+    r"\b(?:eps|per share|per month|arpu|gwh)\b|\(in gw\)|\(#\)|metric tons?",
+    re.IGNORECASE,
+)
+
+
+def _row_scale(label: str, cell: str, table_scale: float) -> float:
+    """A millions caption does not apply to percents, per-share amounts, or unit rows."""
+    text = str(cell)
+    if any(token in text.lower() for token in ("%", "bp", "pts")):
+        return 1.0
+    if _TABLE_SCALE_SKIP.search(label or ""):
+        return 1.0
+    return table_scale
 
 
 def _quarter_headers(headers: list[str]) -> list[tuple[int, str]]:
@@ -555,7 +766,8 @@ def table_scan(
     rows: list[dict] = []
     proposals: list[dict] = []
     seen_proposals: set[str] = set()
-    for table in tables:
+    for raw_table in tables:
+        table = _prepare_quarter_table(raw_table) if raw_table else None
         if not table:
             continue
         quarters = _quarter_headers(table[0])
@@ -578,40 +790,49 @@ def table_scan(
                 parsed_any = True
                 if entry is None:
                     continue
-                scaled, hinted = apply_scale(value, raw_label, entry, reported_scale)
+                scaled, hinted = apply_scale(
+                    value,
+                    raw_label,
+                    entry,
+                    _row_scale(raw_label, cells[index], reported_scale),
+                )
                 unit = entry.get("unit") or hinted or unit_hint or ""
                 if unit == "ratio" and abs(scaled) > 1:
                     scaled = scaled / 100.0
-                rows.append(_observation(
-                    entry,
-                    ticker=ticker,
-                    fiscal_period=fiscal_period,
-                    value=scaled,
-                    unit=unit,
-                    source_url=source_url,
-                    source_doc_hash=source_doc_hash,
-                    extracted_at=extracted_at,
-                    published_date=published_date,
-                    method=method,
-                    confidence=confidence,
-                    lower_bound=lower_bound,
-                    source_kind=source_kind,
-                    label=raw_label,
-                ))
+                rows.append(
+                    _observation(
+                        entry,
+                        ticker=ticker,
+                        fiscal_period=fiscal_period,
+                        value=scaled,
+                        unit=unit,
+                        source_url=source_url,
+                        source_doc_hash=source_doc_hash,
+                        extracted_at=extracted_at,
+                        published_date=published_date,
+                        method=method,
+                        confidence=confidence,
+                        lower_bound=lower_bound,
+                        source_kind=source_kind,
+                        label=raw_label,
+                    )
+                )
             if entry is None and parsed_any and method != "llm":
                 key = normalize_label(raw_label)
                 if key and key not in seen_proposals:
                     seen_proposals.add(key)
-                    proposals.append(propose_metric(
-                        raw_label,
-                        unit=unit_hint or "",
-                        scale=label_scale,
-                        fiscal_period=quarters[-1][1],
-                        source=source_url,
-                        lower_bound=any(
-                            _parse_cell(cells[index])[1] for index, _period in quarters if index < len(cells)
-                        ),
-                    ))
+                    proposals.append(
+                        propose_metric(
+                            raw_label,
+                            unit=unit_hint or "",
+                            scale=label_scale,
+                            fiscal_period=quarters[-1][1],
+                            source=source_url,
+                            lower_bound=any(
+                                _parse_cell(cells[index])[1] for index, _period in quarters if index < len(cells)
+                            ),
+                        )
+                    )
     return rows, proposals
 
 
@@ -655,6 +876,195 @@ def _fiscal_period(end: date, fiscal_end_month: int) -> str:
     return f"{year}Q{quarter}"
 
 
+def fiscal_end_month_from_submissions(submissions: dict) -> int:
+    """SEC `fiscalYearEnd` is MMDD. Nvidia's `0131` is a late-January year end."""
+    digits = re.sub(r"\D", "", str((submissions or {}).get("fiscalYearEnd") or ""))
+    if len(digits) >= 2:
+        month = int(digits[:2])
+        if 1 <= month <= 12:
+            return month
+    return 12
+
+
+def _quarter_months(fiscal_end_month: int, quarter: int) -> set[int]:
+    """Months that belong to a fiscal quarter. A January year end makes Q2 May-July."""
+    first = ((fiscal_end_month % 12) + (quarter - 1) * 3) % 12 + 1
+    return {first, first % 12 + 1, (first + 1) % 12 + 1}
+
+
+def _period_from_fact(fact: dict, fiscal_end_month: int) -> str:
+    """Use the filing's `fy`/`fp` when it agrees with the period end. Otherwise the end date."""
+    end = date.fromisoformat(fact["end"])
+    from_end = _fiscal_period(end, fiscal_end_month)
+    fp = str(fact.get("fp") or "").upper()
+    fy = fact.get("fy")
+    if fy and abs(int(fy) - end.year) <= 1:
+        if fp in {"Q1", "Q2", "Q3", "Q4"} and end.month in _quarter_months(fiscal_end_month, int(fp[1])):
+            return f"{int(fy)}{fp}"
+        if fp == "FY" and end.month in _quarter_months(fiscal_end_month, 4):
+            return f"{int(fy)}Q4"
+    return from_end
+
+
+_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+_ORDINAL_QUARTER = {"first": 1, "second": 2, "third": 3, "fourth": 4}
+
+
+def _expand_year(year: int) -> int:
+    return year + 2000 if year < 100 else year
+
+
+def fiscal_period_from_text(text: str, fiscal_end_month: int = 12) -> str | None:
+    """The quarter the release is about. The 8-K report date is the filing day, not the quarter."""
+    head = plain_text(text)[:5000]
+    fiscal = re.search(r"\bQ([1-4])\s*(?:FY|fiscal)\s*(\d{2}|\d{4})\b", head, re.IGNORECASE)
+    if fiscal:
+        return f"{_expand_year(int(fiscal.group(2)))}Q{fiscal.group(1)}"
+    named_fiscal = re.search(
+        r"\b(first|second|third|fourth)\s+quarter(?:\s+of)?\s+fiscal\s+(\d{4})\b",
+        head,
+        re.IGNORECASE,
+    )
+    if named_fiscal:
+        return f"{named_fiscal.group(2)}Q{_ORDINAL_QUARTER[named_fiscal.group(1).lower()]}"
+    update = re.search(r"\bQ([1-4])\s*(20\d{2})\s+update\b", head, re.IGNORECASE)
+    if update:
+        return f"{update.group(2)}Q{update.group(1)}"
+    named = re.search(
+        r"\b(first|second|third|fourth)\s+quarter\s+(20\d{2})\b",
+        head,
+        re.IGNORECASE,
+    )
+    if named:
+        return f"{named.group(2)}Q{_ORDINAL_QUARTER[named.group(1).lower()]}"
+    short = re.search(r"\bQ([1-4])\s+(20\d{2})\b", head, re.IGNORECASE)
+    if short:
+        return f"{short.group(2)}Q{short.group(1)}"
+    ended = re.search(
+        r"\bquarter ended\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})",
+        head,
+        re.IGNORECASE,
+    )
+    if ended and ended.group(1).lower() in _MONTHS:
+        end = date(int(ended.group(3)), _MONTHS[ended.group(1).lower()], int(ended.group(2)))
+        return _fiscal_period(end, fiscal_end_month)
+    return None
+
+
+def _span_bucket(days: int) -> str | None:
+    """Map a cash-flow duration to a quarter, half year, nine months, or fiscal year."""
+    if 80 <= days <= 100:
+        return "quarter"
+    if 165 <= days <= 200:
+        return "h1"
+    if 250 <= days <= 290:
+        return "nine"
+    if 340 <= days <= 380:
+        return "fy"
+    return None
+
+
+def discrete_cashflow_quarters(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
+    """Turn year-to-date cash-flow facts into single quarters.
+
+    Q1 is the three-month fact. Q2 is H1 minus Q1 when the quarter itself was not
+    filed. Q3 is nine months minus H1. Q4 is the fiscal year minus nine months.
+    A fact that is already one quarter wins over the difference.
+    """
+    latest: dict[tuple[str, str], tuple[str, float]] = {}
+    for fact in facts:
+        if fact.get("form") not in {"10-Q", "10-K", "10-Q/A", "10-K/A"}:
+            continue
+        if "end" not in fact or "start" not in fact or "val" not in fact:
+            continue
+        days = (date.fromisoformat(fact["end"]) - date.fromisoformat(fact["start"])).days
+        bucket = _span_bucket(days)
+        if bucket is None:
+            continue
+        period = _period_from_fact(fact, fiscal_end_month)
+        quarter = int(period[-1]) if period[-2:-1] == "Q" and period[-1].isdigit() else 0
+        if bucket == "h1" and quarter != 2:
+            continue
+        if bucket == "nine" and quarter != 3:
+            continue
+        if bucket == "fy" and quarter != 4:
+            continue
+        filed = str(fact.get("filed") or "")
+        key = (period, bucket)
+        current = latest.get(key)
+        if current is None or filed >= current[0]:
+            latest[key] = (filed, float(fact["val"]))
+    values = {key: item[1] for key, item in latest.items()}
+    years = sorted({int(period[:4]) for period, _bucket in values})
+    derived: dict[str, float] = {}
+    for year in years:
+        q1 = values.get((f"{year}Q1", "quarter"))
+        q2 = values.get((f"{year}Q2", "quarter"))
+        h1 = values.get((f"{year}Q2", "h1"))
+        q3 = values.get((f"{year}Q3", "quarter"))
+        nine = values.get((f"{year}Q3", "nine"))
+        q4 = values.get((f"{year}Q4", "quarter"))
+        fy = values.get((f"{year}Q4", "fy"))
+        if q1 is not None:
+            derived[f"{year}Q1"] = q1
+        if q2 is not None:
+            derived[f"{year}Q2"] = q2
+        elif h1 is not None and q1 is not None:
+            derived[f"{year}Q2"] = h1 - q1
+        if q3 is not None:
+            derived[f"{year}Q3"] = q3
+        elif nine is not None and h1 is not None:
+            derived[f"{year}Q3"] = nine - h1
+        elif nine is not None and q1 is not None and f"{year}Q2" in derived:
+            derived[f"{year}Q3"] = nine - q1 - derived[f"{year}Q2"]
+        if q4 is not None:
+            derived[f"{year}Q4"] = q4
+        elif fy is not None and nine is not None:
+            derived[f"{year}Q4"] = fy - nine
+        elif fy is not None and all(f"{year}Q{quarter}" in derived for quarter in (1, 2, 3)):
+            derived[f"{year}Q4"] = fy - derived[f"{year}Q1"] - derived[f"{year}Q2"] - derived[f"{year}Q3"]
+    return derived
+
+
+def _newest_period_year(series: dict[str, float]) -> int:
+    years = [int(period[:4]) for period in series if _QUARTER.fullmatch(period)]
+    return max(years) if years else 0
+
+
+def gross_profit_series(
+    reported: dict[str, float],
+    revenue: dict[str, float],
+    cost: dict[str, float],
+) -> dict[str, float]:
+    """Use GrossProfit while it is current. Otherwise revenue minus cost of revenue.
+
+    Amazon's GrossProfit tag stops in 2009. Google and Meta do not tag gross profit.
+    A stale tag is left out rather than published as the latest quarter.
+    """
+    if reported and revenue and _newest_period_year(reported) >= _newest_period_year(revenue) - 5:
+        return reported
+    if reported and not revenue:
+        return reported
+    derived = {}
+    for period, amount in revenue.items():
+        if period in cost:
+            derived[period] = amount - cost[period]
+    return derived
+
+
 def _is_scale_outlier(value: float, peers: list[float]) -> bool:
     """A fact 100x away from its neighbours is a scale error, not a revision."""
     positives = [abs(item) for item in peers if item]
@@ -677,12 +1087,14 @@ def _select_sane_latest(by_period: dict[str, list[tuple[str, float]]]) -> tuple[
         chosen = None
         for filed, value in reversed(facts):
             if _is_scale_outlier(value, peers):
-                flags.append({
-                    "fiscal_period": period,
-                    "value": value,
-                    "filed": filed,
-                    "reason": "scale_error",
-                })
+                flags.append(
+                    {
+                        "fiscal_period": period,
+                        "value": value,
+                        "filed": filed,
+                        "reason": "scale_error",
+                    }
+                )
                 continue
             chosen = value
             break
@@ -711,7 +1123,7 @@ def _collect_xbrl_facts(facts: list[dict], fiscal_end_month: int, kind: str) -> 
                 days = (end - date.fromisoformat(start)).days
                 if days > 5:
                     continue
-        period = _fiscal_period(end, fiscal_end_month)
+        period = _period_from_fact(fact, fiscal_end_month)
         grouped.setdefault(period, []).append((str(fact.get("filed") or ""), float(fact["val"])))
     return grouped
 
@@ -750,7 +1162,13 @@ def reconcile_rows(ir_rows: list[dict], xbrl_by_key: dict[tuple[str, str], float
         if key not in xbrl_by_key:
             continue
         result = reconcile_xbrl(row.get("value"), xbrl_by_key[key])
-        result.update({"metric_id": row["metric_id"], "fiscal_period": row["fiscal_period"]})
+        result.update(
+            {
+                "metric_id": row["metric_id"],
+                "fiscal_period": row["fiscal_period"],
+                "ticker": row.get("ticker"),
+            }
+        )
         if result["status"] == "mismatch":
             mismatches.append(result)
     return mismatches
@@ -869,13 +1287,16 @@ def _fill_gaps(points: list[dict]) -> list[dict]:
         if current is None:
             filled.append({"fiscal_period": fiscal_period, "value": None, "reported": False})
         else:
-            filled.append({
-                "fiscal_period": fiscal_period,
-                "period_end": current["period_end"].isoformat()
-                if isinstance(current["period_end"], date) else current.get("period_end"),
-                "value": current["value"],
-                "reported": current.get("value") is not None,
-            })
+            filled.append(
+                {
+                    "fiscal_period": fiscal_period,
+                    "period_end": current["period_end"].isoformat()
+                    if isinstance(current["period_end"], date)
+                    else current.get("period_end"),
+                    "value": current["value"],
+                    "reported": current.get("value") is not None,
+                }
+            )
         quarter += 1
         if quarter == 5:
             year, quarter = year + 1, 1
@@ -929,6 +1350,18 @@ def _change(latest: dict | None, prior: dict | None) -> float | None:
     return (latest["value"] - prior["value"]) / abs(prior["value"])
 
 
+def mismatches_for_ticker(ticker: str, mismatches: list[dict] | None) -> list[dict]:
+    """Scale flags and XBRL mismatches stay on the ticker that produced them."""
+    symbol = str(ticker or "").upper()
+    kept = []
+    for item in mismatches or []:
+        owner = str(item.get("ticker") or "").upper()
+        if owner and owner != symbol:
+            continue
+        kept.append(item)
+    return kept
+
+
 def build_serving(
     ticker: str,
     catalog: dict,
@@ -940,18 +1373,17 @@ def build_serving(
     mismatches: list[dict] | None = None,
 ) -> dict:
     """Approved and proposed metrics. A partial or failed run keeps the previous good payload."""
+    scoped = mismatches_for_ticker(ticker, mismatches if mismatches is not None else run.get("mismatches"))
     if run.get("status") in {"partial", "failed"} and previous and previous.get("metrics"):
         kept = json.loads(json.dumps(previous))
         kept["run_status"] = run["status"]
         kept["stale"] = True
         kept["generated_at"] = generated_at
         kept["freshness_label"] = "Partial run · previous approved values kept"
-        kept["mismatches"] = list(mismatches or run.get("mismatches") or [])
+        kept["mismatches"] = scoped
         return kept
 
-    mismatch_index = {
-        (item["metric_id"], item["fiscal_period"]): item for item in (mismatches or run.get("mismatches") or [])
-    }
+    mismatch_index = {(item["metric_id"], item["fiscal_period"]): item for item in scoped}
     by_metric: dict[str, list[dict]] = {}
     for row in rows:
         entry = catalog_entry(catalog, row["metric_id"])
@@ -1051,7 +1483,7 @@ def build_serving(
         "discovered": bool(metrics),
         "metrics": metrics,
         "unavailable": [],
-        "mismatches": list(mismatches or []),
+        "mismatches": scoped,
     }
 
 
@@ -1194,6 +1626,249 @@ def validate_catalog(document: dict) -> list[str]:
     return errors
 
 
+def plain_text(html: str) -> str:
+    """Visible text. Block tags become line breaks so a slide stays one paragraph."""
+    cleaned = unescape(sanitize_html(html or ""))
+    cleaned = re.sub(r"(?i)<br\s*/?>", "\n", cleaned)
+    cleaned = re.sub(r"(?i)</(?:p|div|tr|li|h[1-6]|table|section)>", "\n", cleaned)
+    cleaned = re.sub(r"(?i)<[^>]+>", " ", cleaned)
+    cleaned = cleaned.replace("\xa0", " ").replace("\u200b", "")
+    return cleaned
+
+
+_VALUE_TOKEN = re.compile(
+    r"^(?:[<>]\s*)?\$?\(?-?\d[\d,]*(?:\.\d+)?\)?(?:%|bp|pts)?$|[\u2014\u2013\-]$",
+    re.IGNORECASE,
+)
+_QUARTER_RUN = re.compile(
+    r"(?:Q[1-4][\s'\-]*(?:FY\s*)?(?:\d{2}|\d{4})\s+){3,8}(?:YoY|Y/Y|Year(?:\s+|-)over(?:\s+|-)year)?",
+    re.IGNORECASE,
+)
+_MONTH_DATE = (
+    r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4}"
+)
+_DATE_RUN = re.compile(rf"((?:{_MONTH_DATE}\s+){{3,8}})", re.IGNORECASE)
+
+
+def _is_value_token(token: str) -> bool:
+    return bool(_VALUE_TOKEN.fullmatch(token.replace(" ", "")))
+
+
+def _glue_tokens(raw: list[str]) -> list[str]:
+    tokens: list[str] = []
+    index = 0
+    while index < len(raw):
+        token = raw[index]
+        if index + 1 < len(raw) and raw[index + 1].lower() in {"%", "bp", "pts"}:
+            token = f"{token}{raw[index + 1]}"
+            index += 2
+        else:
+            index += 1
+        tokens.append(token.strip("$").strip() if token in {"$"} else token)
+    return [token for token in tokens if token and token != "$"]
+
+
+def _rows_after_header(body: str, width: int) -> list[list[str]]:
+    tokens = _glue_tokens(body.split())
+    rows: list[list[str]] = []
+    section = ""
+    index = 0
+    while index < len(tokens) and len(rows) < 80:
+        if not _is_value_token(tokens[index]):
+            index += 1
+            continue
+        end = index
+        while end < len(tokens) and _is_value_token(tokens[end]):
+            end += 1
+        run = tokens[index:end]
+        if len(run) < width:
+            index = end
+            continue
+        label_tokens: list[str] = []
+        cursor = index - 1
+        while cursor >= 0 and not _is_value_token(tokens[cursor]) and len(label_tokens) < 16:
+            label_tokens.append(tokens[cursor])
+            cursor -= 1
+        label_tokens.reverse()
+        label = " ".join(label_tokens).strip(" .|")
+        label = re.sub(r"\s+", " ", label).strip("$").strip()
+        lowered = label.lower()
+        if lowered.startswith("revenue"):
+            section = "revenue"
+        elif "ebitda" in lowered:
+            section = "adjusted ebitda"
+        elif lowered.startswith("capex") or lowered.endswith(" capex"):
+            section = "capex"
+        elif "from operations" in lowered or lowered.startswith("income"):
+            section = "operating income"
+        if lowered == "total" and section:
+            label = f"{section} total"
+        if label and lowered not in _YOY_HEADER:
+            rows.append([label, *run[:width]])
+        index = end
+    return rows
+
+
+def _date_from_header(token: str) -> date | None:
+    match = re.fullmatch(_MONTH_DATE, token.strip(), re.IGNORECASE)
+    if not match:
+        return None
+    month_name, day, year = token.replace(",", "").split()
+    month = _MONTHS.get(month_name.lower())
+    if not month:
+        return None
+    return date(int(year), month, int(day))
+
+
+def flowing_text_tables(text: str, fiscal_end_month: int = 12) -> list[list[list[str]]]:
+    """KPI rows with no `<table>` tag: a label, then quarter values, then YoY.
+
+    Also accepts a run of period-end dates. A repeated date is a year-to-date column
+    and is not treated as another quarter.
+    """
+    plain = plain_text(text)
+    tables: list[list[list[str]]] = []
+    quarter_spans = list(_QUARTER_RUN.finditer(plain))
+    for index, match in enumerate(quarter_spans):
+        stop = quarter_spans[index + 1].start() if index + 1 < len(quarter_spans) else match.end() + 6000
+        header_tokens = _glue_tokens(match.group(0).split())
+        quarters = [token for token in header_tokens if quarter_token(token)]
+        if len(quarters) < 3:
+            continue
+        width = len(header_tokens)
+        preamble = plain[max(0, match.start() - 220) : match.start()]
+        header = [preamble.strip() or "Metric", *header_tokens]
+        body_rows = _rows_after_header(plain[match.end() : stop], width)
+        if body_rows:
+            tables.append([header, *body_rows])
+    occupied = [(match.start(), match.end()) for match in quarter_spans]
+    for match in _DATE_RUN.finditer(plain):
+        if any(start <= match.start() < end for start, end in occupied):
+            continue
+        raw_dates = re.findall(_MONTH_DATE, match.group(1), flags=re.IGNORECASE)
+        if len(raw_dates) < 3:
+            continue
+        seen: set[str] = set()
+        headers: list[str] = []
+        for raw in raw_dates:
+            parsed = _date_from_header(raw)
+            if parsed is None:
+                headers.append("YTD")
+                continue
+            period = _fiscal_period(parsed, fiscal_end_month)
+            if period in seen:
+                headers.append("YTD")
+            else:
+                seen.add(period)
+                headers.append(period)
+        preamble = plain[max(0, match.start() - 220) : match.start()]
+        header = [preamble.strip() or "Metric", *headers]
+        body_rows = _rows_after_header(plain[match.end() : match.end() + 6000], len(raw_dates))
+        if body_rows:
+            tables.append([header, *body_rows])
+    return tables
+
+
+_EXHIBIT_TYPE = re.compile(r"^EX-99\.[12](?:[^0-9].*)?$")
+
+
+def _exhibit_type(value: str) -> str | None:
+    compact = re.sub(r"\s+", "", value or "").upper()
+    if _EXHIBIT_TYPE.match(compact):
+        return compact[:7] if compact.startswith("EX-99.") else compact
+    return None
+
+
+def exhibits_from_index_page(html: str) -> list[dict]:
+    """Document type from the filing index table. `index.json` only knows the mime type."""
+    found = []
+    seen: set[tuple[str, str]] = set()
+    for table in html_tables(html or ""):
+        for cells in table:
+            exhibit = next((kind for cell in cells if (kind := _exhibit_type(cell))), None)
+            if not exhibit:
+                continue
+            name = ""
+            for cell in cells:
+                match = re.search(r"([A-Za-z0-9_.\-]+\.htm[l]?)", cell, re.IGNORECASE)
+                if match and "index" not in match.group(1).lower():
+                    name = match.group(1)
+            if not name or name.lower().endswith((".jpg", ".jpeg", ".gif", ".png")):
+                continue
+            key = (exhibit, name.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            description = next(
+                (
+                    cell
+                    for cell in cells
+                    if cell and cell != name and _exhibit_type(cell) is None and not cell.isdigit()
+                ),
+                exhibit,
+            )
+            found.append({"name": name, "type": exhibit, "description": description})
+    return found
+
+
+def exhibits_from_submission(text: str) -> list[dict]:
+    """`<TYPE>` and `<FILENAME>` inside a complete submission `.txt`."""
+    found = []
+    seen: set[tuple[str, str]] = set()
+    for part in re.split(r"(?i)<DOCUMENT>", text or "")[1:]:
+        type_match = re.search(r"(?i)<TYPE>\s*([^\n<]+)", part)
+        file_match = re.search(r"(?i)<FILENAME>\s*([^\n<]+)", part)
+        desc_match = re.search(r"(?i)<DESCRIPTION>\s*([^\n<]+)", part)
+        if not type_match or not file_match:
+            continue
+        exhibit = _exhibit_type(type_match.group(1))
+        name = file_match.group(1).strip()
+        if not exhibit or not name or name.lower().endswith((".jpg", ".jpeg", ".gif", ".png", ".zip", ".xml", ".xsd")):
+            continue
+        key = (exhibit, name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(
+            {
+                "name": name,
+                "type": exhibit,
+                "description": (desc_match.group(1).strip() if desc_match else exhibit),
+            }
+        )
+    return found
+
+
+def classify_release(title: str, body: str) -> str:
+    """Classify from the document text. An HTML title of `Document` is not a deck."""
+    plain = plain_text(body)
+    head = plain[:800].lower()
+    blob = f"{title or ''}\n{plain[:8000]}".lower()
+    # The update deck says "Q2 2026 Update" up front. A deliveries release mentions
+    # the later "Q3 2026 update" only as a link, after the production table.
+    if re.search(r"q[1-4]\s*(?:fy\s*)?\d{2,4}\s+update", head) or "quarterly update" in head:
+        return "deck"
+    if "production" in head and "deliver" in head:
+        return "press_release"
+    if "cfo commentary" in blob:
+        return "press_release"
+    if any(
+        phrase in blob
+        for phrase in (
+            "financial results",
+            "earnings release",
+            "reports first quarter",
+            "reports second quarter",
+            "reports third quarter",
+            "reports fourth quarter",
+        )
+    ):
+        return "press_release"
+    titled = classify_exhibit_title(title)
+    return titled
+
+
 def classify_exhibit_title(title: str) -> str:
     """Both deliveries and the earnings deck are Item 2.02. The exhibit title separates them."""
     text = " ".join(str(title or "").lower().split())
@@ -1221,20 +1896,29 @@ def fiscal_period_for_end(end: date, fiscal_end_month: int = 12) -> str:
 
 
 def exhibits_from_index(payload: dict) -> list[dict]:
-    """EX-99.1 rows from an EDGAR filing index.json directory listing."""
+    """EX-99 rows only when index.json itself carries the document type.
+
+    Live EDGAR index.json sets `type` to a mime such as `text.gif`. That is not an
+    exhibit type, and the filename is not a reliable substitute.
+    """
     items = (payload.get("directory") or {}).get("item") or []
     if isinstance(items, dict):
         items = [items]
     found = []
+    seen: set[tuple[str, str]] = set()
     for item in items:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "")
-        kind = str(item.get("type") or item.get("description") or "")
-        description = str(item.get("description") or item.get("type") or name)
-        exhibit = kind.upper().replace(" ", "")
-        if exhibit.startswith("EX-99.1") or re.search(r"ex[-_]?99\.?1", name, re.IGNORECASE):
-            found.append({"name": name, "type": kind or "EX-99.1", "description": description})
+        exhibit = _exhibit_type(str(item.get("type") or ""))
+        if not exhibit or not name or name.lower().endswith((".jpg", ".jpeg", ".gif", ".png")):
+            continue
+        key = (exhibit, name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        description = str(item.get("description") or exhibit)
+        found.append({"name": name, "type": exhibit, "description": description})
     return found
 
 
@@ -1264,15 +1948,17 @@ def item_202_filings(submissions: dict, *, limit: int = 4) -> list[dict]:
         accession = (recent.get("accessionNumber") or [""] * len(forms))[index]
         if not accession:
             continue
-        rows.append({
-            "accession": accession,
-            "cik": cik,
-            "form": str(form),
-            "filed": (recent.get("filingDate") or [""] * len(forms))[index],
-            "report_date": (recent.get("reportDate") or [""] * len(forms))[index] or None,
-            "items": items,
-            "primary_document": (recent.get("primaryDocument") or [""] * len(forms))[index],
-        })
+        rows.append(
+            {
+                "accession": accession,
+                "cik": cik,
+                "form": str(form),
+                "filed": (recent.get("filingDate") or [""] * len(forms))[index],
+                "report_date": (recent.get("reportDate") or [""] * len(forms))[index] or None,
+                "items": items,
+                "primary_document": (recent.get("primaryDocument") or [""] * len(forms))[index],
+            }
+        )
     rows.sort(key=lambda row: row.get("filed") or "", reverse=True)
     return rows[:limit]
 
@@ -1303,7 +1989,10 @@ def latest_periodic_filings(submissions: dict) -> list[dict]:
 
 
 def parse_deliveries_matrix(
-    table: list[list[str]], fiscal_period: str, catalog: dict, **kwargs,
+    table: list[list[str]],
+    fiscal_period: str,
+    catalog: dict,
+    **kwargs,
 ) -> tuple[list[dict], list[dict]]:
     """One-quarter production / deliveries grid from the press release, not the five-quarter deck."""
     if not table or not fiscal_period:
@@ -1331,28 +2020,36 @@ def parse_deliveries_matrix(
                 continue
             entry = match_catalog_entry(raw_label, catalog)
             if entry is None:
-                proposals.append(propose_metric(
-                    raw_label, unit="vehicles", scale=1, fiscal_period=fiscal_period,
-                    source=kwargs.get("source_url") or "", lower_bound=lower_bound,
-                ))
+                proposals.append(
+                    propose_metric(
+                        raw_label,
+                        unit="vehicles",
+                        scale=1,
+                        fiscal_period=fiscal_period,
+                        source=kwargs.get("source_url") or "",
+                        lower_bound=lower_bound,
+                    )
+                )
                 continue
             scaled, _hint = apply_scale(value, raw_label, entry)
-            rows.append(_observation(
-                entry,
-                ticker=kwargs["ticker"],
-                fiscal_period=fiscal_period,
-                value=scaled,
-                unit=entry.get("unit") or "vehicles",
-                source_url=kwargs["source_url"],
-                source_doc_hash=kwargs["source_doc_hash"],
-                extracted_at=kwargs["extracted_at"],
-                published_date=kwargs.get("published_date"),
-                method="table",
-                confidence=confidence_for("table"),
-                lower_bound=lower_bound,
-                source_kind=kwargs.get("source_kind") or "press_release",
-                label=raw_label,
-            ))
+            rows.append(
+                _observation(
+                    entry,
+                    ticker=kwargs["ticker"],
+                    fiscal_period=fiscal_period,
+                    value=scaled,
+                    unit=entry.get("unit") or "vehicles",
+                    source_url=kwargs["source_url"],
+                    source_doc_hash=kwargs["source_doc_hash"],
+                    extracted_at=kwargs["extracted_at"],
+                    published_date=kwargs.get("published_date"),
+                    method="table",
+                    confidence=confidence_for("table"),
+                    lower_bound=lower_bound,
+                    source_kind=kwargs.get("source_kind") or "press_release",
+                    label=raw_label,
+                )
+            )
     return rows, proposals
 
 
@@ -1391,47 +2088,71 @@ def narrative_candidates(text: str, *, enabled: bool) -> list[dict]:
     found = []
     attach = re.search(r">\s*(\d+(?:\.\d+)?)\s*%[^.\n]{0,80}deliver", text or "", re.IGNORECASE)
     if attach:
-        found.append({
-            "metric_id": "fsd_attach_rate",
-            "label": "FSD attach rate",
-            "value": float(attach.group(1)) / 100.0,
-            "unit": "ratio",
-            "lower_bound": True,
-            "method": "llm",
-            "confidence": CONFIDENCE["llm"],
-            "source_kind": "llm",
-        })
+        found.append(
+            {
+                "metric_id": "fsd_attach_rate",
+                "label": "FSD attach rate",
+                "value": float(attach.group(1)) / 100.0,
+                "unit": "ratio",
+                "lower_bound": True,
+                "method": "llm",
+                "confidence": CONFIDENCE["llm"],
+                "source_kind": "llm",
+            }
+        )
     metros = re.search(r"live in (seven|\d+) major metros", text or "", re.IGNORECASE)
     if metros:
         words = {"seven": 7}
         raw = metros.group(1).lower()
-        found.append({
-            "metric_id": "robotaxi_metros",
-            "label": "Robotaxi metros",
-            "value": float(words.get(raw, raw)),
-            "unit": "metros",
-            "lower_bound": False,
-            "method": "llm",
-            "confidence": CONFIDENCE["llm"],
-            "source_kind": "llm",
-        })
+        found.append(
+            {
+                "metric_id": "robotaxi_metros",
+                "label": "Robotaxi metros",
+                "value": float(words.get(raw, raw)),
+                "unit": "metros",
+                "lower_bound": False,
+                "method": "llm",
+                "confidence": CONFIDENCE["llm"],
+                "source_kind": "llm",
+            }
+        )
     return found
 
 
 def parse_company_document(text: str, catalog: dict, **kwargs) -> dict:
     """Press-release grids, five-quarter summary tables, and optional low-confidence narrative candidates."""
     tables = html_tables(text) if "<table" in text.lower() or "<tr" in text.lower() else []
-    flowing = text_tables(text)
-    if flowing:
-        tables = [*tables, *flowing]
+    has_quarter_table = any(_prepare_quarter_table(table) for table in tables)
+    if not has_quarter_table:
+        fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
+        tables = [*tables, *text_tables(text), *flowing_text_tables(text, fiscal_end_month)]
     source_kind = kwargs.get("source_kind") or "deck"
-    rows, proposals = table_scan(tables, catalog, source_kind=source_kind, method=kwargs.get("method") or "table", **{
-        key: kwargs[key] for key in (
-            "ticker", "source_url", "source_doc_hash", "extracted_at", "published_date",
-        )
-    })
-    period = kwargs.get("fiscal_period")
-    matrix_kwargs = {key: value for key, value in kwargs.items() if key != "fiscal_period"}
+    detected = classify_release(title_from_html(text), text)
+    body = plain_text(text).lower()
+    if detected == "press_release" and "production" in body and "deliver" in body:
+        source_kind = "press_release"
+    rows, proposals = table_scan(
+        tables,
+        catalog,
+        source_kind=source_kind,
+        method=kwargs.get("method") or "table",
+        **{
+            key: kwargs[key]
+            for key in (
+                "ticker",
+                "source_url",
+                "source_doc_hash",
+                "extracted_at",
+                "published_date",
+            )
+        },
+    )
+    text_period = fiscal_period_from_text(
+        text,
+        int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12),
+    )
+    period = text_period or kwargs.get("fiscal_period")
+    matrix_kwargs = {key: value for key, value in kwargs.items() if key not in {"fiscal_period", "fiscal_end_month"}}
     if period and source_kind == "press_release":
         for table in tables:
             extra, extra_proposals = parse_deliveries_matrix(table, period, catalog, **matrix_kwargs)
@@ -1449,22 +2170,24 @@ def parse_company_document(text: str, catalog: dict, **kwargs) -> dict:
                 "status": "proposed",
                 "category": "operating",
             }
-            rows.append(_observation(
-                entry,
-                ticker=kwargs["ticker"],
-                fiscal_period=period,
-                value=candidate["value"],
-                unit=candidate["unit"],
-                source_url=kwargs["source_url"],
-                source_doc_hash=kwargs["source_doc_hash"],
-                extracted_at=kwargs["extracted_at"],
-                published_date=kwargs.get("published_date"),
-                method="llm",
-                confidence=CONFIDENCE["llm"],
-                lower_bound=candidate["lower_bound"],
-                source_kind="llm",
-                label=candidate["label"],
-            ))
+            rows.append(
+                _observation(
+                    entry,
+                    ticker=kwargs["ticker"],
+                    fiscal_period=period,
+                    value=candidate["value"],
+                    unit=candidate["unit"],
+                    source_url=kwargs["source_url"],
+                    source_doc_hash=kwargs["source_doc_hash"],
+                    extracted_at=kwargs["extracted_at"],
+                    published_date=kwargs.get("published_date"),
+                    method="llm",
+                    confidence=CONFIDENCE["llm"],
+                    lower_bound=candidate["lower_bound"],
+                    source_kind="llm",
+                    label=candidate["label"],
+                )
+            )
     for row in rows:
         row["accession"] = kwargs.get("accession")
     return {"rows": rows, "proposals": proposals}
@@ -1492,8 +2215,7 @@ def dedupe_observations(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     revisions = []
     for key, group in groups.items():
         official = [
-            row for row in group
-            if (row.get("source_kind") or "") not in {"news", "llm"} and row.get("method") != "llm"
+            row for row in group if (row.get("source_kind") or "") not in {"news", "llm"} and row.get("method") != "llm"
         ]
         pool = official or group
         pool = sorted(pool, key=_priority)
@@ -1501,7 +2223,8 @@ def dedupe_observations(rows: list[dict]) -> tuple[list[dict], list[dict]]:
         # News and LLM rows never become the served value when an official number exists.
         if official:
             winner["approved"] = row_approved(
-                winner.get("catalog_status") or "proposed", winner.get("method") or "table",
+                winner.get("catalog_status") or "proposed",
+                winner.get("method") or "table",
             )
         else:
             winner["approved"] = False
@@ -1512,28 +2235,85 @@ def dedupe_observations(rows: list[dict]) -> tuple[list[dict], list[dict]]:
             winner["revision_reason"] = (
                 prior.get("footnote") or winner.get("footnote") or "later filing restated the quarter"
             )
-            revisions.append({
-                "ticker": key[0],
-                "metric_id": key[1],
-                "fiscal_period": key[2],
-                "value": winner.get("value"),
-                "supersedes": winner["supersedes"],
-                "previous_value": prior.get("value"),
-                "reason": winner["revision_reason"],
-                "source_doc_hash": winner.get("source_doc_hash"),
-            })
+            revisions.append(
+                {
+                    "ticker": key[0],
+                    "metric_id": key[1],
+                    "fiscal_period": key[2],
+                    "value": winner.get("value"),
+                    "supersedes": winner["supersedes"],
+                    "previous_value": prior.get("value"),
+                    "reason": winner["revision_reason"],
+                    "source_doc_hash": winner.get("source_doc_hash"),
+                }
+            )
         winners.append(winner)
     return winners, revisions
 
 
-def _xbrl_tag_series(gaap: dict, tag: str, kind: str, unit: str = "USD") -> tuple[dict[str, float], list[dict]]:
+def _xbrl_tag_series(
+    gaap: dict,
+    tag: str,
+    kind: str,
+    unit: str = "USD",
+    fiscal_end_month: int = 12,
+) -> tuple[dict[str, float], list[dict]]:
     facts = (gaap.get(tag) or {}).get("units", {}).get(unit) or []
     if not facts:
         return {}, []
-    return _select_sane_latest(_collect_xbrl_facts(facts, 12, kind))
+    return _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, kind))
 
 
-def cash_and_investments_series(gaap: dict) -> tuple[dict[str, float], list[dict]]:
+def _best_tag_facts(gaap: dict, tags: list[str], unit: str) -> list[dict]:
+    """Use the concept that is still being filed. An older tag must not hide the current one."""
+    ranked = []
+    for index, tag in enumerate(tags):
+        facts = (gaap.get(tag) or {}).get("units", {}).get(unit) or []
+        ends = [fact.get("end") or "" for fact in facts if fact.get("end")]
+        if ends:
+            ranked.append((max(ends), index, facts))
+    if not ranked:
+        return []
+    ranked.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+    return ranked[0][2]
+
+
+def _ytd_series(facts: list[dict], fiscal_end_month: int) -> tuple[dict[str, float], list[dict]]:
+    discrete = discrete_cashflow_quarters(facts, fiscal_end_month)
+    grouped = {period: [("", value)] for period, value in discrete.items()}
+    return _select_sane_latest(grouped)
+
+
+def deferred_revenue_series(gaap: dict, fiscal_end_month: int = 12) -> tuple[dict[str, float], list[dict]]:
+    """Current plus noncurrent contract liabilities. The single combined tag is often annual-only."""
+    current, flags = _xbrl_tag_series(
+        gaap,
+        "ContractWithCustomerLiabilityCurrent",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    noncurrent, more = _xbrl_tag_series(
+        gaap,
+        "ContractWithCustomerLiabilityNoncurrent",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    flags.extend(more)
+    selected: dict[str, float] = {}
+    for period in set(current) | set(noncurrent):
+        if period in current and period in noncurrent:
+            selected[period] = current[period] + noncurrent[period]
+        else:
+            selected[period] = current.get(period, noncurrent.get(period, 0.0))
+    for tag in ("DeferredRevenueCurrent", "ContractWithCustomerLiability"):
+        extra, extra_flags = _xbrl_tag_series(gaap, tag, "instant", fiscal_end_month=fiscal_end_month)
+        flags.extend(extra_flags)
+        for period, value in extra.items():
+            selected.setdefault(period, value)
+    return selected, flags
+
+
+def cash_and_investments_series(gaap: dict, fiscal_end_month: int = 12) -> tuple[dict[str, float], list[dict]]:
     """Cash at carrying value plus one investments concept, then older single-concept fallbacks.
 
     Tesla's current balance sheet tags cash and short-term investments separately.
@@ -1541,9 +2321,24 @@ def cash_and_investments_series(gaap: dict) -> tuple[dict[str, float], list[dict
     concept that was filed twice is not added twice. Periods with neither current
     concept fall back to the restricted-cash total, then the legacy combined tag.
     """
-    cash, flags = _xbrl_tag_series(gaap, "CashAndCashEquivalentsAtCarryingValue", "instant")
-    short_term, short_flags = _xbrl_tag_series(gaap, "ShortTermInvestments", "instant")
-    marketable, market_flags = _xbrl_tag_series(gaap, "MarketableSecuritiesCurrent", "instant")
+    cash, flags = _xbrl_tag_series(
+        gaap,
+        "CashAndCashEquivalentsAtCarryingValue",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    short_term, short_flags = _xbrl_tag_series(
+        gaap,
+        "ShortTermInvestments",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    marketable, market_flags = _xbrl_tag_series(
+        gaap,
+        "MarketableSecuritiesCurrent",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
     flags.extend(short_flags)
     flags.extend(market_flags)
     selected: dict[str, float] = {}
@@ -1556,57 +2351,96 @@ def cash_and_investments_series(gaap: dict) -> tuple[dict[str, float], list[dict
         "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
         "CashCashEquivalentsAndShortTermInvestments",
     ):
-        series, tag_flags = _xbrl_tag_series(gaap, tag, "instant")
+        series, tag_flags = _xbrl_tag_series(gaap, tag, "instant", fiscal_end_month=fiscal_end_month)
         flags.extend(tag_flags)
         for period, value in series.items():
             selected.setdefault(period, value)
     return selected, flags
 
 
+def _series_for_spec(gaap: dict, spec: dict, fiscal_end_month: int) -> tuple[dict[str, float], list[dict]]:
+    mode = spec.get("mode") or spec.get("kind") or "duration"
+    if mode == "cash_investments":
+        return cash_and_investments_series(gaap, fiscal_end_month)
+    if mode == "deferred":
+        return deferred_revenue_series(gaap, fiscal_end_month)
+    unit = spec.get("unit") or "USD"
+    facts = _best_tag_facts(gaap, list(spec.get("tags") or []), unit)
+    if not facts:
+        return {}, []
+    if mode == "ytd":
+        return _ytd_series(facts, fiscal_end_month)
+    return _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, spec.get("kind") or "duration"))
+
+
+def _extra_xbrl_specs(catalog: dict) -> list[tuple[str, dict]]:
+    """Company-specific XBRL rows live on the catalog entry, not in the shared GAAP list."""
+    extras = []
+    for entry in catalog.get("metrics") or []:
+        metric_id = entry.get("metric_id")
+        tags = entry.get("xbrl_tags") or []
+        if not metric_id or not tags or metric_id in GAAP_XBRL_TAGS:
+            continue
+        extras.append(
+            (
+                metric_id,
+                {
+                    "kind": entry.get("xbrl_kind") or "instant",
+                    "tags": list(tags),
+                    "mode": entry.get("xbrl_mode") or entry.get("xbrl_kind") or "instant",
+                    "unit": entry.get("xbrl_unit") or "USD",
+                },
+            )
+        )
+    return extras
+
+
 def companyfacts_observations(companyfacts: dict, catalog: dict, **kwargs) -> tuple[list[dict], list[dict]]:
     """XBRL observations for GAAP catalog rows, with scale-error flags kept off the winning value."""
     gaap = (companyfacts.get("facts") or {}).get("us-gaap") or {}
-    rows = []
-    flags = []
+    fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
     ticker = kwargs["ticker"]
-    for metric_id, (kind, tags) in GAAP_XBRL_TAGS.items():
-        entry = catalog_entry(catalog, metric_id)
-        if entry is None:
+    selected_by_metric: dict[str, dict[str, float]] = {}
+    flags: list[dict] = []
+    specs = list(GAAP_XBRL_TAGS.items()) + _extra_xbrl_specs(catalog)
+    for metric_id, spec in specs:
+        selected, scale_flags = _series_for_spec(gaap, spec, fiscal_end_month)
+        if not selected and not scale_flags:
             continue
-        if metric_id == "cash_and_investments":
-            selected, scale_flags = cash_and_investments_series(gaap)
-        else:
-            facts = []
-            for tag in tags:
-                unit_key = "USD/shares" if metric_id == "eps_diluted" else "USD"
-                facts = (gaap.get(tag) or {}).get("units", {}).get(unit_key) or []
-                if facts:
-                    break
-            if not facts:
-                continue
-            grouped = _collect_xbrl_facts(facts, 12, kind)
-            selected, scale_flags = _select_sane_latest(grouped)
+        selected_by_metric[metric_id] = selected
         for flag in scale_flags:
             flag["metric_id"] = metric_id
             flag["ticker"] = ticker.upper()
             flags.append(flag)
+    selected_by_metric["gross_profit"] = gross_profit_series(
+        selected_by_metric.get("gross_profit") or {},
+        selected_by_metric.get("revenue_gaap") or {},
+        selected_by_metric.get("cost_of_revenue") or {},
+    )
+    rows = []
+    for metric_id, selected in selected_by_metric.items():
+        entry = catalog_entry(catalog, metric_id)
+        if entry is None or not selected:
+            continue
         for fiscal_period, value in selected.items():
-            rows.append(_observation(
-                entry,
-                ticker=ticker,
-                fiscal_period=fiscal_period,
-                value=float(value),
-                unit=entry.get("unit") or "USD",
-                source_url=kwargs.get("source_url") or "",
-                source_doc_hash=kwargs.get("source_doc_hash") or "",
-                extracted_at=kwargs["extracted_at"],
-                published_date=kwargs.get("published_date"),
-                method="table",
-                confidence=confidence_for("table"),
-                lower_bound=False,
-                source_kind="xbrl",
-                label=metric_id,
-            ))
+            rows.append(
+                _observation(
+                    entry,
+                    ticker=ticker,
+                    fiscal_period=fiscal_period,
+                    value=float(value),
+                    unit=entry.get("unit") or "USD",
+                    source_url=kwargs.get("source_url") or "",
+                    source_doc_hash=kwargs.get("source_doc_hash") or "",
+                    extracted_at=kwargs["extracted_at"],
+                    published_date=kwargs.get("published_date"),
+                    method="table",
+                    confidence=confidence_for("table"),
+                    lower_bound=False,
+                    source_kind="xbrl",
+                    label=metric_id,
+                )
+            )
     return rows, flags
 
 
@@ -1812,7 +2646,7 @@ def run_collect(
 
         return (urlparse(url).hostname or "").lower()
 
-    def pull(url: str, source_id: str):
+    def pull(url: str, source_id: str, *, optional: bool = False):
         host = host_of(url)
         if host in stopped:
             reasons.append({"source_id": source_id, "reason": "provider_policy", "url": url})
@@ -1826,9 +2660,10 @@ def run_collect(
             reasons.append({"source_id": source_id, "reason": decision["reason"], "url": url})
             return None
         if not decision["store"]:
-            reasons.append({"source_id": source_id, "reason": decision["reason"], "url": url})
-            if decision["reason"] != "ok":
-                failed.append(source_id)
+            if not optional:
+                reasons.append({"source_id": source_id, "reason": decision["reason"], "url": url})
+                if decision["reason"] != "ok":
+                    failed.append(source_id)
             return None
         return response
 
@@ -1841,6 +2676,7 @@ def run_collect(
         source_kind: str,
         accession: str,
         published: str | None,
+        fiscal_end_month: int | None = None,
     ):
         nonlocal written, documents, skipped
         stored = store_raw_document(
@@ -1866,6 +2702,7 @@ def run_collect(
             "accession": accession,
             "published_date": published,
             "content_type": content_type,
+            "fiscal_end_month": fiscal_end_month or 12,
         }
         manifests.append(entry)
         if exists(stored["key"]):
@@ -1911,30 +2748,60 @@ def run_collect(
         except ValueError:
             failed.append(f"edgar:{ticker}:submissions")
             continue
+        fy_month = fiscal_end_month_from_submissions(body)
         for filing in item_202_filings(body):
-            index_url = filing_index_url(cik, filing["accession"])
-            index = pull(index_url, f"edgar:{ticker}:{filing['accession']}:index")
-            if index is None:
-                continue
-            try:
-                exhibits = exhibits_from_index(index.json())
-            except ValueError:
-                failed.append(f"edgar:{ticker}:{filing['accession']}:index")
-                continue
+            exhibits: list[dict] = []
+            for suffix in (f"{filing['accession']}-index.html", f"{filing['accession']}-index.htm"):
+                page = pull(
+                    archive_url(cik, filing["accession"], suffix),
+                    f"edgar:{ticker}:{filing['accession']}:index-html",
+                    optional=True,
+                )
+                if page is None:
+                    continue
+                exhibits = exhibits_from_index_page(page.text)
+                if exhibits:
+                    break
+            if not exhibits:
+                submission = pull(
+                    archive_url(cik, filing["accession"], f"{filing['accession']}.txt"),
+                    f"edgar:{ticker}:{filing['accession']}:submission",
+                    optional=True,
+                )
+                if submission is not None:
+                    exhibits = exhibits_from_submission(submission.text)
+            if not exhibits:
+                index = pull(filing_index_url(cik, filing["accession"]), f"edgar:{ticker}:{filing['accession']}:index")
+                if index is None:
+                    continue
+                try:
+                    exhibits = exhibits_from_index(index.json())
+                except ValueError:
+                    failed.append(f"edgar:{ticker}:{filing['accession']}:index")
+                    continue
             for exhibit in exhibits:
                 url = archive_url(cik, filing["accession"], exhibit["name"])
-                document = pull(url, f"edgar:{ticker}:{filing['accession']}:ex-99.1")
+                exhibit_type = str(exhibit.get("type") or "EX-99.1").lower()
+                document = pull(url, f"edgar:{ticker}:{filing['accession']}:{exhibit_type}")
                 if document is None:
                     continue
-                title = exhibit.get("description") or title_from_html(document.text)
-                kind = _source_kind_for_title(title)
+                title = title_from_html(document.text) or exhibit.get("description") or ""
+                kind = classify_release(title, document.text)
                 if kind == "other":
-                    kind = "press_release" if "deliver" in title.lower() else "deck"
-                period = "undated"
-                if filing.get("report_date"):
-                    period = fiscal_period_for_end(date.fromisoformat(filing["report_date"]))
+                    kind = "deck"
+                period = fiscal_period_from_text(document.text, fy_month) or "undated"
                 content = document.content if isinstance(document.content, bytes) else document.text.encode()
-                save(ticker, period, url, content, "text/html", kind, filing["accession"], filing.get("filed"))
+                save(
+                    ticker,
+                    period,
+                    url,
+                    content,
+                    "text/html",
+                    kind,
+                    filing["accession"],
+                    filing.get("filed"),
+                    fy_month,
+                )
         for filing in latest_periodic_filings(body):
             url = archive_url(cik, filing["accession"], filing["primary_document"])
             document = pull(url, f"edgar:{ticker}:{filing['form']}")
@@ -1942,14 +2809,14 @@ def run_collect(
                 continue
             period = "undated"
             if filing.get("report_date"):
-                period = fiscal_period_for_end(date.fromisoformat(filing["report_date"]))
+                period = fiscal_period_for_end(date.fromisoformat(filing["report_date"]), fy_month)
             content = document.content if isinstance(document.content, bytes) else document.text.encode()
-            save(ticker, period, url, content, "text/html", "note", filing["accession"], filing.get("filed"))
+            save(ticker, period, url, content, "text/html", "note", filing["accession"], filing.get("filed"), fy_month)
         facts_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
         facts = pull(facts_url, f"edgar:{ticker}:companyfacts")
         if facts is not None:
             content = facts.content if isinstance(facts.content, bytes) else facts.text.encode()
-            save(ticker, "companyfacts", facts_url, content, "application/json", "xbrl", "", None)
+            save(ticker, "companyfacts", facts_url, content, "application/json", "xbrl", "", None, fy_month)
         if not any(item["ticker"] == ticker and item["source_kind"] in {"deck", "press_release"} for item in manifests):
             for source in catalog.get("ir_sources") or []:
                 robots_url = source.get("robots_url")
@@ -1957,11 +2824,13 @@ def run_collect(
                 if robots_url:
                     robots_decision = decide_ir_fetch(robots_url, None, agent)
                     if robots_decision["action"] == "skip":
-                        reasons.append({
-                            "source_id": source.get("id") or "ir",
-                            "reason": robots_decision["reason"],
-                            "url": robots_url,
-                        })
+                        reasons.append(
+                            {
+                                "source_id": source.get("id") or "ir",
+                                "reason": robots_decision["reason"],
+                                "url": robots_url,
+                            }
+                        )
                         failed.append(source.get("id") or "ir")
                         continue
                     robots = pull(robots_url, f"ir:{ticker}:robots")
@@ -1969,11 +2838,13 @@ def run_collect(
                 for url in source.get("urls") or []:
                     decision = decide_ir_fetch(url, robots_txt, agent)
                     if decision["action"] == "skip":
-                        reasons.append({
-                            "source_id": source.get("id") or "ir",
-                            "reason": decision["reason"],
-                            "url": url,
-                        })
+                        reasons.append(
+                            {
+                                "source_id": source.get("id") or "ir",
+                                "reason": decision["reason"],
+                                "url": url,
+                            }
+                        )
                         failed.append(source.get("id") or "ir")
                         continue
                     document = pull(url, f"ir:{ticker}:{source.get('id') or 'pdf'}")
@@ -2009,7 +2880,13 @@ def _period_from_manifest(item: dict) -> str | None:
 
 
 def run_extract(
-    event: dict | None, *, read_bytes, read_json, write_parquet, write_json, now: datetime | None = None,
+    event: dict | None,
+    *,
+    read_bytes,
+    read_json,
+    write_parquet,
+    write_json,
+    now: datetime | None = None,
 ) -> dict:
     """Parse manifests from collect, reconcile GAAP to XBRL, and write curated rows plus proposals."""
     flat = unwrap_job_event(event)
@@ -2039,6 +2916,7 @@ def run_extract(
             continue
         text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
         catalog = load_catalog(ticker)
+        fiscal_end_month = int(item.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
         kind = item.get("source_kind") or "deck"
         if kind == "xbrl":
             try:
@@ -2054,6 +2932,7 @@ def run_extract(
                 source_doc_hash=item.get("sha256") or "",
                 extracted_at=extracted_at,
                 published_date=item.get("published_date"),
+                fiscal_end_month=fiscal_end_month,
             )
             by_ticker.setdefault(ticker, []).extend(rows)
             scale_flags.extend(flags)
@@ -2070,6 +2949,7 @@ def run_extract(
             published_date=item.get("published_date"),
             source_kind=kind if kind in {"deck", "press_release"} else "deck",
             fiscal_period=_period_from_manifest(item),
+            fiscal_end_month=fiscal_end_month,
             accession=item.get("accession"),
             llm_enabled=llm_enabled,
         )
@@ -2082,16 +2962,14 @@ def run_extract(
         catalog = load_catalog(ticker)
         ir_only = [row for row in rows if row.get("source_kind") != "xbrl"]
         ir_winners, _ignored = dedupe_observations(ir_only)
-        mismatches.extend(reconcile_rows(ir_winners, xbrl_value_map(rows)))
+        for item in reconcile_rows(ir_winners, xbrl_value_map(rows)):
+            mismatches.append({**item, "ticker": ticker})
         winners, revisions = dedupe_observations(rows)
         frame = metrics_frame(winners)
         write_parquet(frame, curated_parquet_key(ticker))
         write_json(curated_observations_key(ticker), {"rows": [_jsonable(row) for row in winners]})
         merged = merge_proposals(catalog, proposals.get(ticker) or [])
-        new_items = [
-            item for item in merged.get("metrics") or []
-            if catalog_entry(catalog, item["metric_id"]) is None
-        ]
+        new_items = [item for item in merged.get("metrics") or [] if catalog_entry(catalog, item["metric_id"]) is None]
         write_json(curated_proposals_key(ticker), {"ticker": ticker, "metrics": new_items})
         write_json(curated_revisions_key(ticker), {"revisions": revisions})
         tickers.append(ticker)
@@ -2141,14 +3019,15 @@ def run_serve(event: dict | None, *, read_json, write_json, now: str | None = No
         payload = read_json(curated_observations_key(ticker)) or {}
         rows = _load_observations(payload.get("rows") or [])
         previous = read_json(serving_stock_key(ticker))
+        own_mismatches = mismatches_for_ticker(ticker, mismatches)
         document = build_serving(
             ticker,
             catalog,
             rows,
-            run=run_record(status=run_status, sources={"tickers": len(tickers)}, mismatches=mismatches),
+            run=run_record(status=run_status, sources={"tickers": len(tickers)}, mismatches=own_mismatches),
             generated_at=generated_at,
             previous=previous,
-            mismatches=mismatches,
+            mismatches=own_mismatches,
         )
         public = public_stock_document(document, ticker)
         write_json(serving_stock_key(ticker), json.loads(visible_html(public)))
