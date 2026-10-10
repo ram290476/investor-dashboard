@@ -19,6 +19,7 @@ import httpx
 import polars as pl
 
 from trend_metrics import DRIVERS
+from yield_curve import CURVE_SERIES_IDS
 
 ET = ZoneInfo("America/New_York")
 FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
@@ -27,8 +28,13 @@ REVISION_DAYS = 10
 SOURCE = "fred"
 STATE_KEY = "curated/macro_daily/source=fred/_state.json"
 # Monthly YoY prints belong to M1. ETF proxies belong to the daily price job.
-DAILY_FRED_SERIES: tuple[str, ...] = tuple(
+# Curve tenors that are not already trend drivers are collected here and served as
+# rates.curve. They are not added to DRIVERS, so overlays and driver ranking stay put.
+_DRIVER_FRED_SERIES: tuple[str, ...] = tuple(
     sid for sid in DRIVERS if not sid.startswith("ETF:") and not sid.endswith("_YOY")
+)
+DAILY_FRED_SERIES: tuple[str, ...] = _DRIVER_FRED_SERIES + tuple(
+    sid for sid in CURVE_SERIES_IDS if sid not in _DRIVER_FRED_SERIES
 )
 _API_KEY_QUERY = re.compile(r"(api_key=)[^&\s\"]*")
 

@@ -6,6 +6,8 @@ import math
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from yield_curve import CURVE_SERIES_IDS, build_rates
+
 MAX_PRICE_ROWS = 1260
 SCHEMA_VERSION = 3
 HEADLINE_LIMIT = 10
@@ -417,6 +419,9 @@ def build_snapshot(
     releases: list[dict] | None = None,
     release_calendar: list[dict] | None = None,
     release_links: list[dict] | None = None,
+    rates_observations: dict | None = None,
+    rates_fomc: dict | None = None,
+    rates_attempts: dict | None = None,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable."""
     clock = _as_of(generated_at)
@@ -495,6 +500,7 @@ def build_snapshot(
             else build_releases(releases or [], release_calendar or [])
         ),
         "status": status,
+        "rates": build_rates(rates_observations, rates_fomc, rates_attempts),
     }
 
 
@@ -556,6 +562,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         release_frame = read_parquet_prefix("curated/releases/")
         calendar = read_json("curated/release_calendar/upcoming.json") or []
         links = read_parquet_prefix("curated/release_links/")
+        curve_observations: dict[str, list[dict]] = {}
+        for series_id in CURVE_SERIES_IDS:
+            frame = read_parquet_prefix(f"curated/macro_daily/source=fred/series_id={series_id}/")
+            curve_observations[series_id] = frame.to_dicts() if not frame.is_empty() else []
         snapshot = build_snapshot(
             tickers=tickers,
             prices=price_data,
@@ -571,6 +581,9 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             releases=release_frame.to_dicts() if not release_frame.is_empty() else [],
             release_calendar=calendar if isinstance(calendar, list) else [],
             release_links=links.to_dicts() if not links.is_empty() else [],
+            rates_observations=curve_observations,
+            rates_fomc=read_json("serving/rates/fomc.json"),
+            rates_attempts=read_json("serving/rates/attempts.json"),
         )
         for ticker in tickers:
             chart_document = build_chart_data(

@@ -30,6 +30,7 @@ import {
   stockPanels,
   STOCK_TABS,
 } from "./stock-page.js";
+import { curveView, fomcView, policyPathView } from "./rates-panel.js";
 import {
   CHART_LANES,
   OVERLAYS,
@@ -718,6 +719,7 @@ function renderDrawer({ id, title, subtitle, summary, mobilePanel, panelId }, re
   const open = isPanelOpen(session.prefs.display?.panels, id);
   const controls = drawerControls(id, open);
   const panel = node("section", `panel panel-drawer${open ? " is-open" : ""}`);
+  panel.dataset.drawer = id;
   if (mobilePanel) panel.dataset.mobilePanel = mobilePanel;
   if (panelId) panel.id = panelId;
   const header = node("div", "panel-header drawer-header");
@@ -781,11 +783,13 @@ function ratesSummary(rows) {
   if (session.dashboardState === "loading") return "Loading…";
   const ten = rows.find((row) => row.series_id === "DGS10");
   const two = rows.find((row) => row.series_id === "DGS2");
-  if (!ten && !two) return "Unavailable";
+  const regime = session.dashboard?.rates?.curve?.regime;
+  if (!ten && !two && !regime) return "Unavailable";
   const parts = [];
   if (observationText(ten)) parts.push(`10Y ${observationText(ten)}`);
   if (observationText(two)) parts.push(`2Y ${observationText(two)}`);
-  if (ten) parts.push(`1M ${driverChange(ten)}`);
+  if (regime) parts.push(regime);
+  else if (ten) parts.push(`1M ${driverChange(ten)}`);
   return parts.join(" · ") || "Unavailable";
 }
 
@@ -1932,6 +1936,93 @@ function signalSparkline(points, color = "var(--price)", label = "Historical ser
   return svg;
 }
 
+function renderCurveBlock(view) {
+  const block = node("div", "rates-curve");
+  block.append(node("h3", "signal-label", "Treasury yield curve"));
+  if (view.kind !== "ready") {
+    block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
+    return block;
+  }
+  const heading = node("div", "signal-heading");
+  heading.append(node("span", "", view.regime || "Regime unavailable"), node("span", "mono", view.dates));
+  block.append(heading);
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", "0 0 300 100");
+  svg.setAttribute("class", "yield-curve");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", view.ariaLabel);
+  [["curve-ago", view.agoPath], ["curve-today", view.todayPath]].forEach(([className, pathData]) => {
+    if (!pathData) return;
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("class", className);
+    path.setAttribute("d", pathData);
+    svg.append(path);
+  });
+  const labels = node("div", "rates-tenors");
+  const changes = node("div", "rates-bps");
+  view.tenors.forEach((tenor) => {
+    labels.append(node("span", "", tenor.tenor));
+    changes.append(node("span", tenor.bpClass, tenor.bpText));
+  });
+  block.append(svg, labels, changes, node("p", "signal-note", "Today (solid) versus 1M ago (dashed). The bp change uses the print on or before 30 calendar days earlier."));
+  return block;
+}
+
+function renderFomcBlock(view) {
+  const block = node("div", "rates-fomc");
+  block.append(node("h3", "signal-label", "Next FOMC · Kalshi"));
+  if (view.kind !== "ready") {
+    block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
+    return block;
+  }
+  const row = node("div", "rates-fomc-row");
+  const copy = node("div", "");
+  copy.append(node("p", "signal-heading", view.meeting));
+  const bar = node("div", "fomc-bar");
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", view.ariaLabel);
+  view.segments.forEach((segment) => {
+    const piece = node("span", segment.className);
+    piece.style.width = segment.width;
+    piece.title = segment.title;
+    bar.append(piece);
+  });
+  copy.append(bar, node("p", "signal-note", view.legend));
+  row.append(copy, signalSparkline(view.history.map((point) => ({ value: point.cut })), "var(--price)", view.sparkLabel));
+  block.append(row);
+  return block;
+}
+
+function renderPolicyBlock(view) {
+  const block = node("div", "rates-policy");
+  block.append(node("h3", "signal-label", "Implied policy path"));
+  if (view.kind !== "ready") {
+    block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
+    return block;
+  }
+  block.append(node("p", "signal-note", view.note));
+  const chart = node("div", "policy-bars");
+  chart.setAttribute("role", "img");
+  chart.setAttribute("aria-label", view.ariaLabel);
+  view.bars.forEach((bar) => {
+    const column = node("div", "policy-bar");
+    column.append(node("span", "mono", bar.rateText));
+    const track = node("span", "policy-track");
+    const fill = node("span", "policy-fill");
+    fill.style.height = bar.height;
+    if (bar.reference) {
+      const reference = node("span", "policy-reference");
+      reference.style.bottom = bar.reference;
+      track.append(reference);
+    }
+    track.append(fill);
+    column.append(track, node("span", "", bar.meeting), node("span", "mono", bar.changeText));
+    chart.append(column);
+  });
+  block.append(chart);
+  return block;
+}
+
 function renderMacroPanels(tickerData, chartData, chartDataState) {
   const grid = node("div", "macro-panel-grid");
   const rows = driverRows(tickerData);
@@ -1943,6 +2034,12 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
     summary: ratesSummary(rates),
     mobilePanel: "signals",
   }, (rateBody) => {
+  const ratesDocument = session.dashboard?.rates;
+  rateBody.append(
+    renderCurveBlock(curveView(ratesDocument, session.dashboardState)),
+    renderFomcBlock(fomcView(ratesDocument, session.dashboardState)),
+    renderPolicyBlock(policyPathView(ratesDocument, session.dashboardState)),
+  );
   if (!rates.length) rateBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading rates…"
     : session.dashboardState === "error" ? "Rates could not be loaded. Refresh data to retry."
       : "Rates are unavailable until D1 observations reach the trend build."));

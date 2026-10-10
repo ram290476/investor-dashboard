@@ -2027,6 +2027,152 @@ input::placeholder {
   margin: 6px 0;
 }
 
+.rates-curve,
+.rates-fomc,
+.rates-policy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 8px;
+}
+
+.rates-curve h3,
+.rates-fomc h3,
+.rates-policy h3 {
+  margin: 0;
+}
+
+.yield-curve {
+  display: block;
+  width: 100%;
+  height: 96px;
+}
+
+.yield-curve path {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.yield-curve .curve-today {
+  stroke: var(--price);
+}
+
+.yield-curve .curve-ago {
+  stroke: var(--muted);
+  stroke-dasharray: 4 3;
+}
+
+.rates-tenors,
+.rates-bps {
+  display: flex;
+  justify-content: space-between;
+  gap: 2px;
+  overflow-x: auto;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.rates-tenors span,
+.rates-bps span {
+  flex: 1 1 0;
+  min-width: 1.6em;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.bp-up {
+  color: var(--green);
+}
+
+.bp-down {
+  color: var(--red);
+}
+
+.bp-flat {
+  color: var(--muted);
+}
+
+.rates-fomc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 10px;
+  align-items: center;
+}
+
+.fomc-bar {
+  display: flex;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--surface-raised);
+}
+
+.fomc-bar span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+}
+
+.fomc-cut {
+  background: var(--green);
+}
+
+.fomc-hold {
+  background: var(--amber);
+}
+
+.fomc-hike {
+  background: var(--red);
+}
+
+.fomc-other {
+  background: var(--blue);
+}
+
+.policy-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-height: 88px;
+}
+
+.policy-bar {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.policy-track {
+  position: relative;
+  width: 100%;
+  height: 56px;
+}
+
+.policy-fill {
+  position: absolute;
+  right: 20%;
+  bottom: 0;
+  left: 20%;
+  background: var(--selected);
+  border-top: 2px solid var(--price);
+  border-radius: 2px 2px 0 0;
+}
+
+.policy-reference {
+  position: absolute;
+  right: 0;
+  left: 0;
+  border-top: 1px dashed var(--muted);
+}
+
 .release-window {
   color: var(--secondary);
   font-size: 11px;
@@ -2128,6 +2274,10 @@ input::placeholder {
   }
 
   .macro-panel-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rates-fomc-row {
     grid-template-columns: minmax(0, 1fr);
   }
 

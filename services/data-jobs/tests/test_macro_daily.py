@@ -42,6 +42,14 @@ def test_daily_series_are_the_trend_job_fred_drivers():
         "DTWEXBGS",
         "DCOILWTICO",
         "USEPUINDXD",
+        "DGS1MO",
+        "DGS3MO",
+        "DGS6MO",
+        "DGS1",
+        "DGS3",
+        "DGS5",
+        "DGS7",
+        "DGS20",
     )
 
 

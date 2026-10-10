@@ -392,11 +392,22 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | `options-daily` | Weekdays 16:50 ET | Enabled by default through `enable_options_daily`; uses the existing Alpaca indicative credentials. IV30 stays unavailable if the feed omits implied volatility. |
 | `backfill` | Every 15 minutes and on ticker-added events | Resumes only persisted incomplete work. |
 | `price-reconcile` | Weekdays 19:15 ET | Checks Yahoo for new splits/dividends and rewrites a ticker's adjusted history when needed (job ID `RECONCILE`). |
-| `macro-daily` | Weekdays 07:00 ET | FRED history/revisions; federal holidays skipped. |
+| `macro-daily` | Weekdays 07:00 ET | FRED history/revisions, including the 11 constant-maturity Treasury tenors (`DGS1MO` through `DGS30`); federal holidays skipped. |
 | `release-day` | Weekdays 06:35 ET and release-morning one-offs | Bootstraps the calendar and stores release history. D4, RECONCILE and non-idle BACKFILL events rebuild ticker links without provider calls. |
 | `trend-metrics` | D1, D4, M1, RECONCILE and non-idle BACKFILL events | Publishes shared series metrics plus per-ticker correlation/effect history. |
 | `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill and reconcile events | Publishes `serving/dashboard.json`. |
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
+| `kalshi-fomc` | Not scheduled | Collector and status-feed id `KALSHI` exist. Live fetches stay off until the Kalshi terms are accepted. No next run is advertised. |
+
+### Rates and yields sources
+
+The Rates & yields drawer reads one shared `rates` object on `serving/dashboard.json`. It is not per ticker. Missing blocks stay null. They are not filled with zeros or design samples.
+
+| Block | Source | Schedule | Notes |
+| --- | --- | --- | --- |
+| `rates.curve` | FRED constant-maturity `DGS1MO`, `DGS3MO`, `DGS6MO`, `DGS1`, `DGS2`, `DGS3`, `DGS5`, `DGS7`, `DGS10`, `DGS20`, `DGS30` | Weekdays 07:00 ET with D1 | Today's yield, the print on or before 30 calendar days earlier, and the change in basis points. The regime label needs both the 2Y and 10Y moves. Tenors that are not already trend drivers are stored in the same macro table and are not chart overlays. |
+| `rates.fomc` | Kalshi public market-data API (DS-89), no key | Not enabled | The collector parses the next meeting's cut, hold and hike prices, stops on 4xx and 429 without retry, and has status-feed id `KALSHI`. Live fetches stay off until Ram accepts the Kalshi terms. Until a document is stored, the panel says Kalshi is unavailable. |
+| `rates.policy_path` | Not selected | No job | Ram has not chosen the Atlanta Fed market probability tracker, Kalshi multi-meeting markets, or fed funds futures. The field is null. The panel says the source has not been selected. |
 
 D1, M1, TREND and DASHBOARD use conditional S3 leases to prevent concurrent
 read/build/publish runs from overwriting newer documents. Leases expire after 15
@@ -599,6 +610,9 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 
 * The full source catalog and all documented collection frequencies have not been implemented.
   Existing job-map entries and status-feed job names are not evidence that collectors exist.
+  The implied policy path source is undecided, so `rates.policy_path` is not served. The Kalshi
+  FOMC collector is implemented and not enabled: status-feed id `KALSHI` has no schedule until
+  the terms are accepted.
 * The historical price loader does not backfill macro or news. Adding a ticker also triggers
   Q1 to collect available SEC fundamental history, independently of price backfill.
 * Fundamentals infer fiscal quarters from the annual duration fact's end month, using the
