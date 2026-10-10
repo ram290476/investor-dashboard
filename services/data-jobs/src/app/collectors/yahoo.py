@@ -1,8 +1,10 @@
-"""Yahoo Finance chart API (DS-05), used only for history backfill.
+"""Yahoo Finance chart API (DS-05), used for history backfill and consolidated volume.
 
 One call per ticker: 5 years of daily bars at setup (job O1) and when a user adds a
-ticker nobody followed before (TickerAdded event -> backfill job). Unofficial endpoint
-with no SLA: Alpaca daily bars are the fallback when it throttles.
+ticker nobody followed before (TickerAdded event -> backfill job). price_reconcile reads
+volume from the chart it already requests; it does not add a call. Unofficial endpoint
+with no SLA: Alpaca daily bars are the price fallback when it throttles. Yahoo volume is
+consolidated US volume. Alpaca's free feed is IEX-only and must not be mixed in unlabeled.
 """
 
 from __future__ import annotations
@@ -59,7 +61,10 @@ def parse_events(payload: dict) -> list[dict]:
 
 
 def parse_chart(payload: dict, ticker: str) -> list[dict]:
-    """Rows for curated/prices_daily: ticker, date (exchange-local), close, adj_close, volume, source_id."""
+    """Rows for curated/prices_daily: ticker, date (exchange-local), close, adj_close, volume, source_id.
+
+    volume is consolidated and volume_source is DS-05. volume_iex is null; Alpaca is the IEX print.
+    """
     result = (payload.get("chart") or {}).get("result") or []
     if not result:
         err = (payload.get("chart") or {}).get("error")
@@ -74,13 +79,16 @@ def parse_chart(payload: dict, ticker: str) -> list[dict]:
         if close is None:
             continue
         local = datetime.fromtimestamp(ts, tz=UTC) + offset
+        raw_volume = (quote.get("volume") or [None])[i] if i < len(quote.get("volume") or []) else None
         rows.append(
             {
                 "ticker": ticker,
                 "date": local.date(),
                 "close": float(close),
                 "adj_close": float(adj[i]) if i < len(adj) and adj[i] is not None else None,
-                "volume": (quote.get("volume") or [None])[i],
+                "volume": int(raw_volume) if raw_volume is not None else None,
+                "volume_iex": None,
+                "volume_source": "DS-05",
                 "source_id": "DS-05",
             }
         )

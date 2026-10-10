@@ -340,6 +340,9 @@ so a five-year ticker costs about six `GetObject` calls instead of one per tradi
 | `close_raw` | Actual traded close; never re-adjusted | `daily-prices` (Alpaca `adjustment=raw`); `price-reconcile` derives it for backfill rows |
 | `close` | Split-adjusted as of the last write or rebuild (Yahoo's `close`) | `daily-prices` (`adjustment=split`), `backfill`, `price-reconcile` |
 | `adj_close` | Split- and dividend-adjusted as of the last write or rebuild (Yahoo's `adjclose`) | `daily-prices` (`adjustment=all`), `backfill`, `price-reconcile` |
+| `volume` | Shares on the Volume lane | See [Daily volume source](#daily-volume-source) |
+| `volume_source` | `DS-05` Yahoo consolidated, or `DS-02` Alpaca IEX | `daily-prices`, `backfill`, `price-reconcile` |
+| `volume_iex` | Alpaca IEX share count. Null on Yahoo-only rows | `daily-prices`; kept after consolidated volume replaces `volume` |
 
 Charts, 1-day returns and `trend-metrics` use `adj_close` (falling back to `close` on rows that
 lack it); the dashboard shows `close_raw` (falling back to `close`) as the price. `daily-prices`
@@ -357,6 +360,22 @@ To force a rebuild of one ticker, remove its entry from the state file and invok
 ```sh
 aws lambda invoke --function-name invdash-price-reconcile --payload '{}' /tmp/price-reconcile.json
 ```
+
+### Daily volume source
+
+Alpaca's free plan (DS-02, `feed=iex`) is IEX-only volume, about 2–3% of consolidated US volume. Yahoo daily history (DS-05) is consolidated volume. `daily-prices` used to store the IEX print in the same `volume` column the backfill had filled with Yahoo, so the series dropped about 40–90× on the day a D4 row replaced a backfill row.
+
+`volume_source` records which print `volume` holds. `source_id` stays the price source (`DS-02` for `daily-prices` closes, `DS-05` for backfill) and is not the volume source. `volume_iex` keeps the IEX print after a consolidated value replaces `volume`.
+
+| Writer | What it stores |
+| --- | --- |
+| `backfill` | Yahoo consolidated `volume`, `volume_source=DS-05`, `volume_iex` null |
+| `daily-prices` | IEX `volume` and `volume_iex`, `volume_source=DS-02`. Closes stay on Alpaca |
+| `price-reconcile` | For the last 10 NYSE sessions, replaces `volume` with Yahoo's consolidated volume when that session is in the chart it already fetched, and sets `volume_source=DS-05`. Does not add a Yahoo call. Older `volume` values are not rescaled. A missing `volume_source` is filled from `source_id` |
+
+A session Yahoo does not return stays IEX and keeps `volume_source=DS-02`. Rows older than those 10 sessions that `daily-prices` already wrote stay IEX and stay marked `DS-02`; later runs do not walk back and rewrite them. `dashboard-build` copies `volume`, `volume_source`, and `volume_iex` onto each `price_history` bar. `volume_source_changes` lists each date in that series where the source differs from the previous bar (`from`, `to`). One source produces an empty list. The two prints are not scaled into each other.
+
+Limits: the Yahoo chart endpoint is unofficial and has no SLA, the same quota rules as backfill (#69). The steady-state reconcile reads volume from the 35-day event check; a split rebuild reads it from the full-history response that rebuild already requests. Hourly and intraday volume stay IEX-only. Between the 16:45 ET `daily-prices` run and the 19:15 ET reconcile, the newest bar is still IEX and the change date is served.
 
 Deployments before this layout wrote one object per ticker-day
 (`ticker=<T>/date=<D>/daily.parquet`) and one per backfill batch
@@ -386,12 +405,12 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 
 | Job | Schedule / trigger | Notes |
 | --- | --- | --- |
-| `daily-prices` | Weekdays 16:45 ET | Alpaca daily bars for base, user and index ETF proxy tickers (raw, split- and fully adjusted closes for the last 7 days); NYSE weekends/holidays are skipped. |
+| `daily-prices` | Weekdays 16:45 ET | Alpaca daily bars for base, user and index ETF proxy tickers (raw, split- and fully adjusted closes for the last 7 days). Volume on that write is IEX (`volume_source=DS-02`). NYSE weekends/holidays are skipped. |
 | `q1-fundamentals` | Mondays 08:30 ET and `TickerAdded` | Resolves SEC CIKs for base tickers and all stored watchlist tickers, then publishes quarterly series. Q1 completion triggers dashboard/chart rebuilding. Non-filers and missing XBRL are explicit availability states. |
 | `short-interest` | Weekdays 18:30 ET | FINRA only publishes on settlement cadence. |
 | `options-daily` | Weekdays 16:50 ET | Enabled by default through `enable_options_daily`; uses the existing Alpaca indicative credentials. IV30 stays unavailable if the feed omits implied volatility. |
 | `backfill` | Every 15 minutes and on ticker-added events | Resumes only persisted incomplete work. |
-| `price-reconcile` | Weekdays 19:15 ET | Checks Yahoo for new splits/dividends and rewrites a ticker's adjusted history when needed (job ID `RECONCILE`). |
+| `price-reconcile` | Weekdays 19:15 ET | Checks Yahoo for new splits/dividends and rewrites a ticker's adjusted history when needed. Replaces the last 10 sessions' volume with Yahoo consolidated volume when that session is present (job ID `RECONCILE`). |
 | `macro-daily` | Weekdays 07:00 ET | FRED history/revisions, including the 11 constant-maturity Treasury tenors (`DGS1MO` through `DGS30`); federal holidays skipped. |
 | `release-day` | Weekdays 06:35 ET and release-morning one-offs | Bootstraps the calendar and stores release history. D4, RECONCILE and non-idle BACKFILL events rebuild ticker links without provider calls. |
 | `trend-metrics` | D1, D4, M1, RECONCILE and non-idle BACKFILL events | Publishes shared series metrics plus per-ticker correlation/effect history. |
