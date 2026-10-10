@@ -3,7 +3,7 @@
 import io
 import json
 import sys
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import boto3
@@ -199,9 +199,20 @@ def _outputs(client) -> dict:
     return {"dashboard": dash, "latest": latest, "trend": trend}
 
 
-def test_outputs_unchanged_after_migrating_legacy_layout(s3):
+def test_outputs_unchanged_after_migrating_legacy_layout(s3, monkeypatch):
+    # Both dashboard builds must share one clock. market.as_of is that instant,
+    # and a second boundary made the before/after documents differ.
+    frozen = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen if tz is None else frozen.astimezone(tz)
+
+    monkeypatch.setattr(dashboard_build, "datetime", FrozenDateTime)
     days = _seed_legacy_layout()
     before = _outputs(s3)
+    assert before["dashboard"]["market"]["as_of"] == "2026-10-10T12:00:00+00:00"
     tsla = before["dashboard"]["tickers"]["TSLA"]["price_history"]
     assert len(tsla) == len(days)
     assert tsla[-1]["date"] == str(days[-1])
