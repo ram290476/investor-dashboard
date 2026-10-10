@@ -424,7 +424,12 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
         mod.handler(
             _event(
                 "PUT",
-                body={"tickers": ["TSLA"], "pinned": [], "display": {"theme": "clean-light"}, "version": saved["version"]},
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"theme": "clean-light"},
+                    "version": saved["version"],
+                },
             ),
             None,
         )["body"]
