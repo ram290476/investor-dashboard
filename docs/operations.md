@@ -630,7 +630,11 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
   usually annual USD series; deliveries/FSD subscribers remain reviewed manual observations.
 * The watchlist limit is 25 per user (separate from the existing 25-ticker cross-user collector
   cap). Legacy over-limit lists are never trimmed: display/chart/pin/reorder/removal saves work,
-  but new symbols are blocked until capacity is available.
+  but new symbols are blocked until capacity is available. Each chip draws that ticker's last
+  22 adjusted closes (the 1M window) with the shared sparkline helper. Ram has not decided
+  whether the window should follow the selected chart period, whether chips should show a
+  short company name, or whether phones should hide the line. The name is not in the snapshot,
+  so it is not shown. Phones keep a smaller line.
 * Fundamentals are chart overlays, not a separate bottom table. The snapshot's existing
   fundamentals array is retained for compatibility. Seven metrics remain supported; #76
   supersedes #71's always-visible unavailable chips. Overlay chips/groups and lane toggles

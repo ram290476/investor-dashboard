@@ -14,6 +14,7 @@ import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-s
 import { applyTheme, overlayColor } from "./theme.js";
 import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystDateLabel, catalystMove, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+import { sparkline, sparklineModel, sparklineSummary } from "./sparkline.js";
 import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
   number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
@@ -951,7 +952,11 @@ function renderWatchlist() {
       buttons[next].focus();
     });
     button.setAttribute("aria-pressed", String(ticker === session.selected));
-    button.setAttribute("aria-label", `${ticker}, ${latest ? formatPrice(displayPrice(latest)) : "no price data"}`);
+    const sparkKey = `${session.dashboard?.generated_at || ""}|${ticker}|${history.length}|${latest?.date || ""}`;
+    const sparkModel = sparklineModel(history, sparkKey);
+    const sparkText = sparklineSummary(sparkModel);
+    const priceLabel = latest ? formatPrice(displayPrice(latest)) : "no price data";
+    button.setAttribute("aria-label", sparkText ? `${ticker}, ${priceLabel}, ${sparkText}` : `${ticker}, ${priceLabel}`);
     button.addEventListener("click", () => {
       if (button.dataset.longPress === "1") {
         delete button.dataset.longPress;
@@ -976,7 +981,9 @@ function renderWatchlist() {
       star.setAttribute("aria-hidden", "true");
       symbol.prepend(star);
     }
-    button.append(symbol);
+    const spark = sparkline(history, { cacheKey: sparkKey });
+    spark.classList.add("ticker-spark");
+    button.append(symbol, spark);
     button.append(
       node(
         "span",

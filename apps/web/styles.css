@@ -319,8 +319,8 @@ a {
 }
 
 .ticker-watch-item .ticker-button {
-  min-width: 155px;
-  flex: 0 0 155px;
+  min-width: 148px;
+  flex: 0 0 148px;
 }
 
 .ticker-research {
@@ -369,7 +369,7 @@ a {
 }
 
 .watchlist-bar .ticker-button {
-  flex: 0 0 155px;
+  flex: 0 0 148px;
 }
 
 .watchlist-bar .ticker-manage {
@@ -1659,6 +1659,46 @@ body.modal-open {
 .spark.negative {
   stroke: var(--red);
 }
+
+/* watchlist sparklines (#92) */
+.watchlist .ticker-button {
+  grid-template-columns: minmax(0, 1fr) 60px;
+  column-gap: 6px;
+  align-items: center;
+}
+
+.watchlist .ticker-meta {
+  grid-column: 1 / -1;
+}
+
+.watchlist .spark,
+.watchlist .spark-empty {
+  width: 60px;
+  height: 18px;
+}
+
+.watchlist .spark-empty {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.spark.flat {
+  stroke: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .watchlist .ticker-button {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .watchlist .spark,
+  .watchlist .spark-empty {
+    width: 44px;
+    height: 14px;
+  }
+}
+/* end watchlist sparklines (#92) */
 
 .spark-empty,
 .row-price,
