@@ -1,5 +1,6 @@
 // View model for the per-stock page. Proposed metrics never become panels.
 // Text is plain; callers render it with textContent.
+import { catalystDateLabel } from "./roadmap.js";
 
 export const LONG_PRESS_MS = 550;
 
@@ -139,10 +140,15 @@ export function freshnessBadge(payload, state, ticker = "") {
   return { tone: "ok", text: payload.freshness_label || "IR data approved" };
 }
 
-export function stockFreshnessText(payload, state, ticker = "") {
+export function monthDayLabel(value, now = new Date(), timeZone = "UTC") {
+  const label = catalystDateLabel(value, { now, timeZone });
+  return label && label !== "—" ? label : "";
+}
+
+export function stockFreshnessText(payload, state, ticker = "", now = new Date(), timeZone = "UTC") {
   const badge = freshnessBadge(payload, state, ticker);
   if (state !== "ready" || !payload) return badge.text;
-  const extra = [payload.run_status, payload.generated_at].filter(Boolean);
+  const extra = [payload.run_status, monthDayLabel(payload.generated_at, now, timeZone)].filter(Boolean);
   return extra.length ? `${badge.text} · ${extra.join(" · ")}` : badge.text;
 }
 

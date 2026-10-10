@@ -3239,7 +3239,6 @@ a.catalyst-edgar-link:hover {
   .theme-choice::after,
   .segment::after,
   .panel-action::after,
-  .company-page-link::after,
   .stock-dashboard-link::after {
     content: "";
     position: absolute;
@@ -3256,37 +3255,6 @@ a.catalyst-edgar-link:hover {
   .panel {
     transition: border-color 120ms ease, background-color 120ms ease;
   }
-}
-
-.chart-entry {
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
-  padding: var(--space-2) 16px 0;
-}
-
-.company-page-link {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  min-height: 44px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--blue);
-  font-size: 13px;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.company-page-link:hover,
-.company-page-link:focus-visible {
-  border-color: var(--blue);
-  background: var(--hover);
 }
 
 .stock-heading {
@@ -3372,10 +3340,69 @@ a.catalyst-edgar-link:hover {
   gap: 12px;
 }
 
+.stock-section {
+  padding: 14px 16px 16px;
+  color: var(--text);
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
 .stock-section-title {
-  margin: 0 0 8px;
-  font-size: 15px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.stock-section .stock-metric {
+  background: var(--surface-raised);
+  box-shadow: none;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.direction-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.direction-word {
+  color: var(--text);
+}
+
+.direction-mark-up .direction-word {
+  color: var(--green);
+}
+
+.direction-mark-down .direction-word {
+  color: var(--red);
+}
+
+.direction-mark-flat .direction-word {
+  color: var(--muted);
+}
+
+.direction-mark .mono {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.stock-page-tabs .stock-tab {
+  width: 100%;
+  padding-inline: 4px;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+.stock-page-tabs .stock-tab[aria-selected="true"] {
+  border-color: var(--blue);
+  background: var(--selected);
+  color: var(--text);
 }
 
 .stock-metric-grid {
@@ -3482,9 +3509,52 @@ a.catalyst-edgar-link:hover {
 }
 
 .stock-latest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
   margin: 0;
   color: var(--secondary);
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
+}
+
+.panel[data-drawer="contracts"],
+.panel[data-drawer="about-data"] {
+  color: var(--text);
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+.panel[data-drawer="about-data"] .overlay-chip,
+.panel[data-drawer="contracts"] .catalyst-recent-row,
+.panel[data-drawer="about-data"] .signal-note,
+.panel[data-drawer="contracts"] .signal-note {
+  font-family: inherit;
+}
+
+.record-row {
+  align-items: center;
+  height: auto;
+  min-height: 28px;
+  white-space: normal;
+}
+
+.record-title {
+  align-items: flex-start;
+}
+
+.record-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.record-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .price-panel-compact .chart-controls,

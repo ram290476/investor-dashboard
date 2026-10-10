@@ -15,7 +15,7 @@ import { applyTheme, overlayColor } from "./theme.js";
 import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
-  catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
+  catalystDateLabel, catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
   catalystSensitivityRows, markerIndex, movingAverageRows, newsEmptyMessage, newsGroups, newsHeader, newsRowView, newsSummary,
   sortedDrivers, upcomingEmptyMessage,
 } from "./roadmap.js";
@@ -1178,6 +1178,12 @@ function displayZone() {
   return session.prefs?.display?.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
+function monthDay(value) {
+  if (!value) return "";
+  const label = catalystDateLabel(value, { timeZone: displayZone(), now: new Date() });
+  return label === "—" ? "" : label;
+}
+
 function catalystSummary(model) {
   if (session.dashboardState === "loading") return "Loading…";
   if (session.dashboardState === "error" && !model.upcoming.length && !model.past.length) return "Unavailable";
@@ -1991,20 +1997,6 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   }
   quoteBlock.append(meta);
   overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
-  if (session.route.page === "dashboard" && stockHash(session.selected)) {
-    const entry = node("div", "chart-entry");
-    const openPage = node("a", "company-page-link", `Open ${session.selected} page`);
-    openPage.href = `/${stockHash(session.selected)}`;
-    openPage.dataset.companyPage = session.selected;
-    openPage.setAttribute("aria-label", `Open ${session.selected} company page`);
-    openPage.addEventListener("click", (event) => {
-      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      event.preventDefault();
-      navigateToStock(session.selected);
-    });
-    entry.append(openPage);
-    panel.append(entry);
-  }
   panel.append(overview);
   panel.append(renderOverlayControls(controls.groups, chartDataState, onSettingsChange));
   const filters = node("div", "catalyst-filters");
@@ -2162,32 +2154,16 @@ function renderContracts(tickerData) {
     : contracts.freshness === "fresh" ? "current"
       : "unavailable";
   const sourceIds = contracts.source_ids?.length ? contracts.source_ids.join(", ") : "source unavailable";
-  const observed = contracts.observed_at ? formatTime(contracts.observed_at, session.prefs.display.time_zone)
-    : "observation date unavailable";
+  const observed = monthDay(contracts.observed_at) || "observation date unavailable";
   body.append(node("p", "signal-note",
-    `Rollup ${freshness} · as of ${contracts.as_of || "date unavailable"} · sources ${sourceIds} · last source observation ${observed}`));
+    `Rollup ${freshness} · as of ${monthDay(contracts.as_of) || "date unavailable"} · sources ${sourceIds} · last source observation ${observed}`));
   if (contracts.coverage === "unavailable") {
     body.append(node("p", "data-state", "No dated source rows support a trailing-12-month amount; zero is not inferred."));
   }
   const quarters = (contracts.by_agency || []).map(row => `${row.quarter}: ${formatPrice(row.obligated)}`);
   if (quarters.length) body.append(node("p", "signal-note", `Agency/fiscal-quarter breakdown · ${quarters.join(" · ")}`));
-  const list = node("ul", "news-list");
-  (contracts.recent || []).slice(0, 5).forEach((row) => {
-    const item = node("li", "news-item");
-    const link = node("a", "news-title", `${row.agency || "Agency"} · ${row.award_id || ""}`);
-    if (row.url) {
-      link.href = row.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-    }
-    item.append(link);
-    const amount = isNumericValue(row.amount) ? formatPrice(row.amount) : "—";
-    item.append(node("p", "news-meta",
-      `${row.date || "award date unavailable"} · ${amount} · ${row.source_id || "source unavailable"} · collected ${
-        row.observed_at ? String(row.observed_at).slice(0, 10) : "date unavailable"
-      }`));
-    list.append(item);
-  });
+  const list = node("div", "catalyst-recent-list");
+  (contracts.recent || []).slice(0, 5).forEach((row) => list.append(renderContractRow(row)));
   if (!list.childElementCount) {
     body.append(node("p", "data-state", "No awards in the last 30 days."));
   } else {
@@ -2195,6 +2171,40 @@ function renderContracts(tickerData) {
   }
   });
   return panel;
+}
+
+function renderContractRow(row) {
+  const dateText = monthDay(row.date) || "—";
+  const amount = isNumericValue(row.amount) ? formatPrice(row.amount) : "—";
+  const name = `${row.agency || "Agency"} · ${row.award_id || "award"}`;
+  const source = row.source_id || "source unavailable";
+  const collected = monthDay(row.observed_at);
+  const href = /^https?:\/\//i.test(String(row.url || "")) ? row.url : "";
+  const line = href ? document.createElement("a") : node("div", "");
+  line.className = "catalyst-recent-row record-row";
+  if (href) {
+    line.href = href;
+    line.target = "_blank";
+    line.rel = "noopener noreferrer";
+  }
+  const date = node("time", "catalyst-recent-date", dateText);
+  date.dateTime = String(row.date || "").slice(0, 10);
+  const title = node("span", "catalyst-recent-title record-title");
+  const dot = node("span", "catalyst-dot");
+  dot.style.setProperty("--catalyst-color", "var(--series-2)");
+  dot.setAttribute("aria-hidden", "true");
+  const copy = node("span", "record-copy");
+  const label = node("span", "catalyst-recent-name", name);
+  copy.append(label);
+  const metaText = collected ? `${source} · collected ${collected}` : source;
+  copy.append(node("span", "record-meta", metaText));
+  title.append(dot, copy);
+  const move = node("span", "catalyst-recent-move mono", amount);
+  line.append(date, title, move);
+  const accessible = [dateText, name, amount, metaText].join(", ");
+  line.setAttribute("aria-label", accessible);
+  line.title = accessible;
+  return line;
 }
 
 function renderCatalystRow(event, tickerData, { calendarId = false, link = false, variant = "catalyst" } = {}) {
@@ -2978,7 +2988,7 @@ function renderAboutData() {
     node("p", "signal-note", "Monthly macro releases use separate adjusted-return event windows and at least 12 paired releases. Without consensus, the basis is YoY change, not consensus surprise. Current/revised observations are not a real-time-vintage backtest."),
     node("p", "signal-note", "Quarterly fundamentals change on filing/release dates. Public float is reported USD, usually annual; estimated float shares in the short-interest lane are a separate calculation."),
     node("p", "signal-note", "News sentiment is a rolling mean of available daily scores over seven calendar days, mixing provider sentiment with a headline lexicon fallback. Missing days are not fabricated. Catalyst feeds are bounded published events, not an exhaustive corporate calendar."),
-    action("View collection schedules and source health", "button-link", () => settings.open("refresh", "about-data")));
+    action("View collection schedules and source health", "overlay-chip panel-action", () => settings.open("refresh", "about-data")));
   });
   return panel;
 }
@@ -3053,6 +3063,26 @@ function renderAppHeader() {
   return header;
 }
 
+function renderDirectionMark(kind, value, text) {
+  const number = Number(value);
+  const up = number > 0;
+  const down = number < 0;
+  const word = up ? "Uptrend" : down ? "Downtrend" : "Flat";
+  const tone = up ? "up" : down ? "down" : "flat";
+  const arrow = up ? "▲" : down ? "▼" : "▬";
+  const mark = node("span", `direction-mark direction-mark-${tone}`);
+  const dot = node("span", "catalyst-dot");
+  dot.style.setProperty("--catalyst-color", up ? "var(--green)" : down ? "var(--red)" : "var(--muted)");
+  dot.setAttribute("aria-hidden", "true");
+  mark.append(
+    dot,
+    node("span", "direction-word", word),
+    node("span", `mono ${up ? "positive" : down ? "negative" : "neutral"}`, `${kind} ${arrow} ${text}`),
+  );
+  mark.setAttribute("aria-label", `${kind} ${word}, ${text}`);
+  return mark;
+}
+
 function renderMetricCard(metric) {
   const card = node("article", `panel stock-metric${metric.unavailable ? " stock-metric-unavailable" : ""}`);
   card.dataset.metricId = metric.id;
@@ -3100,14 +3130,8 @@ function renderMetricCard(metric) {
   const periodText = fiscal ? `Q${fiscal[2]}` : metric.latestPeriod;
   latest.append(document.createTextNode(metric.unavailable ? "Unavailable. " : `Latest ${periodText ? `${periodText} ` : ""}`));
   latest.append(node("span", "", metric.unavailable ? "not reported" : metric.latest));
-  if (!metric.unavailable && metric.qoq) {
-    latest.append(document.createTextNode(" "));
-    latest.append(node("span", metric.qoqValue > 0 ? "positive" : metric.qoqValue < 0 ? "negative" : "neutral", `QoQ ${metric.qoq}`));
-  }
-  if (!metric.unavailable && metric.yoy) {
-    latest.append(document.createTextNode(" "));
-    latest.append(node("span", metric.yoyValue > 0 ? "positive" : metric.yoyValue < 0 ? "negative" : "neutral", `YoY ${metric.yoy}`));
-  }
+  if (!metric.unavailable && metric.qoq) latest.append(renderDirectionMark("QoQ", metric.qoqValue, metric.qoq));
+  if (!metric.unavailable && metric.yoy) latest.append(renderDirectionMark("YoY", metric.yoyValue, metric.yoy));
   card.append(latest);
   return card;
 }
@@ -3120,7 +3144,7 @@ function renderStockPage() {
   const pageState = session.stockPageState[session.selected] || "loading";
   const panels = stockPanels(payload, chartData);
   const badge = freshnessBadge(payload, pageState, session.selected);
-  const freshnessText = stockFreshnessText(payload, pageState, session.selected);
+  const freshnessText = stockFreshnessText(payload, pageState, session.selected, new Date(), displayZone());
   const history = tickerData?.price_history || [];
   const bars = validBars(history);
   const latest = bars.at(-1);
@@ -3140,9 +3164,8 @@ function renderStockPage() {
   if (isNumericValue(dayChange)) {
     price.append(node("span", polarity(dayChange), ` ${formatPercent(dayChange)}`));
   }
-  const updated = session.dashboard?.generated_at
-    ? `Updated ${formatTime(session.dashboard.generated_at, session.prefs.display.time_zone)}`
-    : "Updated time unavailable";
+  const updatedDay = monthDay(session.dashboard?.generated_at);
+  const updated = updatedDay ? `Updated ${updatedDay}` : "Updated time unavailable";
   const freshness = node("p", "stock-freshness", freshnessText);
   freshness.dataset.tone = badge.tone;
   copy.append(title, price, node("p", "overview-meta", updated), freshness);
@@ -3172,7 +3195,7 @@ function renderStockPage() {
   chart.dataset.stockPanel = "overview";
 
   const section = (id, label, cards, empty) => {
-    const block = node("section", "stock-section");
+    const block = node("section", "panel stock-section");
     block.dataset.stockPanel = id;
     block.id = `stock-panel-${id}`;
     block.append(node("h3", "stock-section-title", label));
@@ -3186,7 +3209,7 @@ function renderStockPage() {
   };
 
   const calls = callsCopy();
-  const callsBlock = node("section", "stock-section");
+  const callsBlock = node("section", "panel stock-section");
   callsBlock.dataset.stockPanel = "calls";
   callsBlock.id = "stock-panel-calls";
   callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
@@ -3213,7 +3236,7 @@ function renderStockPage() {
   tabs.setAttribute("role", "tablist");
   tabs.setAttribute("aria-label", "Company page sections");
   STOCK_TABS.forEach((item) => {
-    const tab = action(item.label, "", () => {
+    const tab = action(item.label, "overlay-chip stock-tab", () => {
       session.stockTab = item.id;
       renderDashboard();
       root.querySelector(`#stock-tab-${item.id}`)?.focus();
