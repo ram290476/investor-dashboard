@@ -3,11 +3,25 @@
 // renders the dashboard as if no data had been published, with nothing to say why.
 
 export class ApiError extends Error {
-  constructor(message, status = 0) {
+  constructor(message, status = 0, code = "") {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
+}
+
+// Codes from prefs_api's error boundary. 502/503 responses use these instead of a generic failure.
+export const API_CODE_MESSAGES = {
+  STS_UNAVAILABLE: "The sign-in check is temporarily unavailable. Try again in a minute.",
+  SERVING_READ_FAILED: "Dashboard data is being rebuilt; try again in a minute.",
+  PREFS_STORE_UNAVAILABLE: "Preferences could not be reached. Try again in a minute.",
+  SERVING_DOCUMENT_INVALID: "Dashboard data is being rebuilt; try again in a minute.",
+  INTERNAL: "Something went wrong. Try again in a minute.",
+};
+
+export function messageForApiCode(code) {
+  return API_CODE_MESSAGES[code] || "";
 }
 
 // fetch() rejected before any response (offline, blocked, CORS, Safari "Load failed").
@@ -33,8 +47,10 @@ export async function readApiResponse(response, what) {
     }
   }
   if (!response.ok) {
-    const message = body && typeof body.error === "string" ? body.error : `${what} failed (${response.status}).`;
-    throw new ApiError(message, response.status);
+    const code = body && typeof body.code === "string" ? body.code : "";
+    const mapped = response.status === 502 || response.status === 503 ? messageForApiCode(code) : "";
+    const fallback = body && typeof body.error === "string" ? body.error : `${what} failed (${response.status}).`;
+    throw new ApiError(mapped || fallback, response.status, code);
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new ApiError(`${what} returned a response that could not be read (${text.length.toLocaleString()} bytes). Try again.`, response.status);
@@ -59,9 +75,9 @@ function settledFailures(dashboardResult, statusResult) {
 // The banner refreshData shows. Empty when both calls succeeded.
 export function refreshErrorMessage(dashboardResult, statusResult) {
   const failures = settledFailures(dashboardResult, statusResult);
-  if (dashboardResult?.status === "rejected" && dashboardResult.reason?.status === 503) {
-    return UNPUBLISHED_DASHBOARD_MESSAGE;
-  }
+  const dashboardFailure = dashboardResult?.status === "rejected" ? dashboardResult.reason : null;
+  if (dashboardFailure && messageForApiCode(dashboardFailure.code)) return dashboardFailure.message;
+  if (dashboardFailure?.status === 503) return UNPUBLISHED_DASHBOARD_MESSAGE;
   const dashboardError = failures.find((error) => error.status !== 503) || failures[0];
   return dashboardError?.message || "";
 }
@@ -87,7 +103,9 @@ export function applyRefresh(session, dashboardResult, statusResult) {
     next.dashboard = dashboardResult.value;
     next.dashboardState = "ready";
   } else if (!session?.dashboard) {
-    next.dashboardState = dashboardResult?.reason?.status === 503 ? "unpublished" : "error";
+    const reason = dashboardResult?.reason;
+    const unpublished = reason?.status === 503 && !messageForApiCode(reason?.code);
+    next.dashboardState = unpublished ? "unpublished" : "error";
   }
   if (statusResult?.status === "fulfilled") next.status = statusResult.value;
   if (settledFailures(dashboardResult, statusResult).some((error) => error.status === 401)) {
