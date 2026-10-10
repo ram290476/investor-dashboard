@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { catalystCategory, catalystCategoriesInWindow, catalystDateLabel, catalystMove, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+import {
+  calendarPanelModel, calendarSummary, catalystCategory, catalystCategoriesInWindow, catalystDateLabel, catalystMove,
+  catalystMoveLabel, catalystRowView, catalystRows, countdownLabel, edgarCompanyUrl, edgarIndexUrl, filingDisplayTitle,
+  filingPanelModel, filingsEmptyMessage, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers,
+} from "./roadmap.js";
 
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
@@ -81,7 +85,8 @@ test("catalyst moves use the aligned session close and stay null outside history
   assert.equal(catalystMove({ date: "2026-10-02" }, bars), null);
   assert.equal(catalystMove({ date: "2026-10-03" }, bars), 90 / 100 - 1);
   assert.equal(catalystMove({ date: "2026-10-04" }, bars), 90 / 100 - 1);
-  assert.equal(catalystMove({ date: "2026-10-05T20:05:00Z" }, bars), 90 / 100 - 1);
+  assert.equal(catalystMove({ date: "2026-10-05T19:00:00Z" }, bars), 90 / 100 - 1);
+  assert.equal(catalystMove({ date: "2026-10-05T20:05:00Z" }, bars), 99 / 90 - 1);
   assert.equal(catalystMove({ date: "2026-10-06" }, bars), 99 / 90 - 1);
   assert.equal(catalystMove({ date: "2026-10-07" }, bars), 0);
   assert.equal(catalystMove({ date: "2026-09-01" }, bars), null);
@@ -101,7 +106,7 @@ test("catalyst moves use the aligned session close and stay null outside history
 });
 
 test("recent catalyst rows reuse the chart marker color and stay one line", () => {
-  const block = styles.slice(styles.indexOf("/* recent catalyst rows (#91) */"), styles.indexOf("/* end recent catalyst rows (#91) */"));
+  const block = styles.slice(styles.indexOf("/* recent catalyst rows (#91)"), styles.indexOf("/* end recent catalyst rows (#91) */"));
   assert.match(block, /\.catalyst-dot[\s\S]*background:\s*var\(--catalyst-color, var\(--subtle\)\)/);
   assert.match(block, /\.catalyst-recent-name[\s\S]*text-overflow:\s*ellipsis/);
   assert.match(block, /\.catalyst-recent-row[\s\S]*height:\s*28px/);
@@ -109,14 +114,115 @@ test("recent catalyst rows reuse the chart marker color and stay one line", () =
   assert.match(block, /\.catalyst-recent-row:disabled[\s\S]*color:\s*var\(--muted\)/);
   assert.match(block, /@media \(pointer: coarse\)[\s\S]*min-height:\s*44px/);
   assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}/);
-  const render = app.slice(app.indexOf("function catalystMoveLabel"), app.indexOf("function renderDrivers"));
+  const render = app.slice(app.indexOf("function renderCatalystRow"), app.indexOf("function renderDrivers"));
   assert.match(render, /overlayColor\(category\.slot/);
   assert.match(render, /visually-hidden/);
-  assert.match(render, /catalystMove\(event, daily\)/);
+  assert.match(render, /catalystRowView\(event/);
   assert.match(render, /selectCatalyst\(event\)/);
   assert.match(render, /Outside the selected chart period/);
-  assert.match(render, /▲/);
-  assert.match(render, /▼/);
+  assert.match(render, /renderCatalystList\(events, tickerData\)/);
+  assert.match(app, /renderRecentCatalysts\(recent, tickerData\)/);
+  assert.match(app, /function renderFilings[\s\S]*renderCatalystSection/);
+  assert.match(app, /function renderCatalystCalendar[\s\S]*renderCatalystSection/);
+});
+
+test("row dates stay on the calendar day for date-only values and follow the time zone otherwise", () => {
+  const now = new Date("2026-10-07T19:15:00-07:00");
+  const zone = "America/Los_Angeles";
+  assert.equal(catalystDateLabel("2026-10-02", { now, timeZone: zone }), "Oct 2");
+  assert.equal(catalystDateLabel("2026-10-31T00:00:00Z", { now, timeZone: zone }), "Oct 31");
+  assert.equal(catalystDateLabel("2026-10-08T02:06:20Z", { now, timeZone: zone }), "Oct 7");
+  assert.equal(catalystDateLabel("2026-10-05T20:05:00Z", { now, timeZone: "Asia/Tokyo" }), "Oct 6");
+  assert.equal(catalystDateLabel("2025-10-08", { now, timeZone: zone }), "Oct 8, 2025");
+  assert.equal(catalystDateLabel("not-a-date", { now }), "—");
+  const spring = catalystDateLabel("2026-03-08T07:30:00Z", { now: new Date("2026-03-08T12:00:00Z"), timeZone: zone });
+  assert.equal(spring, "Mar 7");
+});
+
+test("past rows show an arrow or a flat mark, and upcoming rows count days without an arrow", () => {
+  assert.deepEqual(catalystMoveLabel(0.046), { text: "▲ +4.6%", tone: "positive", label: "1-day move ▲ +4.6%" });
+  assert.deepEqual(catalystMoveLabel(-0.013), { text: "▼ -1.3%", tone: "negative", label: "1-day move ▼ -1.3%" });
+  assert.equal(catalystMoveLabel(0.0005).text.startsWith("▲"), true);
+  assert.equal(catalystMoveLabel(-0.0005).text.startsWith("▼"), true);
+  assert.equal(catalystMoveLabel(0.0004).text, "▬ 0.0%");
+  assert.equal(catalystMoveLabel(-0.0004).tone, "neutral");
+  assert.equal(catalystMoveLabel(null).text, "—");
+  const now = new Date("2026-10-07T19:15:00-07:00");
+  const zone = "America/Los_Angeles";
+  assert.deepEqual(countdownLabel("2026-10-10", { now, timeZone: zone, precision: "day" }), { text: "in 3d", label: "in 3 days" });
+  assert.equal(countdownLabel("2026-10-07", { now, timeZone: zone, precision: "day" }).text, "today");
+  assert.equal(countdownLabel("2026-10-08T05:15:00Z", { now, timeZone: zone }).text, "in 3h");
+  assert.equal(countdownLabel("2026-10-01", { now, timeZone: zone, precision: "day" }), null);
+  const upcoming = catalystRowView({ date: "2026-10-31T00:00:00Z", title: "Starship flight", kind: "event" }, { now, timeZone: zone });
+  assert.equal(upcoming.dateText, "Oct 31");
+  assert.equal(upcoming.upcoming, true);
+  assert.equal(upcoming.trailingText, "in 24d");
+  assert.equal(upcoming.trailingLabel, "in 24 days");
+  assert.doesNotMatch(upcoming.trailingText, /[▲▼▬]/);
+  const past = catalystRowView({
+    date: "2026-10-05", title: "A very long filing title that must stay intact for the tooltip even after the row ellipsizes it on screen", kind: "filing",
+  }, {
+    now, timeZone: zone, bars: [{ date: "2026-10-02", adj_close: 100 }, { date: "2026-10-05", adj_close: 110 }],
+  });
+  assert.equal(past.upcoming, false);
+  assert.equal(past.trailingText, "▲ +10.0%");
+  assert.equal(past.name.includes("must stay intact"), true);
+  assert.equal(past.tooltip.startsWith(past.name), true);
+  assert.equal(past.name.includes("\n"), false);
+});
+
+test("filing titles are readable and panels keep each ticker's own upcoming and past items apart", () => {
+  assert.equal(filingDisplayTitle({ form: "8-K", title: "8-K", class: "earnings" }), "8-K · Item 2.02 Results of operations");
+  assert.equal(filingDisplayTitle({ form: "8-K", title: "Results of operations", class: "earnings" }), "8-K · Item 2.02 Results of operations");
+  assert.equal(filingDisplayTitle({ form: "10-Q", title: "10-Q", report_date: "2026-06-30" }), "10-Q · Quarterly report (period Jun 30)");
+  assert.equal(filingDisplayTitle({ form: "10-K", title: "10-K", report_date: "2025-12-31" }), "10-K · Annual report (FY2025)");
+  assert.equal(filingDisplayTitle({ form: "4", title: "OWNERSHIP DOCUMENT", class: "sell", insider_role: "director" }), "Form 4 · Insider sale · director");
+  assert.equal(filingDisplayTitle({ form: "8-K", title: "8-K", items: ["2.02", "9.01", "5.02"] }), "8-K · Item 2.02 Results of operations +1");
+  const index = edgarIndexUrl("https://www.sec.gov/Archives/edgar/data/1318605/000131860526000010/tsla-8k.htm");
+  assert.equal(index, "https://www.sec.gov/Archives/edgar/data/1318605/000131860526000010/0001318605-26-000010-index.html");
+  assert.match(edgarCompanyUrl(index), /CIK=0001318605/);
+  const now = new Date("2026-10-07T19:15:00-07:00");
+  const dashboard = {
+    generated_at: "2026-10-07T19:15:00-07:00",
+    rates: { fomc: { meeting_date: "2026-10-28" } },
+    releases: { next: [{ series: "cpi", release_ts: "2026-10-15T12:35:00Z" }] },
+    events: [
+      { event_ts: "2026-10-31T00:00:00Z", type: "launch", title: "Starship flight", tickers: ["SPCX"], source: "launch-library" },
+      { event_ts: "2026-10-11T23:00:00Z", type: "launch", title: "Falcon 9", tickers: ["SPCX"], source: "launch-library" },
+      { event_ts: "2026-10-03T16:00:00Z", type: "other", title: "Columbus Day", tickers: [], source: "white-house" },
+      { event_ts: "2026-10-02T15:00:00Z", type: "other", title: "Minutes of the Federal Open Market Committee", tickers: [], source: "federal-register" },
+      { event_ts: "2026-09-01T15:00:00Z", type: "robotaxi", title: "Old permit", tickers: ["TSLA"], source: "federal-register" },
+    ],
+    tickers: {
+      TSLA: { filings: [
+        { form: "8-K", title: "8-K", filed_at: "2026-10-02", class: "earnings", url: "https://www.sec.gov/Archives/edgar/data/1318605/000131860526000010/tsla-8k.htm" },
+        { form: "10-Q", title: "10-Q", filed_at: "2026-07-23", class: "periodic", url: "https://www.sec.gov/Archives/edgar/data/1318605/000131860526000020/tsla-10q.htm" },
+      ] },
+      SPCX: { filings: [] },
+    },
+  };
+  const tsla = filingPanelModel({ dashboard, ticker: "TSLA", now, timeZone: "America/Los_Angeles" });
+  assert.deepEqual(tsla.upcoming.map((row) => row.title), []);
+  assert.equal(tsla.filings[0].title, "8-K · Item 2.02 Results of operations");
+  assert.equal(tsla.filings.some((row) => row.title.includes("10-Q")), true);
+  assert.equal(tsla.company.some((row) => /Starship|Falcon/.test(row.title)), false);
+  assert.equal(tsla.company.some((row) => row.title === "Columbus Day"), false);
+  assert.equal(filingsEmptyMessage("AAPL", []), "SEC filings are collected for TSLA and SPCX only.");
+  const spcx = filingPanelModel({ dashboard, ticker: "SPCX", now, timeZone: "America/Los_Angeles" });
+  assert.deepEqual(spcx.upcoming.map((row) => row.title), ["Falcon 9", "Starship flight"]);
+  assert.equal(spcx.upcoming.some((row) => row.title === "Falcon 9" && row.date.startsWith("2026-10-11")), true);
+  const calendar = calendarPanelModel({ dashboard, ticker: "TSLA", now, timeZone: "America/Los_Angeles" });
+  assert.equal(calendar.upcoming.some((row) => row.title === "CPI (Sep)"), true);
+  assert.equal(calendar.upcoming.some((row) => row.title === "FOMC decision"), true);
+  assert.equal(calendar.upcoming.some((row) => row.title === "Starship flight"), false);
+  assert.equal(calendar.past.some((row) => row.title.includes("8-K")), true);
+  assert.equal(calendar.past.some((row) => row.title === "Columbus Day"), false);
+  assert.equal(calendar.other.some((row) => row.title === "Columbus Day"), true);
+  assert.equal(calendar.past.some((row) => row.title.startsWith("Minutes")), true);
+  assert.equal(calendar.past.find((row) => row.title.startsWith("Minutes")).category, "rates");
+  assert.match(calendarSummary(calendar.upcoming, { now, timeZone: "America/Los_Angeles" }), /^2 upcoming · next: .+ · Oct 15 · in \d+d$/);
+  assert.equal(catalystCategory("other", "Minutes of the Federal Open Market Committee"), "rates");
+  assert.equal(catalystCategory("other", "SAFE Vehicles Rule III"), "policy");
 });
 
 test("driver drawer sorts finite values ahead of unavailable ones", () => {

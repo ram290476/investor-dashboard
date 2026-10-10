@@ -191,7 +191,7 @@ test("panel drawer state round-trips and keeps defaults for unsaved ids", () => 
   }
   assert.equal(isPanelOpen(again, "tariffs"), false);
   assert.equal(isPanelOpen(again, "news"), false);
-  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company", "news"]);
+  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company", "news", "filings-events"]);
 });
 
 test("dismissed panels stay dismissed until the user restores them", () => {

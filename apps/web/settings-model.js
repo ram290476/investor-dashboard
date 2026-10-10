@@ -172,11 +172,11 @@ export function timeZoneLabel(zone) {
 export const PANEL_IDS = [
   "rates", "inflation", "market-comparison", "moving-averages", "volatility",
   "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "company",
-  "contracts", "about-data", "news",
+  "contracts", "about-data", "news", "filings-events",
 ];
 
 const PANEL_STATES = new Set(["open", "closed", "dismissed"]);
-const DEFAULT_OPEN_PANELS = new Set(["rates", "inflation", "moving-averages", "company", "news"]);
+const DEFAULT_OPEN_PANELS = new Set(["rates", "inflation", "moving-averages", "company", "news", "filings-events"]);
 
 /** Keep known ids with an open, closed, or dismissed value. Unknown ids and other values are dropped. */
 export function normalizePanels(raw) {

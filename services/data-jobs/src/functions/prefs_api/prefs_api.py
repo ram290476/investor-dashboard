@@ -54,7 +54,7 @@ CHART_PERIODS = {"1D", "1W", "1M", "3M", "YTD", "1Y", "3Y", "5Y"}
 PANEL_IDS = {
     "rates", "inflation", "market-comparison", "moving-averages", "volatility",
     "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "company",
-    "contracts", "about-data", "news",
+    "contracts", "about-data", "news", "filings-events",
 }
 PANEL_STATES = {"open", "closed", "dismissed"}
 PANEL_MODES = {"follow", "all"}
