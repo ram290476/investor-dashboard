@@ -254,10 +254,143 @@ export function singleLine(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-export function catalystRowView(event, { bars = [], timeZone = "UTC", now } = {}) {
+const AGE_MINUTE = 60 * 1000;
+const AGE_HOUR = 60 * AGE_MINUTE;
+const AGE_DAY = 24 * AGE_HOUR;
+
+// #113 D2: now / Nm / Nh inside a day, then the calendar day in the profile zone.
+export function ageLabel(value, { now, timeZone = "UTC" } = {}) {
+  const current = now instanceof Date ? now : new Date(now || Date.now());
+  const instant = new Date(value);
+  if (Number.isNaN(current.valueOf()) || Number.isNaN(instant.valueOf())) {
+    return catalystDateLabel(value, { now: current, timeZone });
+  }
+  const delta = current.getTime() - instant.getTime();
+  if (delta < 0) return catalystDateLabel(value, { now: current, timeZone, precision: "minute" });
+  if (delta < AGE_MINUTE) return "now";
+  if (delta < 60 * AGE_MINUTE) return `${Math.floor(delta / AGE_MINUTE)}m`;
+  if (delta < AGE_DAY) return `${Math.floor(delta / AGE_HOUR)}h`;
+  return catalystDateLabel(value, { now: current, timeZone, precision: resolvePrecision(value) });
+}
+
+export const BULLISH_ABOVE = 0.15;
+export const BEARISH_BELOW = -0.15;
+
+export function sentimentTone(score) {
+  if (!isNumericValue(score)) return { tone: "neutral", label: "Neutral", dot: "muted" };
+  const value = Number(score);
+  if (value > BULLISH_ABOVE) return { tone: "positive", label: "Bullish", dot: "green" };
+  if (value < BEARISH_BELOW) return { tone: "negative", label: "Bearish", dot: "red" };
+  return { tone: "neutral", label: "Neutral", dot: "muted" };
+}
+
+export function formatSentimentScore(score) {
+  if (!isNumericValue(score)) return "n/a";
+  const rounded = Math.round(Number(score) * 100) / 100;
+  if (rounded === 0) return "0.00";
+  const text = rounded.toFixed(2);
+  return rounded > 0 ? `+${text}` : text;
+}
+
+export function sentimentChangeLabel(change) {
+  if (!isNumericValue(change)) return null;
+  const value = Number(change);
+  if (Math.abs(value) < 0.005) return { text: "▬ 0.00", tone: "neutral" };
+  const up = value > 0;
+  return { text: `${up ? "▲ " : "▼ "}${value > 0 ? "+" : ""}${value.toFixed(2)}`, tone: up ? "positive" : "negative" };
+}
+
+export function stripPublisher(title, publisher) {
+  const text = singleLine(title);
+  const source = singleLine(publisher);
+  const suffix = ` - ${source}`;
+  if (source && text.toLowerCase().endsWith(suffix.toLowerCase())) return text.slice(0, -suffix.length).trim();
+  return text;
+}
+
+function shiftDay(day, count) {
+  const [year, month, date] = String(day || "").split("-").map(Number);
+  if (!year || !month || !date) return "";
+  return new Date(Date.UTC(year, month - 1, date + count)).toISOString().slice(0, 10);
+}
+
+function weekdayOnOrAfter(day) {
+  let cursor = day;
+  for (let guard = 0; guard < 7 && cursor; guard += 1) {
+    const [year, month, date] = cursor.split("-").map(Number);
+    const weekday = new Date(Date.UTC(year, month - 1, date)).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) return cursor;
+    cursor = shiftDay(cursor, 1);
+  }
+  return cursor;
+}
+
+function targetSessionDay(event) {
+  const stamp = String(event?.date || "");
+  const precision = resolvePrecision(stamp, event?.date_precision);
+  if (precision === "minute" && CLOCK_TIME.test(stamp)) {
+    const minutes = easternMinutes(stamp);
+    const etDay = calendarDay(stamp, { timeZone: "America/New_York", precision: "minute" });
+    if (!DATE_ONLY.test(etDay)) return "";
+    const start = minutes != null && minutes >= MARKET_CLOSE_MINUTES ? shiftDay(etDay, 1) : etDay;
+    return weekdayOnOrAfter(start);
+  }
+  const day = (stamp.match(/^(\d{4}-\d{2}-\d{2})/) || [])[1] || "";
+  return day ? weekdayOnOrAfter(day) : "";
+}
+
+function sessionHasClosed(day, now) {
+  if (!DATE_ONLY.test(String(day || "")) || !(now instanceof Date) || Number.isNaN(now.valueOf())) return false;
+  const today = calendarDay(now, { timeZone: "America/New_York", precision: "minute" });
+  if (!today) return false;
+  if (day < today) return true;
+  if (day > today) return false;
+  const minutes = easternMinutes(now.toISOString());
+  return minutes != null && minutes >= MARKET_CLOSE_MINUTES;
+}
+
+// The session a headline aligns to, using the same after-close rule as catalystMove.
+// An unclosed session is pending instead of an intraday print.
+export function publicationMove(event, bars, now) {
+  const list = bars || [];
+  const index = moveSessionIndex(event, list);
+  const storedDay = index >= 0 ? String(list[index]?.ts || list[index]?.date || "").slice(0, 10) : "";
+  const sessionDay = DATE_ONLY.test(storedDay) ? storedDay : targetSessionDay(event);
+  const current = now instanceof Date ? now : new Date(now || Date.now());
+  if (sessionDay && !sessionHasClosed(sessionDay, current)) {
+    return {
+      text: "—",
+      tone: "neutral",
+      label: "1-day move pending, next session not closed",
+      pending: true,
+      session: sessionDay,
+    };
+  }
+  const move = index >= 1 ? catalystMove(event, list) : null;
+  return { ...catalystMoveLabel(move), pending: false, session: DATE_ONLY.test(storedDay) ? storedDay : "" };
+}
+
+export function newsClockTitle(value, { timeZone = "UTC", now } = {}) {
+  const day = calendarDay(value, { timeZone, precision: "minute" });
+  if (!DATE_ONLY.test(day)) return "";
+  const nowDay = now ? calendarDay(now, { timeZone, precision: "minute" }) : day;
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: nowDay.slice(0, 4) === day.slice(0, 4) ? undefined : "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${day}T00:00:00Z`)).replace(/^(\w+),/, "$1");
+  const clock = clockLabel(value, timeZone, "minute");
+  return clock ? `${formatted} · ${clock}` : formatted;
+}
+
+export function catalystRowView(event, { bars = [], timeZone = "UTC", now, dateMode = "date" } = {}) {
   const precision = resolvePrecision(event?.date, event?.date_precision);
   const dateOptions = { timeZone, precision, now };
-  const dateText = catalystDateLabel(event?.date, dateOptions);
+  const dateText = dateMode === "age"
+    ? ageLabel(event?.date, { now, timeZone })
+    : catalystDateLabel(event?.date, dateOptions);
   const dateTitle = fullDateTitle(event?.date, dateOptions);
   const upcoming = isUpcomingItem(event, now, timeZone);
   const clock = clockLabel(event?.date, timeZone, precision);
@@ -277,6 +410,128 @@ export function catalystRowView(event, { bars = [], timeZone = "UTC", now } = {}
     trailingLabel: trailing.label,
     tooltip,
   };
+}
+
+export function newsRowView(headline, { bars = [], timeZone = "UTC", now } = {}) {
+  const publisher = singleLine(headline?.publisher || "");
+  const event = {
+    date: headline?.published_at,
+    date_precision: headline?.date_precision || "minute",
+    title: stripPublisher(headline?.title, publisher),
+    kind: "news",
+    url: headline?.url || "",
+    source: publisher,
+  };
+  const base = catalystRowView(event, { bars, timeZone, now, dateMode: "age" });
+  const sentiment = sentimentTone(headline?.score);
+  const score = formatSentimentScore(headline?.score);
+  const move = publicationMove(event, bars, now);
+  const timeTitle = newsClockTitle(event.date, { timeZone, now });
+  const moveBit = !move.pending && move.session && move.text !== "—"
+    ? `1-day move ${singleLine(move.text)} (${catalystDateLabel(move.session)} session)`
+    : move.label;
+  const knownSource = headline?.score_source === "provider" || headline?.score_source === "lexicon"
+    ? ` (${headline.score_source})` : "";
+  const sentimentBit = score === "n/a" ? "sentiment n/a" : `sentiment ${score}${knownSource}`;
+  const snippet = singleLine(headline?.snippet || "");
+  const tooltip = [base.name, publisher, timeTitle, sentimentBit, moveBit, snippet].filter(Boolean).join(" · ");
+  return {
+    ...base,
+    timeTitle,
+    publisher,
+    sentimentLabel: sentiment.label,
+    dotToken: sentiment.dot,
+    scoreText: score,
+    scoreTone: sentiment.tone,
+    scoreLabel: score === "n/a" ? "Sentiment score unavailable" : `Sentiment ${score}`,
+    tone: move.tone,
+    trailingText: move.text,
+    trailingLabel: move.label,
+    tooltip,
+  };
+}
+
+export const COMPANY_NEWS_TICKERS = ["TSLA", "SPCX"];
+export const NEWS_ROW_LIMIT = 5;
+
+export function visibleHeadlines(headlines, ticker) {
+  return (Array.isArray(headlines) ? headlines : []).filter((item) => {
+    if (!item || item.relevance === "sector") return false;
+    const symbols = Array.isArray(item.tickers) ? item.tickers.map((symbol) => String(symbol).toUpperCase()) : [];
+    if (!symbols.length || !ticker) return true;
+    return symbols.includes(String(ticker).toUpperCase());
+  });
+}
+
+export function newsGroupName(value, { now, timeZone = "UTC" } = {}) {
+  const current = now instanceof Date ? now : new Date(now || Date.now());
+  const today = calendarDay(current, { timeZone, precision: "minute" });
+  const day = calendarDay(value, { timeZone, precision: resolvePrecision(value, "minute") });
+  const diff = calendarDayDiff(today, day);
+  if (diff == null || diff <= 0) return "Today";
+  if (diff <= 6) return "This week";
+  return "Earlier";
+}
+
+export function newsGroups(headlines, { ticker, now, timeZone = "UTC" } = {}) {
+  const buckets = { Today: [], "This week": [], Earlier: [] };
+  visibleHeadlines(headlines, ticker)
+    .slice()
+    .sort((left, right) => Date.parse(right?.published_at || "") - Date.parse(left?.published_at || "")
+      || String(left?.title || "").localeCompare(String(right?.title || "")))
+    .forEach((row) => {
+      buckets[newsGroupName(row.published_at, { now, timeZone })].push(row);
+    });
+  return ["Today", "This week", "Earlier"]
+    .filter((name) => buckets[name].length)
+    .map((name) => ({ name, rows: buckets[name] }));
+}
+
+export function newsCount(news) {
+  const count = Number(news?.count_7d);
+  if (Number.isFinite(count)) return count;
+  return visibleHeadlines(news?.headlines, "").length;
+}
+
+export function newsSummary(news, { state } = {}) {
+  if (state === "loading") return "Loading…";
+  const count = newsCount(news);
+  const hasScore = isNumericValue(news?.sentiment_7d);
+  if (state === "error" && !hasScore && !count) return "Unavailable";
+  if (!news) return "Headlines and 7-day sentiment";
+  const headlines = `${count} headline${count === 1 ? "" : "s"}`;
+  return hasScore ? `${formatSentimentScore(news.sentiment_7d)} · ${headlines}` : headlines;
+}
+
+export function newsSourceNote(news, { timeZone = "UTC", now } = {}) {
+  const history = Array.isArray(news?.sentiment_history) ? news.sentiment_history : [];
+  const day = String(history.at(-1)?.date || news?.as_of || "").slice(0, 10);
+  const when = DATE_ONLY.test(day) ? catalystDateLabel(day, { timeZone, precision: "day", now }) : "";
+  return when && when !== "—"
+    ? `Through ${when} · provider scores with headline-lexicon fallback`
+    : "provider scores with headline-lexicon fallback";
+}
+
+export function newsHeader(news, { timeZone = "UTC", now } = {}) {
+  const scoreValue = isNumericValue(news?.sentiment_7d) ? Number(news.sentiment_7d) : null;
+  const prior = isNumericValue(news?.sentiment_7d_prior) ? Number(news.sentiment_7d_prior) : null;
+  const change = scoreValue != null && prior != null ? scoreValue - prior : null;
+  return {
+    scoreText: scoreValue == null ? "—" : formatSentimentScore(scoreValue),
+    scoreTone: sentimentTone(scoreValue).tone,
+    count: newsCount(news),
+    change: change == null ? null : sentimentChangeLabel(change),
+    sourceNote: newsSourceNote(news, { timeZone, now }),
+    historyEmpty: !(Array.isArray(news?.sentiment_history) && news.sentiment_history.length),
+  };
+}
+
+export function newsEmptyMessage(ticker, headlines) {
+  if (headlines.length) return "";
+  if (!COMPANY_NEWS_TICKERS.includes(ticker)) {
+    return `Company news is collected for TSLA and SPCX. ${ticker} gets Alpha Vantage headlines on rotation, every few days.`;
+  }
+  return `No ${ticker} headlines in the last 7 days.`;
 }
 
 const GENERIC_FILING_TITLES = new Set([

@@ -5,11 +5,15 @@ from news_sentiment import (
     apply_sentiment,
     canonical_url,
     catch_up_since,
+    curated_row,
     dedupe_articles,
+    headline_relevance,
     label_for,
     lexicon_score,
     next_av_ticker,
+    parse_rss,
     rollup_daily,
+    strip_publisher_suffix,
     url_hash,
 )
 from observability import emit_job_finished, job_handler
@@ -48,6 +52,29 @@ def test_alpha_vantage_rotation_never_exceeds_16_calls_a_day():
     early = datetime(2026, 10, 7, 9, 15, tzinfo=UTC)  # 05:15 EDT, before 06:15
     fresh, reset = next_av_ticker({"av_day": "2026-10-06", "av_index": 16}, "2026-10-07", plan, early)
     assert fresh is None and reset["av_index"] == 0
+
+
+def test_rss_strips_the_publisher_suffix_and_drops_the_description_snippet():
+    xml = """<?xml version="1.0"?>
+    <rss><channel><item>
+      <title>Tesla approval beats estimates - Reuters</title>
+      <link>https://example.com/story?utm_source=gn</link>
+      <pubDate>Tue, 06 Oct 2026 16:30:00 GMT</pubDate>
+      <source>Reuters</source>
+      <description>&lt;p&gt;A long description&lt;/p&gt;</description>
+    </item></channel></rss>"""
+    rows = parse_rss(xml, "google-tesla", ["TSLA"], ["tesla"], "2026-10-06T18:00:00+00:00")
+    assert rows[0]["title"] == "Tesla approval beats estimates"
+    assert rows[0]["publisher"] == "Reuters"
+    assert curated_row(rows[0])["snippet"] == ""
+    assert strip_publisher_suffix("SpaceX launch - NASA", "nasa") == "SpaceX launch"
+    kept = curated_row({"source": "finnhub", "summary": "<p>Robotaxi <b>approval</b></p>", "title": "Tesla"})
+    assert kept["snippet"] == "Robotaxi approval"
+    sector = {"title": "Uber stake in Verne", "topics": ["robotaxi"], "summary": "A European deal"}
+    assert headline_relevance(sector, "TSLA") == "sector"
+    named = {"title": "Tesla Cybercab", "topics": ["robotaxi"], "summary": ""}
+    assert headline_relevance(named, "TSLA") == "ticker"
+    assert headline_relevance({"title": "Quarterly update", "topics": ["company"]}, "TSLA") == "ticker"
 
 
 def test_scoring_thresholds_prefer_the_provider_score():

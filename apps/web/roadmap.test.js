@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import {
-  calendarPanelModel, calendarSummary, catalystCategory, catalystCategoriesInWindow, catalystDateLabel, catalystMove,
-  catalystMoveLabel, catalystRowView, catalystRows, countdownLabel, edgarCompanyUrl, edgarIndexUrl, filingDisplayTitle,
-  filingPanelModel, filingsEmptyMessage, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers,
+  ageLabel, calendarPanelModel, calendarSummary, catalystCategory, catalystCategoriesInWindow, catalystDateLabel,
+  catalystMove, catalystMoveLabel, catalystRowView, catalystRows, countdownLabel, edgarCompanyUrl, edgarIndexUrl,
+  filingDisplayTitle, filingPanelModel, filingsEmptyMessage, formatSentimentScore, markerIndex, movingAverageRows,
+  newsClockTitle, newsEmptyMessage, newsGroupName, newsGroups, newsHeader, newsRowView, newsSummary, sensitivityRows,
+  sentimentTone, sortedDrivers, stripPublisher,
 } from "./roadmap.js";
 
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
@@ -223,6 +225,123 @@ test("filing titles are readable and panels keep each ticker's own upcoming and 
   assert.match(calendarSummary(calendar.upcoming, { now, timeZone: "America/Los_Angeles" }), /^2 upcoming · next: .+ · Oct 15 · in \d+d$/);
   assert.equal(catalystCategory("other", "Minutes of the Federal Open Market Committee"), "rates");
   assert.equal(catalystCategory("other", "SAFE Vehicles Rule III"), "policy");
+});
+
+test("default catalyst rows stay byte-identical for filings, the calendar, and recent catalysts", () => {
+  const now = new Date("2026-10-07T19:15:00-07:00");
+  const zone = "America/Los_Angeles";
+  assert.deepEqual(
+    catalystRowView({ date: "2026-10-31T00:00:00Z", title: "Starship flight", kind: "event" }, { now, timeZone: zone }),
+    {
+      dateText: "Oct 31",
+      dateTitle: "Sat, Oct 31, 2026",
+      dateTime: "2026-10-31",
+      name: "Starship flight",
+      upcoming: true,
+      tone: "neutral",
+      trailingText: "in 24d",
+      trailingLabel: "in 24 days",
+      tooltip: "Starship flight · Sat, Oct 31, 2026 · in 24 days",
+    },
+  );
+  assert.deepEqual(catalystRowView({
+    date: "2026-10-05",
+    title: "A very long filing title that must stay intact for the tooltip even after the row ellipsizes it on screen",
+    kind: "filing",
+  }, {
+    now,
+    timeZone: zone,
+    bars: [{ date: "2026-10-02", adj_close: 100 }, { date: "2026-10-05", adj_close: 110 }],
+  }), {
+    dateText: "Oct 5",
+    dateTitle: "Mon, Oct 5, 2026",
+    dateTime: "2026-10-05",
+    name: "A very long filing title that must stay intact for the tooltip even after the row ellipsizes it on screen",
+    upcoming: false,
+    tone: "positive",
+    trailingText: "▲ +10.0%",
+    trailingLabel: "1-day move ▲ +10.0%",
+    tooltip: "A very long filing title that must stay intact for the tooltip even after the row ellipsizes it on screen · Mon, Oct 5, 2026",
+  });
+});
+
+test("news ages, scores, and publisher suffixes follow the headline rules", () => {
+  const now = new Date("2026-10-08T18:00:00Z");
+  const zone = "UTC";
+  assert.equal(ageLabel(new Date(now.getTime() - 30_000).toISOString(), { now, timeZone: zone }), "now");
+  assert.equal(ageLabel(new Date(now.getTime() - 60_000).toISOString(), { now, timeZone: zone }), "1m");
+  assert.equal(ageLabel(new Date(now.getTime() - 59 * 60_000).toISOString(), { now, timeZone: zone }), "59m");
+  assert.equal(ageLabel(new Date(now.getTime() - 60 * 60_000).toISOString(), { now, timeZone: zone }), "1h");
+  assert.equal(ageLabel(new Date(now.getTime() - 23 * 60 * 60_000).toISOString(), { now, timeZone: zone }), "23h");
+  assert.equal(ageLabel(new Date(now.getTime() - 24 * 60 * 60_000).toISOString(), { now, timeZone: zone }), "Oct 7");
+  assert.equal(ageLabel("2025-10-08T18:00:00Z", { now, timeZone: zone }), "Oct 8, 2025");
+  assert.equal(stripPublisher("Tesla approval - BASENOR", "basenor"), "Tesla approval");
+  assert.equal(stripPublisher("Tesla approval - Wire extra", "Wire"), "Tesla approval - Wire extra");
+  assert.equal(formatSentimentScore(0.22), "+0.22");
+  assert.equal(formatSentimentScore(-0.31), "-0.31");
+  assert.equal(formatSentimentScore(0), "0.00");
+  assert.equal(formatSentimentScore(null), "n/a");
+  assert.equal(sentimentTone(0.15).label, "Neutral");
+  assert.equal(sentimentTone(0.16).dot, "green");
+  assert.equal(sentimentTone(-0.15).label, "Neutral");
+  assert.equal(sentimentTone(-0.16).dot, "red");
+  assert.equal(sentimentTone(0).dot, "muted");
+  assert.equal(newsClockTitle("2026-10-08T02:06:20Z", {
+    timeZone: "America/Los_Angeles", now: new Date("2026-10-08T02:15:00Z"),
+  }), "Wed Oct 7 · 19:06 PDT");
+});
+
+test("news moves use the after-close session and stay pending until that session closes", () => {
+  const bars = [
+    { date: "2026-10-02", adj_close: 100 },
+    { date: "2026-10-05", adj_close: 90 },
+    { date: "2026-10-06", adj_close: 99 },
+    { date: "2026-10-07", adj_close: 99 },
+  ];
+  const headline = {
+    title: "Tesla approval - Wire",
+    publisher: "Wire",
+    url: "https://example.com/story",
+    date_precision: "minute",
+    score: 0.22,
+    score_source: "provider",
+    snippet: "Approval coverage",
+  };
+  const pending = newsRowView({
+    ...headline, published_at: "2026-10-07T20:30:00Z",
+  }, { bars, timeZone: "America/Los_Angeles", now: new Date("2026-10-07T22:15:00Z") });
+  assert.equal(pending.name, "Tesla approval");
+  assert.equal(pending.publisher, "Wire");
+  assert.equal(pending.scoreText, "+0.22");
+  assert.equal(pending.sentimentLabel, "Bullish");
+  assert.equal(pending.dotToken, "green");
+  assert.equal(pending.trailingText, "—");
+  assert.equal(pending.trailingLabel, "1-day move pending, next session not closed");
+  assert.equal(pending.tooltip.includes("Tesla approval"), true);
+  assert.equal(pending.tooltip.includes("sentiment +0.22 (provider)"), true);
+  assert.equal(pending.tooltip.split("Wire").length - 1, 1);
+  assert.doesNotMatch(pending.dateText, /T\d{2}:/);
+  assert.doesNotMatch(pending.tooltip, /T\d{2}:/);
+  const closed = newsRowView({
+    ...headline, published_at: "2026-10-05T20:05:00Z", score: -0.2, score_source: "lexicon",
+  }, { bars, timeZone: "America/New_York", now: new Date("2026-10-07T22:00:00Z") });
+  assert.equal(closed.trailingText, "▲ +10.0%");
+  assert.match(closed.tooltip, /1-day move ▲ \+10\.0% \(Oct 6 session\)/);
+  const weekend = newsRowView({
+    ...headline, published_at: "2026-10-03T16:00:00Z", score: 0,
+  }, { bars, timeZone: "America/New_York", now: new Date("2026-10-04T18:00:00Z") });
+  assert.equal(weekend.trailingLabel, "1-day move pending, next session not closed");
+  assert.equal(weekend.scoreText, "0.00");
+  assert.equal(weekend.scoreTone, "neutral");
+  const landed = newsRowView({
+    ...headline, published_at: "2026-10-03T16:00:00Z", score: null,
+  }, { bars, timeZone: "America/New_York", now: new Date("2026-10-07T22:00:00Z") });
+  assert.equal(landed.trailingText, "▼ -10.0%");
+  assert.equal(landed.scoreText, "n/a");
+  const openSession = newsRowView({
+    ...headline, published_at: "2026-10-06T18:00:00Z",
+  }, { bars, timeZone: "America/New_York", now: new Date("2026-10-06T19:00:00Z") });
+  assert.equal(openSession.trailingLabel, "1-day move pending, next session not closed");
 });
 
 test("driver drawer sorts finite values ahead of unavailable ones", () => {

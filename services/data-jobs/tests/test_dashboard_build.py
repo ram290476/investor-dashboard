@@ -273,7 +273,7 @@ def snapshot_sources(snapshot):
     return [row["volume_source"] for row in snapshot["tickers"]["TSLA"]["price_history"]]
 
 
-def test_news_keeps_the_last_48_hours_and_a_seven_day_mean():
+def test_news_keeps_seven_days_and_a_seven_day_mean():
     snapshot = dashboard_build.build_snapshot(
         tickers=["TSLA"],
         prices={},
@@ -321,15 +321,144 @@ def test_news_keeps_the_last_48_hours_and_a_seven_day_mean():
     )
     news = snapshot["tickers"]["TSLA"]["news"]
     assert news["sentiment_7d"] == pytest.approx(0.3)
-    assert [item["title"] for item in news["headlines"]] == ["Tesla approval"]
+    assert news["sentiment_7d_prior"] is None
+    assert news["count_7d"] == 2
+    assert [item["title"] for item in news["headlines"] if item["relevance"] != "sector"] == [
+        "Tesla approval",
+        "Old",
+    ]
     assert news["headlines"][0]["label"] == "bullish"
+    assert news["headlines"][0]["date_precision"] == "minute"
+    assert news["headlines"][0]["score"] is None
     assert news["sentiment_history"] == [
         {"date": "2026-10-01", "value": 0.2},
         {"date": "2026-10-06", "value": pytest.approx(0.3)},
     ]
 
 
-def test_sentiment_history_is_ticker_scoped_finite_and_only_uses_observed_days():
+def test_news_serves_scores_clean_titles_and_hides_topic_only_stories():
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 10, 8, 18, tzinfo=UTC)
+    articles = [
+        {
+            "url_hash": "old",
+            "title": "Ancient Tesla note",
+            "publisher": "Wire",
+            "published_at": "2026-09-30T18:00:00+00:00",
+            "tickers": ["TSLA"],
+            "topics": ["tesla"],
+            "sentiment_score": 0.4,
+            "sentiment_label": "bullish",
+        },
+        {
+            "url_hash": "lex",
+            "title": "Tesla approval - BASENOR",
+            "publisher": "BASENOR",
+            "published_at": "2026-10-08T02:06:20+00:00",
+            "tickers": ["TSLA"],
+            "topics": ["tesla"],
+            "sentiment_score": 0.22,
+            "provider_sentiment": None,
+            "sentiment_label": "bullish",
+            "snippet": "<b>Approval</b> coverage",
+        },
+        {
+            "url_hash": "provider",
+            "title": "Shares plunge - Wire",
+            "publisher": "Wire",
+            "published_at": "2026-10-07T15:00:00+00:00",
+            "tickers": ["TSLA"],
+            "topics": ["company"],
+            "sentiment_score": -0.31,
+            "provider_sentiment": -0.31,
+            "sentiment_label": "bearish",
+        },
+        {
+            "url_hash": "uber",
+            "title": "Uber takes a stake in Croatian robotaxi startup Verne - Wire",
+            "publisher": "Wire",
+            "published_at": "2026-10-07T12:00:00+00:00",
+            "tickers": ["TSLA"],
+            "topics": ["robotaxi"],
+            "summary": "A European autonomy deal.",
+            "sentiment_score": 0.05,
+            "sentiment_label": "neutral",
+        },
+        {
+            "url_hash": "mentioned",
+            "title": "Tesla robotaxi miles - Wire",
+            "publisher": "Wire",
+            "published_at": "2026-10-06T12:00:00+00:00",
+            "tickers": ["TSLA"],
+            "topics": ["robotaxi"],
+            "sentiment_score": 0.4,
+            "provider_sentiment": 0.4,
+            "sentiment_label": "bullish",
+        },
+        {
+            "url_hash": "other",
+            "title": "Apple event",
+            "publisher": "Wire",
+            "published_at": "2026-10-08T12:00:00+00:00",
+            "tickers": ["AAPL"],
+            "sentiment_score": 0.9,
+            "sentiment_label": "bullish",
+        },
+    ]
+    news = dashboard_build.build_news(
+        "TSLA",
+        [
+            {"ticker": "TSLA", "date": "2026-10-08", "mean_sentiment": 0.2},
+            {"ticker": "TSLA", "date": "2026-10-02", "mean_sentiment": 0.1},
+            {"ticker": "TSLA", "date": "2026-09-28", "mean_sentiment": -0.2},
+            {"ticker": "TSLA", "date": "2026-09-25", "mean_sentiment": 0.4},
+        ],
+        articles,
+        now,
+    )
+    lex = next(item for item in news["headlines"] if item["title"] == "Tesla approval")
+    assert lex["publisher"] == "BASENOR"
+    assert lex["score"] == pytest.approx(0.22)
+    assert lex["score_source"] == "lexicon"
+    assert lex["date_precision"] == "minute"
+    assert lex["relevance"] == "ticker"
+    assert lex["snippet"] == "Approval coverage"
+    provider = next(item for item in news["headlines"] if item["title"] == "Shares plunge")
+    assert provider["score"] == pytest.approx(-0.31)
+    assert provider["score_source"] == "provider"
+    uber = next(item for item in news["headlines"] if item["title"].startswith("Uber"))
+    assert uber["relevance"] == "sector"
+    assert uber["title"] == "Uber takes a stake in Croatian robotaxi startup Verne"
+    mentioned = next(item for item in news["headlines"] if item["title"] == "Tesla robotaxi miles")
+    assert mentioned["relevance"] == "ticker"
+    assert mentioned["score_source"] == "provider"
+    assert all(item["title"] != "Apple event" for item in news["headlines"])
+    assert all(item["title"] != "Ancient Tesla note" for item in news["headlines"])
+    assert news["count_7d"] == 3
+    assert news["sentiment_7d"] == pytest.approx(0.15)
+    assert news["sentiment_7d_prior"] == pytest.approx(0.1)
+    limited = dashboard_build.build_news(
+        "TSLA",
+        [],
+        [
+            {
+                "url_hash": f"n-{index}",
+                "title": f"Tesla headline {index}",
+                "publisher": "Wire",
+                "published_at": (now - timedelta(minutes=index)).isoformat(),
+                "tickers": ["TSLA"],
+                "topics": ["tesla"],
+                "sentiment_score": 0.0,
+                "sentiment_label": "neutral",
+            }
+            for index in range(35)
+        ],
+        now,
+    )
+    assert limited["count_7d"] == 35
+    assert sum(item["relevance"] != "sector" for item in limited["headlines"]) == 30
+    assert limited["headlines"][0]["title"] == "Tesla headline 0"
     from datetime import UTC, datetime
 
     rows = [

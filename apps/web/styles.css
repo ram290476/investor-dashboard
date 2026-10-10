@@ -2556,8 +2556,34 @@ input::placeholder {
   color: var(--muted);
 }
 
-.catalyst-recent-move {
+.catalyst-recent-move,
+.catalyst-recent-score {
   text-align: right;
+}
+
+.catalyst-recent-score {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.catalyst-recent-publisher {
+  flex: none;
+  max-width: 84px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalyst-recent-row--news {
+  grid-template-columns: 46px minmax(0, 1fr) 40px 62px;
+}
+
+a.catalyst-recent-row {
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
 }
 
 .catalyst-recent-title {
@@ -2636,6 +2662,16 @@ a.catalyst-edgar-link:hover {
 @media (min-width: 1100px) {
   .catalyst-horizon {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .catalyst-recent-row--news {
+    grid-template-columns: 40px minmax(0, 1fr) 38px 58px;
+  }
+
+  .catalyst-recent-publisher {
+    max-width: 58px;
   }
 }
 
