@@ -529,8 +529,8 @@ python3 -m http.server 8080 --directory apps/web
 
 Ensure `http://localhost:8080/` is in the Cognito callback/logout and API CORS settings for local
 development. The root callback is compatible with Python's basic static server. Production uses
-the CloudFront `/auth/callback` path and its SPA fallback. Open `http://localhost:8080/`, sign in
-with an invited Cognito user and complete MFA. The application keeps access tokens in memory,
+the CloudFront `/auth/callback` path and its SPA fallback. Open `http://localhost:8080/` and sign in
+with an invited Cognito user (MFA is currently off). The application keeps access tokens in memory,
 uses PKCE, and sends them only as Bearer authorization headers. `config.json` is git-ignored.
 
 For deployment, use the protected Actions workflow or publish the generated config and site
@@ -539,15 +539,52 @@ using the S3 bucket and CloudFront distribution in the `site` output. Verify the
 
 ## Users, monitoring and rollback
 
-Create invite-only Cognito users with the pool ID from `terraform output -json cognito`:
+Create invite-only Cognito users with the pool ID from `terraform output -json cognito`.
+The pool uses email as the username and recovers accounts only through a verified email.
+Pass `--region us-west-1`; an AWS CLI profile often defaults to `us-east-1`, which is not
+this pool. Set both `email` and `email_verified=true`. Without a verified email, Forgot
+password does not send a recovery code, and a lost temporary password needs an administrator
+reset.
 
 ```sh
-aws cognito-idp admin-create-user --user-pool-id <user-pool-id> --username <email>
+aws cognito-idp admin-create-user \
+  --region us-west-1 \
+  --user-pool-id <user-pool-id> \
+  --username <email> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true \
+  --desired-delivery-mediums EMAIL
 ```
 
-Require the invited user to complete the temporary-password setup. Cognito MFA is **off**
-(password-only sign-in) by design for now; Plus-tier threat protection stays enforced. Never
-disable the JWT authorizer to troubleshoot a browser sign-in issue.
+Require the invited user to finish the temporary-password setup and complete sign-in (MFA is
+currently off). Cognito MFA is **off** (password-only sign-in) by design for now; Plus-tier
+threat protection stays enforced. Never disable the JWT authorizer to troubleshoot a browser
+sign-in issue.
+
+### Fix an existing user
+
+A user invited without `email_verified=true` has an unverified address, so Forgot password
+does not send a code. Mark the existing address verified; do not change the address:
+
+```sh
+aws cognito-idp admin-update-user-attributes \
+  --region us-west-1 \
+  --user-pool-id <user-pool-id> \
+  --username <email> \
+  --user-attributes Name=email_verified,Value=true
+```
+
+If the temporary password has already expired, an administrator can set a known permanent
+password with `admin-set-user-password --permanent`. Do not commit that password. The README
+demo account is the only password this repository publishes.
+
+```sh
+aws cognito-idp admin-set-user-password \
+  --region us-west-1 \
+  --user-pool-id <user-pool-id> \
+  --username <email> \
+  --password '<permanent-password>' \
+  --permanent
+```
 
 This is separate from **AWS console / IAM Identity Center MFA**, which remains required. Alerting
 on console MFA changes (for example `DeactivateMFADevice`) is unchanged.
