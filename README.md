@@ -13,7 +13,9 @@ Use the following link and demo credentials to log in to the dashboard:
 | Email | `ram.vellamsetti@gmail.com` |
 | Password | `Serious-investor77` |
 
-![Dashboard on desktop (Industrial Dark theme)](docs/design-roadmap/desktop-full.png)
+![Dashboard on desktop, Industrial Dark, local preview of the current app](docs/design-roadmap/current-app/industrial-dark-1440.png)
+
+Prices in these two pictures are a local fixture, not a live market snapshot. The preview is the app after the October 10, 2026 chart, news, catalyst, and header updates.
 
 ## Using the dashboard
 
@@ -25,10 +27,10 @@ The dashboard works in desktop and mobile browsers. On a wide screen the price c
 - **Calendar**: inflation and the catalyst calendar drawers
 - **More**: news, filings, and the company, contracts and about-this-data drawers
 
-<img src="docs/design-roadmap/issue-76/industrial-dark-390.png" alt="Dashboard on a phone, Chart tab" width="300">
+<img src="docs/design-roadmap/current-app/industrial-dark-390-chart.png" alt="Dashboard on a phone, Chart tab, Industrial Dark" width="300">
 
 ### Account menu and settings
-The header shows the NYSE session (open, pre-market, after-hours, or closed) and the next open or close in your time zone. The date, such as Fri Oct 9 · PT, sits in front of the **Data** button. On a phone the status shortens to Open, Closed, Pre, or Post, and the date is hidden. If the snapshot has no market block, the header says the status is unavailable instead of guessing.
+The header shows the NYSE session (open, pre-market, after-hours, or closed) and the next open or close in your time zone. The top right is the date (such as Sat Oct 10 · PT), the refresh icon, and **Signed In**. On a phone the status shortens to Open, Closed, Pre, or Post, and the date is hidden. If the snapshot has no market block, the header says the status is unavailable instead of guessing.
 
 The **Signed In** button at the top right (an icon only, on phones) opens the account menu. Under the label, a second line shows how many collection jobs are ok and how many need attention. On a phone that line is hidden; the dot on the icon stays, and the button name still includes the same words. The menu shows your sign-in email, **Private workspace**, a data-refresh status line and **Sign out**. Its items open the **Account settings** dialog on one of four tabs:
 
@@ -38,7 +40,7 @@ The **Signed In** button at the top right (an icon only, on phones) opens the ac
 - **Data refresh**: each data collection job with its last run, next run and status. A scheduled job shows its next run in your time zone. Trend metrics runs after market close and release day, and a ticker backfill runs when a ticker is added, so those rows name the trigger instead of saying they are unscheduled. A job that has not run yet says "Waiting for first run". On a phone each job is one card (status, name, job, last run, next run) so the status is not off-screen. The settings tabs scroll sideways, and the open tab stays in view. The sheet uses the visible viewport height so the last row stays above the browser toolbar.
 
 ### Picking a ticker
-The ticker bar under the header lists your watchlist (up to 25 tickers), with pinned tickers first, each showing its last price, daily change, and a 1-month sparkline of the last 22 closes. The line uses the up/down palette. A chip with fewer than two closes shows — instead of a line. Select a ticker to load its chart and panels. The selected ticker has an **Open TSLA page →** link (click, Enter, or long-press). Enter or a long-press on any ticker opens that page too. The page address is `#stock/TSLA` (also `/stock/<TICKER>`), so it can be bookmarked without a new CloudFront path. Back returns to the dashboard and keeps the ticker you had selected. TSLA and SPCX also have a research-page link beside the ticker; those pages bring the existing price, company, news, filing and (where available) contract panels together. Research routes (`/ticker/TSLA` and `/ticker/SPCX`) support direct links and refresh, and returning to the dashboard restores its previous ticker selection. When the list is wider than the screen, the bar scrolls sideways with a trackpad, mouse wheel, the ‹ › arrow buttons, keyboard or touch, and it keeps the selected ticker in view. The **+ Add / pin** button stays fixed at the end of the bar and opens My tickers.
+The ticker bar under the header lists your watchlist (up to 25 tickers), with pinned tickers first, each showing its last price, daily change, and a 1-month sparkline of the last 22 closes. The line uses the up/down palette. A chip with fewer than two closes shows — instead of a line. Select a ticker to load its chart and panels. **Open TSLA page** sits above the period chips and opens that ticker's company page. Enter or a long-press on a ticker opens the company page too. The page address is `#stock/TSLA` (also `/stock/<TICKER>`), so it can be bookmarked without a new CloudFront path. Back returns to the dashboard and keeps the ticker you had selected. TSLA and SPCX also have a research-page link (↗) beside the ticker; those pages bring the existing price, company, news, filing and (where available) contract panels together. Research routes (`/ticker/TSLA` and `/ticker/SPCX`) support direct links and refresh, and returning to the dashboard restores its previous ticker selection. When the list is wider than the screen, the bar scrolls sideways with a trackpad, mouse wheel, the ‹ › arrow buttons, keyboard or touch, and it keeps the selected ticker in view. The **+ Add / pin** button stays fixed at the end of the bar and opens My tickers.
 
 ### Price chart and periods
 The main chart shows the selected ticker's price. Period chips **1D, 1W, 1M, 3M, YTD, 1Y, 3Y, 5Y** set the chart window, and each shows the return for that period. 1D uses hourly bars when they're available; chips for periods without enough history are disabled. A trend pill under the price (for example "Uptrend · 5d") compares the price with its 20- and 50-day averages.

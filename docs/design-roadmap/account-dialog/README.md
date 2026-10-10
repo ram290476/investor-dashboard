@@ -13,7 +13,7 @@ Captured Oct 7, 2026 from `apps/web` on main @ 6e13c86 (Account settings dialog 
 | account-menu-1440.png | Account menu open (1440px) |
 | my-tickers-1440.png | My tickers tab |
 | profile-time-zone-1440.png | Profile & time zone tab |
-| theme-display-1440.png | Theme & display tab |
+| [../issue-133/09-theme-industrial-dark-1440.png](../issue-133/09-theme-industrial-dark-1440.png), [../issue-133/09-theme-clean-light-1440.png](../issue-133/09-theme-clean-light-1440.png), [../issue-133/09-theme-industrial-dark-390.png](../issue-133/09-theme-industrial-dark-390.png), [../issue-133/09-theme-clean-light-390.png](../issue-133/09-theme-clean-light-390.png) | Theme & display after #134. Each file is before \| after; the right side is the current one-line theme buttons. `theme-display-1440.png` is the October 7 tab, before that fix. |
 | data-refresh-1440.png | Data refresh tab (job status table) |
 | my-tickers-390.png | My tickers, 390px mobile |
 | data-refresh-390.png | Data refresh, 390px mobile |

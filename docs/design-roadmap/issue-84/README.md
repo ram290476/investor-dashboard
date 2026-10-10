@@ -1,6 +1,6 @@
-# Issue #84: mini charts below the price chart (current state)
+# Issue #84: mini charts below the price chart (before the #84 layout change)
 
-These captures show the price panel of `main` @ `5b45137`, before any #84 changes, rendered locally in Chrome at device scale 2.
+These captures show the price panel of `main` @ `5b45137`, before any #84 changes, rendered locally in Chrome at device scale 2. They are not the current chart. #84 shipped in #105, #131 recolored the lanes, and #134 changed the axis labels and control height. The current price panel is [`../current-app/industrial-dark-1440.png`](../current-app/industrial-dark-1440.png).
 
 | File | Viewport | Theme | Period |
 | --- | --- | --- | --- |

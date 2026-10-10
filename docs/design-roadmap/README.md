@@ -18,7 +18,7 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `trend-pill-overview.png` | Selected-stock overview row as designed: last price, trend-state pill (`Uptrend · 4d`) + `vs 20-day avg`, period chips |
 | `trend-pill-states.png` | The same quote block for each sample ticker in My tickers (`Uptrend · Nd`, `Range · 2d`) |
 | `trend-pill-placement-mock.png` | **Rejected option (mock, not the design):** same row with the pill block (▲ icon added) moved to the right of the period chips. Superseded on Oct 7, 2026: no room there; the pill stays under the price (#38) |
-| `overview-chips-current-1280.png` | Current app (`apps/web/styles.css` on main) at 1280px: the 7 period chips wrap to 2 rows |
+| `overview-chips-current-1280.png` | October 6 app at 1280px, when seven period chips wrapped. Chart controls after #134 are [`issue-133/06-controls-industrial-dark-1440.png`](issue-133/06-controls-industrial-dark-1440.png) and [`current-app/industrial-dark-1440.png`](current-app/industrial-dark-1440.png) |
 | `trend-pill-under-price-mock-1280.png` | **Mock, not shipped:** app styles + design trend pill under the price + proposed compact chips on one row, 1280px (#38) |
 | `trend-pill-under-price-mock-1440.png` | Same mock at 1440px |
 | `trend-pill-under-price-mock-360.png` | Same mock at 360px mobile: chips wrap under the price |
@@ -26,9 +26,13 @@ Rendered locally with `design/ai-generated/support.js` (a Design-canvas preview 
 | `issue-26/production-*.png` | Implemented signals/rates/release/drift panels in six themes and four mobile views (see [`issue-26/README.md`](issue-26/README.md)) |
 | `issue-71/*-1440.png`, `issue-71/*-390.png` | Fundamentals overlays and fixed Add/pin watchlist control in Industrial Dark and Clean Light; local app using a captured October 8, 2026 live market snapshot, mock sign-in and synthetic 25-ticker preferences |
 | `issue-27/*-1440.png`, `issue-27/*-390-*.png` | Implemented catalysts, signals, macro/company panels, sentiment and drawers in Industrial Dark and Clean Light; captured live market data and actual stored daily news scores, with mock sign-in/preferences |
-| `issue-76/*-1440.png`, `issue-76/*-390.png` | Period-aware available overlays, fixed-order under-chart lanes, below-chart lane/catalyst controls, pinned bulk actions and Signed In header in Industrial Dark and Clean Light; captured live market data with mock sign-in/preferences |
+| `issue-76/*-1440.png`, `issue-76/*-390.png` | Period-aware available overlays, fixed-order under-chart lanes, below-chart lane/catalyst controls, pinned bulk actions and Signed In header in Industrial Dark and Clean Light; captured live market data with mock sign-in/preferences. Header, control height, lane colors, news rows, and catalyst rows have since changed; see `current-app/` and `issue-133/` |
+| `current-app/*-1440.png`, `current-app/*-390-*.png` | Local static preview of `apps/web` on October 10, 2026, after #127, #130, #131, and #134. Fixture prices, not a live snapshot. Six themes at 1440px; Industrial Dark and Clean Light chart tabs at 390px; Clean Light signals tab at 390px |
+| `issue-133/` | Before/after crops for the #133 fixes. The right side of each pair is the current UI. See [`issue-133/README.md`](issue-133/README.md) |
+| `lane-colors/` | Mini-chart color comparison from before #131. Shipped lane colors are in `current-app/` |
+| `news-filings/`, `news-panel/`, `catalyst-panels/` | Proposal comparisons from before #127 and #130. The newest news-panel capture is `issue-133/08-news-*` |
 
-**Note:** Values in these shots are **design sample data** from the artboard’s inline demo generator (dated demo facts and synthetic series), **not live lake / market data**. See the [Dashboard features](https://github.com/ram290476/investor-dashboard/wiki/Dashboard-features) wiki for what ships today vs design-only.
+**Note:** Values in the artboard shots (`desktop-full.png`, `desktop-*.png`, `mobile-glance.png`, `themes/*-desktop-full.png`, the account and trend-pill design crops) are **design sample data** from the artboard’s inline demo generator, **not live lake / market data**. `current-app/` is a later local preview of the real app with fixture prices. See the [Dashboard features](https://github.com/ram290476/investor-dashboard/wiki/Dashboard-features) wiki for what ships today vs design-only.
 
 The `issue-71/`, `issue-27/` and `issue-76/` captures are exceptions: their market values come from a live lake capture,
 but authentication and watchlist preferences are local test fixtures, not a production user session.
