@@ -13,7 +13,11 @@ import { createAccountSettings } from "./account-settings.js";
 import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
 import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
-import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystDateLabel, catalystMove, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+import {
+  CATALYST_CATEGORIES, calendarPanelModel, calendarSummary, catalystCategoriesInWindow, catalystRowView,
+  catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage, markerIndex,
+  movingAverageRows, sensitivityRows, sortedDrivers, upcomingEmptyMessage,
+} from "./roadmap.js";
 import { legendItems, overlayCorrelation, seriesLineStyle } from "./chart-legend.js";
 import { sparkline, sparklineModel, sparklineSummary } from "./sparkline.js";
 import {
@@ -90,6 +94,7 @@ const session = {
   watchlistScroll: 0,
   catalystCategories: CATALYST_CATEGORIES.map(category => category.id),
   focusCatalyst: null,
+  showOtherEvents: false,
   driverSort: "effect",
   // Inner disclosures that are not bottom drawers (all drivers, release calendar).
   innerDrawers: new Set(),
@@ -160,13 +165,13 @@ function setPanelOpen(id, open) {
 const DISMISS_ORDER = [
   "rates", "inflation", "market-comparison", "moving-averages", "volatility",
   "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "company",
-  "contracts", "news", "about-data",
+  "contracts", "news", "filings-events", "about-data",
 ];
 
 const TAB_DETAIL_IDS = {
   signals: ["rates", "market-comparison", "moving-averages", "volatility", "dollar-oil", "tariffs", "correlation"],
   calendar: ["inflation", "catalyst-calendar"],
-  more: ["company", "contracts", "news", "about-data"],
+  more: ["company", "contracts", "news", "filings-events", "about-data"],
 };
 
 function panelLabel(id) {
@@ -187,6 +192,7 @@ function panelLabel(id) {
     "catalyst-calendar": "Catalyst calendar",
     contracts: "Government contracts",
     news: "News & sentiment",
+    "filings-events": "Filings & events",
     "about-data": "About this data",
   }[id] || id;
 }
@@ -1107,13 +1113,14 @@ function correlationSummary(rows, chartData, chartDataState) {
   return `${strengthening} strengthening · ${flips} sign flip${flips === 1 ? "" : "s"}`;
 }
 
-function catalystSummary(events) {
+function displayZone() {
+  return session.prefs?.display?.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function catalystSummary(model) {
   if (session.dashboardState === "loading") return "Loading…";
-  if (!events.length) return session.dashboardState === "error" ? "Unavailable" : "No published events";
-  const today = String(session.dashboard?.generated_at || "").slice(0, 10);
-  const upcoming = events.filter((event) => String(event.date).slice(0, 10) >= today);
-  const next = upcoming[0];
-  return `${upcoming.length} upcoming${next ? ` · next: ${String(next.date).slice(0, 10)} ${next.title}` : ""}`;
+  if (session.dashboardState === "error" && !model.upcoming.length && !model.past.length) return "Unavailable";
+  return calendarSummary(model.upcoming, { timeZone: displayZone(), now: new Date() });
 }
 
 function companySummary(tickerData, events) {
@@ -2073,40 +2080,62 @@ function renderContracts(tickerData) {
   return panel;
 }
 
-function catalystMoveLabel(move) {
-  if (!isNumericValue(move)) return "—";
-  const arrow = Number(move) > 0 ? "▲ " : Number(move) < 0 ? "▼ " : "";
-  return `${arrow}${formatPercent(move, 1)}`;
+function renderCatalystRow(event, tickerData, { calendarId = false, link = false } = {}) {
+  const category = CATALYST_CATEGORIES.find((item) => item.id === event.category) || CATALYST_CATEGORIES.at(-1);
+  const daily = validBars(tickerData?.price_history || []);
+  const chartBars = selectedChartBars(tickerData);
+  const view = catalystRowView(event, { bars: daily, timeZone: displayZone(), now: new Date() });
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "catalyst-recent-row";
+  if (calendarId && event.id) button.id = `calendar-${event.id}`;
+  const date = node("time", "catalyst-recent-date", view.dateText);
+  date.dateTime = view.dateTime;
+  date.title = view.dateTitle;
+  const title = node("span", "catalyst-recent-title");
+  const dot = node("span", "catalyst-dot");
+  const color = overlayColor(category.slot, session.prefs.display.theme);
+  dot.style.setProperty("--catalyst-color", color);
+  dot.dataset.catalystColor = color;
+  dot.title = category.label;
+  dot.setAttribute("aria-hidden", "true");
+  const name = node("span", "catalyst-recent-name", view.name);
+  name.title = view.name;
+  title.append(dot, node("span", "visually-hidden", category.label), name);
+  const move = node("span", `catalyst-recent-move mono ${view.tone}`, view.trailingText);
+  move.setAttribute("aria-label", view.trailingLabel);
+  button.append(date, title, move);
+  button.title = view.tooltip;
+  button.setAttribute("aria-label", `${view.dateText}, ${category.label}, ${view.name}, ${view.trailingLabel}`);
+  const inRange = markerIndex(event, chartBars) >= 0;
+  if (!view.upcoming && !inRange) {
+    button.disabled = true;
+    const reason = "Outside the selected chart period. Choose a longer period to focus this catalyst.";
+    button.title = reason;
+    button.setAttribute("aria-label", `${button.getAttribute("aria-label")}. ${reason}`);
+  }
+  button.addEventListener("click", () => selectCatalyst(event));
+  const href = link && event.kind === "filing" ? edgarIndexUrl(event.url) : "";
+  if (!href) return button;
+  const line = node("div", "catalyst-recent-line");
+  const anchor = node("a", "catalyst-source", "↗");
+  anchor.href = href;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.setAttribute("aria-label", `Open SEC filing ${event.form || "filing"}, ${view.dateText}`);
+  anchor.title = anchor.getAttribute("aria-label");
+  line.append(button, anchor);
+  return line;
+}
+
+function renderCatalystList(events, tickerData, options) {
+  const list = node("div", "catalyst-recent-list");
+  events.forEach((event) => list.append(renderCatalystRow(event, tickerData, options)));
+  return list;
 }
 
 function renderRecentCatalysts(events, tickerData) {
-  const list = node("div", "catalyst-recent-list");
-  const chartBars = selectedChartBars(tickerData);
-  const daily = validBars(tickerData?.price_history || []);
-  events.forEach((event) => {
-    const category = CATALYST_CATEGORIES.find((item) => item.id === event.category);
-    const move = catalystMove(event, daily);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "catalyst-recent-row";
-    const date = node("span", "catalyst-recent-date", catalystDateLabel(event.date));
-    const title = node("span", "catalyst-recent-title");
-    const dot = node("span", "catalyst-dot");
-    const color = overlayColor(category.slot, session.prefs.display.theme);
-    dot.style.setProperty("--catalyst-color", color);
-    dot.dataset.catalystColor = color;
-    dot.title = category.label;
-    dot.setAttribute("aria-hidden", "true");
-    const name = node("span", "catalyst-recent-name", event.title);
-    name.title = event.title;
-    title.append(dot, node("span", "visually-hidden", category.label), name);
-    button.append(date, title, node("span", `catalyst-recent-move mono ${polarity(move)}`, catalystMoveLabel(move)));
-    button.disabled = markerIndex(event, chartBars) < 0;
-    if (button.disabled) button.title = "Outside the selected chart period. Choose a longer period to focus this catalyst.";
-    button.addEventListener("click", () => selectCatalyst(event));
-    list.append(button);
-  });
-  return list;
+  return renderCatalystList(events, tickerData);
 }
 
 function renderDrivers(tickerData) {
@@ -2483,34 +2512,53 @@ function renderDetailPanels(tickerData, chartData, chartDataState) {
   return panels;
 }
 
+function renderCatalystSection(title, events, tickerData, empty, options) {
+  const section = node("div", "catalyst-section");
+  section.append(node("h3", "signal-label", title));
+  if (!events.length) section.append(node("p", "data-state", empty));
+  else section.append(renderCatalystList(events, tickerData, options));
+  return section;
+}
+
 function renderCatalystCalendar(tickerData) {
-  const events = catalystRows(session.dashboard, session.selected);
+  const model = calendarPanelModel({
+    dashboard: session.dashboard, ticker: session.selected, now: new Date(), timeZone: displayZone(),
+  });
   const panel = renderDrawer({
     id: "catalyst-calendar",
     title: "Catalyst calendar",
-    subtitle: `Published events for ${session.selected} and the macro universe`,
-    summary: catalystSummary(events),
+    subtitle: `Upcoming and the past 14 days for ${session.selected} and the macro universe`,
+    summary: catalystSummary(model),
     mobilePanel: "calendar",
     keys: drawerKeys("catalyst-calendar"),
   }, (drawer) => {
-  if (!events.length) drawer.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading catalysts…"
-    : session.dashboardState === "error" ? "Catalysts could not be loaded. Refresh data to retry." : "No catalyst feed has been published."));
-  const bars = selectedChartBars(tickerData);
-  events.forEach(event => {
-    const row = node("div", "catalyst-calendar-row");
-    const inRange = markerIndex(event, bars) >= 0;
-    const button = action(`${String(event.date).slice(0, 10)} · ${event.title}`, "button-link catalyst-row-button", () => selectCatalyst(event));
-    button.id = `calendar-${event.id}`;
-    button.disabled = !inRange;
-    row.append(button, node("p", "signal-note", `${event.source} · ${inRange ? "Focus chart marker" : "Outside the selected chart period"}`));
-    if (/^https?:\/\//i.test(event.url || "")) {
-      const link = node("a", "button-link", "Source");
-      link.href = event.url; link.target = "_blank"; link.rel = "noopener noreferrer";
-      row.append(link);
-    }
-    drawer.append(row);
-  });
-  drawer.append(node("p", "signal-note", "Nontrading-day catalysts align to the next stored session. Intraday markers use the first stored bar on the event date. No demo events are included."));
+  if (!model.upcoming.length && !model.past.length && !model.other.length && (session.dashboardState === "loading" || session.dashboardState === "error")) {
+    drawer.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading catalysts…" : "Catalysts could not be loaded. Refresh data to retry."));
+    return;
+  }
+  const horizon = node("div", "catalyst-horizon");
+  const rowOptions = { calendarId: true, link: true };
+  const upcoming = renderCatalystSection("Upcoming", model.upcoming, tickerData, upcomingEmptyMessage(session.selected), rowOptions);
+  if (model.earningsNote) upcoming.append(node("p", "signal-note", model.earningsNote));
+  horizon.append(
+    upcoming,
+    renderCatalystSection("Past 14 days", model.past, tickerData, `No ${session.selected} catalysts in the past 14 days.`, rowOptions),
+  );
+  drawer.append(horizon);
+  if (model.other.length) {
+    const toggle = action(
+      session.showOtherEvents ? "Hide other events" : `Show ${model.other.length} other events`,
+      "overlay-chip",
+      () => {
+        session.showOtherEvents = !session.showOtherEvents;
+        renderDashboard();
+      },
+    );
+    toggle.setAttribute("aria-expanded", String(session.showOtherEvents));
+    drawer.append(toggle);
+    if (session.showOtherEvents) drawer.append(renderCatalystList(model.other, tickerData, rowOptions));
+  }
+  drawer.append(node("p", "signal-note", "Nontrading-day catalysts align to the next stored session. Prints at or after the close use the next session. Intraday markers use the first stored bar on the event date. No demo events are included."));
   });
   return panel;
 }
@@ -2591,55 +2639,55 @@ function renderNews(tickerData) {
   });
 }
 
-function renderFilings(tickerData) {
-  const panel = node("section", "panel");
-  panel.append(sectionHeader("Filings & events", "Latest SEC filings and the last 14 days of events"));
-  const filings = tickerData?.filings;
-  const events = session.dashboard?.events;
-  if (!filings && !events && session.dashboardState === "loading") {
-    panel.append(node("p", "data-state", "Loading filings…"));
-    return panel;
-  }
+function filingsSummary(model) {
+  if (session.dashboardState === "loading") return "Loading…";
+  if (session.dashboardState === "error" && !model.filings.length && !model.upcoming.length && !model.company.length) return "Unavailable";
+  return `${model.filings.length} filing${model.filings.length === 1 ? "" : "s"} · ${model.upcoming.length} upcoming`;
+}
 
-  if (!filings && !events && session.dashboardState === "error") {
-    panel.append(node("p", "data-state", "Filings could not be loaded. Use Try again above."));
-    return panel;
-  }
-  if (!filings && !events) {
-    panel.append(node("p", "data-state", "Filings have not been collected yet."));
-    return panel;
-  }
-  const list = node("ul", "news-list");
-  (filings || []).forEach((row) => {
-    const item = node("li", "news-item");
-    const link = node("a", "news-title", `${row.form || "Filing"} · ${row.title || ""}`);
-    if (row.url) {
-      link.href = row.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-    }
-    item.append(link);
-    item.append(node("p", "news-meta", `${row.filed_at || ""} · ${row.class || "filing"}`));
-    list.append(item);
+function renderFilings(tickerData) {
+  const model = filingPanelModel({
+    dashboard: session.dashboard, ticker: session.selected, now: new Date(), timeZone: displayZone(),
   });
-  (events || []).slice(0, 8).forEach((event) => {
-    const item = node("li", "news-item");
-    const link = node("a", "news-title", event.title || event.type || "Event");
-    if (event.source_url) {
-      link.href = event.source_url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-    }
-    item.append(link);
-    item.append(node("p", "news-meta", `${event.event_ts || ""} · ${event.type || "event"}`));
-    list.append(item);
-  });
-  if (!list.childElementCount) {
-    panel.append(node("p", "data-state", "No filings or events in the current window."));
-    return panel;
+  return renderDrawer({
+    id: "filings-events",
+    title: "Filings & events",
+    subtitle: `SEC filings and company events for ${session.selected}`,
+    summary: filingsSummary(model),
+    mobilePanel: "more",
+    keys: drawerKeys("filings-events"),
+  }, (body) => {
+  const missing = !tickerData?.filings && !session.dashboard?.events;
+  if (missing && session.dashboardState === "loading") {
+    body.append(node("p", "data-state", "Loading filings…"));
+    return;
   }
-  panel.append(list);
-  return panel;
+  if (missing && session.dashboardState === "error") {
+    body.append(node("p", "data-state", "Filings could not be loaded. Use Try again above."));
+    return;
+  }
+  if (missing && !session.dashboard) {
+    body.append(node("p", "data-state", "Filings have not been collected yet."));
+    return;
+  }
+  const filingRows = { link: true };
+  const upcoming = renderCatalystSection(`Upcoming · ${session.selected}`, model.upcoming, tickerData, upcomingEmptyMessage(session.selected), filingRows);
+  if (model.earningsNote) upcoming.append(node("p", "signal-note", model.earningsNote));
+  const filings = renderCatalystSection("SEC filings", model.filings, tickerData, filingsEmptyMessage(session.selected, model.filings), filingRows);
+  const companyPage = edgarCompanyUrl(model.filings.find((row) => row.url)?.url || tickerData?.filings?.[0]?.url || "");
+  if (companyPage) {
+    const all = node("a", "catalyst-edgar-link", "All filings on SEC EDGAR ↗");
+    all.href = companyPage;
+    all.target = "_blank";
+    all.rel = "noopener noreferrer";
+    filings.append(all);
+  }
+  body.append(
+    upcoming,
+    filings,
+    renderCatalystSection("Company & sector events", model.company, tickerData, "No company or sector events in the last 30 days.", filingRows),
+  );
+  });
 }
 
 function renderCompanyPanel(tickerData, chartData, chartDataState) {
@@ -3208,7 +3256,7 @@ function renderDashboard() {
     news.dataset.mobilePanel = "more";
     news.id = "mobile-panel-more";
   }
-  filings.dataset.mobilePanel = "more";
+  if (filings) filings.dataset.mobilePanel = "more";
   side.append(...[renderDrivers(tickerData), news, filings].filter(Boolean));
   const about = renderAboutData();
   if (about) primary.append(about);

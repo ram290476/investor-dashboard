@@ -416,7 +416,12 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
                     "tickers": ["TSLA"],
                     "pinned": [],
                     "display": {
-                        "panels": {"rates": "dismissed", "news": "closed", "made-up": "dismissed"},
+                        "panels": {
+                            "rates": "dismissed",
+                            "news": "closed",
+                            "filings-events": "open",
+                            "made-up": "dismissed",
+                        },
                         "panel_mode": "follow",
                     },
                     "version": 0,
@@ -425,7 +430,7 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
             None,
         )["body"]
     )
-    assert saved["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    assert saved["display"]["panels"] == {"rates": "dismissed", "news": "closed", "filings-events": "open"}
     assert saved["display"]["panel_mode"] == "follow"
     kept = json.loads(
         mod.handler(
@@ -441,7 +446,7 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
             None,
         )["body"]
     )
-    assert kept["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    assert kept["display"]["panels"] == {"rates": "dismissed", "news": "closed", "filings-events": "open"}
     assert kept["display"]["panel_mode"] == "follow"
     assert kept["display"]["theme"] == "clean-light"
     shown = json.loads(
@@ -459,7 +464,7 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
         )["body"]
     )
     assert shown["display"]["panel_mode"] == "all"
-    assert shown["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    assert shown["display"]["panels"] == {"rates": "dismissed", "news": "closed", "filings-events": "open"}
     rejected = mod.handler(
         _event(
             "PUT",
