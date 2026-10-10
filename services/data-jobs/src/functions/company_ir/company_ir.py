@@ -515,14 +515,37 @@ def row_approved(catalog_status: str, method: str) -> bool:
     return catalog_status == "approved" and method != "llm"
 
 
-def period_end_for(fiscal_period: str) -> date:
+def _quarter_end_month(fiscal_end_month: int, quarter: int) -> int:
+    """Calendar month in which a fiscal quarter closes. Q4 closes on the year-end month."""
+    return (fiscal_end_month + quarter * 3 - 1) % 12 + 1
+
+
+def period_end_for(fiscal_period: str, fiscal_end_month: int = 12) -> date:
+    """Last day of the company's fiscal quarter.
+
+    Nvidia's fiscal year ends in January, so 2027Q2 closes in July 2026, not on
+    the calendar quarter-end June 30, 2027. A fact or release end date is more
+    precise and replaces this month-end when the caller has one.
+    """
     match = _QUARTER.fullmatch(fiscal_period)
     if not match:
         raise ValueError(f"fiscal period must look like 2026Q3, got {fiscal_period!r}")
     year, quarter = int(match.group(1)), int(match.group(2))
-    month_day = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
-    month, day = month_day[quarter]
-    return date(year, month, day)
+    month = _quarter_end_month(fiscal_end_month, quarter)
+    calendar_year = year if month <= fiscal_end_month else year - 1
+    if month == 12:
+        return date(calendar_year, 12, 31)
+    return date(calendar_year, month + 1, 1) - timedelta(days=1)
+
+
+_POSITIVE_SPEND = {"capex", "capex_total"}
+
+
+def _as_positive_spend(metric_id: str, value: float) -> float:
+    """Capex is an outflow. The deck shows it in parentheses and XBRL files it positive."""
+    if metric_id in _POSITIVE_SPEND and value < 0:
+        return -value
+    return value
 
 
 def _parse_number(text: str) -> float | None:
@@ -536,7 +559,7 @@ def _parse_cell(text: str) -> tuple[float | None, bool]:
     lower_bound = cleaned.startswith(">")
     if lower_bound:
         cleaned = cleaned[1:].strip()
-    if cleaned.lower() in _MISSING:
+    if cleaned.lower() in _MISSING or _FOOTNOTE_TOKEN.fullmatch(cleaned.replace(" ", "")):
         return None, lower_bound
     negative = cleaned.startswith("(") and cleaned.endswith(")")
     percent = "%" in cleaned
@@ -624,8 +647,10 @@ def text_tables(text: str) -> list[list[list[str]]]:
 
 
 def quarter_token(header: str) -> str | None:
-    """`2026Q3`, `Q3-26` and `Q2 FY27` are fiscal periods. A YoY column is not a period."""
+    """`2026Q3`, `Q3-26`, `4Q-2022` and `Q2 FY27` are fiscal periods. A YoY column is not."""
     text = " ".join(str(header).replace("'", " ").split())
+    if "|" in text:
+        text = text.split("|", 1)[0].strip()
     lowered = text.lower()
     if lowered in _YOY_HEADER or lowered in {"q/q", "y/y", "ytd"}:
         return None
@@ -639,12 +664,18 @@ def quarter_token(header: str) -> str | None:
             year += 2000
         return f"{year}Q{fiscal.group(1)}"
     match = _QSHORT.fullmatch(text.strip())
-    if not match:
+    if match:
+        year = int(match.group(2))
+        if year < 100:
+            year += 2000
+        return f"{year}Q{match.group(1)}"
+    trailing = re.fullmatch(r"([1-4])Q[\s'\-]*(\d{2}|\d{4})", text.strip(), re.IGNORECASE)
+    if not trailing:
         return None
-    year = int(match.group(2))
+    year = int(trailing.group(2))
     if year < 100:
         year += 2000
-    return f"{year}Q{match.group(1)}"
+    return f"{year}Q{trailing.group(1)}"
 
 
 def _coalesce_percent_cells(row: list[str]) -> list[str]:
@@ -680,7 +711,7 @@ def _prepare_quarter_table(table: list[list[str]]) -> list[list[str]] | None:
 
 
 _TABLE_SCALE_SKIP = re.compile(
-    r"\b(?:eps|per share|per month|arpu|gwh)\b|\(in gw\)|\(#\)|metric tons?",
+    r"\b(?:eps|per share|per month|arpu|gwh|days|count)\b|\(in gw\)|\(#\)|metric tons?",
     re.IGNORECASE,
 )
 
@@ -720,13 +751,15 @@ def _observation(
     lower_bound: bool,
     source_kind: str,
     label: str,
+    period_end: date | None = None,
+    fiscal_end_month: int = 12,
 ) -> dict:
     return {
         "ticker": ticker.upper(),
         "metric_id": entry["metric_id"],
-        "period_end": period_end_for(fiscal_period),
+        "period_end": period_end or period_end_for(fiscal_period, fiscal_end_month),
         "fiscal_period": fiscal_period,
-        "value": value,
+        "value": _as_positive_spend(entry["metric_id"], value),
         "unit": unit,
         "source_url": source_url,
         "source_doc_hash": source_doc_hash,
@@ -746,6 +779,18 @@ def _observation(
     }
 
 
+def _header_period_end(header: str) -> date | None:
+    """A column header may carry the real period end next to its fiscal label."""
+    text = str(header)
+    if "|" in text:
+        _period, _, raw = text.partition("|")
+        try:
+            return date.fromisoformat(raw.strip())
+        except ValueError:
+            return None
+    return None
+
+
 def table_scan(
     tables: list[list[list[str]]],
     catalog: dict,
@@ -757,6 +802,7 @@ def table_scan(
     published_date: str | None,
     method: str = "table",
     source_kind: str = "deck",
+    fiscal_end_month: int = 12,
 ) -> tuple[list[dict], list[dict]]:
     """Split a quarter table into catalog matches and proposed labels.
 
@@ -779,6 +825,11 @@ def table_scan(
                 continue
             raw_label = str(cells[0]).strip()
             entry = match_catalog_entry(raw_label, catalog)
+            normalized = normalize_label(raw_label)
+            if entry and entry.get("metric_id") in {"inventory", "deferred_revenue"}:
+                # Cash-flow "change in" lines and the noncurrent rollforward are not the balance.
+                if "change in" in normalized or "net of current" in normalized or "write down" in normalized:
+                    entry = None
             label_scale, unit_hint = scale_from_label(raw_label)
             parsed_any = False
             for index, fiscal_period in quarters:
@@ -815,6 +866,8 @@ def table_scan(
                         lower_bound=lower_bound,
                         source_kind=source_kind,
                         label=raw_label,
+                        period_end=_header_period_end(table[0][index]) if index < len(table[0]) else None,
+                        fiscal_end_month=fiscal_end_month,
                     )
                 )
             if entry is None and parsed_any and method != "llm":
@@ -870,7 +923,21 @@ def parse_deck_text(text: str, catalog: dict, **kwargs) -> list[dict]:
     return observations_from_tables(text_tables(text), catalog, method="table", **kwargs)
 
 
+_WEEK_EDGE_DAYS = 7
+
+
+def _snap_week_end(end: date) -> date:
+    """A 52/53-week period can close in the first week of the next month.
+
+    A fiscal year that ends on January 2, 2027 is FY2026 Q4 when the year ends in December.
+    """
+    if end.day <= _WEEK_EDGE_DAYS:
+        return end.replace(day=1) - timedelta(days=1)
+    return end
+
+
 def _fiscal_period(end: date, fiscal_end_month: int) -> str:
+    end = _snap_week_end(end)
     year = end.year + int(end.month > fiscal_end_month)
     quarter = ((end.month - fiscal_end_month - 1) % 12) // 3 + 1
     return f"{year}Q{quarter}"
@@ -892,18 +959,79 @@ def _quarter_months(fiscal_end_month: int, quarter: int) -> set[int]:
     return {first, first % 12 + 1, (first + 1) % 12 + 1}
 
 
-def _period_from_fact(fact: dict, fiscal_end_month: int) -> str:
-    """Use the filing's `fy`/`fp` when it agrees with the period end. Otherwise the end date."""
-    end = date.fromisoformat(fact["end"])
-    from_end = _fiscal_period(end, fiscal_end_month)
-    fp = str(fact.get("fp") or "").upper()
-    fy = fact.get("fy")
-    if fy and abs(int(fy) - end.year) <= 1:
-        if fp in {"Q1", "Q2", "Q3", "Q4"} and end.month in _quarter_months(fiscal_end_month, int(fp[1])):
-            return f"{int(fy)}{fp}"
-        if fp == "FY" and end.month in _quarter_months(fiscal_end_month, 4):
-            return f"{int(fy)}Q4"
-    return from_end
+def _filing_key(fact: dict) -> tuple:
+    """Facts that share an accession are one filing. Comparatives reuse that filing's fy/fp."""
+    accn = str(fact.get("accn") or fact.get("accession") or "").strip()
+    if accn:
+        return ("accn", accn)
+    return (
+        "filed",
+        str(fact.get("filed") or ""),
+        str(fact.get("form") or ""),
+        str(fact.get("fy") or ""),
+        str(fact.get("fp") or ""),
+    )
+
+
+def _fp_label(fy: object, fp: object) -> str | None:
+    text = str(fp or "").upper()
+    if text in {"Q1", "Q2", "Q3", "Q4"}:
+        return f"{int(fy)}{text}"
+    if text == "FY":
+        return f"{int(fy)}Q4"
+    return None
+
+
+def _month_matching(end: date, label: str) -> int | None:
+    for month in range(1, 13):
+        if _fiscal_period(end, month) == label:
+            return month
+    return None
+
+
+def _periods_for_facts(facts: list[dict], fiscal_end_month: int) -> dict[int, str]:
+    """Label each fact from its own end date, and from start for a duration.
+
+    `fy`/`fp` belong to the filing. They are used only for the fact whose end is
+    that filing's period end, and only when that end actually falls in the labeled
+    quarter. A prior-year comparative keeps the quarter of its own start and end.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for fact in facts:
+        if fact.get("end"):
+            groups.setdefault(_filing_key(fact), []).append(fact)
+    labeled: dict[int, str] = {}
+    for group in groups.values():
+        filing_end = max(str(fact["end"]) for fact in group)
+        anchor = next(fact for fact in group if str(fact["end"]) == filing_end)
+        month = fiscal_end_month
+        anchor_label = _fp_label(anchor.get("fy"), anchor.get("fp")) if anchor.get("fy") and anchor.get("fp") else None
+        if anchor_label:
+            fitted = _month_matching(date.fromisoformat(filing_end), anchor_label)
+            if fitted is not None:
+                month = fitted
+        for fact in group:
+            end = date.fromisoformat(str(fact["end"]))
+            start_text = fact.get("start")
+            if start_text and str(start_text) != str(fact["end"]):
+                start = date.fromisoformat(str(start_text))
+                # The span closes on `end`. A start after the end is not a duration we can trust.
+                if start > end:
+                    labeled[id(fact)] = _fiscal_period(end, month)
+                    continue
+            from_dates = _fiscal_period(end, month)
+            use_filing_label = (
+                str(fact["end"]) == filing_end and anchor_label is not None and from_dates == anchor_label
+            )
+            labeled[id(fact)] = anchor_label if use_filing_label else from_dates
+    return labeled
+
+
+def _period_from_fact(fact: dict, fiscal_end_month: int, periods: dict[int, str] | None = None) -> str:
+    """Period of one fact. Pass `periods` from `_periods_for_facts` when the filing is known."""
+    if periods is not None and id(fact) in periods:
+        return periods[id(fact)]
+    return _fiscal_period(date.fromisoformat(str(fact["end"])), fiscal_end_month)
 
 
 _MONTHS = {
@@ -927,41 +1055,78 @@ def _expand_year(year: int) -> int:
     return year + 2000 if year < 100 else year
 
 
+def _ordinal_period(ordinal: str, year: str) -> str:
+    return f"{_expand_year(int(year))}Q{_ORDINAL_QUARTER[ordinal.lower()]}"
+
+
 def fiscal_period_from_text(text: str, fiscal_end_month: int = 12) -> str | None:
-    """The quarter the release is about. The 8-K report date is the filing day, not the quarter."""
+    """The quarter the release is about. The earliest heading wins, not pattern order.
+
+    The 8-K report date is the filing day, not the quarter. "Q4 and FY 2025 Update"
+    is 2025Q4. "Second quarter of fiscal year 2027" and Apple's "fiscal 2026 fourth
+    quarter" keep the fiscal year in the heading.
+    """
     head = plain_text(text)[:5000]
-    fiscal = re.search(r"\bQ([1-4])\s*(?:FY|fiscal)\s*(\d{2}|\d{4})\b", head, re.IGNORECASE)
-    if fiscal:
-        return f"{_expand_year(int(fiscal.group(2)))}Q{fiscal.group(1)}"
+    found: list[tuple[int, str]] = []
+
+    def add(match: re.Match[str] | None, period: str | None) -> None:
+        if match is not None and period:
+            found.append((match.start(), period))
+
+    add(
+        (match := re.search(r"\bQ([1-4])\s+and\s+FY\s+(\d{2}|\d{4})\b", head, re.IGNORECASE)),
+        f"{_expand_year(int(match.group(2)))}Q{match.group(1)}" if match else None,
+    )
+    add(
+        (match := re.search(r"\bQ([1-4])\s*(?:FY|fiscal)\s*(\d{2}|\d{4})\b", head, re.IGNORECASE)),
+        f"{_expand_year(int(match.group(2)))}Q{match.group(1)}" if match else None,
+    )
     named_fiscal = re.search(
-        r"\b(first|second|third|fourth)\s+quarter(?:\s+of)?\s+fiscal\s+(\d{4})\b",
+        r"\b(first|second|third|fourth)\s+quarter(?:\s+of)?\s+(?:fiscal(?:\s+year)?|fy)\s*(\d{2}|\d{4})\b",
         head,
         re.IGNORECASE,
     )
-    if named_fiscal:
-        return f"{named_fiscal.group(2)}Q{_ORDINAL_QUARTER[named_fiscal.group(1).lower()]}"
+    add(named_fiscal, _ordinal_period(named_fiscal.group(1), named_fiscal.group(2)) if named_fiscal else None)
+    apple = re.search(
+        r"\bfiscal(?:\s+year)?\s+(\d{4})\s+(first|second|third|fourth)\s+quarter\b",
+        head,
+        re.IGNORECASE,
+    )
+    add(apple, _ordinal_period(apple.group(2), apple.group(1)) if apple else None)
     update = re.search(r"\bQ([1-4])\s*(20\d{2})\s+update\b", head, re.IGNORECASE)
-    if update:
-        return f"{update.group(2)}Q{update.group(1)}"
+    add(update, f"{update.group(2)}Q{update.group(1)}" if update else None)
     named = re.search(
         r"\b(first|second|third|fourth)\s+quarter\s+(20\d{2})\b",
         head,
         re.IGNORECASE,
     )
-    if named:
-        return f"{named.group(2)}Q{_ORDINAL_QUARTER[named.group(1).lower()]}"
+    add(named, _ordinal_period(named.group(1), named.group(2)) if named else None)
     short = re.search(r"\bQ([1-4])\s+(20\d{2})\b", head, re.IGNORECASE)
-    if short:
-        return f"{short.group(2)}Q{short.group(1)}"
-    ended = re.search(
-        r"\bquarter ended\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})",
-        head,
-        re.IGNORECASE,
-    )
+    add(short, f"{short.group(2)}Q{short.group(1)}" if short else None)
+    ended = re.search(r"\bquarter ended\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})", head, re.IGNORECASE)
     if ended and ended.group(1).lower() in _MONTHS:
         end = date(int(ended.group(3)), _MONTHS[ended.group(1).lower()], int(ended.group(2)))
-        return _fiscal_period(end, fiscal_end_month)
-    return None
+        add(ended, _fiscal_period(end, fiscal_end_month))
+    if not found:
+        return None
+    return min(found, key=lambda item: item[0])[1]
+
+
+def period_ends_from_text(text: str, fiscal_end_month: int = 12) -> dict[str, date]:
+    """Explicit 'quarter ended July 26, 2026' dates, keyed by fiscal period."""
+    head = plain_text(text)[:8000]
+    found: dict[str, date] = {}
+    for match in re.finditer(
+        r"\b(?:quarter|year|period)\s+ended\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})",
+        head,
+        re.IGNORECASE,
+    ):
+        month = _MONTHS.get(match.group(1).lower())
+        if month is None:
+            continue
+        end = date(int(match.group(3)), month, int(match.group(2)))
+        found[_fiscal_period(end, fiscal_end_month)] = end
+    return found
 
 
 def _span_bucket(days: int) -> str | None:
@@ -977,66 +1142,130 @@ def _span_bucket(days: int) -> str | None:
     return None
 
 
-def discrete_cashflow_quarters(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
-    """Turn year-to-date cash-flow facts into single quarters.
+def _component_quarter(period: str, bucket: str) -> int:
+    if len(period) < 5 or period[-2:-1] != "Q" or not period[-1].isdigit():
+        return 0
+    quarter = int(period[-1])
+    if bucket == "h1" and quarter != 2:
+        return 0
+    if bucket == "nine" and quarter != 3:
+        return 0
+    if bucket == "fy" and quarter != 4:
+        return 0
+    return quarter
 
-    Q1 is the three-month fact. Q2 is H1 minus Q1 when the quarter itself was not
-    filed. Q3 is nine months minus H1. Q4 is the fiscal year minus nine months.
-    A fact that is already one quarter wins over the difference.
+
+def _derive_filing_quarters(
+    components: dict[tuple[str, str], tuple[float, str]],
+    published: dict[str, float],
+    seen_ends: dict[str, float],
+) -> dict[str, tuple[float, str]]:
+    """Difference YTD pieces from this filing. Borrow an earlier quarter only for a new span.
+
+    A later filing that restates H1 without restating Q1 must not subtract the old Q1.
+    The first time an end date appears, earlier published quarters complete the difference.
     """
-    latest: dict[tuple[str, str], tuple[str, float]] = {}
+    years = sorted({int(period[:4]) for period, _bucket in components})
+    derived: dict[str, tuple[float, str]] = {}
+
+    def own(period: str, bucket: str) -> tuple[float, str] | None:
+        return components.get((period, bucket))
+
+    def fresh(piece: tuple[float, str] | None) -> bool:
+        return piece is not None and piece[1] not in seen_ends
+
+    def prior_sum(year: int, quarters: tuple[int, ...]) -> float | None:
+        total = 0.0
+        for quarter in quarters:
+            value = derived.get(f"{year}Q{quarter}")
+            if value is None:
+                value = published.get(f"{year}Q{quarter}")
+                if value is None:
+                    return None
+                total += value
+            else:
+                total += value[0]
+        return total
+
+    for year in years:
+        q1 = own(f"{year}Q1", "quarter")
+        q2 = own(f"{year}Q2", "quarter")
+        h1 = own(f"{year}Q2", "h1")
+        q3 = own(f"{year}Q3", "quarter")
+        nine = own(f"{year}Q3", "nine")
+        q4 = own(f"{year}Q4", "quarter")
+        fy = own(f"{year}Q4", "fy")
+        if q1 is not None:
+            derived[f"{year}Q1"] = q1
+        if q2 is not None:
+            derived[f"{year}Q2"] = q2
+        elif h1 is not None and (q1 is not None or fresh(h1)):
+            base = prior_sum(year, (1,))
+            if base is not None:
+                derived[f"{year}Q2"] = (h1[0] - base, h1[1])
+        if q3 is not None:
+            derived[f"{year}Q3"] = q3
+        elif nine is not None and (q1 is not None or q2 is not None or fresh(nine)):
+            base = prior_sum(year, (1, 2))
+            if base is not None:
+                derived[f"{year}Q3"] = (nine[0] - base, nine[1])
+        if q4 is not None:
+            derived[f"{year}Q4"] = q4
+        elif fy is not None and (q1 is not None or q2 is not None or q3 is not None or fresh(fy)):
+            base = prior_sum(year, (1, 2, 3))
+            if base is not None:
+                derived[f"{year}Q4"] = (fy[0] - base, fy[1])
+    return derived
+
+
+def _discrete_cashflow(
+    facts: list[dict],
+    fiscal_end_month: int = 12,
+) -> tuple[dict[str, float], dict[str, str]]:
+    """Single quarters, preferring every input from the same filing, plus the closing end date."""
+    periods = _periods_for_facts(facts, fiscal_end_month)
+    filings: dict[tuple, list[tuple[str, str, float, str, str]]] = {}
     for fact in facts:
         if fact.get("form") not in {"10-Q", "10-K", "10-Q/A", "10-K/A"}:
             continue
         if "end" not in fact or "start" not in fact or "val" not in fact:
             continue
-        days = (date.fromisoformat(fact["end"]) - date.fromisoformat(fact["start"])).days
+        days = (date.fromisoformat(str(fact["end"])) - date.fromisoformat(str(fact["start"]))).days
         bucket = _span_bucket(days)
         if bucket is None:
             continue
-        period = _period_from_fact(fact, fiscal_end_month)
-        quarter = int(period[-1]) if period[-2:-1] == "Q" and period[-1].isdigit() else 0
-        if bucket == "h1" and quarter != 2:
+        period = periods.get(id(fact)) or _fiscal_period(date.fromisoformat(str(fact["end"])), fiscal_end_month)
+        if _component_quarter(period, bucket) == 0:
             continue
-        if bucket == "nine" and quarter != 3:
-            continue
-        if bucket == "fy" and quarter != 4:
-            continue
-        filed = str(fact.get("filed") or "")
-        key = (period, bucket)
-        current = latest.get(key)
-        if current is None or filed >= current[0]:
-            latest[key] = (filed, float(fact["val"]))
-    values = {key: item[1] for key, item in latest.items()}
-    years = sorted({int(period[:4]) for period, _bucket in values})
-    derived: dict[str, float] = {}
-    for year in years:
-        q1 = values.get((f"{year}Q1", "quarter"))
-        q2 = values.get((f"{year}Q2", "quarter"))
-        h1 = values.get((f"{year}Q2", "h1"))
-        q3 = values.get((f"{year}Q3", "quarter"))
-        nine = values.get((f"{year}Q3", "nine"))
-        q4 = values.get((f"{year}Q4", "quarter"))
-        fy = values.get((f"{year}Q4", "fy"))
-        if q1 is not None:
-            derived[f"{year}Q1"] = q1
-        if q2 is not None:
-            derived[f"{year}Q2"] = q2
-        elif h1 is not None and q1 is not None:
-            derived[f"{year}Q2"] = h1 - q1
-        if q3 is not None:
-            derived[f"{year}Q3"] = q3
-        elif nine is not None and h1 is not None:
-            derived[f"{year}Q3"] = nine - h1
-        elif nine is not None and q1 is not None and f"{year}Q2" in derived:
-            derived[f"{year}Q3"] = nine - q1 - derived[f"{year}Q2"]
-        if q4 is not None:
-            derived[f"{year}Q4"] = q4
-        elif fy is not None and nine is not None:
-            derived[f"{year}Q4"] = fy - nine
-        elif fy is not None and all(f"{year}Q{quarter}" in derived for quarter in (1, 2, 3)):
-            derived[f"{year}Q4"] = fy - derived[f"{year}Q1"] - derived[f"{year}Q2"] - derived[f"{year}Q3"]
-    return derived
+        filings.setdefault(_filing_key(fact), []).append(
+            (period, bucket, float(fact["val"]), str(fact["end"]), str(fact.get("filed") or "")),
+        )
+    order = sorted(filings, key=lambda key: max(item[4] for item in filings[key]))
+    published: dict[str, float] = {}
+    ends: dict[str, str] = {}
+    seen_ends: dict[str, float] = {}
+    for key in order:
+        components: dict[tuple[str, str], tuple[float, str]] = {}
+        for period, bucket, value, end, _filed in filings[key]:
+            components[(period, bucket)] = (value, end)
+        derived = _derive_filing_quarters(components, published, seen_ends)
+        for period, (value, end) in derived.items():
+            published[period] = value
+            ends[period] = end
+        for _key, (value, end) in components.items():
+            seen_ends[end] = value
+    return published, ends
+
+
+def discrete_cashflow_quarters(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
+    """Turn year-to-date cash-flow facts into single quarters.
+
+    Q1 is the three-month fact. Q2 is H1 minus Q1. Q3 is nine months minus the first half.
+    Q4 is the fiscal year minus nine months. A fact that is already one quarter wins over
+    the difference. Pieces come from the same filing when that filing has them.
+    """
+    values, _ends = _discrete_cashflow(facts, fiscal_end_month)
+    return values
 
 
 def _newest_period_year(series: dict[str, float]) -> int:
@@ -1077,15 +1306,20 @@ def _is_scale_outlier(value: float, peers: list[float]) -> bool:
     return abs(value) < median / 100 or abs(value) > median * 100
 
 
-def _select_sane_latest(by_period: dict[str, list[tuple[str, float]]]) -> tuple[dict[str, float], list[dict]]:
+def _select_sane_latest(
+    by_period: dict[str, list[tuple]],
+) -> tuple[dict[str, float], list[dict], dict[str, str]]:
     """Keep the latest filing for each period, walking back past an obvious scale error."""
     latest = {period: facts[-1][1] for period, facts in by_period.items() if facts}
     selected: dict[str, float] = {}
     flags: list[dict] = []
+    ends: dict[str, str] = {}
     for period, facts in by_period.items():
         peers = [value for other, value in latest.items() if other != period]
         chosen = None
-        for filed, value in reversed(facts):
+        chosen_end = ""
+        for item in reversed(facts):
+            filed, value = item[0], item[1]
             if _is_scale_outlier(value, peers):
                 flags.append(
                     {
@@ -1097,14 +1331,18 @@ def _select_sane_latest(by_period: dict[str, list[tuple[str, float]]]) -> tuple[
                 )
                 continue
             chosen = value
+            chosen_end = item[2] if len(item) > 2 else ""
             break
         if chosen is not None:
             selected[period] = chosen
-    return selected, flags
+            if chosen_end:
+                ends[period] = chosen_end
+    return selected, flags, ends
 
 
-def _collect_xbrl_facts(facts: list[dict], fiscal_end_month: int, kind: str) -> dict[str, list[tuple[str, float]]]:
-    grouped: dict[str, list[tuple[str, float]]] = {}
+def _collect_xbrl_facts(facts: list[dict], fiscal_end_month: int, kind: str) -> dict[str, list[tuple]]:
+    labeled = _periods_for_facts(facts, fiscal_end_month)
+    grouped: dict[str, list[tuple]] = {}
     for fact in sorted(facts, key=lambda item: item.get("filed", "")):
         if fact.get("form") not in {"10-Q", "10-K", "10-Q/A", "10-K/A"}:
             continue
@@ -1123,25 +1361,25 @@ def _collect_xbrl_facts(facts: list[dict], fiscal_end_month: int, kind: str) -> 
                 days = (end - date.fromisoformat(start)).days
                 if days > 5:
                     continue
-        period = _period_from_fact(fact, fiscal_end_month)
-        grouped.setdefault(period, []).append((str(fact.get("filed") or ""), float(fact["val"])))
+        period = labeled.get(id(fact)) or _fiscal_period(end, fiscal_end_month)
+        grouped.setdefault(period, []).append((str(fact.get("filed") or ""), float(fact["val"]), str(fact["end"])))
     return grouped
 
 
 def parse_xbrl_quarters(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
     """Map fiscal quarter to the latest sane 10-Q/10-K duration value. Q4 is not inferred here."""
-    selected, _flags = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, "duration"))
+    selected, _flags, _ends = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, "duration"))
     return selected
 
 
 def parse_xbrl_instants(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
     """Balance-sheet instants at a quarter end. Scale errors are dropped, not served."""
-    selected, _flags = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, "instant"))
+    selected, _flags, _ends = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, "instant"))
     return selected
 
 
 def xbrl_scale_flags(facts: list[dict], fiscal_end_month: int = 12, kind: str = "instant") -> list[dict]:
-    _selected, flags = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, kind))
+    _selected, flags, _ends = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, kind))
     return flags
 
 
@@ -1351,14 +1589,13 @@ def _change(latest: dict | None, prior: dict | None) -> float | None:
 
 
 def mismatches_for_ticker(ticker: str, mismatches: list[dict] | None) -> list[dict]:
-    """Scale flags and XBRL mismatches stay on the ticker that produced them."""
+    """Scale flags stay on the ticker that produced them. A flag with no ticker is dropped."""
     symbol = str(ticker or "").upper()
     kept = []
     for item in mismatches or []:
         owner = str(item.get("ticker") or "").upper()
-        if owner and owner != symbol:
-            continue
-        kept.append(item)
+        if owner == symbol:
+            kept.append(item)
     return kept
 
 
@@ -1640,19 +1877,41 @@ _VALUE_TOKEN = re.compile(
     r"^(?:[<>]\s*)?\$?\(?-?\d[\d,]*(?:\.\d+)?\)?(?:%|bp|pts)?$|[\u2014\u2013\-]$",
     re.IGNORECASE,
 )
+_FOOTNOTE_TOKEN = re.compile(r"^\(\d\)$")
+_QUARTER_PIECE = r"(?:Q[1-4]|[1-4]Q)[\s'\-]*(?:FY\s*)?(?:\d{4}|\d{2})"
 _QUARTER_RUN = re.compile(
-    r"(?:Q[1-4][\s'\-]*(?:FY\s*)?(?:\d{2}|\d{4})\s+){3,8}(?:YoY|Y/Y|Year(?:\s+|-)over(?:\s+|-)year)?",
+    rf"(?:{_QUARTER_PIECE}\s+){{3,16}}(?:YoY|Y/Y|Year(?:\s+|-)over(?:\s+|-)year)?",
     re.IGNORECASE,
 )
 _MONTH_DATE = (
     r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+\d{1,2},\s+\d{4}"
 )
-_DATE_RUN = re.compile(rf"((?:{_MONTH_DATE}\s+){{3,8}})", re.IGNORECASE)
+_SHORT_DATE = r"\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2,4}"
+_EITHER_DATE = rf"(?:{_MONTH_DATE}|{_SHORT_DATE})"
+_DATE_RUN = re.compile(rf"((?:{_EITHER_DATE}\s+){{3,16}})", re.IGNORECASE)
+_MON3 = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+_CHANGE_LABELS = {"inventory", "deferred revenue", "accounts receivable", "accounts payable"}
 
 
 def _is_value_token(token: str) -> bool:
-    return bool(_VALUE_TOKEN.fullmatch(token.replace(" ", "")))
+    compact = token.replace(" ", "")
+    if _FOOTNOTE_TOKEN.fullmatch(compact):
+        return False
+    return bool(_VALUE_TOKEN.fullmatch(compact))
 
 
 def _glue_tokens(raw: list[str]) -> list[str]:
@@ -1673,6 +1932,7 @@ def _rows_after_header(body: str, width: int) -> list[list[str]]:
     tokens = _glue_tokens(body.split())
     rows: list[list[str]] = []
     section = ""
+    in_change = False
     index = 0
     while index < len(tokens) and len(rows) < 80:
         if not _is_value_token(tokens[index]):
@@ -1704,6 +1964,13 @@ def _rows_after_header(body: str, width: int) -> list[list[str]]:
             section = "operating income"
         if lowered == "total" and section:
             label = f"{section} total"
+        if in_change and lowered in _CHANGE_LABELS:
+            label = f"change in {label}"
+            lowered = label.lower()
+        if "change in" in lowered or "changes in" in lowered:
+            in_change = True
+        if lowered.startswith("net cash") or "cash flows from" in lowered or "supplemental" in lowered:
+            in_change = False
         if label and lowered not in _YOY_HEADER:
             rows.append([label, *run[:width]])
         index = end
@@ -1711,14 +1978,24 @@ def _rows_after_header(body: str, width: int) -> list[list[str]]:
 
 
 def _date_from_header(token: str) -> date | None:
-    match = re.fullmatch(_MONTH_DATE, token.strip(), re.IGNORECASE)
-    if not match:
+    text = " ".join(token.strip().split())
+    match = re.fullmatch(_MONTH_DATE, text, re.IGNORECASE)
+    if match:
+        month_name, day, year = text.replace(",", "").split()
+        month = _MONTHS.get(month_name.lower())
+        if not month:
+            return None
+        return date(int(year), month, int(day))
+    short = re.fullmatch(r"(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})", text)
+    if not short:
         return None
-    month_name, day, year = token.replace(",", "").split()
-    month = _MONTHS.get(month_name.lower())
+    month = _MON3.get(short.group(2).lower())
     if not month:
         return None
-    return date(int(year), month, int(day))
+    year = int(short.group(3))
+    if year < 100:
+        year += 2000
+    return date(year, month, int(short.group(1)))
 
 
 def flowing_text_tables(text: str, fiscal_end_month: int = 12) -> list[list[list[str]]]:
@@ -1746,7 +2023,7 @@ def flowing_text_tables(text: str, fiscal_end_month: int = 12) -> list[list[list
     for match in _DATE_RUN.finditer(plain):
         if any(start <= match.start() < end for start, end in occupied):
             continue
-        raw_dates = re.findall(_MONTH_DATE, match.group(1), flags=re.IGNORECASE)
+        raw_dates = re.findall(_EITHER_DATE, match.group(1), flags=re.IGNORECASE)
         if len(raw_dates) < 3:
             continue
         seen: set[str] = set()
@@ -1761,7 +2038,7 @@ def flowing_text_tables(text: str, fiscal_end_month: int = 12) -> list[list[list
                 headers.append("YTD")
             else:
                 seen.add(period)
-                headers.append(period)
+                headers.append(f"{period}|{parsed.isoformat()}")
         preamble = plain[max(0, match.start() - 220) : match.start()]
         header = [preamble.strip() or "Metric", *headers]
         body_rows = _rows_after_header(plain[match.end() : match.end() + 6000], len(raw_dates))
@@ -1840,14 +2117,24 @@ def exhibits_from_submission(text: str) -> list[dict]:
     return found
 
 
+_UPDATE_DECK = re.compile(
+    r"q[1-4](?:\s+and\s+fy)?\s*(?:fy\s*)?(?:\d{2}|\d{4})\s+update",
+    re.IGNORECASE,
+)
+
+
 def classify_release(title: str, body: str) -> str:
-    """Classify from the document text. An HTML title of `Document` is not a deck."""
+    """Classify from the document text. An HTML title of `Document` is not a deck.
+
+    An unclassified exhibit stays `other`. Deck is the highest source priority, so it
+    is not the fallback.
+    """
     plain = plain_text(body)
     head = plain[:800].lower()
     blob = f"{title or ''}\n{plain[:8000]}".lower()
-    # The update deck says "Q2 2026 Update" up front. A deliveries release mentions
-    # the later "Q3 2026 update" only as a link, after the production table.
-    if re.search(r"q[1-4]\s*(?:fy\s*)?\d{2,4}\s+update", head) or "quarterly update" in head:
+    # The update deck says "Q2 2026 Update" or "Q4 and FY 2025 Update" up front.
+    # A deliveries release mentions the later "Q3 2026 update" only as a link.
+    if _UPDATE_DECK.search(head) or "quarterly update" in head:
         return "deck"
     if "production" in head and "deliver" in head:
         return "press_release"
@@ -1865,8 +2152,7 @@ def classify_release(title: str, body: str) -> str:
         )
     ):
         return "press_release"
-    titled = classify_exhibit_title(title)
-    return titled
+    return classify_exhibit_title(title)
 
 
 def classify_exhibit_title(title: str) -> str:
@@ -1874,7 +2160,7 @@ def classify_exhibit_title(title: str) -> str:
     text = " ".join(str(title or "").lower().split())
     if "production" in text and "deliver" in text:
         return "press_release"
-    if re.search(r"q[1-4]\s*\d{2,4}\s+update", text) or "quarterly update" in text or text.endswith(" update"):
+    if _UPDATE_DECK.search(text) or "quarterly update" in text or text.endswith(" update"):
         return "deck"
     if "update" in text and re.search(r"q[1-4]", text):
         return "deck"
@@ -2131,11 +2417,13 @@ def parse_company_document(text: str, catalog: dict, **kwargs) -> dict:
     body = plain_text(text).lower()
     if detected == "press_release" and "production" in body and "deliver" in body:
         source_kind = "press_release"
+    fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
     rows, proposals = table_scan(
         tables,
         catalog,
         source_kind=source_kind,
         method=kwargs.get("method") or "table",
+        fiscal_end_month=fiscal_end_month,
         **{
             key: kwargs[key]
             for key in (
@@ -2147,10 +2435,7 @@ def parse_company_document(text: str, catalog: dict, **kwargs) -> dict:
             )
         },
     )
-    text_period = fiscal_period_from_text(
-        text,
-        int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12),
-    )
+    text_period = fiscal_period_from_text(text, fiscal_end_month)
     period = text_period or kwargs.get("fiscal_period")
     matrix_kwargs = {key: value for key, value in kwargs.items() if key not in {"fiscal_period", "fiscal_end_month"}}
     if period and source_kind == "press_release":
@@ -2188,8 +2473,12 @@ def parse_company_document(text: str, catalog: dict, **kwargs) -> dict:
                     label=candidate["label"],
                 )
             )
+    explicit_ends = period_ends_from_text(text, fiscal_end_month)
     for row in rows:
         row["accession"] = kwargs.get("accession")
+        explicit = explicit_ends.get(row["fiscal_period"])
+        if explicit is not None:
+            row["period_end"] = explicit
     return {"rows": rows, "proposals": proposals}
 
 
@@ -2261,7 +2550,8 @@ def _xbrl_tag_series(
     facts = (gaap.get(tag) or {}).get("units", {}).get(unit) or []
     if not facts:
         return {}, []
-    return _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, kind))
+    selected, flags, _ends = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, kind))
+    return selected, flags
 
 
 def _best_tag_facts(gaap: dict, tags: list[str], unit: str) -> list[dict]:
@@ -2278,9 +2568,9 @@ def _best_tag_facts(gaap: dict, tags: list[str], unit: str) -> list[dict]:
     return ranked[0][2]
 
 
-def _ytd_series(facts: list[dict], fiscal_end_month: int) -> tuple[dict[str, float], list[dict]]:
-    discrete = discrete_cashflow_quarters(facts, fiscal_end_month)
-    grouped = {period: [("", value)] for period, value in discrete.items()}
+def _ytd_series(facts: list[dict], fiscal_end_month: int) -> tuple[dict[str, float], list[dict], dict[str, str]]:
+    discrete, ends = _discrete_cashflow(facts, fiscal_end_month)
+    grouped = {period: [("", value, ends.get(period, ""))] for period, value in discrete.items()}
     return _select_sane_latest(grouped)
 
 
@@ -2358,16 +2648,22 @@ def cash_and_investments_series(gaap: dict, fiscal_end_month: int = 12) -> tuple
     return selected, flags
 
 
-def _series_for_spec(gaap: dict, spec: dict, fiscal_end_month: int) -> tuple[dict[str, float], list[dict]]:
+def _series_for_spec(
+    gaap: dict,
+    spec: dict,
+    fiscal_end_month: int,
+) -> tuple[dict[str, float], list[dict], dict[str, str]]:
     mode = spec.get("mode") or spec.get("kind") or "duration"
     if mode == "cash_investments":
-        return cash_and_investments_series(gaap, fiscal_end_month)
+        selected, flags = cash_and_investments_series(gaap, fiscal_end_month)
+        return selected, flags, {}
     if mode == "deferred":
-        return deferred_revenue_series(gaap, fiscal_end_month)
+        selected, flags = deferred_revenue_series(gaap, fiscal_end_month)
+        return selected, flags, {}
     unit = spec.get("unit") or "USD"
     facts = _best_tag_facts(gaap, list(spec.get("tags") or []), unit)
     if not facts:
-        return {}, []
+        return {}, [], {}
     if mode == "ytd":
         return _ytd_series(facts, fiscal_end_month)
     return _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, spec.get("kind") or "duration"))
@@ -2401,10 +2697,12 @@ def companyfacts_observations(companyfacts: dict, catalog: dict, **kwargs) -> tu
     fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
     ticker = kwargs["ticker"]
     selected_by_metric: dict[str, dict[str, float]] = {}
+    ends_by_metric: dict[str, dict[str, str]] = {}
     flags: list[dict] = []
     specs = list(GAAP_XBRL_TAGS.items()) + _extra_xbrl_specs(catalog)
     for metric_id, spec in specs:
-        selected, scale_flags = _series_for_spec(gaap, spec, fiscal_end_month)
+        selected, scale_flags, ends = _series_for_spec(gaap, spec, fiscal_end_month)
+        ends_by_metric[metric_id] = ends
         if not selected and not scale_flags:
             continue
         selected_by_metric[metric_id] = selected
@@ -2412,17 +2710,22 @@ def companyfacts_observations(companyfacts: dict, catalog: dict, **kwargs) -> tu
             flag["metric_id"] = metric_id
             flag["ticker"] = ticker.upper()
             flags.append(flag)
-    selected_by_metric["gross_profit"] = gross_profit_series(
-        selected_by_metric.get("gross_profit") or {},
+    reported_gross = selected_by_metric.get("gross_profit") or {}
+    derived_gross = gross_profit_series(
+        reported_gross,
         selected_by_metric.get("revenue_gaap") or {},
         selected_by_metric.get("cost_of_revenue") or {},
     )
+    selected_by_metric["gross_profit"] = derived_gross
+    if derived_gross is not reported_gross:
+        ends_by_metric["gross_profit"] = {}
     rows = []
     for metric_id, selected in selected_by_metric.items():
         entry = catalog_entry(catalog, metric_id)
         if entry is None or not selected:
             continue
         for fiscal_period, value in selected.items():
+            end_iso = (ends_by_metric.get(metric_id) or {}).get(fiscal_period)
             rows.append(
                 _observation(
                     entry,
@@ -2439,6 +2742,8 @@ def companyfacts_observations(companyfacts: dict, catalog: dict, **kwargs) -> tu
                     lower_bound=False,
                     source_kind="xbrl",
                     label=metric_id,
+                    period_end=date.fromisoformat(end_iso) if end_iso else None,
+                    fiscal_end_month=fiscal_end_month,
                 )
             )
     return rows, flags
@@ -2601,6 +2906,10 @@ def _source_kind_for_title(title: str) -> str:
     return "other"
 
 
+# Leave headroom under the 300s collect Lambda so a slow ticker stops as partial, not a timeout.
+COLLECT_BUDGET_S = 280
+
+
 def run_collect(
     event: dict | None,
     today: date,
@@ -2614,6 +2923,7 @@ def run_collect(
     pace: Pace | None = None,
     user_agent: str | None = None,
     extracted_at: str | None = None,
+    budget_s: float | None = None,
 ) -> dict:
     """Fetch EDGAR submissions, Item 2.02 EX-99.1, periodic filings and companyfacts. IR PDFs are a fallback."""
     plan = collection_plan(event, today)
@@ -2632,6 +2942,9 @@ def run_collect(
     agent = user_agent or crawler_user_agent()
     limiter = pace or Pace(0)
     targets = company_ir_tickers(plan["tickers"] or tickers)
+    budget = COLLECT_BUDGET_S if budget_s is None else budget_s
+    deadline = datetime.now(UTC) + timedelta(seconds=budget)
+    stopped_for_time = False
     manifests = []
     written = 0
     documents = 0
@@ -2646,7 +2959,18 @@ def run_collect(
 
         return (urlparse(url).hostname or "").lower()
 
+    def expired() -> bool:
+        nonlocal stopped_for_time
+        if budget <= 0 or datetime.now(UTC) >= deadline:
+            stopped_for_time = True
+            return True
+        return False
+
     def pull(url: str, source_id: str, *, optional: bool = False):
+        if expired():
+            failed.append(source_id)
+            reasons.append({"source_id": source_id, "reason": "time_budget", "url": url})
+            return None
         host = host_of(url)
         if host in stopped:
             reasons.append({"source_id": source_id, "reason": "provider_policy", "url": url})
@@ -2734,6 +3058,10 @@ def run_collect(
                 cik_by_ticker[str(record["ticker"]).upper()] = f"{int(record['cik_str']):010d}"
 
     for ticker in targets:
+        if expired():
+            failed.append(f"edgar:{ticker}:time_budget")
+            reasons.append({"source_id": f"edgar:{ticker}", "reason": "time_budget"})
+            break
         catalog = load_catalog(ticker)
         cik = cik_by_ticker.get(ticker)
         if not cik:
@@ -2763,14 +3091,6 @@ def run_collect(
                 if exhibits:
                     break
             if not exhibits:
-                submission = pull(
-                    archive_url(cik, filing["accession"], f"{filing['accession']}.txt"),
-                    f"edgar:{ticker}:{filing['accession']}:submission",
-                    optional=True,
-                )
-                if submission is not None:
-                    exhibits = exhibits_from_submission(submission.text)
-            if not exhibits:
                 index = pull(filing_index_url(cik, filing["accession"]), f"edgar:{ticker}:{filing['accession']}:index")
                 if index is None:
                     continue
@@ -2787,8 +3107,6 @@ def run_collect(
                     continue
                 title = title_from_html(document.text) or exhibit.get("description") or ""
                 kind = classify_release(title, document.text)
-                if kind == "other":
-                    kind = "deck"
                 period = fiscal_period_from_text(document.text, fy_month) or "undated"
                 content = document.content if isinstance(document.content, bytes) else document.text.encode()
                 save(
@@ -2854,7 +3172,9 @@ def run_collect(
                     save(ticker, "ir", url, content, "application/pdf", "deck", "", None)
 
     status = "ok"
-    if failed and documents:
+    if stopped_for_time:
+        status = "partial"
+    elif failed and documents:
         status = "partial"
     elif failed and not documents:
         status = "failed"
@@ -2947,7 +3267,7 @@ def run_extract(
             source_doc_hash=item.get("sha256") or "",
             extracted_at=extracted_at,
             published_date=item.get("published_date"),
-            source_kind=kind if kind in {"deck", "press_release"} else "deck",
+            source_kind=kind if kind in {"deck", "press_release", "other"} else "other",
             fiscal_period=_period_from_manifest(item),
             fiscal_end_month=fiscal_end_month,
             accession=item.get("accession"),
@@ -3077,6 +3397,12 @@ def collect_handler(event, context):
             return http.get(url, headers=headers)
 
         universe = watchlist_universe(user_ticker_union())
+        remaining = getattr(context, "get_remaining_time_in_millis", None)
+        budget_s = None
+        if callable(remaining):
+            millis = remaining()
+            if isinstance(millis, (int, float)) and millis > 0:
+                budget_s = max(1.0, millis / 1000.0 - 20.0)
         with get_client(headers={"User-Agent": crawler_user_agent()}) as http:
             result = run_collect(
                 event,
@@ -3088,6 +3414,7 @@ def collect_handler(event, context):
                 read_json=lambda key: read_json(key, bucket),
                 tickers=list(universe["tickers"] or []),
                 pace=Pace(),
+                budget_s=budget_s,
             )
         _record_failures(result.get("failed_source_ids") or [])
         return result
