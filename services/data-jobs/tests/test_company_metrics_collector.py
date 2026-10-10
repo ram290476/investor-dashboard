@@ -320,6 +320,9 @@ def test_collect_stores_edgar_once_and_stops_on_429_without_retry(monkeypatch):
     assert first["collected"] >= 1
     assert calls[0][1].startswith("InvestorDashboardIR/1.0")
     assert any(key.endswith(".htm") for key in stored)
+    requested = [url for url, _agent in calls]
+    assert any(url.endswith("/000162828026064366/index.json") for url in requested)
+    assert not any(url.endswith("-index.json") for url in requested)
     again = run_once(lambda key: key in stored)
     assert again["collected"] == 0
     assert again["documents"] >= 1
@@ -556,3 +559,93 @@ def test_propose_and_approve_helpers_never_invent_an_approval(tmp_path):
     entry = ir.catalog_entry(approved, "total_deliveries")
     assert entry["status"] == "approved" and entry["approved_by"] == "ram"
     assert ir.validate_catalog(approved) == []
+
+
+def test_filing_index_url_is_the_directory_index():
+    url = ir.filing_index_url("0001318605", "0001628280-26-064366")
+    assert url == "https://www.sec.gov/Archives/edgar/data/1318605/000162828026064366/index.json"
+
+
+def _instant(end: str, value: float, filed: str, form: str = "10-Q") -> dict:
+    return {"end": end, "val": value, "filed": filed, "form": form, "accn": "000", "fy": 2026, "fp": "Q2"}
+
+
+def test_cash_and_investments_uses_current_concepts_then_older_fallbacks():
+    cash_2018 = 2_967_000_000
+    cash_2026 = 15_219_000_000
+    short_2026 = 28_305_000_000
+    cash_2022 = 19_532_000_000
+    marketable_2022 = 1_575_000_000
+    cash_2021 = 17_576_000_000
+    short_2021 = 131_000_000
+    gaap = {
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents": {"units": {"USD": [
+            _instant("2018-09-30", 3_522_966_000, "2018-11-02"),
+            _instant("2017-09-30", 3_000_000_000, "2017-11-03"),
+        ]}},
+        "CashAndCashEquivalentsAtCarryingValue": {"units": {"USD": [
+            _instant("2018-09-30", cash_2018, "2018-11-02"),
+            _instant("2021-12-31", cash_2021, "2022-02-07", "10-K"),
+            _instant("2022-09-30", cash_2022, "2022-10-24"),
+            _instant("2026-06-30", cash_2026, "2026-07-23"),
+        ]}},
+        "ShortTermInvestments": {"units": {"USD": [
+            _instant("2021-12-31", short_2021, "2022-02-07", "10-K"),
+            _instant("2024-12-31", 20_424_000_000, "2025-01-30", "10-K"),
+            _instant("2026-06-30", short_2026, "2026-07-23"),
+        ]}},
+        "MarketableSecuritiesCurrent": {"units": {"USD": [
+            _instant("2021-12-31", short_2021, "2022-02-07", "10-K"),
+            _instant("2022-09-30", marketable_2022, "2022-10-24"),
+        ]}},
+        "CashCashEquivalentsAndShortTermInvestments": {"units": {"USD": [
+            _instant("2012-03-31", 900_000_000, "2012-05-10"),
+        ]}},
+    }
+    rows, _flags = ir.companyfacts_observations(
+        {"facts": {"us-gaap": gaap}},
+        ir.load_catalog("TSLA"),
+        ticker="TSLA",
+        source_url="https://data.sec.gov/api/xbrl/companyfacts/CIK0001318605.json",
+        source_doc_hash="e" * 64,
+        extracted_at=EXTRACTED,
+    )
+    series = {
+        row["fiscal_period"]: row["value"]
+        for row in rows if row["metric_id"] == "cash_and_investments"
+    }
+    assert series["2018Q3"] == cash_2018
+    assert series["2026Q2"] == cash_2026 + short_2026
+    assert series["2022Q3"] == cash_2022 + marketable_2022
+    assert series["2021Q4"] == cash_2021 + short_2021
+    assert series["2017Q3"] == 3_000_000_000
+    assert series["2012Q1"] == 900_000_000
+
+
+def test_extract_still_parses_a_partial_collect():
+    written = {}
+    result = ir.run_extract(
+        {
+            "job": "Q2C",
+            "outcome": "partial",
+            "status": "partial",
+            "run_status": "partial",
+            "manifests": [{
+                "ticker": "TSLA",
+                "key": "deliveries",
+                "source_kind": "press_release",
+                "period": "2026Q3",
+                "source_url": SEC_URL,
+                "sha256": "a" * 64,
+                "published_date": "2026-10-02",
+            }],
+        },
+        read_bytes=lambda key: _load("tsla_q3_2026_deliveries.html").encode(),
+        read_json=lambda key: None,
+        write_parquet=lambda frame, key: written.__setitem__(key, frame.height),
+        write_json=lambda key, obj: written.__setitem__(key, obj),
+        now=EXTRACTED,
+    )
+    assert result["run_status"] == "ok"
+    assert result["extracted"] > 0
+    assert written[ir.curated_parquet_key("TSLA")] > 0

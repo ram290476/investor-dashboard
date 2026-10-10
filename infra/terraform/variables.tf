@@ -454,6 +454,8 @@ variable "jobs" {
     # deploy.yml applies this map whenever jobs_image_uri is set. SEC_USER_AGENT is already
     # in the shared job environment. COMPANY_IR_LLM_SECRET_ID stays unset. Catalog approval
     # is a reviewed JSON edit; the job does not approve metrics.
+    # A partial collect publishes outcome partial. Extract and serve match that outcome
+    # as well as success, so documents that did land are still parsed. A failed collect does not.
     q2-company-ir-collect = {
       handler        = "company_ir.collect_handler"
       schedule       = "cron(15 7 ? * MON-FRI *)"
@@ -468,7 +470,7 @@ variable "jobs" {
     q2-company-ir-extract = {
       handler        = "company_ir.extract_handler"
       schedule       = ""
-      triggers       = ["job:Q2C"]
+      triggers       = ["job:Q2C?partial"]
       memory         = 1024
       timeout        = 300
       read_prefixes  = ["raw/company_ir/", "curated/company_metrics/"]
@@ -479,7 +481,7 @@ variable "jobs" {
     q2-company-ir-serve = {
       handler        = "company_ir.serve_handler"
       schedule       = ""
-      triggers       = ["job:Q2X"]
+      triggers       = ["job:Q2X?partial"]
       memory         = 512
       timeout        = 120
       read_prefixes  = ["curated/company_metrics/", "serving/stock/"]

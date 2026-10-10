@@ -97,7 +97,8 @@ def apply_event(feed: dict | None, detail: dict, now: datetime) -> dict:
             failed = int(detail.get("failed_sources") or 0)
             outcome = detail.get("outcome", "success")
             status = (
-                "failed" if outcome != "success" else "partial" if failed
+                "failed" if outcome in {"failure", "failed"}
+                else "partial" if outcome == "partial" or failed
                 else "skipped" if detail.get("status") == "skipped" else "ok"
             )
             entry = {
