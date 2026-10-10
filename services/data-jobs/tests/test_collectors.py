@@ -130,16 +130,38 @@ def test_atlanta_xlsx_header_driven():
         fed_sources.parse_atlanta_xlsx(b2.getvalue())
 
 
-def test_cleveland_html_tables():
-    html = """<table><tr><th>Month</th><th>October 2026</th><th>September 2026</th></tr>
-      <tr><td>CPI</td><td>0.25</td><td>0.31%</td></tr>
-      <tr><td>Core CPI</td><td>0.28</td><td>n/a</td></tr>
-      <tr><td>Footnote</td><td>x</td></tr></table>"""
-    rows = fed_sources.parse_cleveland_html(html, date(2026, 10, 3))
-    assert {(r["measure"], r["period"], r["value"]) for r in rows} == {
-        ("CPI", "October 2026", 0.25),
-        ("CPI", "September 2026", 0.31),
-        ("Core CPI", "October 2026", 0.28),
-    }
+CLEVELAND_HTML = """
+<table><caption>Inflation, month-over-month percent change</caption>
+  <tr><th>Month</th><th>CPI</th><th>Core CPI</th><th>PCE</th><th>Core PCE</th><th>Updated</th></tr>
+  <tr><td>October 2026</td><td>0.27</td><td>0.20</td><td>0.28</td><td>0.25</td><td>10/09</td></tr>
+  <tr><td>September 2026</td><td></td><td>0.20</td><td>0.43</td><td>0.25</td><td>10/09</td></tr>
+</table>
+<table><caption>Inflation, year-over-year percent change</caption>
+  <tr><th>Month</th><th>CPI</th><th>Core CPI</th><th>PCE</th><th>Core PCE</th><th>Updated</th></tr>
+  <tr><td>October 2026</td><td>3.63</td><td>2.30</td><td>3.69</td><td>3.10</td><td>10/09</td></tr>
+</table>
+<table><caption>Quarterly annualized percent change</caption>
+  <tr><th>Quarter</th><th>CPI</th><th>Core CPI</th><th>PCE</th><th>Core PCE</th><th>Updated</th></tr>
+  <tr><td>2026:Q4</td><td>4.39</td><td>2.56</td><td>4.00</td><td>3.05</td><td>10/09</td></tr>
+</table>
+"""
+
+
+def test_cleveland_html_tables_keep_mom_yoy_and_quarterly_apart():
+    rows = fed_sources.parse_cleveland_html(CLEVELAND_HTML, date(2026, 10, 9))
+    mom = {(r["measure"], r["period"]): r["value"] for r in rows if r["basis"] == "mom"}
+    yoy = {(r["measure"], r["period"]): r["value"] for r in rows if r["basis"] == "yoy"}
+    quarter = {(r["measure"], r["period"]): r["value"] for r in rows if r["basis"] == "annualized_quarterly"}
+    assert mom[("CPI", "October 2026")] == 0.27
+    assert ("CPI", "September 2026") not in mom  # blank cell: the print was already released
+    assert mom[("Core CPI", "September 2026")] == 0.20
+    assert yoy[("CPI", "October 2026")] == 3.63
+    assert quarter[("CPI", "2026:Q4")] == 4.39
+    assert {r["basis"] for r in rows} == {"mom", "yoy", "annualized_quarterly"}
     with pytest.raises(fed_sources.LayoutChangedError):
         fed_sources.parse_cleveland_html("<p>redesigned</p>", date(2026, 10, 3))
+    with pytest.raises(fed_sources.LayoutChangedError):
+        fed_sources.parse_cleveland_html(
+            "<table><tr><th>Month</th><th>October 2026</th></tr><tr><td>CPI</td><td>0.25</td></tr></table>",
+            date(2026, 10, 3),
+        )

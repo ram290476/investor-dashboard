@@ -48,6 +48,9 @@ def test_finra_failure_is_explicit_and_does_not_update_watermark(monkeypatch, fa
     assert emitted[0][0] == "failure"
     assert emitted[0][1]["failed_source_ids"] == ["DS-91"]
     assert "private provider response" not in json.dumps(emitted)
+    if failure in {"http", "data"}:
+        assert observability._runs[-1]["error"] == "FINRA authentication failed"
+        assert "private provider response" not in observability._runs[-1]["error"]
 
 
 @pytest.mark.parametrize("known", [[], ["2026-09-30"]])

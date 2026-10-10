@@ -32,6 +32,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import time
 import traceback
 import uuid
@@ -53,6 +54,10 @@ metrics = Metrics(namespace=os.getenv("POWERTOOLS_METRICS_NAMESPACE", "InvestorD
 MAX_AGE_HOURS = {"hourly": 2, "daily": 30, "weekly": 24 * 8, "monthly": 24 * 35, "quarterly": 24 * 100}
 
 _runs: list[dict[str, Any]] = []
+# Query secrets must not land in source-run logs. \b keeps "monkey=" from matching "key=".
+_SECRET_QUERY = re.compile(
+    r"(?i)\b(api_key|apikey|registrationkey|access_token|token|secret|password|key)=([^&\s\"']+)"
+)
 
 JOB_EVENT_SOURCE = f"{SERVICE}.jobs"
 _events = None
@@ -67,6 +72,13 @@ def _finished_detail(result: Any) -> dict[str, Any]:
     if "rows_written" not in detail and result.get("rows_stored") is not None:
         detail["rows_written"] = result["rows_stored"]
     return detail
+
+
+def public_error(exc: BaseException) -> str:
+    """Exception text safe for logs: status and host may remain; query secrets do not."""
+    text = _SECRET_QUERY.sub(lambda match: f"{match.group(1)}=REDACTED", str(exc))
+    text = re.sub(r"(?i)(authorization:\s*)\S+", r"\1REDACTED", text)
+    return text[:500]
 
 
 def emit_job_finished(job_id: str, run_id: str, outcome: str, detail: dict[str, Any] | None = None) -> None:
@@ -193,7 +205,7 @@ def source_run(source_id: str) -> Iterator[dict[str, Any]]:
         try:
             yield run
         except Exception as exc:  # noqa: BLE001 - bulkhead: record and continue with the next source
-            run.update(outcome="failure", error_type=type(exc).__name__, error=str(exc)[:500])
+            run.update(outcome="failure", error_type=type(exc).__name__, error=public_error(exc))
             subsegment.add_exception(exc, stack=traceback.extract_tb(exc.__traceback__))
             metrics.add_metric(name="FailedRuns", unit=MetricUnit.Count, value=1)
         finally:

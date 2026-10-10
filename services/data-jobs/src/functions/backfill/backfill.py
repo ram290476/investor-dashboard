@@ -66,6 +66,31 @@ def new_backfill_state(tickers: list[str], today: date, years: int = DEFAULT_YEA
     }
 
 
+class YahooUnknownSymbol(RuntimeError):
+    """Yahoo HTTP 404 for the requested symbol. Do not substitute a different ticker."""
+
+
+class YahooRejectedWindow(RuntimeError):
+    """Yahoo HTTP 400 that is not a confirmed pre-inception boundary."""
+
+
+def stored_inception(frame) -> date | None:
+    """Earliest stored session, or None when this ticker has no price rows yet."""
+    if frame is None or frame.is_empty() or "date" not in frame.columns:
+        return None
+    value = frame["date"].drop_nulls().min()
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    return value
+
+
+def confirm_pre_inception(kind: str, batch_end: date, inception: date | None) -> bool:
+    """A date-window 400 is terminal only when the whole batch is before the first stored bar."""
+    return kind == "pre_inception_candidate" and inception is not None and batch_end <= inception
+
+
 def _is_empty_historical_window(payload: dict) -> bool:
     chart = payload.get("chart") or {}
     result = chart.get("result") or []
@@ -96,7 +121,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
     import polars as pl
     from aws_lambda_powertools.metrics import MetricUnit
 
-    from lake import LAKE_BUCKET, read_json, upsert_prices, write_json
+    from lake import LAKE_BUCKET, read_json, read_prices, upsert_prices, write_json
     from observability import job_handler, logger, metrics, source_run
 
     @job_handler("BACKFILL")
@@ -136,10 +161,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
         stored_rows = 0
         no_data_tickers: list[str] = []
         failed_tickers: list[str] = []
+        invalid_symbols: list[str] = []
+        rate_limited = False
         index = int(state.get("next_index", 0)) % len(ticker_order)
 
         with get_client() as http:
-            while batches_done < max_batches:
+            while batches_done < max_batches and not rate_limited:
                 pending = [t for t in ticker_order if not state["tickers"][t].get("complete")]
                 if not pending:
                     break
@@ -155,13 +182,50 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 start, end = batch_bounds(cursor, earliest, batch_days)
                 params = yahoo.chart_params(start=start, end=end)
                 with source_run("DS-05") as record:
+                    # 429 is not retried. 400 and 404 are returned so the body can be classified.
                     response = request_with_retry(
                         http,
                         "GET",
                         yahoo.CHART_URL.format(ticker=ticker),
                         params=params,
+                        retry_statuses=frozenset({500, 502, 503, 504}),
+                        return_statuses=frozenset({400, 404, 429}),
                     )
-                    payload = response.json()
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = None
+                    if not isinstance(payload, dict):
+                        payload = None
+                    kind = yahoo.classify_chart(response.status_code, payload)
+                    if kind == "rate_limited":
+                        record["coverage"] = "rate_limited"
+                        raise yahoo.YahooRateLimited("Yahoo returned HTTP 429; stopped until quota permits")
+                    if kind == "unknown_symbol":
+                        progress["invalid_symbol"] = ticker
+                        progress["complete"] = True
+                        progress["stopped"] = "unknown_symbol"
+                        invalid_symbols.append(ticker)
+                        record["coverage"] = "unknown_symbol"
+                        raise YahooUnknownSymbol(f"Yahoo has no listing for {ticker}")
+                    boundary = False
+                    if kind == "pre_inception_candidate":
+                        inception = stored_inception(read_prices(ticker, bucket))
+                        if not confirm_pre_inception(kind, end, inception):
+                            record["coverage"] = "rejected_400"
+                            raise YahooRejectedWindow(
+                                f"Yahoo HTTP 400 for {ticker} {start.isoformat()}/{end.isoformat()} "
+                                "is not a confirmed pre-inception boundary"
+                            )
+                        progress["inception"] = inception.isoformat()
+                        progress["stopped"] = "pre_inception"
+                        record["coverage"] = "pre_inception"
+                        record["rows"] = 0
+                        boundary = True
+                        payload = {"chart": {"result": [{"timestamp": []}]}}
+                    elif kind != "ok" or payload is None:
+                        record["coverage"] = kind
+                        raise YahooRejectedWindow(f"Yahoo chart request failed for {ticker} ({kind})")
                     empty_window = _is_empty_historical_window(payload)
                     rows = [] if empty_window else yahoo.parse_chart(payload, ticker)
                     received = len((payload.get("chart", {}).get("result") or [{}])[0].get("timestamp") or [])
@@ -202,7 +266,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                     if not rows and empty_window:
                         progress["complete"] = True
                         progress["no_data_before"] = end.isoformat()
-                        no_data_tickers.append(ticker)
+                        if boundary:
+                            progress["stopped"] = "pre_inception"
+                        if ticker not in no_data_tickers:
+                            no_data_tickers.append(ticker)
                     else:
                         progress["cursor"] = start.isoformat()
                         if start <= earliest:
@@ -211,6 +278,9 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
 
                 if record["outcome"] == "failure":
                     failed_tickers.append(ticker)
+                    if record["error_type"] == "YahooRateLimited":
+                        rate_limited = True
+                        break
                     continue
 
                 batches_done += 1
@@ -219,7 +289,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 write_json(state, STATE_KEY, bucket, cache_seconds=0)
 
         pending_after = [t for t in ticker_order if not state["tickers"][t].get("complete")]
-        state["status"] = "running" if pending_after else "complete"
+        if rate_limited:
+            state["status"] = "rate_limited"
+        elif pending_after:
+            state["status"] = "running"
+        else:
+            state["status"] = "complete"
         state["completed_at"] = None if pending_after else datetime.now(UTC).isoformat(timespec="seconds")
         state["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         write_json(state, STATE_KEY, bucket, cache_seconds=0)
@@ -233,6 +308,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 "tickers_pending": pending_after,
                 "no_data_tickers": no_data_tickers,
                 "failed_tickers": failed_tickers,
+                "invalid_symbols": invalid_symbols,
+                "rate_limited": rate_limited,
                 "tickers_pending_before": pending_before,
             },
         )
@@ -244,6 +321,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
             "pending_tickers": pending_after,
             "no_data_tickers": no_data_tickers,
             "failed_tickers": failed_tickers,
+            "invalid_symbols": invalid_symbols,
+            "rate_limited": rate_limited,
         }
 
     return run(event, context)

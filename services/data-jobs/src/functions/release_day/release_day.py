@@ -32,6 +32,29 @@ FOLLOW_UP_MINUTES = (0, 4, 8, 12, 16)
 BLS_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BEA_URL = "https://apps.bea.gov/api/data"
 CENSUS_URL = "https://api.census.gov/data/timeseries/eits/ftd"
+# Official variables for timeseries/eits/ftd (variables.json, checked 2026-10-10).
+# time, for and in are predicate-only. IMPG and EXPG are not variables.
+CENSUS_GET_VARIABLES = frozenset(
+    {
+        "category_code",
+        "cell_value",
+        "data_type_code",
+        "error_data",
+        "geo_level_code",
+        "program_code",
+        "seasonally_adj",
+        "time_slot_date",
+        "time_slot_id",
+        "time_slot_name",
+    }
+)
+CENSUS_PREDICATE_ONLY = frozenset({"for", "in", "time"})
+CENSUS_REQUIRED_GET = frozenset(
+    {"cell_value", "time_slot_id", "category_code", "data_type_code", "seasonally_adj"}
+)
+# FTD-mf codebook (Census econ download, 2026-10-06): BOPG is goods; IMP and EXP are millions of dollars.
+CENSUS_GOODS_CATEGORY = "BOPG"
+CENSUS_GOODS_TYPES = {"IMP": "CENSUS_IMPG", "EXP": "CENSUS_EXPG"}
 FRED_URL = "https://api.stlouisfed.org/fred/releases/dates"
 FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
 # FRED vintage series -> the M1 series released that morning. The earliest realtime_start
@@ -52,9 +75,30 @@ YOY_SERIES = {
 }
 RELEASE_LINKS_KEY = "curated/release_links/release_links.parquet"
 _API_KEY_QUERY = re.compile(r"(api_key=)[^&\s\"]*")
-BLS_ICS_URL = "https://www.bls.gov/schedule/news_release/cpi.ics"
+# Official calendar subscription on the CPI schedule page and bls.gov/help/hlpical.htm.
+# cpi.ics is not that endpoint (Lambda received HTTP 404). A 403 is an access denial.
+BLS_ICS_URL = "https://www.bls.gov/schedule/news_release/bls.ics"
 CLEVELAND_PAGE = "https://www.clevelandfed.org/indicators-and-data/inflation-nowcasting"
-MEASURE_SERIES = {"CPI": "CUSR0000SA0", "Core CPI": "CUSR0000SA0L1E", "PCE": "PCE"}
+MEASURE_SERIES = {
+    "CPI": "CUSR0000SA0",
+    "Core CPI": "CUSR0000SA0L1E",
+    "PCE": "PCE",
+    "Core PCE": "CORE_PCE",
+}
+_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
 RELEASE_FIELDS = (
     "series_id",
     "period",
@@ -187,8 +231,53 @@ def _bea_period(token: str) -> str | None:
     return None
 
 
+def census_request_problems(params: dict) -> list[str]:
+    """Reject a foreign-trade request that does not match the published variable list."""
+    problems = []
+    requested = {name.strip() for name in str(params.get("get") or "").split(",") if name.strip()}
+    missing = CENSUS_REQUIRED_GET - requested
+    if missing:
+        problems.append("missing required variables: " + ", ".join(sorted(missing)))
+    unknown = requested - CENSUS_GET_VARIABLES
+    if unknown:
+        problems.append("unknown variables: " + ", ".join(sorted(unknown)))
+    if requested & CENSUS_PREDICATE_ONLY:
+        problems.append("predicate-only variable in get")
+    if params.get("category_code") != CENSUS_GOODS_CATEGORY:
+        problems.append("category_code must be BOPG (goods)")
+    if str(params.get("seasonally_adj") or "").lower() != "yes":
+        problems.append("seasonally_adj must be yes")
+    window = str(params.get("time") or "")
+    if not re.fullmatch(r"from \d{4}-\d{2} to \d{4}-\d{2}", window):
+        problems.append("time must be a month range: from YYYY-MM to YYYY-MM")
+    return problems
+
+
+def census_params(start_year: int, end: date, api_key: str) -> dict:
+    """Goods imports and exports. Variables and the time predicate match Census metadata."""
+    params = {
+        "get": ",".join(sorted(CENSUS_REQUIRED_GET)),
+        "time": f"from {start_year}-01 to {end.year}-{end.month:02d}",
+        "category_code": CENSUS_GOODS_CATEGORY,
+        "seasonally_adj": "yes",
+        "key": api_key,
+    }
+    problems = census_request_problems(params)
+    if problems:
+        raise ValueError("Census request does not match official metadata: " + "; ".join(problems))
+    return params
+
+
+def _census_period(record: dict) -> str | None:
+    for key in ("time", "time_slot_id"):
+        text = str(record.get(key) or "")
+        if len(text) >= 7 and text[4] == "-" and text[:4].isdigit() and text[5:7].isdigit():
+            return text[:7]
+    return None
+
+
 def parse_census(payload, release_ts: str) -> list[dict]:
-    """Census foreign-trade goods: imports and exports, one series each."""
+    """Seasonally adjusted BOP goods imports and exports, in the published millions of dollars."""
     if isinstance(payload, dict):
         raise ValueError(str(payload.get("error") or payload)[:200])
     if not isinstance(payload, list) or len(payload) < 2:
@@ -197,14 +286,16 @@ def parse_census(payload, release_ts: str) -> list[dict]:
     rows = []
     for raw in payload[1:]:
         record = dict(zip(header, raw, strict=False))
-        period = str(record.get("time") or "")[:7]
-        if len(period) != 7:
+        if record.get("category_code") not in (None, "", CENSUS_GOODS_CATEGORY):
             continue
-        for column, series_id in (("IMPG", "CENSUS_IMPG"), ("EXPG", "CENSUS_EXPG")):
-            actual = _number(record.get(column))
-            if actual is None:
-                continue
-            rows.append(_row(series_id, period, release_ts, actual, "census", "usd"))
+        if str(record.get("seasonally_adj") or "yes").lower() not in {"yes", "y", "1"}:
+            continue
+        series_id = CENSUS_GOODS_TYPES.get(str(record.get("data_type_code") or ""))
+        period = _census_period(record)
+        actual = _number(record.get("cell_value"))
+        if not series_id or not period or actual is None:
+            continue
+        rows.append(_row(series_id, period, release_ts, actual, "census", "usd_millions"))
     return rows
 
 
@@ -328,31 +419,55 @@ def consensus_index(prior: float | None, nowcast_pct: float | None) -> float | N
     return float(prior) * (1 + float(nowcast_pct) / 100)
 
 
-def apply_nowcast(rows: list[dict], nowcast_rows: list[dict]) -> list[dict]:
-    latest_pct: dict[str, float] = {}
+def nowcast_month(period: str) -> str | None:
+    """Month label from the nowcast table. Quarterly labels are not monthly periods."""
+    text = " ".join(str(period or "").replace(",", " ").split())
+    if len(text) >= 7 and text[4] == "-" and text[:4].isdigit() and text[5:7].isdigit():
+        return text[:7]
+    parts = text.split()
+    if len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 4 and parts[0].lower() in _MONTHS:
+        return f"{int(parts[1]):04d}-{_MONTHS[parts[0].lower()]:02d}"
+    return None
+
+
+def apply_nowcast(rows: list[dict], nowcast_rows: list[dict], known: set | None = None) -> list[dict]:
+    """Attach a MoM nowcast only to a new release for that same month.
+
+    Year-over-year and annualized quarterly forecasts are not index consensus.
+    A period already in `known` keeps whatever consensus it has, including none.
+    """
+    stored = known or set()
+    mom: dict[tuple[str, str], float] = {}
     for item in nowcast_rows:
+        if item.get("basis") != "mom":
+            continue
         series_id = MEASURE_SERIES.get(str(item.get("measure") or ""))
-        if series_id and isinstance(item.get("value"), (int, float)):
-            latest_pct[series_id] = float(item["value"])
+        period = nowcast_month(str(item.get("period") or ""))
+        if series_id and period and isinstance(item.get("value"), (int, float)):
+            mom[(series_id, period)] = float(item["value"])
     grouped: dict[str, list[dict]] = {}
     for row in rows:
         grouped.setdefault(str(row.get("series_id")), []).append(row)
-    for series_id, group in grouped.items():
-        pct = latest_pct.get(series_id)
-        if pct is None:
-            continue
+    for group in grouped.values():
         ordered = sorted(group, key=lambda item: str(item.get("period") or ""))
-        latest = ordered[-1]
-        if latest.get("consensus") is not None:
-            continue
-        prior = latest.get("prior")
-        if prior is None and len(ordered) >= 2:
-            prior = ordered[-2].get("actual")
-        agreed = consensus_index(prior, pct)
-        if agreed is None:
-            continue
-        latest["consensus"] = agreed
-        latest["surprise"] = surprise(latest.get("actual"), agreed)
+        by_period = {item.get("period"): item for item in ordered}
+        for row in ordered:
+            series_id = str(row.get("series_id") or "")
+            period = str(row.get("period") or "")
+            if (series_id, period) in stored or row.get("consensus") is not None:
+                continue
+            pct = mom.get((series_id, period))
+            if pct is None:
+                continue
+            prior = row.get("prior")
+            if prior is None:
+                previous = by_period.get(shift_period(period, 1) or "")
+                prior = None if previous is None else previous.get("actual")
+            agreed = consensus_index(prior, pct)
+            if agreed is None:
+                continue
+            row["consensus"] = agreed
+            row["surprise"] = surprise(row.get("actual"), agreed)
     return rows
 
 
@@ -558,6 +673,19 @@ def apply_vintage_dates(rows: list[dict], vintages: dict[str, dict[str, str]]) -
     return rows
 
 
+class ProviderStatus(RuntimeError):
+    """Source failure whose message is safe to log. It does not include a URL or key."""
+
+
+def raise_without_url(exc: httpx.HTTPStatusError, source: str) -> None:
+    status = exc.response.status_code
+    if status == 429:
+        raise ProviderStatus(f"{source} HTTP 429; throttled, not a parser failure") from None
+    if status in (401, 403):
+        raise ProviderStatus(f"{source} HTTP {status}; access denied, no dates or rows synthesized") from None
+    raise ProviderStatus(f"{source} HTTP {status}") from None
+
+
 def redact_api_key(payload: dict, secret: str) -> dict:
     text = json.dumps(payload, default=str)
     if secret:
@@ -754,28 +882,34 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 rec["rows"] = len(parsed)
                 found.extend(parsed)
             with source_run("census") as rec, get_client() as http:
-                payload = request_with_retry(
-                    http,
-                    "GET",
-                    CENSUS_URL,
-                    params={
-                        "get": "time,IMPG,EXPG",
-                        "time": f"from {start_year}-01",
-                        "key": api_key("census"),
-                    },
-                ).json()
+                try:
+                    payload = request_with_retry(
+                        http,
+                        "GET",
+                        CENSUS_URL,
+                        params=census_params(start_year, today, api_key("census")),
+                    ).json()
+                except httpx.HTTPStatusError as exc:
+                    raise_without_url(exc, "Census")
+                if isinstance(payload, dict):
+                    payload = redact_api_key(payload, api_key("census"))
                 write_json(payload, f"raw/releases/census/date={day}/{run_key}.json")
                 parsed = parse_census(payload, release_ts)
                 rec["rows"] = len(parsed)
+                rec["coverage"] = f"goods_rows={len(parsed)}"
                 found.extend(parsed)
             latest_rows["rows"] = found
             return found
 
         with source_run("bls-ics") as rec, get_client() as http:
-            text = request_with_retry(http, "GET", BLS_ICS_URL).text
+            try:
+                text = request_with_retry(http, "GET", BLS_ICS_URL).text
+            except httpx.HTTPStatusError as exc:
+                raise_without_url(exc, "BLS calendar")
             write_json({"ics": text}, f"raw/releases/bls-ics/date={day}/{run_key}.json")
             ics_dates = parse_ics(text)
             rec["rows"] = len(ics_dates)
+            rec["coverage"] = f"cpi_dates={len(ics_dates)}"
         with source_run("fred") as rec, get_client() as http:
             payload = request_with_retry(
                 http,
@@ -825,7 +959,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         fresh = poll_for_new_period(fetch_prints, known, attempts=attempts, pause=time.sleep)
         merged = merge_releases(existing, latest_rows["rows"] or fresh)
         merged = apply_vintage_dates(merged, vintages)
-        merged = enrich_releases(apply_nowcast(merged, nowcast))
+        merged = enrich_releases(apply_nowcast(merged, nowcast, known))
         if merged:
             frame = release_frame(merged).with_columns(pl.col("period").str.slice(0, 4).alias("_year"))
             grouped = frame.partition_by(["series_id", "_year"], as_dict=True)

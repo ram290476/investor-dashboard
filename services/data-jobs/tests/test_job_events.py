@@ -63,6 +63,19 @@ def test_source_failure_ids_are_emitted_without_error_payloads(monkeypatch):
     assert "private upstream payload" not in json.dumps(captured)
 
 
+def test_source_run_redacts_query_secrets():
+    observability._runs.clear()
+    with observability.source_run("census"):
+        raise RuntimeError("Census HTTP 400 https://api.census.gov/data?key=super-secret&get=cell_value")
+    recorded = observability._runs[-1]
+    assert recorded["outcome"] == "failure"
+    assert "super-secret" not in recorded["error"]
+    assert "key=REDACTED" in recorded["error"]
+    with observability.source_run("probe"):
+        raise RuntimeError("monkey=banana")
+    assert observability._runs[-1]["error"] == "monkey=banana"
+
+
 def test_job_lease_excludes_concurrent_publishers_and_recovers_after_expiry(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")

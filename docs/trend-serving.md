@@ -201,3 +201,63 @@ M1 refresh now reprojects stored release YoY values with original availability
 dates and serves the actual release row kind. Integration tests build the real
 curated table and verify both projections, without keys/provider calls. This does
 not fetch missing Core PCE history or reinterpret current forecasts as consensus.
+
+### Provider failure remediation (issue 69)
+
+The collectors now classify the source failures in the table above. Fixtures cover the
+response each source returned. A source failure stays inside `source_run`: the job event
+lists `failed_source_ids`, and the source-run log carries a status without the request URL
+or a query secret. Stored row counts and coverage fields are part of the source record.
+This change does not deploy, apply Terraform, rotate secrets, or call a provider.
+
+| Source | What the code does | What remains in production |
+| --- | --- | --- |
+| Yahoo DS-05 | HTTP 404 keeps the requested symbol and stops that ticker. HTTP 400 completes only when the body is a date-window error and the batch ends on or before the earliest stored bar (SPCX cursor `2026-04-09`). HTTP 429 is not retried and stops the run with `status=rate_limited`. | Invoke `backfill` and `price-reconcile` only after a chart request is no longer HTTP 429. Confirm checkpoint rows and parquet coverage. |
+| Cleveland Fed DS-90 | Parser reads Month/Quarter rows and CPI, Core CPI, PCE, and Core PCE columns, with separate MoM, YoY, and annualized-quarterly captions. Only a MoM value for the same month can become consensus on a release that is not already stored. | One `release-day` invoke, then confirm nowcast rows were not written over known prints. |
+| Census foreign trade | Request uses the published get-variables, `category_code=BOPG`, `seasonally_adj=yes`, and `time=from YYYY-MM to YYYY-MM`. Values are stored as `usd_millions`. | If older curated rows used a different shape, compare units before the first successful run. Do not rotate the Census key: Census checks the key before it validates variables. |
+| BLS calendar | Calendar URL is the documented `bls.ics`. HTTP 403 or 404 is an access failure and adds no dates. FRED still fills dates the calendar missed. | A 403 is the provider access policy. Do not spoof a browser or invent dates. |
+| SAM opportunities | `postedFrom` and `postedTo` are `MM/dd/yyyy` and span 364 days. The search is still one call inside the 3-per-run and 10-per-day budget. | One `gov-contracts` invoke. A 401 or 403 stays partial and is not a reason to rotate the key by itself. |
+| DoD | The contracts RSS is requested once. `www.war.gov` is allowlisted because that RSS redirects there. Article URLs are not fetched. Coverage is `feed_items`, `award_rows`, and `article_urls_fetched=0`. | A summary-only feed stores zero award rows. Do not fetch the article HTML that returns 403. |
+| USAspending | Fields stay on the spending-by-award contract allowlist, with `award_type_codes` and `subawards=false`. HTTP 422 does not advance the watermark. | Confirm existing award parquet is still present after a rejected request. |
+| NASA | Feed URL is `https://www.nasa.gov/news-release/feed/`. HTTP 429 keeps the existing retries, then fails as throttling before the body is parsed. | A 429 is quota, not a parser defect. Wait for the budget before another invoke. |
+| FINRA DS-91 | HTTP 401 or 403 on the token or data call raises `FINRA authentication failed` and does not advance the watermark. The provider body stays out of the job event. | Read the DS-91 source-run error before any key rotation. |
+
+After the image is deployed, run the affected collectors once, in `us-west-1`, and only inside
+the budgets above. Then rebuild links, trend metrics, and the dashboard from the lake
+(those three invokes do not call providers):
+
+```sh
+aws lambda invoke --region us-west-1 --function-name invdash-backfill \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"tickers":["SPCX"]}' /tmp/backfill-spcx.json
+aws lambda invoke --region us-west-1 --function-name invdash-price-reconcile \
+  --cli-binary-format raw-in-base64-out --payload '{}' /tmp/price-reconcile.json
+aws lambda invoke --region us-west-1 --function-name invdash-release-day \
+  --cli-binary-format raw-in-base64-out --payload '{}' /tmp/release-day.json
+aws lambda invoke --region us-west-1 --function-name invdash-gov-contracts \
+  --cli-binary-format raw-in-base64-out --payload '{}' /tmp/gov-contracts.json
+aws lambda invoke --region us-west-1 --function-name invdash-short-interest \
+  --cli-binary-format raw-in-base64-out --payload '{}' /tmp/short-interest.json
+
+# Provider-free follow-up. D4 success rebuilds release links from curated rows.
+aws lambda invoke --region us-west-1 --function-name invdash-release-day \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"detail-type":"Job Finished","detail":{"job":"D4","outcome":"success"}}' \
+  /tmp/release-links.json
+aws lambda invoke --region us-west-1 --function-name invdash-trend-metrics \
+  --cli-binary-format raw-in-base64-out --payload '{}' /tmp/trend-metrics.json
+aws lambda invoke --region us-west-1 --function-name invdash-dashboard-build \
+  --cli-binary-format raw-in-base64-out --payload '{}' /tmp/dashboard-build.json
+```
+
+Replace `invdash` with the Terraform `project` value. Read the checkpoint and the job logs
+in the same Region. A Lambda result of `success` is not coverage: check `rows`, `coverage`,
+and the parquet objects.
+
+```sh
+LAKE=$(terraform -chdir=infra/terraform output -raw lake_bucket_name)
+aws s3 cp "s3://${LAKE}/curated/prices_daily/_backfill/state.json" - --region us-west-1
+aws logs tail /aws/lambda/invdash-release-day --region us-west-1 --since 1h
+aws logs tail /aws/lambda/invdash-gov-contracts --region us-west-1 --since 1h
+aws logs tail /aws/lambda/invdash-short-interest --region us-west-1 --since 1h
+```
