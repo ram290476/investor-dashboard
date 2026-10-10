@@ -17,6 +17,8 @@ import {
   normalizePanels,
   panelState,
   parseSettingsHash,
+  lastRunLabel,
+  nextRunLabel,
   refreshSummary,
   removeTicker,
   restoreTicker,
@@ -136,6 +138,23 @@ test("history state reports loading until a new ticker has price history", () =>
   assert.equal(historyState(undefined, false), "unknown");
   assert.equal(historyState(undefined, true), "loading");
   assert.equal(historyState({ price_history: [{ date: "2026-10-06", close: 1 }] }, true), "ready");
+});
+
+test("data refresh labels name the trigger and a first run that has not happened", () => {
+  assert.deepEqual(nextRunLabel({ next_run: "2026-10-08T13:35:00Z", trigger: null }), { kind: "time" });
+  assert.deepEqual(nextRunLabel({ next_run: "2026-10-08T13:35:00Z", trigger: "ignored" }), { kind: "time" });
+  assert.deepEqual(nextRunLabel({ next_run: null, trigger: "When a ticker is added" }), {
+    kind: "event",
+    text: "When a ticker is added",
+  });
+  assert.deepEqual(nextRunLabel({ next_run: null, trigger: null }), { kind: "none", text: "—" });
+  assert.deepEqual(nextRunLabel({}), { kind: "none", text: "—" });
+  assert.equal(lastRunLabel({ status: "never_run", last_run: null }), "Waiting for first run");
+  assert.equal(lastRunLabel({}), "Waiting for first run");
+  assert.equal(lastRunLabel({ status: "ok", last_run: "2026-10-07T20:45:00Z" }), null);
+  assert.equal(lastRunLabel({ status: "partial", last_run: "2026-10-07T20:45:00Z" }), null);
+  assert.equal(lastRunLabel({ status: "skipped", last_run: "2026-10-07T20:45:00Z" }), null);
+  assert.equal(JSON.stringify(nextRunLabel({ trigger: "When a ticker is added" })).includes("not scheduled"), false);
 });
 
 test("refresh summary counts ok jobs and flags partial or failed ones", () => {

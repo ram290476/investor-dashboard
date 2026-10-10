@@ -8,6 +8,32 @@ import backfill
 import status_feed as sf
 
 
+def test_every_job_has_a_cron_or_a_trigger():
+    now = datetime(2026, 10, 8, 15, tzinfo=UTC)
+    feed = sf.apply_event(None, {"job": "D4", "outcome": "success", "failed_sources": 0}, now)
+    by_job = {row["job"]: row for row in feed["jobs"]}
+    assert set(by_job) == set(sf.JOBS)
+    for job, (name, cron, _calendar, trigger) in sf.JOBS.items():
+        assert name
+        row = by_job[job]
+        assert row["trigger"] == trigger
+        if job in sf.UNSCHEDULED:
+            assert cron is None and trigger is None and row["next_run"] is None
+            continue
+        assert bool(cron) != bool(trigger), job
+        if cron:
+            assert row["next_run"]
+            assert trigger is None
+        else:
+            assert row["next_run"] is None
+            assert trigger
+    assert by_job["M1"]["next_run"]
+    assert by_job["Q1"]["next_run"]
+    assert by_job["TREND"]["trigger"] == "After market close and release day"
+    assert by_job["BACKFILL"]["trigger"] == "When a ticker is added"
+    assert by_job["KALSHI"]["trigger"] is None
+
+
 def test_next_run_skips_weekend_and_holiday():
     # Friday 2026-11-20 after the close -> next H1 is Monday 10:05 ET (15:05 UTC)
     assert sf.next_run("H1", datetime(2026, 11, 20, 22, tzinfo=UTC)) == "2026-11-23T15:05+00:00"

@@ -17,6 +17,8 @@ import {
   historyState,
   moveTicker,
   parseSettingsHash,
+  lastRunLabel,
+  nextRunLabel,
   refreshSummary,
   removeTicker,
   restoreTicker,
@@ -733,18 +735,22 @@ export function createAccountSettings(ctx) {
       .sort((a, b) => String(a.job).localeCompare(String(b.job)))
       .forEach((job) => {
         const row = el("tr");
+        const zone = session.prefs.display.time_zone;
         const jobCell = el("td", "mono", job.job || "—");
         jobCell.dataset.label = "Job";
         const nameCell = el("td", "", job.name || job.job || "—");
         nameCell.dataset.label = "Name";
-        const lastCell = el("td", "mono", ctx.formatTime(job.last_run, session.prefs.display.time_zone));
+        const waiting = lastRunLabel(job);
+        const lastCell = el("td", "mono", waiting ?? ctx.formatTime(job.last_run, zone));
         lastCell.dataset.label = "Last";
-        const nextCell = el(
-          "td",
-          "mono",
-          job.next_run ? ctx.formatTime(job.next_run, session.prefs.display.time_zone) : "not scheduled",
-        );
+        const next = nextRunLabel(job);
+        const nextCell = el("td", next.kind === "time" ? "mono" : "refresh-next");
         nextCell.dataset.label = "Next";
+        if (next.kind === "time") nextCell.textContent = ctx.formatTime(job.next_run, zone);
+        else if (next.kind === "event") {
+          const badge = el("span", "refresh-event", "event");
+          nextCell.append(badge, document.createTextNode(` ${next.text}`));
+        } else nextCell.textContent = next.text;
         row.append(jobCell, nameCell, lastCell, nextCell);
 
         const state = ["ok", "partial", "failed", "skipped"].includes(job.status) ? job.status : "never_run";

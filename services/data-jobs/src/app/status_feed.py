@@ -2,12 +2,13 @@
 
 serving/status.json, rebuilt on every 'Job Finished' event:
     {"generated_at": ISO, "jobs": [{"job", "name", "status", "last_run", "last_outcome",
-                                     "failed_sources", "next_run", "last_links_run"}]}
+                                     "failed_sources", "next_run", "trigger", "last_links_run"}]}
 A links-only M1 run (detail.mode == "links") sets last_links_run and leaves last_run.
 Tickers past the cap are stored as over_cap "over the ticker cap".
 status: "ok" | "partial" (some sources failed) | "failed" | "skipped" | "never_run".
 next_run: next scheduled start (ISO, UTC) from the job's schedule, skipping weekends
-and NYSE / US federal holidays per the job's calendar; null for event-driven jobs.
+and NYSE / US federal holidays per the job's calendar; null when the job has no cron.
+trigger: why an event-driven job runs, or null when it has a cron or no schedule yet.
 
 Updates use S3 conditional writes (If-Match on the ETag), so two jobs finishing at
 once can't overwrite each other's entries.
@@ -23,24 +24,28 @@ from croniter import croniter
 
 ET = ZoneInfo("America/New_York")
 
-# job -> (display name, cron in ET or None for event-driven, holiday calendar)
-JOBS: dict[str, tuple[str, str | None, str]] = {
-    "H1": ("Market prices", "5 10-16 * * 1-5", "nyse"),
-    "H2": ("News & sentiment", "15 * * * 1-5", "nyse"),
-    "H3": ("Regulatory & company feeds", "25 6-22 * * 1-5", "federal"),
-    "D1": ("Morning macro & calendars", "0 7 * * 1-5", "federal"),
-    "D4": ("Market close", "45 16 * * 1-5", "nyse"),
-    "D5": ("Government contracts", "45 17 * * 1-5", "federal"),
-    "M1": ("Release-day data & calendar", "35 6 * * 1-5", "federal"),
-    "Q1": ("Quarterly fundamentals", "30 8 * * 1", "nyse"),
-    "SHORT": ("Short interest", "30 18 * * 1-5", "nyse"),
-    "OPTIONS": ("Options put/call and IV", "50 16 * * 1-5", "nyse"),
-    "TREND": ("Trend metrics", None, "nyse"),
-    "BACKFILL": ("Ticker history backfill", None, "nyse"),
-    "RECONCILE": ("Split & dividend adjustment", "15 19 * * 1-5", "nyse"),
+# job -> (display name, cron in ET or None, holiday calendar, trigger or None)
+# A job has a cron or a trigger, except KALSHI, which stays unset until its terms are accepted (#89).
+JOBS: dict[str, tuple[str, str | None, str, str | None]] = {
+    "H1": ("Market prices", "5 10-16 * * 1-5", "nyse", None),
+    "H2": ("News & sentiment", "15 * * * 1-5", "nyse", None),
+    "H3": ("Regulatory & company feeds", "25 6-22 * * 1-5", "federal", None),
+    "D1": ("Morning macro & calendars", "0 7 * * 1-5", "federal", None),
+    "D4": ("Market close", "45 16 * * 1-5", "nyse", None),
+    "D5": ("Government contracts", "45 17 * * 1-5", "federal", None),
+    "M1": ("Release-day data & calendar", "35 6 * * 1-5", "federal", None),
+    "Q1": ("Quarterly fundamentals", "30 8 * * 1", "nyse", None),
+    "SHORT": ("Short interest", "30 18 * * 1-5", "nyse", None),
+    "OPTIONS": ("Options put/call and IV", "50 16 * * 1-5", "nyse", None),
+    "TREND": ("Trend metrics", None, "nyse", "After market close and release day"),
+    "BACKFILL": ("Ticker history backfill", None, "nyse", "When a ticker is added"),
+    "RECONCILE": ("Split & dividend adjustment", "15 19 * * 1-5", "nyse", None),
     # No cron until Ram accepts the Kalshi terms (issue #89). A next_run would advertise a schedule that is not enabled.
-    "KALSHI": ("FOMC odds (Kalshi)", None, "federal"),
+    "KALSHI": ("FOMC odds (Kalshi)", None, "federal", None),
 }
+
+# Jobs with neither a cron nor a trigger. KALSHI is waiting on Ram (#89).
+UNSCHEDULED = frozenset({"KALSHI"})
 
 
 def _holidays(calendar: str, years: range) -> set[date]:
@@ -54,7 +59,7 @@ def _holidays(calendar: str, years: range) -> set[date]:
 
 
 def next_run(job: str, now: datetime) -> str | None:
-    _name, cron, cal = JOBS[job]
+    _name, cron, cal, _trigger = JOBS[job]
     if not cron:
         return None
     off = _holidays(cal, range(now.year, now.year + 2))
@@ -111,9 +116,9 @@ def apply_event(feed: dict | None, detail: dict, now: datetime) -> dict:
                 entry.pop("over_cap", None)
         by_job[job] = entry
     jobs = []
-    for j, (name, _, _) in JOBS.items():
+    for j, (name, _cron, _cal, trigger) in JOBS.items():
         entry = by_job.get(j, {"job": j, "status": "never_run", "last_run": None, "last_outcome": None})
-        entry.update({"name": name, "next_run": next_run(j, now)})
+        entry.update({"name": name, "next_run": next_run(j, now), "trigger": trigger})
         entry.setdefault("failed_sources", 0)
         jobs.append(entry)
     return {"generated_at": now.isoformat(timespec="seconds"), "jobs": jobs}

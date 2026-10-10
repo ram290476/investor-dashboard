@@ -221,6 +221,21 @@ export function drawerControls(id, open) {
   };
 }
 
+const RAN_STATUSES = ["ok", "partial", "failed", "skipped"];
+
+/** Last-run copy. A job that has not run yet is waiting, not missing data. Null means format last_run. */
+export function lastRunLabel(job) {
+  if (!RAN_STATUSES.includes(job?.status)) return "Waiting for first run";
+  return null;
+}
+
+/** Next-run copy. A timestamp wins. Otherwise the event trigger, or an em dash when neither exists. */
+export function nextRunLabel(job) {
+  if (job?.next_run) return { kind: "time" };
+  if (job?.trigger) return { kind: "event", text: String(job.trigger) };
+  return { kind: "none", text: "—" };
+}
+
 /** Data refresh summary for the account button and menu. */
 export function refreshSummary(status) {
   const jobs = (status?.jobs || []).filter((job) => job.status && job.status !== "never_run");

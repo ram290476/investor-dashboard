@@ -27,6 +27,12 @@ test("a phone stacks each job and keeps the sheet above the visible viewport", (
   assert.match(css, /padding-bottom:\s*max\(16px,\s*env\(safe-area-inset-bottom\)\)/);
   assert.match(account, /dataset\.label = "Last"/);
   assert.match(account, /dataset\.label = "Next"/);
+  assert.match(account, /lastRunLabel\(job\)/);
+  assert.match(account, /nextRunLabel\(job\)/);
+  assert.match(account, /refresh-event/);
+  assert.equal(account.includes("not scheduled"), false);
+  assert.match(css, /\.refresh-event\s*\{[^}]*var\(--muted\)/);
+  assert.match(css, /\.refresh-event\s*\{[^}]*var\(--line\)/);
   assert.match(account, /function revealActiveTab\(/);
   assert.match(account, /tablist\.scrollLeft = right - tablist\.clientWidth/);
 });
