@@ -13,7 +13,7 @@ import { createAccountSettings } from "./account-settings.js";
 import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
 import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
-import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystDateLabel, catalystMove, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
 import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
   number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
@@ -1803,6 +1803,42 @@ function renderContracts(tickerData) {
   return panel;
 }
 
+function catalystMoveLabel(move) {
+  if (!isNumericValue(move)) return "—";
+  const arrow = Number(move) > 0 ? "▲ " : Number(move) < 0 ? "▼ " : "";
+  return `${arrow}${formatPercent(move, 1)}`;
+}
+
+function renderRecentCatalysts(events, tickerData) {
+  const list = node("div", "catalyst-recent-list");
+  const chartBars = selectedChartBars(tickerData);
+  const daily = validBars(tickerData?.price_history || []);
+  events.forEach((event) => {
+    const category = CATALYST_CATEGORIES.find((item) => item.id === event.category);
+    const move = catalystMove(event, daily);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "catalyst-recent-row";
+    const date = node("span", "catalyst-recent-date", catalystDateLabel(event.date));
+    const title = node("span", "catalyst-recent-title");
+    const dot = node("span", "catalyst-dot");
+    const color = overlayColor(category.slot, session.prefs.display.theme);
+    dot.style.setProperty("--catalyst-color", color);
+    dot.dataset.catalystColor = color;
+    dot.title = category.label;
+    dot.setAttribute("aria-hidden", "true");
+    const name = node("span", "catalyst-recent-name", event.title);
+    name.title = event.title;
+    title.append(dot, node("span", "visually-hidden", category.label), name);
+    button.append(date, title, node("span", `catalyst-recent-move mono ${polarity(move)}`, catalystMoveLabel(move)));
+    button.disabled = markerIndex(event, chartBars) < 0;
+    if (button.disabled) button.title = "Outside the selected chart period. Choose a longer period to focus this catalyst.";
+    button.addEventListener("click", () => selectCatalyst(event));
+    list.append(button);
+  });
+  return list;
+}
+
 function renderDrivers(tickerData) {
   const panel = node("section", "panel signals-panel");
   panel.dataset.mobilePanel = "signals";
@@ -1854,12 +1890,7 @@ function renderDrivers(tickerData) {
       .filter(row => String(row.date).slice(0, 10) <= String(session.dashboard?.generated_at).slice(0, 10)).slice(-5).reverse();
     body.append(node("h3", "signal-label", `Recent ${session.selected} catalysts`));
     if (!recent.length) body.append(node("p", "signal-note", "No recent catalysts have been published."));
-    recent.forEach(event => {
-      const button = action(`${String(event.date).slice(0, 10)} · ${event.title}`, "button-link catalyst-row-button", () => selectCatalyst(event));
-      button.disabled = markerIndex(event, selectedChartBars(tickerData)) < 0;
-      if (button.disabled) button.title = "Outside the selected chart period. Choose a longer period to focus this catalyst.";
-      body.append(button);
-    });
+    else body.append(renderRecentCatalysts(recent, tickerData));
     const all = rememberInner(node("details", "signal-drawer"), "all-drivers");
     const sort = node("select", "driver-sort");
     sort.setAttribute("aria-label", "Sort all driver trends");

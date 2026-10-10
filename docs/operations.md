@@ -460,7 +460,10 @@ The #27 roadmap UI consumes the existing schema-v3 serving document and chart hi
   (`series`, `release_ts`) and stored release dates. Category filters control chart markers.
   Distinct filing URLs are preserved even when titles/dates match. Nontrading-day events
   align to the next stored session; intraday events use the first stored bar on that date.
-  Calendar rows outside the selected period cannot focus a marker. The feed is bounded
+  Calendar rows outside the selected period cannot focus a marker. Recent catalyst rows
+  show the same aligned session's 1-day move from adjusted closes (`close[i] / close[i-1] - 1`),
+  or "—" when that close is missing. An after-close print on a trading day still uses that
+  day's session; Ram has not decided whether it should use the next session. The feed is bounded
   published history, not an exhaustive corporate calendar.
 - `news.sentiment_history` contains up to 90 observed `{date, value}` points. Each value
   averages the selected ticker's finite daily `mean_sentiment` over seven calendar days;

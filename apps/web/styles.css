@@ -2272,6 +2272,97 @@ input::placeholder {
   overflow-wrap: anywhere;
 }
 
+/* recent catalyst rows (#91) */
+.catalyst-recent-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.catalyst-recent-row {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 0;
+  height: 28px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.catalyst-recent-row:hover {
+  border-color: transparent;
+  border-bottom-color: var(--line);
+  background: var(--hover);
+}
+
+.catalyst-recent-row:disabled,
+.catalyst-recent-row:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.catalyst-recent-row:disabled .catalyst-recent-name,
+.catalyst-recent-row:disabled .catalyst-recent-move {
+  color: var(--muted);
+}
+
+.catalyst-recent-date,
+.catalyst-recent-move {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.catalyst-recent-date {
+  color: var(--muted);
+}
+
+.catalyst-recent-move {
+  text-align: right;
+}
+
+.catalyst-recent-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.catalyst-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--catalyst-color, var(--subtle));
+}
+
+.catalyst-recent-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .catalyst-recent-row {
+    height: auto;
+    min-height: 44px;
+  }
+}
+/* end recent catalyst rows (#91) */
+
 .catalyst-calendar-row {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
