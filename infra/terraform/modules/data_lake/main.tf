@@ -140,6 +140,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "lake" {
   }
 
   rule {
+    id     = "company-ir-intelligent-tiering"
+    status = "Enabled"
+    filter {
+      prefix = "raw/company_ir/"
+    }
+    transition {
+      days          = 0
+      storage_class = "INTELLIGENT_TIERING"
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  rule {
     id     = "raw-to-glacier-after-1-year"
     status = "Enabled"
     filter {

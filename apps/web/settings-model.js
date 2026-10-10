@@ -168,6 +168,54 @@ export function timeZoneLabel(zone) {
   return TIME_ZONE_PICKS.find((pick) => pick.id === zone)?.label || zone;
 }
 
+// Bottom-panel drawers (#86). Ids match prefs_api.PANEL_IDS. Missing ids use these defaults.
+export const PANEL_IDS = [
+  "rates", "inflation", "market-comparison", "moving-averages", "volatility",
+  "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "company",
+  "contracts", "about-data",
+];
+
+const DEFAULT_OPEN_PANELS = new Set(["rates", "inflation", "moving-averages", "company"]);
+
+/** Keep known ids with an open/closed value. Unknown ids and other values are dropped. */
+export function normalizePanels(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const panels = {};
+  for (const [id, value] of Object.entries(raw)) {
+    if (!PANEL_IDS.includes(id) || (value !== "open" && value !== "closed")) continue;
+    panels[id] = value;
+  }
+  return panels;
+}
+
+export function isPanelOpen(panels, id) {
+  const saved = normalizePanels(panels)[id];
+  if (saved === "open") return true;
+  if (saved === "closed") return false;
+  return DEFAULT_OPEN_PANELS.has(id);
+}
+
+/** Next saved map after the user opens or closes one drawer. Unknown ids are ignored. */
+export function withPanelState(panels, id, open) {
+  const next = normalizePanels(panels);
+  if (!PANEL_IDS.includes(id)) return next;
+  next[id] = open ? "open" : "closed";
+  return next;
+}
+
+/** Header control state. The collapsed body stays hidden so it is not tabbed or announced. */
+export function drawerControls(id, open) {
+  const expanded = Boolean(open);
+  return {
+    expanded,
+    ariaExpanded: expanded ? "true" : "false",
+    ariaControls: `drawer-body-${id}`,
+    bodyHidden: !expanded,
+    chevron: "▸",
+    cue: expanded ? "Hide" : "Show",
+  };
+}
+
 /** Data refresh summary for the account button and menu. */
 export function refreshSummary(status) {
   const jobs = (status?.jobs || []).filter((job) => job.status && job.status !== "never_run");

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { applyTheme, contrastRatio, DEFAULT_THEME, mixColor, overlayColor, THEMES, themeFor, themeProperties } from "./theme.js";
 import { OVERLAYS } from "./chart-overlays.js";
+import { CATALYST_CATEGORIES } from "./roadmap.js";
 
 test("production palettes match all six existing design references", () => {
   const reference = JSON.parse(readFileSync(new URL("../../docs/design-roadmap/themes/themes.json", import.meta.url)));
@@ -65,6 +66,19 @@ test("all overlay colors are theme-aware and readable on the chart background", 
     }
   }
   assert.notEqual(overlayColor(0, "industrial-dark"), overlayColor(0, "terminal-amber"));
+});
+
+test("catalyst marker colors match across themes and stay readable on chip surfaces", () => {
+  for (const theme of THEMES) {
+    const surface = themeProperties(theme.id);
+    const backgrounds = [surface["--surface"], surface["--surface-raised"], surface["--selected"], surface["--page"]];
+    const colors = CATALYST_CATEGORIES.map((category) => overlayColor(category.slot, theme.id));
+    colors.forEach((color, index) => {
+      for (const background of backgrounds) {
+        assert.ok(contrastRatio(color, background) >= 3, `${theme.id} ${CATALYST_CATEGORIES[index].id} on ${background}`);
+      }
+    });
+  }
 });
 
 test("theme application targets the document, updates metadata, and changes only styling", () => {

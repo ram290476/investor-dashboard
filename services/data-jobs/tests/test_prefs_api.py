@@ -119,6 +119,38 @@ def test_chart_route_only_reads_a_ticker_in_the_callers_watchlist(api, monkeypat
     assert reads == ["serving/chart_data/TSLA.json"]
 
 
+def test_stock_route_hides_proposed_metrics_and_stays_on_the_watchlist(api, monkeypatch):
+    mod, _ = api
+    mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
+    stored = {
+        "ticker": "TSLA",
+        "generated_at": "2026-10-08T12:00:00Z",
+        "run_status": "ok",
+        "metrics": [
+            {"metric_id": "optimus", "approved": False, "approval_state": "proposed", "latest": {"value": 9}},
+            {"metric_id": "tesla_semi", "approved": True, "approval_state": "approved", "latest": {"value": 4}},
+        ],
+    }
+    monkeypatch.setattr(mod, "_read_serving_json", lambda key: stored if key == "serving/stock/TSLA.json" else None)
+
+    event = _event("GET")
+    event["rawPath"] = "/stock/TSLA"
+    body = json.loads(mod.handler(event, None)["body"])
+    assert [item["metric_id"] for item in body["metrics"]] == ["tesla_semi"]
+
+    missing = _event("GET")
+    missing["rawPath"] = "/stock/SPCX"
+    denied = mod.handler(missing, None)
+    assert denied["statusCode"] == 403
+
+    mod.handler(_event("PUT", body={"tickers": ["TSLA", "NVDA"], "pinned": [], "version": 1}), None)
+    empty = _event("GET")
+    empty["rawPath"] = "/stock/NVDA"
+    page = json.loads(mod.handler(empty, None)["body"])
+    assert page["metrics"] == []
+    assert page["freshness_label"] == "No company-specific metrics discovered"
+
+
 def test_dashboard_route_reports_not_ready_instead_of_fake_data(api, monkeypatch):
     mod, _ = api
     monkeypatch.setattr(mod, "_read_serving_json", lambda _key: None)
@@ -328,6 +360,62 @@ def test_chart_settings_reject_unknown_or_excess_values(api, settings, msg):
     )
     assert response["statusCode"] == 400
     assert msg in json.loads(response["body"])["error"]
+
+
+def test_panel_drawers_round_trip_and_ignore_unknown_ids(api):
+    mod, _ = api
+    saved = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"panels": {"rates": "closed", "made-up": "open", "company": "open"}},
+                    "version": 0,
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert saved["display"]["panels"] == {"rates": "closed", "company": "open"}
+    kept = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"theme": "clean-light"},
+                    "version": saved["version"],
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert kept["display"]["panels"] == {"rates": "closed", "company": "open"}
+    assert kept["display"]["theme"] == "clean-light"
+    again = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert again["display"]["panels"] == kept["display"]["panels"]
+
+
+@pytest.mark.parametrize(
+    "panels,msg",
+    [
+        ("open", "must be an object"),
+        ({"rates": "expanded"}, "open or closed"),
+        ([], "must be an object"),
+    ],
+)
+def test_panel_drawers_reject_invalid_values(api, panels, msg):
+    mod, _ = api
+    response = mod.handler(
+        _event("PUT", body={"tickers": ["TSLA"], "pinned": [], "display": {"panels": panels}, "version": 0}),
+        None,
+    )
+    assert response["statusCode"] == 400
+    assert msg in json.loads(response["body"])["error"]
+    assert json.loads(mod.handler(_event("GET"), None)["body"])["version"] == 0
 
 
 def test_unauthenticated(api):

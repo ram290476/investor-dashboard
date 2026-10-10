@@ -18,6 +18,8 @@ COPY services/data-jobs/src/functions/regulatory_feeds/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/gov_contracts/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/price_reconcile/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/release_day/ ${LAMBDA_TASK_ROOT}/
+COPY services/data-jobs/src/functions/company_ir/ ${LAMBDA_TASK_ROOT}/
+COPY services/data-jobs/src/functions/kalshi_fomc/ ${LAMBDA_TASK_ROOT}/
 
 # Lambda always runs the code as its own unprivileged user and checks health itself.
 # checkov:skip=CKV_DOCKER_2: Lambda manages function health; HEALTHCHECK is ignored by the runtime

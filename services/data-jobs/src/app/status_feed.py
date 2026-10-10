@@ -38,6 +38,8 @@ JOBS: dict[str, tuple[str, str | None, str]] = {
     "TREND": ("Trend metrics", None, "nyse"),
     "BACKFILL": ("Ticker history backfill", None, "nyse"),
     "RECONCILE": ("Split & dividend adjustment", "15 19 * * 1-5", "nyse"),
+    # No cron until Ram accepts the Kalshi terms (issue #89). A next_run would advertise a schedule that is not enabled.
+    "KALSHI": ("FOMC odds (Kalshi)", None, "federal"),
 }
 
 

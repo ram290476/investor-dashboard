@@ -21,14 +21,16 @@ Use the following link and demo credentials to log in to the dashboard:
 The dashboard works in desktop and mobile browsers. On a wide screen the price chart and macro panels are in the main column, with macro signals, news and filings alongside. On a phone (640px wide or less) four tabs at the top switch views:
 
 - **Chart**: price, overlays, mini charts and catalyst toggles
-- **Signals**: macro signals, rates, market comparison, moving averages and other trend panels
-- **Calendar**: inflation and release links, and the catalyst calendar
-- **More**: news, filings, government contracts and company context
+- **Signals**: macro signals, plus the rates, market, moving-average and other trend drawers
+- **Calendar**: inflation and the catalyst calendar drawers
+- **More**: news, filings, and the company, contracts and about-this-data drawers
 
 <img src="docs/design-roadmap/issue-76/industrial-dark-390.png" alt="Dashboard on a phone, Chart tab" width="300">
 
 ### Account menu and settings
-The **Signed In** button at the top right (an icon only, on phones) opens the account menu. It shows your sign-in email, a data-refresh status line and **Sign out**. Its items open the **Account settings** dialog on one of four tabs:
+The header shows the NYSE session (open, pre-market, after-hours, or closed) and the next open or close in your time zone. The date, such as Fri Oct 9 · PT, sits in front of the **Data** button. On a phone the status shortens to Open, Closed, Pre, or Post, and the date is hidden. If the snapshot has no market block, the header says the status is unavailable instead of guessing.
+
+The **Signed In** button at the top right (an icon only, on phones) opens the account menu. Under the label, a second line shows how many collection jobs are ok and how many need attention. On a phone that line is hidden; the dot on the icon stays, and the button name still includes the same words. The menu shows your sign-in email, **Private workspace**, a data-refresh status line and **Sign out**. Its items open the **Account settings** dialog on one of four tabs:
 
 - **My tickers**: add, remove, reorder and pin tickers (up to 25 tickers, 6 pinned). Pinned tickers come first in the ticker bar.
 - **Theme & display**: pick one of six color themes (Industrial Dark, Terminal Amber, Charting Navy, Clean Light, Colorblind High Contrast, Midnight Slate), the up/down color palette, and the default chart period.
@@ -36,7 +38,7 @@ The **Signed In** button at the top right (an icon only, on phones) opens the ac
 - **Data refresh**: each data collection job with its last run, next run and status.
 
 ### Picking a ticker
-The ticker bar under the header lists your watchlist (up to 25 tickers), with pinned tickers first, each showing its last price and daily change. Select a ticker to load its chart and panels. TSLA and SPCX also have a research-page link beside the ticker; those pages bring the existing price, company, news, filing and (where available) contract panels together. Research routes (`/ticker/TSLA` and `/ticker/SPCX`) support direct links and refresh, and returning to the dashboard restores its previous ticker selection. Other tickers continue to use the dashboard. When the list is wider than the screen, the bar scrolls sideways with a trackpad, mouse wheel, the ‹ › arrow buttons, keyboard or touch, and it keeps the selected ticker in view. The **+ Add / pin** button stays fixed at the end of the bar and opens My tickers.
+The ticker bar under the header lists your watchlist (up to 25 tickers), with pinned tickers first, each showing its last price and daily change. Select a ticker to load its chart and panels. The selected ticker has an **Open TSLA page →** link (click, Enter, or long-press). Enter or a long-press on any ticker opens that page too. The page address is `#stock/TSLA` (also `/stock/<TICKER>`), so it can be bookmarked without a new CloudFront path. Back returns to the dashboard and keeps the ticker you had selected. TSLA and SPCX also have a research-page link beside the ticker; those pages bring the existing price, company, news, filing and (where available) contract panels together. Research routes (`/ticker/TSLA` and `/ticker/SPCX`) support direct links and refresh, and returning to the dashboard restores its previous ticker selection. When the list is wider than the screen, the bar scrolls sideways with a trackpad, mouse wheel, the ‹ › arrow buttons, keyboard or touch, and it keeps the selected ticker in view. The **+ Add / pin** button stays fixed at the end of the bar and opens My tickers.
 
 ### Price chart and periods
 The main chart shows the selected ticker's price. Period chips **1D, 1W, 1M, 3M, YTD, 1Y, 3Y, 5Y** set the chart window, and each shows the return for that period. 1D uses hourly bars when they're available; chips for periods without enough history are disabled. A trend pill under the price (for example "Uptrend · 5d") compares the price with its 20- and 50-day averages.
@@ -67,15 +69,18 @@ Dots on the price chart mark catalysts: published macro releases, curated events
   - **Top drivers**: the series with the largest effects, each labelled Tailwind, Headwind or Neutral, with 1–3 strength bars, its latest value, 1-month change and trend state (Uptrend / Downtrend / Range, based on the 1-month z-score).
   - Regime pills, catalyst sensitivity and recent catalysts, plus an "All driver trends" list you can sort.
 - **Inflation & release links**: the latest CPI and PCE releases (YoY level, trend, surprise) and how the ticker has historically moved around release dates: correlation for the week before, the days before and release day, with sample sizes. At least 12 paired releases are required.
-- **Rates & yields, Correlation drift, Market comparison, Moving averages, Volatility, Dollar & oil** and other panels add more detail.
+- **Rates & yields, Correlation drift, Market comparison, Moving averages, Volatility, Dollar & oil** and the other bottom panels are collapsible drawers. The header (chevron, title, one-line summary, Show/Hide) toggles the panel. Rates, inflation, moving averages and the company panel start open; the rest start collapsed. Your open and closed choices are saved to your account and follow you across reloads, tickers and devices. Choosing a catalyst opens the catalyst calendar. On a phone the same drawers appear in the Signals, Calendar and More tabs.
+- **Rates & yields** opens with three shared blocks, then the existing rate rows (2Y, 10Y, 30Y, 10Y–2Y, 10Y real, SOFR, 10Y breakeven). The Treasury curve plots today's constant-maturity yields against the print from 30 calendar days earlier, with the basis-point change under each tenor from 1M through 30Y and a regime label (bull or bear steepening or flattening) when the 2Y and 10Y moves are both known. FOMC odds are a stacked cut/hold/hike bar plus a short history of the cut probability, from Kalshi when that collection is enabled. The implied policy path stays **Unavailable** until a source is chosen. A missing block names its source and the last attempt, and it does not show a zero.
 
 All correlations describe historical association, not causation or a forecast.
 
 Company context uses only curated events, released fundamentals and federal-award records already present in the serving data. Tesla-reported values show their source ID and release date; SpaceX launches and awards show their source and observation date. Robotaxi fleet size, state permit counts, regional FSD approvals, active-satellite counts and launch cadence remain explicitly unavailable until verified structured observations are collected. An absent or stale awards rollup is not presented as zero.
 
+### Per-stock pages
+Every watchlist ticker has a company page. The header shows the ticker, name, price, day change, last update and a freshness badge. A compact price chart sits under it. Approved company metrics are one panel each, with the series, latest value, quarter-over-quarter and year-over-year change, and provenance (source link, published date, confidence). A quarter the company did not report says **not reported**. Metrics Ram has not approved are stored and are not shown. A partial collection keeps the previous approved values and shows a partial badge. On a phone the page uses Overview, KPIs, Fundamentals and Calls. Calls stay empty until a transcript source is licensed. The page uses the same six themes and up/down palette as the rest of the dashboard.
+
 ### Coming soon
 - More panels below the chart with additional trends.
-- Dedicated pages for individual stocks, with depth depending on each stock's importance.
 
 ## Developer guide
 

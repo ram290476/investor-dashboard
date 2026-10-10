@@ -786,7 +786,12 @@ export function createAccountSettings(ctx) {
     const icon = el("span", "account-icon");
     icon.setAttribute("aria-hidden", "true");
     icon.append(el("span", `dot ${summary.tone}`.trim()));
-    trigger.append(icon, el("span", "account-text", "Signed In"));
+    const copy = el("span", "account-text");
+    copy.append(el("span", "account-name", "Signed In"));
+    const jobs = el("span", `account-jobs${summary.tone ? ` ${summary.tone}` : ""}`, summary.text);
+    jobs.dataset.cue = summary.issues ? "attention" : summary.ok ? "ok" : "none";
+    copy.append(jobs);
+    trigger.append(icon, copy);
 
     const menu = el("div", "account-menu");
     menu.setAttribute("role", "menu");
@@ -794,7 +799,11 @@ export function createAccountSettings(ctx) {
     menu.hidden = true;
     const head = el("div", "menu-head");
     head.setAttribute("role", "presentation");
-    head.append(el("strong", "", "Signed in"), el("span", "", `${session.email || "Cognito account"} · Cognito session active`));
+    head.append(
+      el("strong", "", "Signed in"),
+      el("span", "", `${session.email || "Cognito account"} · Cognito session active`),
+      el("span", "menu-note", "Private workspace"),
+    );
     const refresh = el("button", "menu-refresh");
     refresh.type = "button";
     refresh.setAttribute("role", "menuitem");

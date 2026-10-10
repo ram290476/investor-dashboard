@@ -449,6 +449,42 @@ variable "jobs" {
       api_keys       = []
       reads_prefs    = true
     }
+    # Weekday schedule. The handler fetches on the weekly baseline, inside an earnings
+    # window (T-3 through T+5), and when an event asks for an 8-K EX-99.1 extraction.
+    # Not applied in this change. Ram approves the metric catalog before any panel is served.
+    q2-company-ir-collect = {
+      handler        = "company_ir.collect_handler"
+      schedule       = "cron(15 7 ? * MON-FRI *)"
+      triggers       = ["ticker-added"]
+      memory         = 1024
+      timeout        = 300
+      read_prefixes  = ["raw/company_ir/", "curated/company_metrics/"]
+      write_prefixes = ["raw/company_ir/"]
+      api_keys       = []
+      reads_prefs    = true
+    }
+    q2-company-ir-extract = {
+      handler        = "company_ir.extract_handler"
+      schedule       = ""
+      triggers       = ["job:Q2C"]
+      memory         = 1024
+      timeout        = 300
+      read_prefixes  = ["raw/company_ir/", "curated/company_metrics/"]
+      write_prefixes = ["curated/company_metrics/"]
+      api_keys       = []
+      reads_prefs    = true
+    }
+    q2-company-ir-serve = {
+      handler        = "company_ir.serve_handler"
+      schedule       = ""
+      triggers       = ["job:Q2X"]
+      memory         = 512
+      timeout        = 120
+      read_prefixes  = ["curated/company_metrics/"]
+      write_prefixes = ["serving/stock/"]
+      api_keys       = []
+      reads_prefs    = false
+    }
     # Daily poll; writes only when FINRA publishes a new settlement date (twice a month)
     short-interest = {
       handler        = "short_interest.handler"

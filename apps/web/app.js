@@ -10,14 +10,28 @@ import {
 import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle } from "./trend-state.js";
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
+import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
-import { routeFromPath, routeStateForPath, tickerResearchPath } from "./routes.js";
+import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
 import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
   number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
 } from "./signals.js";
-import { emailFromIdToken, fallbackSelection, parseSettingsHash, stripOrder } from "./settings-model.js";
+import { drawerControls, emailFromIdToken, fallbackSelection, isPanelOpen, parseSettingsHash, stripOrder, withPanelState } from "./settings-model.js";
+import {
+  callsCopy,
+  companyName,
+  emptyKpiCopy,
+  formatMetricValue,
+  freshnessBadge,
+  LONG_PRESS_MS,
+  nextStockTab,
+  stockPanels,
+  STOCK_TABS,
+} from "./stock-page.js";
+import { curveView, fomcView, policyPathView } from "./rates-panel.js";
+import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
   OVERLAYS,
@@ -70,7 +84,12 @@ const session = {
   catalystCategories: CATALYST_CATEGORIES.map(category => category.id),
   focusCatalyst: null,
   driverSort: "effect",
-  openDrawers: new Set(),
+  // Inner disclosures that are not bottom drawers (all drivers, release calendar).
+  innerDrawers: new Set(),
+  panelSaveError: "",
+  stockPage: {},
+  stockPageState: {},
+  stockTab: "overview",
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 let prefsSaveQueue = Promise.resolve();
@@ -90,25 +109,54 @@ function action(label, className, onClick) {
   return button;
 }
 
-function rememberDrawer(drawer, key) {
-  drawer.open = session.openDrawers.has(key);
+function rememberInner(drawer, key) {
+  drawer.open = session.innerDrawers.has(key);
   drawer.addEventListener("toggle", () => {
     if (!drawer.isConnected) return;
-    if (drawer.open) session.openDrawers.add(key);
-    else session.openDrawers.delete(key);
+    if (drawer.open) session.innerDrawers.add(key);
+    else session.innerDrawers.delete(key);
   });
   return drawer;
+}
+
+let panelSaveTimer = 0;
+
+function schedulePanelSave() {
+  window.clearTimeout(panelSaveTimer);
+  panelSaveTimer = window.setTimeout(() => {
+    savePrefs({ display: session.prefs.display }).then(() => {
+      session.panelSaveError = "";
+      root.querySelector("[data-panel-save-error]")?.remove();
+    }).catch((error) => {
+      if (error.status === 401) {
+        settings.close();
+        session.accessToken = null;
+        showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+        return;
+      }
+      session.panelSaveError = error.message;
+      renderDashboard();
+    });
+  }, 400);
+}
+
+function setPanelOpen(id, open) {
+  const panels = withPanelState(session.prefs.display?.panels, id, open);
+  session.prefs = { ...session.prefs, display: { ...session.prefs.display, panels } };
+  schedulePanelSave();
 }
 
 function selectCatalyst(event) {
   session.focusCatalyst = event.id;
   if (!session.catalystCategories.includes(event.category)) session.catalystCategories.push(event.category);
-  session.mobileView = "chart";
+  setPanelOpen("catalyst-calendar", true);
+  session.mobileView = "calendar";
   renderDashboard();
   requestAnimationFrame(() => {
-    const marker = document.getElementById(`catalyst-${event.id}`);
-    marker?.focus();
-    marker?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    const row = document.getElementById(`calendar-${event.id}`);
+    const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    row?.focus();
+    row?.scrollIntoView({ block: "nearest", behavior });
   });
 }
 
@@ -166,7 +214,9 @@ async function beginSignIn() {
     const state = randomBase64Url(32);
     sessionStorage.setItem(authKeys.verifier, verifier);
     sessionStorage.setItem(authKeys.state, state);
-    if (parseSettingsHash(location.hash)) sessionStorage.setItem(authKeys.hash, location.hash);
+    if (parseSettingsHash(location.hash) || parseStockHash(location.hash)) {
+      sessionStorage.setItem(authKeys.hash, location.hash);
+    }
     sessionStorage.setItem(
       authKeys.path,
       session.route.page === "research" ? tickerResearchPath(session.selected) : "/",
@@ -243,7 +293,7 @@ function signOut() {
 }
 
 async function apiGet(path) {
-  const what = apiLabels[path] || "The request";
+  const what = apiLabels[path] || (String(path).startsWith("stock/") ? "Company page" : "The request");
   let response;
   try {
     response = await fetch(apiUrl(path), {
@@ -310,6 +360,27 @@ async function loadChartData(ticker, force = false) {
     }
   }
   if (session.selected === ticker) renderDashboard();
+}
+
+async function loadStockPage(ticker, force = false) {
+  if (!ticker || (!force && session.stockPageState[ticker] === "loading")) return;
+  if (!force && session.stockPageState[ticker] === "ready") return;
+  session.stockPageState[ticker] = "loading";
+  if (session.route.page === "stock" && session.selected === ticker) renderDashboard();
+  try {
+    session.stockPage[ticker] = await apiGet(`stock/${encodeURIComponent(ticker)}`);
+    session.stockPageState[ticker] = "ready";
+  } catch (error) {
+    session.stockPageState[ticker] = "error";
+    session.stockPage[ticker] = null;
+    if (error.status === 401) {
+      settings.close();
+      session.accessToken = null;
+      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+      return;
+    }
+  }
+  if (session.route.page === "stock" && session.selected === ticker) renderDashboard();
 }
 
 function updateChartSettings(ticker, settings) {
@@ -404,6 +475,49 @@ function scaleIndicator(values, inverse) {
   });
 }
 
+function appendTimeGrid(svg, bars, periodId, top, bottom) {
+  chartTicks(bars, periodId).forEach((tick) => {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("class", "chart-time-grid");
+    line.setAttribute("x1", String(tick.x));
+    line.setAttribute("x2", String(tick.x));
+    line.setAttribute("y1", String(top));
+    line.setAttribute("y2", String(bottom));
+    svg.append(line);
+  });
+}
+
+function appendChartInteraction(svg, { top, bottom, layer, viewHeight }) {
+  svg.dataset.chartLayer = layer;
+  svg.dataset.plotLeft = String(CHART_PLOT.left);
+  svg.dataset.plotRight = String(CHART_PLOT.right);
+  const hit = document.createElementNS(svgNS, "rect");
+  hit.setAttribute("class", "chart-hit");
+  hit.setAttribute("x", "0");
+  hit.setAttribute("y", "0");
+  hit.setAttribute("width", String(CHART_PLOT.width));
+  hit.setAttribute("height", String(viewHeight));
+  svg.insertBefore(hit, svg.firstChild);
+  for (const [edge, x] of [["start", CHART_PLOT.left], ["end", CHART_PLOT.right]]) {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("class", "chart-plot-edge");
+    line.dataset.plotEdge = edge;
+    line.setAttribute("x1", String(x));
+    line.setAttribute("x2", String(x));
+    line.setAttribute("y1", String(top));
+    line.setAttribute("y2", String(bottom));
+    svg.append(line);
+  }
+  const cross = document.createElementNS(svgNS, "line");
+  cross.setAttribute("class", "chart-crosshair");
+  cross.setAttribute("x1", String(CHART_PLOT.left));
+  cross.setAttribute("x2", String(CHART_PLOT.left));
+  cross.setAttribute("y1", String(top));
+  cross.setAttribute("y2", String(bottom));
+  cross.setAttribute("visibility", "hidden");
+  svg.append(cross);
+}
+
 function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartContext = {}) {
   if (!history?.length) return null;
   const bars = history;
@@ -437,16 +551,18 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
   const min = Math.min(...axisValues);
   const max = Math.max(...axisValues);
   const spread = max - min || 1;
-  const left = 70;
-  const right = 890;
-  const top = 18;
-  const bottom = 178;
-  const xAt = (index) => left + (index / (bars.length - 1)) * (right - left);
+  const { left, right } = CHART_PLOT;
+  const compact = window.matchMedia("(max-width: 640px)").matches;
+  const top = 16;
+  const bottom = compact ? 320 : 196;
+  const viewHeight = compact ? 340 : 210;
+  const xAt = (index) => plotX(index, bars.length);
   const yValue = (value) => bottom - ((value - min) / spread) * (bottom - top);
   const yNormalized = (value) => bottom - (value / 100) * (bottom - top);
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("class", "price-chart");
-  svg.setAttribute("viewBox", "0 0 940 210");
+  svg.setAttribute("viewBox", `0 0 ${CHART_PLOT.width} ${viewHeight}`);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${ticker} ${periodId} chart, ${bars.length} observations`);
   svg.dataset.period = periodId;
@@ -479,6 +595,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     label.textContent = compareMarkets ? `${(max - ((max - min) / 3) * index).toFixed(1)}%` : formatPrice(max - ((max - min) / 3) * index);
     svg.append(label);
   }
+  appendTimeGrid(svg, bars, periodId, top, bottom);
 
   const pricePath = seriesPath(prices, xAt, (value) => yValue(value));
   const area = document.createElementNS(svgNS, "path");
@@ -537,27 +654,23 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     const category = CATALYST_CATEGORIES.find(category => category.id === event.category);
     const marker = document.createElementNS(svgNS, "g");
     marker.id = `catalyst-${event.id}`;
+    marker.dataset.category = category.id;
     marker.setAttribute("class", `catalyst-marker${session.focusCatalyst === event.id ? " selected" : ""}`);
     marker.setAttribute("tabindex", "0");
     marker.setAttribute("role", "button");
     marker.setAttribute("aria-label", `${category.label}: ${event.title}, ${event.date}`);
-    marker.setAttribute("transform", `translate(${xAt(index)},${182 - peers.indexOf(event) * spacing})`);
+    marker.setAttribute("transform", `translate(${xAt(index)},${bottom + 4 - peers.indexOf(event) * spacing})`);
     const hit = document.createElementNS(svgNS, "circle");
     hit.setAttribute("r", String(Math.min(12, spacing / 2)));
     hit.setAttribute("fill", "transparent");
     const dot = document.createElementNS(svgNS, "circle");
     dot.setAttribute("r", "4");
     dot.setAttribute("fill", overlayColor(category.slot, session.prefs.display.theme));
+    dot.dataset.catalystColor = dot.getAttribute("fill");
     const title = document.createElementNS(svgNS, "title");
     title.textContent = `${event.title} · ${event.date} · ${event.source}`;
     marker.append(hit, dot, title);
-    marker.addEventListener("click", () => {
-      session.focusCatalyst = event.id;
-      session.openDrawers.add("catalyst-calendar");
-      session.mobileView = "calendar";
-      renderDashboard();
-      document.getElementById(`calendar-${event.id}`)?.focus();
-    });
+    marker.addEventListener("click", () => selectCatalyst(event));
     marker.addEventListener("keydown", key => {
       if (key.key === "Enter" || key.key === " ") { key.preventDefault(); marker.dispatchEvent(new Event("click")); }
     });
@@ -578,21 +691,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
       svg.append(marker);
     }
   }
-  [
-    { bar: bars[0], x: left, anchor: "start" },
-    { bar: bars.at(-1), x: right, anchor: "end" },
-  ].forEach(({ bar, x, anchor }) => {
-    const label = document.createElementNS(svgNS, "text");
-    label.setAttribute("x", String(x));
-    label.setAttribute("y", "202");
-    label.setAttribute("fill", "var(--muted)");
-    label.setAttribute("font-size", "10");
-    label.setAttribute("font-family", "IBM Plex Mono, monospace");
-    label.setAttribute("text-anchor", anchor);
-    const stamp = String(bar?.ts || bar?.date || "");
-    label.textContent = periodId === "1D" && stamp.includes("T") ? stamp.slice(11, 16) : stamp.slice(0, 10);
-    svg.append(label);
-  });
+  appendChartInteraction(svg, { top, bottom, layer: "price", viewHeight });
   return svg;
 }
 
@@ -603,6 +702,194 @@ function sectionHeader(title, subtitle = "") {
   if (subtitle) copy.append(node("p", "panel-subtitle", subtitle));
   header.append(copy);
   return header;
+}
+
+function renderPanelSaveError() {
+  if (!session.panelSaveError) return null;
+  const alert = node("p", "data-state error", `${session.panelSaveError} `);
+  alert.dataset.panelSaveError = "true";
+  alert.setAttribute("role", "alert");
+  alert.append(action("Try again", "button-link", () => {
+    session.panelSaveError = "";
+    schedulePanelSave();
+  }));
+  return alert;
+}
+
+function renderDrawer({ id, title, subtitle, summary, mobilePanel, panelId }, renderBody) {
+  const open = isPanelOpen(session.prefs.display?.panels, id);
+  const controls = drawerControls(id, open);
+  const panel = node("section", `panel panel-drawer${open ? " is-open" : ""}`);
+  panel.dataset.drawer = id;
+  if (mobilePanel) panel.dataset.mobilePanel = mobilePanel;
+  if (panelId) panel.id = panelId;
+  const header = node("div", "panel-header drawer-header");
+  const heading = node("h2", "");
+  const button = node("button", "drawer-toggle");
+  button.type = "button";
+  button.dataset.drawerToggle = id;
+  button.setAttribute("aria-expanded", controls.ariaExpanded);
+  button.setAttribute("aria-controls", controls.ariaControls);
+  const chevron = node("span", "drawer-chevron", controls.chevron);
+  chevron.setAttribute("aria-hidden", "true");
+  const titleEl = node("span", "drawer-title", title);
+  titleEl.title = title;
+  const summaryEl = node("span", "drawer-summary", summary);
+  summaryEl.title = summary;
+  const cue = node("span", "drawer-cue", controls.cue);
+  button.append(chevron, titleEl, summaryEl, cue);
+  heading.append(button);
+  header.append(heading);
+  const body = node("div", "panel-body drawer-body");
+  body.id = controls.ariaControls;
+  body.hidden = controls.bodyHidden;
+  if (subtitle) body.append(node("p", "panel-subtitle", subtitle));
+  renderBody(body);
+  button.addEventListener("click", () => {
+    setPanelOpen(id, !isPanelOpen(session.prefs.display?.panels, id));
+    renderDashboard();
+  });
+  panel.append(header, body);
+  return panel;
+}
+
+function shortReleaseDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return String(value || "").slice(0, 10);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short", day: "numeric", timeZone: session.prefs.display?.time_zone || "UTC",
+  }).format(date);
+}
+
+function observationText(row) {
+  const value = signalNumber(row?.value);
+  if (value == null) return null;
+  if (row.unit === "%") return `${value.toFixed(2)}%`;
+  if (row.unit === "USD") return formatPrice(value);
+  return Math.abs(value) >= 100 ? String(Math.round(value)) : value.toFixed(1);
+}
+
+function trendWord(row) {
+  return driverTrend(row).split(" - ")[0];
+}
+
+function directionMark(row) {
+  if (!row || signalNumber(row.value) == null) return "—";
+  if (row.trend_state === "up") return "▲";
+  if (row.trend_state === "down") return "▼";
+  return "·";
+}
+
+function ratesSummary(rows) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const ten = rows.find((row) => row.series_id === "DGS10");
+  const two = rows.find((row) => row.series_id === "DGS2");
+  const regime = session.dashboard?.rates?.curve?.regime;
+  if (!ten && !two && !regime) return "Unavailable";
+  const parts = [];
+  if (observationText(ten)) parts.push(`10Y ${observationText(ten)}`);
+  if (observationText(two)) parts.push(`2Y ${observationText(two)}`);
+  if (regime) parts.push(regime);
+  else if (ten) parts.push(`1M ${driverChange(ten)}`);
+  return parts.join(" · ") || "Unavailable";
+}
+
+function inflationSummary(tickerData) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const latest = (tickerData?.release_links?.latest || []).find((row) => row.series_id === "CPI_YOY");
+  const next = (session.dashboard?.releases?.next || [])[0];
+  const parts = [];
+  if (signalNumber(latest?.yoy) != null) parts.push(`CPI YoY ${Number(latest.yoy).toFixed(1)}%`);
+  if (next?.release_ts) parts.push(`next release ${shortReleaseDate(next.release_ts)}`);
+  return parts.join(" · ") || "Unavailable";
+}
+
+function marketSummary() {
+  if (session.dashboardState === "loading") return "Loading…";
+  const quote = (id) => periodQuote(session.dashboard?.tickers?.[id]?.price_history || [], "1M");
+  const own = quote(session.selected);
+  const spy = quote("SPY");
+  if (!own.available && !spy.available) return "Unavailable";
+  const text = (id, item) => `${id} ${item.available ? formatPercent(item.returnValue, 1) : "—"}`;
+  return `${text(session.selected, own)} vs ${text("SPY", spy)} (1M)`;
+}
+
+function movingAverageSummary(history) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const rows = movingAverageRows(history);
+  const known = rows.filter((row) => row.distance != null);
+  if (!known.length) return "Unavailable";
+  const above = known.filter((row) => row.distance > 0).length;
+  return `Above ${above} of ${rows.length} averages`;
+}
+
+function seriesSummary(rows, seriesId, label) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const row = rows.find((item) => item.series_id === seriesId);
+  const value = observationText(row);
+  if (!value) return "Unavailable";
+  return `${label} ${value} · ${trendWord(row)}`;
+}
+
+function dollarSummary(rows) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const dollar = rows.find((row) => row.series_id === "DTWEXBGS");
+  const oil = rows.find((row) => row.series_id === "DCOILWTICO");
+  if (!dollar && !oil) return "Unavailable";
+  return `Dollar ${directionMark(dollar)} · WTI ${directionMark(oil)}`;
+}
+
+function tariffSummary(rows) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const row = rows.find((item) => item.series_id === "USEPUINDXD");
+  const events = catalystRows(session.dashboard, session.selected).filter((event) => event.category === "policy").slice(-3);
+  if (!row && !events.length) return "Unavailable";
+  const value = observationText(row) || "Unavailable";
+  return `Policy uncertainty ${value} · ${events.length} recent event${events.length === 1 ? "" : "s"}`;
+}
+
+function correlationSummary(rows, chartData, chartDataState) {
+  if (session.dashboardState === "loading" || chartDataState === "loading") return "Loading…";
+  const daily = rows.filter((row) => !row.series_id.endsWith("_YOY"));
+  if (!daily.length) return "Unavailable";
+  let known = 0;
+  let strengthening = 0;
+  let flips = 0;
+  daily.forEach((row) => {
+    const change = correlationDrift(row, chartData?.correlation_history?.[row.series_id] || []);
+    if (!change) return;
+    known += 1;
+    if (change.stronger) strengthening += 1;
+    if (change.signFlip) flips += 1;
+  });
+  if (!known) return "Unavailable";
+  return `${strengthening} strengthening · ${flips} sign flip${flips === 1 ? "" : "s"}`;
+}
+
+function catalystSummary(events) {
+  if (session.dashboardState === "loading") return "Loading…";
+  if (!events.length) return session.dashboardState === "error" ? "Unavailable" : "No published events";
+  const today = String(session.dashboard?.generated_at || "").slice(0, 10);
+  const upcoming = events.filter((event) => String(event.date).slice(0, 10) >= today);
+  const next = upcoming[0];
+  return `${upcoming.length} upcoming${next ? ` · next: ${String(next.date).slice(0, 10)} ${next.title}` : ""}`;
+}
+
+function companySummary(tickerData, events) {
+  if (session.dashboardState === "loading") return "Loading…";
+  if (session.selected === "SPCX" && isNumericValue(tickerData?.contracts?.ttm_obligated)) {
+    return `TTM obligations ${formatPrice(tickerData.contracts.ttm_obligated)}`;
+  }
+  if (session.dashboardState === "error" && !events.length) return "Unavailable";
+  return `${events.length} event${events.length === 1 ? "" : "s"}`;
+}
+
+function contractsSummary(contracts) {
+  if (!isNumericValue(contracts?.ttm_obligated)) return "Unavailable";
+  const amount = new Intl.NumberFormat("en-US", {
+    style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1,
+  }).format(Number(contracts.ttm_obligated));
+  return `TTM ${amount}`;
 }
 
 function renderWatchlist() {
@@ -636,7 +923,24 @@ function renderWatchlist() {
     button.tabIndex = ticker === session.selected || (!hasSelected && index === 0) ? 0 : -1;
     buttons.push(button);
     button.addEventListener("focus", () => ensureVisible(button));
+    let pressTimer = 0;
+    const cancelPress = () => window.clearTimeout(pressTimer);
+    button.addEventListener("pointerdown", () => {
+      cancelPress();
+      pressTimer = window.setTimeout(() => {
+        button.dataset.longPress = "1";
+        navigateToStock(ticker);
+      }, LONG_PRESS_MS);
+    });
+    button.addEventListener("pointerup", cancelPress);
+    button.addEventListener("pointerleave", cancelPress);
+    button.addEventListener("pointercancel", cancelPress);
     button.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        navigateToStock(ticker);
+        return;
+      }
       const index = buttons.indexOf(button);
       const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
         : event.key === "ArrowRight" ? Math.min(index + 1, buttons.length - 1)
@@ -649,7 +953,14 @@ function renderWatchlist() {
     button.setAttribute("aria-pressed", String(ticker === session.selected));
     button.setAttribute("aria-label", `${ticker}, ${latest ? formatPrice(displayPrice(latest)) : "no price data"}`);
     button.addEventListener("click", () => {
-      if (session.route.page !== "dashboard") {
+      if (button.dataset.longPress === "1") {
+        delete button.dataset.longPress;
+        return;
+      }
+      if (session.route.page === "stock") {
+        navigateToStock(ticker);
+        return;
+      } else if (session.route.page !== "dashboard") {
         navigateToDashboard(ticker);
       } else {
         session.selected = ticker;
@@ -687,6 +998,35 @@ function renderWatchlist() {
         navigateToResearch(ticker);
       });
       item.append(researchLink);
+    }
+    if (ticker === session.selected && stockHash(ticker)) {
+      const openPage = node("a", "ticker-stock-link", `Open ${ticker} page →`);
+      openPage.href = `/${stockHash(ticker)}`;
+      openPage.dataset.stockOpen = ticker;
+      openPage.setAttribute("aria-label", `Open ${ticker} page`);
+      let linkTimer = 0;
+      const cancelLinkPress = () => window.clearTimeout(linkTimer);
+      openPage.addEventListener("pointerdown", () => {
+        cancelLinkPress();
+        linkTimer = window.setTimeout(() => {
+          openPage.dataset.longPress = "1";
+          navigateToStock(ticker);
+        }, LONG_PRESS_MS);
+      });
+      openPage.addEventListener("pointerup", cancelLinkPress);
+      openPage.addEventListener("pointerleave", cancelLinkPress);
+      openPage.addEventListener("pointercancel", cancelLinkPress);
+      openPage.addEventListener("click", (event) => {
+        if (openPage.dataset.longPress === "1") {
+          delete openPage.dataset.longPress;
+          event.preventDefault();
+          return;
+        }
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigateToStock(ticker);
+      });
+      item.append(openPage);
     }
     list.append(item);
   });
@@ -970,8 +1310,130 @@ function renderOverlayControls(groups, chartDataState, onSettingsChange) {
   return panel;
 }
 
-function renderLane(lane, bars, tickerData, chartData, chartDataState) {
+function formatCompactNumber(value) {
+  if (!isNumericValue(value)) return "—";
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value));
+}
+
+function formatLanePoint(lane, value) {
+  if (!isNumericValue(value)) return "—";
+  if (lane.id === "VOL") return `${formatCompactNumber(value)} sh`;
+  if (lane.id === "PRESS") return `${Number(value) > 0 ? "+" : ""}${Number(value).toFixed(2)}`;
+  if (lane.id === "SI") return lane.percent ? `${Number(value).toFixed(2)}%` : `${Math.round(Number(value)).toLocaleString()} sh`;
+  return `${Number(value).toFixed(2)} P/C`;
+}
+
+function crosshairText(bar, index, periodId, lanes) {
+  const stamp = barStamp(bar);
+  const when = periodId === "1D" && stamp.includes("T") ? `${stamp.slice(0, 10)} ${stamp.slice(11, 16)}` : stamp.slice(0, 10);
+  const traded = displayPrice(bar);
+  const parts = [when, formatPrice(isNumericValue(traded) ? traded : chartValue(bar))];
+  const volumeLane = lanes.find((lane) => lane.id === "VOL");
+  parts.push(`Volume ${formatLanePoint({ id: "VOL" }, volumeLane ? volumeLane.values[index] : bar.volume)}`);
+  lanes.filter((lane) => lane.id !== "VOL").forEach((lane) => {
+    parts.push(`${lane.label} ${formatLanePoint(lane, lane.values[index])}`);
+  });
+  return parts.join(" · ");
+}
+
+function renderTimeAxis(bars, periodId) {
+  const axis = node("div", "chart-time-axis");
+  axis.dataset.chartLayer = "axis";
+  chartTicks(bars, periodId).forEach((tick) => {
+    const label = node("span", "chart-tick", tick.label);
+    label.dataset.anchor = tick.anchor;
+    label.style.left = `${(tick.x / CHART_PLOT.width) * 100}%`;
+    axis.append(label);
+  });
+  [["start", CHART_PLOT.left], ["end", CHART_PLOT.right]].forEach(([edge, x]) => {
+    const marker = node("span", "chart-axis-edge");
+    marker.dataset.plotEdge = edge;
+    marker.style.left = `${(x / CHART_PLOT.width) * 100}%`;
+    axis.append(marker);
+  });
+  const cross = node("span", "chart-axis-crosshair");
+  cross.hidden = true;
+  axis.append(cross);
+  return axis;
+}
+
+function attachSharedCrosshair(stack, bars, periodId, lanes) {
+  const layers = [...stack.querySelectorAll("[data-chart-layer]")];
+  const readout = stack.querySelector(".chart-readout");
+  let index = null;
+  const show = (next) => {
+    if (!Number.isInteger(next) || next < 0 || next >= bars.length) return;
+    index = next;
+    const x = plotX(index, bars.length);
+    layers.forEach((layer) => {
+      const line = layer.querySelector(".chart-crosshair");
+      if (line) {
+        line.setAttribute("x1", String(x));
+        line.setAttribute("x2", String(x));
+        line.setAttribute("visibility", "visible");
+      }
+      const marker = layer.querySelector(".chart-axis-crosshair");
+      if (marker) {
+        marker.hidden = false;
+        marker.style.left = `${(x / CHART_PLOT.width) * 100}%`;
+      }
+    });
+    if (readout) readout.textContent = crosshairText(bars[index], index, periodId, lanes);
+  };
+  const clear = () => {
+    index = null;
+    layers.forEach((layer) => {
+      layer.querySelector(".chart-crosshair")?.setAttribute("visibility", "hidden");
+      const marker = layer.querySelector(".chart-axis-crosshair");
+      if (marker) marker.hidden = true;
+    });
+    if (readout) readout.textContent = "Hover, tap, or use arrow keys to read a date across the charts.";
+  };
+  const indexFromEvent = (event, layer) => {
+    const rect = layer.getBoundingClientRect();
+    if (!rect.width) return null;
+    const viewX = ((event.clientX - rect.left) / rect.width) * CHART_PLOT.width;
+    return indexAtPlotX(viewX, bars.length);
+  };
+  layers.forEach((layer) => {
+    layer.addEventListener("pointerdown", (event) => {
+      if (event.button != null && event.button !== 0) return;
+      try { layer.setPointerCapture?.(event.pointerId); } catch { /* synthetic or unsupported */ }
+      const next = indexFromEvent(event, layer);
+      if (next != null) show(next);
+    });
+    layer.addEventListener("pointermove", (event) => {
+      const dragging = event.pointerType !== "mouse" && layer.hasPointerCapture?.(event.pointerId);
+      if (event.pointerType !== "mouse" && !dragging) return;
+      const next = indexFromEvent(event, layer);
+      if (next != null) show(next);
+    });
+  });
+  stack.addEventListener("pointerleave", (event) => {
+    if (event.pointerType !== "mouse" || stack.contains(document.activeElement)) return;
+    clear();
+  });
+  stack.addEventListener("keydown", (event) => {
+    if (event.target !== stack) return;
+    const current = index ?? bars.length - 1;
+    const next = event.key === "ArrowLeft" ? Math.max(0, current - 1)
+      : event.key === "ArrowRight" ? Math.min(bars.length - 1, current + 1)
+      : event.key === "Home" ? 0
+      : event.key === "End" ? bars.length - 1
+      : null;
+    if (next == null) return;
+    event.preventDefault();
+    show(next);
+  });
+  stack.addEventListener("focus", () => { if (index == null) show(bars.length - 1); });
+  stack.addEventListener("blur", (event) => {
+    if (event.relatedTarget && !stack.contains(event.relatedTarget)) clear();
+  });
+}
+
+function renderLane(lane, bars, tickerData, chartData, chartDataState, periodId) {
   const row = node("section", "chart-lane");
+  row.dataset.lane = lane.id;
   row.setAttribute("aria-label", `${lane.label} chart lane`);
   const info = node("div", "lane-info");
   info.append(node("h3", "lane-title", lane.label));
@@ -1032,27 +1494,33 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState) {
   }
   info.append(node("strong", `lane-stat ${lane.id === "PRESS" ? polarity(latest) : ""}`.trim(), stat));
 
+  const viewHeight = 64;
+  const laneTop = 6;
+  const laneBottom = 58;
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("class", `lane-chart lane-${lane.id.toLowerCase()}`);
-  svg.setAttribute("viewBox", "0 0 940 68");
+  svg.setAttribute("viewBox", `0 0 ${CHART_PLOT.width} ${viewHeight}`);
+  svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${lane.label} over ${bars.length} chart observations`);
   const title = document.createElementNS(svgNS, "title");
   title.textContent = `${lane.label}: ${stat}`;
   svg.append(title);
-  const left = 70;
-  const right = 890;
-  const bottom = 64;
-  const xAt = (index) => left + (index / Math.max(1, values.length - 1)) * (right - left);
+  const { left, right } = CHART_PLOT;
+  const xAt = (index) => plotX(index, bars.length);
+  appendTimeGrid(svg, bars, periodId, laneTop, laneBottom);
   if (lane.id === "VOL") {
     const max = Math.max(...valid) || 1;
+    const slot = bars.length > 1 ? (right - left) / (bars.length - 1) : right - left;
+    const barWidth = Math.max(0.35, Math.min(slot * 0.72, 8));
     values.forEach((value, index) => {
       if (!isNumericValue(value)) return;
-      const height = (Number(value) / max) * 54;
+      const height = (Number(value) / max) * (laneBottom - laneTop);
       const bar = document.createElementNS(svgNS, "rect");
-      bar.setAttribute("x", String(xAt(index) - Math.max(1, 7 - values.length / 100) / 2));
-      bar.setAttribute("y", String(bottom - height));
-      bar.setAttribute("width", String(Math.max(1, 7 - values.length / 100)));
+      const x = Math.min(Math.max(xAt(index) - barWidth / 2, left), right - barWidth);
+      bar.setAttribute("x", String(x));
+      bar.setAttribute("y", String(laneBottom - height));
+      bar.setAttribute("width", String(barWidth));
       bar.setAttribute("height", String(height));
       bar.setAttribute("class", "lane-volume-bar");
       svg.append(bar);
@@ -1061,7 +1529,7 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState) {
     const min = lane.id === "PRESS" ? -1 : Math.min(...valid);
     const max = lane.id === "PRESS" ? 1 : Math.max(...valid);
     const spread = max - min || 1;
-    const yAt = (value) => bottom - 6 - ((value - min) / spread) * 52;
+    const yAt = (value) => laneBottom - ((value - min) / spread) * (laneBottom - laneTop);
     if (lane.id === "PRESS") {
       const zero = document.createElementNS(svgNS, "line");
       zero.setAttribute("x1", String(left));
@@ -1072,18 +1540,19 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState) {
       svg.append(zero);
     }
     const path = document.createElementNS(svgNS, "path");
-    path.setAttribute("d", seriesPath(values, xAt, (value) => yAt(value)));
+    path.setAttribute("d", seriesPath(values, xAt, (value) => yAt(value), lane.id === "SI"));
     path.setAttribute("class", `lane-line ${lane.id === "PRESS" ? "lane-pressure-line" : ""}`.trim());
     svg.append(path);
   }
+  appendChartInteraction(svg, { top: laneTop, bottom: laneBottom, layer: "lane", viewHeight });
   row.append(info, svg);
   return row;
 }
 
-function renderChartLanes(settings, bars, tickerData, chartData, chartDataState, available) {
+function renderChartLanes(settings, bars, tickerData, chartData, chartDataState, available, periodId) {
   const lanes = node("div", "chart-lanes");
   available.filter(lane => settings.lanes.includes(lane.id)).forEach(lane => {
-    lanes.append(renderLane(lane, bars, tickerData, chartData, chartDataState));
+    lanes.append(renderLane(lane, bars, tickerData, chartData, chartDataState, periodId));
   });
   return lanes;
 }
@@ -1156,14 +1625,23 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   const categories = catalystCategoriesInWindow(session.dashboard, session.selected, chartHistory);
   categories.forEach(category => {
     const enabled = session.catalystCategories.includes(category.id);
-    const toggle = action(category.label, "overlay-chip", () => {
+    const color = overlayColor(category.slot, session.prefs.display.theme);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "overlay-chip catalyst-chip";
+    toggle.style.setProperty("--catalyst-color", color);
+    toggle.dataset.catalystCategory = category.id;
+    toggle.dataset.catalystColor = color;
+    toggle.setAttribute("aria-pressed", String(enabled));
+    const swatch = node("span", "catalyst-swatch");
+    swatch.setAttribute("aria-hidden", "true");
+    toggle.append(swatch, document.createTextNode(category.label));
+    toggle.addEventListener("click", () => {
       session.catalystCategories = enabled ? session.catalystCategories.filter(id => id !== category.id)
         : [...session.catalystCategories, category.id];
       renderDashboard();
       root.querySelector(`[data-catalyst-category="${category.id}"]`)?.focus();
     });
-    toggle.dataset.catalystCategory = category.id;
-    toggle.setAttribute("aria-pressed", String(enabled));
     filters.append(toggle);
   });
   const clearCatalysts = action("Clear all", "overlay-chip bulk-control", () => {
@@ -1181,16 +1659,31 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
     panel.append(error);
   }
 
+  let placedLanes = false;
   if (chartHistory.length >= 2) {
-    const wrap = node("div", "chart-wrap");
     const chart = drawChart(chartHistory, session.selected, activeId, visibleOverlays, {
       tickerData,
       chartData,
       dashboard: session.dashboard,
     });
     if (chart) {
-      wrap.append(chart);
-      panel.append(wrap);
+      const stack = node("div", "chart-stack");
+      stack.tabIndex = 0;
+      stack.setAttribute("role", "group");
+      stack.setAttribute("aria-label", `${session.selected} price chart and under-chart lanes. Left and right arrow keys move the date crosshair.`);
+      const readout = node("p", "chart-readout", "Hover, tap, or use arrow keys to read a date across the charts.");
+      readout.setAttribute("role", "status");
+      readout.setAttribute("aria-live", "polite");
+      const lanes = renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes, activeId);
+      const laneSeries = controls.lanes.filter((lane) => chartSettings.lanes.includes(lane.id)).map((lane) => ({
+        ...lane,
+        values: lane.id === "VOL" || chartDataState === "ready" ? laneValues(lane.id, chartHistory, chartData) : [],
+        percent: lane.id === "SI" && alignedLaneValues(chartData?.short_interest, chartHistory, "short_pct_denominator").some(isNumericValue),
+      }));
+      stack.append(readout, chart, lanes, renderTimeAxis(chartHistory, activeId));
+      attachSharedCrosshair(stack, chartHistory, activeId, laneSeries);
+      panel.append(stack);
+      placedLanes = true;
       const legend = node("div", "chart-legend");
       const values = chartHistory.map(chartValue);
       legend.append(
@@ -1251,8 +1744,8 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       ),
     );
   }
-  panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes),
-    renderLaneControls(chartSettings, controls.lanes, chartDataState, onSettingsChange));
+  if (!placedLanes) panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes, activeId));
+  panel.append(renderLaneControls(chartSettings, controls.lanes, chartDataState, onSettingsChange));
   if (categories.length) panel.append(filters);
   return panel;
 }
@@ -1260,25 +1753,30 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
 function renderContracts(tickerData) {
   const contracts = tickerData?.contracts;
   if (!contracts) return null;
-  const panel = node("section", "panel");
-  panel.append(sectionHeader("Government contracts", "Trailing 12 months · SpaceX and Tesla awards"));
+  const panel = renderDrawer({
+    id: "contracts",
+    title: "Government contracts",
+    subtitle: "Trailing 12 months · SpaceX and Tesla awards",
+    summary: contractsSummary(contracts),
+    mobilePanel: "more",
+  }, (body) => {
   const total = isNumericValue(contracts.ttm_obligated)
     ? formatPrice(contracts.ttm_obligated)
     : "unavailable (no dated source rows)";
-  panel.append(node("p", "news-score", `TTM federal obligations ${total}`));
+  body.append(node("p", "news-score", `TTM federal obligations ${total}`));
   const freshness = contracts.freshness === "stale" ? "stale (>7 days old)"
     : contracts.freshness === "fresh" ? "current"
       : "unavailable";
   const sourceIds = contracts.source_ids?.length ? contracts.source_ids.join(", ") : "source unavailable";
   const observed = contracts.observed_at ? formatTime(contracts.observed_at, session.prefs.display.time_zone)
     : "observation date unavailable";
-  panel.append(node("p", "signal-note",
+  body.append(node("p", "signal-note",
     `Rollup ${freshness} · as of ${contracts.as_of || "date unavailable"} · sources ${sourceIds} · last source observation ${observed}`));
   if (contracts.coverage === "unavailable") {
-    panel.append(node("p", "data-state", "No dated source rows support a trailing-12-month amount; zero is not inferred."));
+    body.append(node("p", "data-state", "No dated source rows support a trailing-12-month amount; zero is not inferred."));
   }
   const quarters = (contracts.by_agency || []).map(row => `${row.quarter}: ${formatPrice(row.obligated)}`);
-  if (quarters.length) panel.append(node("p", "signal-note", `Agency/fiscal-quarter breakdown · ${quarters.join(" · ")}`));
+  if (quarters.length) body.append(node("p", "signal-note", `Agency/fiscal-quarter breakdown · ${quarters.join(" · ")}`));
   const list = node("ul", "news-list");
   (contracts.recent || []).slice(0, 5).forEach((row) => {
     const item = node("li", "news-item");
@@ -1297,10 +1795,11 @@ function renderContracts(tickerData) {
     list.append(item);
   });
   if (!list.childElementCount) {
-    panel.append(node("p", "data-state", "No awards in the last 30 days."));
+    body.append(node("p", "data-state", "No awards in the last 30 days."));
   } else {
-    panel.append(list);
+    body.append(list);
   }
+  });
   return panel;
 }
 
@@ -1361,7 +1860,7 @@ function renderDrivers(tickerData) {
       if (button.disabled) button.title = "Outside the selected chart period. Choose a longer period to focus this catalyst.";
       body.append(button);
     });
-    const all = rememberDrawer(node("details", "signal-drawer"), "all-drivers");
+    const all = rememberInner(node("details", "signal-drawer"), "all-drivers");
     const sort = node("select", "driver-sort");
     sort.setAttribute("aria-label", "Sort all driver trends");
     [["effect", "Effect magnitude"], ["name", "Series name"], ["change", "1M change magnitude"], ["correlation", "90D correlation magnitude"]].forEach(([value, label]) => {
@@ -1438,14 +1937,110 @@ function signalSparkline(points, color = "var(--price)", label = "Historical ser
   return svg;
 }
 
+function renderCurveBlock(view) {
+  const block = node("div", "rates-curve");
+  block.append(node("h3", "signal-label", "Treasury yield curve"));
+  if (view.kind !== "ready") {
+    block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
+    return block;
+  }
+  const heading = node("div", "signal-heading");
+  heading.append(node("span", "", view.regime || "Regime unavailable"), node("span", "mono", view.dates));
+  block.append(heading);
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", "0 0 300 100");
+  svg.setAttribute("class", "yield-curve");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", view.ariaLabel);
+  [["curve-ago", view.agoPath], ["curve-today", view.todayPath]].forEach(([className, pathData]) => {
+    if (!pathData) return;
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("class", className);
+    path.setAttribute("d", pathData);
+    svg.append(path);
+  });
+  const labels = node("div", "rates-tenors");
+  const changes = node("div", "rates-bps");
+  view.tenors.forEach((tenor) => {
+    labels.append(node("span", "", tenor.tenor));
+    changes.append(node("span", tenor.bpClass, tenor.bpText));
+  });
+  block.append(svg, labels, changes, node("p", "signal-note", "Today (solid) versus 1M ago (dashed). The bp change uses the print on or before 30 calendar days earlier."));
+  return block;
+}
+
+function renderFomcBlock(view) {
+  const block = node("div", "rates-fomc");
+  block.append(node("h3", "signal-label", "Next FOMC · Kalshi"));
+  if (view.kind !== "ready") {
+    block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
+    return block;
+  }
+  const row = node("div", "rates-fomc-row");
+  const copy = node("div", "");
+  copy.append(node("p", "signal-heading", view.meeting));
+  const bar = node("div", "fomc-bar");
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", view.ariaLabel);
+  view.segments.forEach((segment) => {
+    const piece = node("span", segment.className);
+    piece.style.width = segment.width;
+    piece.title = segment.title;
+    bar.append(piece);
+  });
+  copy.append(bar, node("p", "signal-note", view.legend));
+  row.append(copy, signalSparkline(view.history.map((point) => ({ value: point.cut })), "var(--price)", view.sparkLabel));
+  block.append(row);
+  return block;
+}
+
+function renderPolicyBlock(view) {
+  const block = node("div", "rates-policy");
+  block.append(node("h3", "signal-label", "Implied policy path"));
+  if (view.kind !== "ready") {
+    block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
+    return block;
+  }
+  block.append(node("p", "signal-note", view.note));
+  const chart = node("div", "policy-bars");
+  chart.setAttribute("role", "img");
+  chart.setAttribute("aria-label", view.ariaLabel);
+  view.bars.forEach((bar) => {
+    const column = node("div", "policy-bar");
+    column.append(node("span", "mono", bar.rateText));
+    const track = node("span", "policy-track");
+    const fill = node("span", "policy-fill");
+    fill.style.height = bar.height;
+    if (bar.reference) {
+      const reference = node("span", "policy-reference");
+      reference.style.bottom = bar.reference;
+      track.append(reference);
+    }
+    track.append(fill);
+    column.append(track, node("span", "", bar.meeting), node("span", "mono", bar.changeText));
+    chart.append(column);
+  });
+  block.append(chart);
+  return block;
+}
+
 function renderMacroPanels(tickerData, chartData, chartDataState) {
   const grid = node("div", "macro-panel-grid");
   const rows = driverRows(tickerData);
   const rates = rows.filter(row => ["DGS2", "DGS10", "DGS30", "T10Y2Y", "DFII10", "SOFR", "T10YIE"].includes(row.series_id));
-  const ratesPanel = node("section", "panel");
-  ratesPanel.dataset.mobilePanel = "signals";
-  ratesPanel.append(sectionHeader("Rates & yields", "Latest available observations · 1M change in basis points"));
-  const rateBody = node("div", "panel-body");
+  const ratesPanel = renderDrawer({
+    id: "rates",
+    title: "Rates & yields",
+    subtitle: "Latest available observations · 1M change in basis points",
+    summary: ratesSummary(rates),
+    mobilePanel: "signals",
+  }, (rateBody) => {
+  const ratesDocument = session.dashboard?.rates;
+  rateBody.append(
+    renderCurveBlock(curveView(ratesDocument, session.dashboardState)),
+    renderFomcBlock(fomcView(ratesDocument, session.dashboardState)),
+    renderPolicyBlock(policyPathView(ratesDocument, session.dashboardState)),
+  );
   if (!rates.length) rateBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading rates…"
     : session.dashboardState === "error" ? "Rates could not be loaded. Refresh data to retry."
       : "Rates are unavailable until D1 observations reach the trend build."));
@@ -1460,12 +2055,15 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
       "var(--price)", `${driverLabel(row.series_id)} over the last 63 stored sessions`));
     rateBody.append(entry);
   });
-  ratesPanel.append(rateBody);
-  const inflation = node("section", "panel");
-  inflation.dataset.mobilePanel = "calendar";
-  inflation.id = "mobile-panel-calendar";
-  inflation.append(sectionHeader("Inflation & release links", `YoY trend · historical links to ${session.selected}`));
-  const releaseBody = node("div", "panel-body");
+  });
+  const inflation = renderDrawer({
+    id: "inflation",
+    title: "Inflation & release links",
+    subtitle: `YoY trend · historical links to ${session.selected}`,
+    summary: inflationSummary(tickerData),
+    mobilePanel: "calendar",
+    panelId: "mobile-panel-calendar",
+  }, (releaseBody) => {
   const links = tickerData?.release_links;
   const latest = (links?.latest || []).filter(row => /^(CORE_)?(CPI|PCE)_YOY$/.test(row.series_id));
   if (!latest.length) releaseBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading releases…"
@@ -1490,18 +2088,20 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   });
   const calendar = session.dashboard?.releases?.next || [];
   if (calendar.length) {
-    const drawer = rememberDrawer(node("details", "signal-drawer"), "release-calendar");
+    const drawer = rememberInner(node("details", "signal-drawer"), "release-calendar");
     drawer.append(node("summary", "", `Release calendar · ${calendar.length} upcoming`));
     calendar.forEach(row => drawer.append(node("p", "signal-note", `${row.series} · ${formatTime(row.release_ts, session.prefs.display.time_zone)}`)));
     releaseBody.append(drawer);
   }
   releaseBody.append(node("p", "signal-note", "Monthly releases are excluded from daily rolling correlations. Missing consensus uses YoY change, not a consensus surprise. Links describe historical association, not causation."));
-  inflation.append(releaseBody);
-  const drift = node("section", "panel");
-  drift.dataset.mobilePanel = "signals";
-  drift.append(sectionHeader("Correlation drift", `${session.selected} · 30D / 90D rolling correlations`));
-  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "correlation");
-  drawer.append(node("summary", "", "Show correlation history and month-over-month drift"));
+  });
+  const drift = renderDrawer({
+    id: "correlation",
+    title: "Correlation drift",
+    subtitle: `${session.selected} · 30D / 90D rolling correlations`,
+    summary: correlationSummary(rows, chartData, chartDataState),
+    mobilePanel: "signals",
+  }, (drawer) => {
   if (chartDataState === "error") drawer.append(node("p", "data-state error", "Correlation history could not be loaded. Use Try again above."));
   else if (chartDataState === "loading") drawer.append(node("p", "data-state", "Loading correlation history…"));
   const daily = rows.filter(row => !row.series_id.endsWith("_YOY"));
@@ -1516,23 +2116,19 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
     drawer.append(entry);
   });
   if (!daily.length) drawer.append(node("p", "data-state", "No daily driver correlations available yet."));
-  drift.append(drawer);
+  });
   grid.append(ratesPanel, inflation, ...renderDetailPanels(tickerData, chartData, chartDataState), drift, renderCatalystCalendar(tickerData));
   return grid;
 }
 
 function renderDetailPanels(tickerData, chartData, chartDataState) {
   const panels = [];
-  const create = (title, subtitle) => {
-    const panel = node("section", "panel");
-    panel.dataset.mobilePanel = "signals";
-    panel.append(sectionHeader(title, subtitle));
-    const body = node("div", "panel-body");
-    panel.append(body);
-    panels.push(panel);
+  const create = (id, title, subtitle, summary) => {
+    let body;
+    panels.push(renderDrawer({ id, title, subtitle, summary, mobilePanel: "signals" }, (target) => { body = target; }));
     return body;
   };
-  const market = create("Market comparison", `1M adjusted returns · ${session.selected} and ETF proxies`);
+  const market = create("market-comparison", "Market comparison", `1M adjusted returns · ${session.selected} and ETF proxies`, marketSummary());
   if (session.dashboardState === "loading") market.append(node("p", "data-state", "Loading market prices…"));
   else if (session.dashboardState === "error") market.append(node("p", "data-state error", "Market prices could not be loaded. Refresh data to retry."));
   [session.selected, "SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH"].filter((id, i, ids) => ids.indexOf(id) === i).forEach(id => {
@@ -1541,18 +2137,18 @@ function renderDetailPanels(tickerData, chartData, chartDataState) {
     market.append(node("p", "signal-heading", `${id} · ${quote.available ? formatPercent(quote.returnValue, 1) : "History unavailable"}`),
       signalSparkline(history.slice(-63).map(bar => ({ value: chartValue(bar) })), "var(--price)", `${id} adjusted closes`));
   });
-  const averages = create("Moving averages", `${session.selected} · adjusted daily closes`);
+  const averages = create("moving-averages", "Moving averages", `${session.selected} · adjusted daily closes`, movingAverageSummary(tickerData?.price_history));
   if (session.dashboardState === "loading") averages.append(node("p", "data-state", "Loading daily closes…"));
   else if (session.dashboardState === "error") averages.append(node("p", "data-state error", "Daily closes could not be loaded."));
   movingAverageRows(tickerData?.price_history).forEach(row => averages.append(node("p", "signal-heading",
     `${row.window}D · ${row.value == null ? "Insufficient history" : `${formatPrice(row.value)} · price ${formatPercent(row.distance, 1)} vs average`}`)));
   const drivers = driverRows(tickerData);
   [
-    ["Volatility", ["VIXCLS"], "VIX levels and observed trend"],
-    ["Dollar & oil", ["DTWEXBGS", "DCOILWTICO"], "Observed macro series, not forecasts"],
-    ["Tariffs & geopolitics", ["USEPUINDXD"], "Policy-uncertainty proxy and curated policy events"],
-  ].forEach(([title, ids, subtitle]) => {
-    const body = create(title, subtitle);
+    ["volatility", "Volatility", ["VIXCLS"], "VIX levels and observed trend", seriesSummary(drivers, "VIXCLS", "VIX")],
+    ["dollar-oil", "Dollar & oil", ["DTWEXBGS", "DCOILWTICO"], "Observed macro series, not forecasts", dollarSummary(drivers)],
+    ["tariffs", "Tariffs & geopolitics", ["USEPUINDXD"], "Policy-uncertainty proxy and curated policy events", tariffSummary(drivers)],
+  ].forEach(([id, title, ids, subtitle, summary]) => {
+    const body = create(id, title, subtitle, summary);
     if (chartDataState === "loading") body.append(node("p", "data-state", "Loading historical series…"));
     else if (chartDataState === "error") body.append(node("p", "data-state error", "Historical series could not be loaded. Refresh data to retry."));
     ids.forEach(id => {
@@ -1577,12 +2173,14 @@ function renderDetailPanels(tickerData, chartData, chartDataState) {
 }
 
 function renderCatalystCalendar(tickerData) {
-  const panel = node("section", "panel");
-  panel.dataset.mobilePanel = "calendar";
-  panel.append(sectionHeader("Catalyst calendar", `Published events for ${session.selected} and the macro universe`));
-  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "catalyst-calendar");
   const events = catalystRows(session.dashboard, session.selected);
-  drawer.append(node("summary", "", `Upcoming and past catalysts · ${events.length} published`));
+  const panel = renderDrawer({
+    id: "catalyst-calendar",
+    title: "Catalyst calendar",
+    subtitle: `Published events for ${session.selected} and the macro universe`,
+    summary: catalystSummary(events),
+    mobilePanel: "calendar",
+  }, (drawer) => {
   if (!events.length) drawer.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading catalysts…"
     : session.dashboardState === "error" ? "Catalysts could not be loaded. Refresh data to retry." : "No catalyst feed has been published."));
   const bars = selectedChartBars(tickerData);
@@ -1601,7 +2199,7 @@ function renderCatalystCalendar(tickerData) {
     drawer.append(row);
   });
   drawer.append(node("p", "signal-note", "Nontrading-day catalysts align to the next stored session. Intraday markers use the first stored bar on the event date. No demo events are included."));
-  panel.append(drawer);
+  });
   return panel;
 }
 
@@ -1724,12 +2322,17 @@ function renderFilings(tickerData) {
 }
 
 function renderCompanyPanel(tickerData, chartData, chartDataState) {
-  const panel = node("section", "panel");
-  panel.dataset.mobilePanel = "more";
-  panel.append(sectionHeader(session.selected === "TSLA" ? "Tesla · robotaxi & company themes"
-    : session.selected === "SPCX" ? "SpaceX · operations & contracts" : `${session.selected} · company themes`,
-  "Published lake data only · no design-demo facts"));
-  const body = node("div", "panel-body");
+  const events = catalystRows(session.dashboard, session.selected)
+    .filter(event => event.category === (session.selected === "SPCX" ? "space" : "robotaxi"));
+  const title = session.selected === "TSLA" ? "Tesla · robotaxi & company themes"
+    : session.selected === "SPCX" ? "SpaceX · operations & contracts" : `${session.selected} · company themes`;
+  const panel = renderDrawer({
+    id: "company",
+    title,
+    subtitle: "Published lake data only · no design-demo facts",
+    summary: companySummary(tickerData, events),
+    mobilePanel: "more",
+  }, (body) => {
   if (session.dashboardState === "loading") body.append(node("p", "data-state", "Loading company events…"));
   else if (session.dashboardState === "error") body.append(node("p", "data-state error", "Company events could not be loaded. Refresh data to retry."));
   if (session.selected === "TSLA") {
@@ -1755,8 +2358,6 @@ function renderCompanyPanel(tickerData, chartData, chartDataState) {
   } else {
     body.append(node("p", "signal-note", "No company-specific operating-metrics feed is configured for this symbol. Available SEC financial series remain in the Fundamentals overlays."));
   }
-  const events = catalystRows(session.dashboard, session.selected)
-    .filter(event => event.category === (session.selected === "SPCX" ? "space" : "robotaxi"));
   if (!events.length) body.append(node("p", "data-state", "No matching company operating events are available."));
   events.slice(-5).reverse().forEach(event => {
     const observed = event.observed_at ? ` · collected ${String(event.observed_at).slice(0, 10)}` : "";
@@ -1775,15 +2376,18 @@ function renderCompanyPanel(tickerData, chartData, chartDataState) {
     renderDashboard();
     root.querySelector('[data-overlay-tab="Fundamentals"]')?.focus();
   }));
-  panel.append(body);
+  });
   return panel;
 }
 
 function renderAboutData() {
-  const panel = node("section", "panel");
-  panel.dataset.mobilePanel = "more";
-  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "about-data");
-  drawer.append(node("summary", "", "About this data · provenance and methodology"),
+  const panel = renderDrawer({
+    id: "about-data",
+    title: "About this data",
+    summary: "Sources, trend definitions, methodology",
+    mobilePanel: "more",
+  }, (drawer) => {
+  drawer.append(
     node("p", "signal-note", "Source IDs identify FRED/Treasury macro series, price-provider histories, SEC EDGAR financial facts and filings, curated release/event calendars, and provider news. Observed and available dates appear in driver tooltips; collection health and schedules are separate from observation freshness."),
     node("p", "signal-note", "Prices use split/dividend-adjusted daily closes for historical comparisons. Intraday bars and live quotes are separate; ETF comparisons use their own stored price histories."),
     node("p", "signal-note", "Driver trends use 5/21/63-session changes and a 1M z-score, not stock moving averages. Stock trend uses 20/50-day averages. The 1Y range is a high-low position, not an empirical percentile."),
@@ -1792,31 +2396,260 @@ function renderAboutData() {
     node("p", "signal-note", "Quarterly fundamentals change on filing/release dates. Public float is reported USD, usually annual; estimated float shares in the short-interest lane are a separate calculation."),
     node("p", "signal-note", "News sentiment is a rolling mean of available daily scores over seven calendar days, mixing provider sentiment with a headline lexicon fallback. Missing days are not fabricated. Catalyst feeds are bounded published events, not an exhaustive corporate calendar."),
     action("View collection schedules and source health", "button-link", () => settings.open("refresh", "about-data")));
-  panel.append(drawer);
+  });
   return panel;
 }
 
+let marketTimer = 0;
+
+function clearMarketTimer() {
+  if (!marketTimer) return;
+  clearTimeout(marketTimer);
+  marketTimer = 0;
+}
+
+function paintHeaderClock() {
+  const zone = session.prefs?.display?.time_zone || "UTC";
+  const now = new Date();
+  const view = marketLabel(session.dashboard?.market, now, zone);
+  const badge = root.querySelector("[data-market-status]");
+  const date = root.querySelector("[data-header-date]");
+  if (!badge && !date) {
+    clearMarketTimer();
+    return;
+  }
+  if (badge) {
+    badge.dataset.marketStatus = view.status;
+    badge.setAttribute("aria-label", view.text);
+    const dot = badge.querySelector(".dot");
+    if (dot) dot.className = `dot${view.dot ? ` ${view.dot}` : ""}`;
+    const full = badge.querySelector(".market-label");
+    const compact = badge.querySelector(".market-compact");
+    if (full && full.textContent !== view.text) full.textContent = view.text;
+    if (compact && compact.textContent !== view.compact) compact.textContent = view.compact;
+  }
+  if (date) {
+    const text = headerDate(now, zone);
+    if (date.textContent !== text) date.textContent = text;
+    date.dateTime = now.toISOString();
+  }
+  armMarketTimer(view.boundary);
+}
+
+function armMarketTimer(boundary) {
+  clearMarketTimer();
+  marketTimer = setTimeout(paintHeaderClock, clockDelay(boundary, Date.now()));
+}
+
 function renderAppHeader() {
+  const zone = session.prefs?.display?.time_zone || "UTC";
+  const now = new Date();
+  const view = marketLabel(session.dashboard?.market, now, zone);
   const header = node("header", "app-header");
   const brand = node("div", "brand-line");
   brand.append(node("h1", "", "Investor Dashboard"));
   const market = node("span", "market-badge");
-  market.append(node("span", "dot ok"), document.createTextNode(" Private workspace"));
+  market.dataset.marketStatus = view.status;
+  market.setAttribute("role", "status");
+  market.setAttribute("aria-label", view.text);
+  const dot = node("span", `dot${view.dot ? ` ${view.dot}` : ""}`);
+  dot.setAttribute("aria-hidden", "true");
+  market.append(dot, node("span", "market-label", view.text), node("span", "market-compact", view.compact));
   brand.append(market);
   header.append(brand);
   const actions = node("div", "header-actions");
-  const lastRefresh = session.dashboard?.generated_at
-    ? `Data ${formatTime(session.dashboard.generated_at, session.prefs.display.time_zone)}`
-    : "Refresh data";
-  const schedule = action(lastRefresh, "", () => settings.open("refresh", "header-refresh"));
+  const when = session.dashboard?.generated_at
+    ? formatTime(session.dashboard.generated_at, zone)
+    : "";
+  const lastRefresh = when ? `Data ${when}` : "Refresh data";
+  const schedule = node("button", "");
+  schedule.type = "button";
+  schedule.append(node("span", "schedule-word", "Data"));
+  if (when) {
+    schedule.append(document.createTextNode(" "));
+    schedule.append(node("span", "schedule-when", when));
+  }
+  schedule.addEventListener("click", () => settings.open("refresh", "header-refresh"));
   schedule.dataset.opener = "header-refresh";
   schedule.setAttribute("aria-label", `${lastRefresh}; open collection schedules and data refresh status`);
   const refresh = action("↻", "", () => refreshData(true));
   refresh.setAttribute("aria-label", "Refresh dashboard data");
   refresh.dataset.refresh = "data";
-  actions.append(schedule, refresh, settings.renderAccountButton());
+  const date = node("time", "header-date", headerDate(now, zone));
+  date.dataset.headerDate = "date";
+  date.dateTime = now.toISOString();
+  actions.append(date, schedule, refresh, settings.renderAccountButton());
   header.append(actions);
+  armMarketTimer(view.boundary);
   return header;
+}
+
+function renderMetricCard(metric) {
+  const card = node("article", `panel stock-metric${metric.unavailable ? " stock-metric-unavailable" : ""}`);
+  card.dataset.metricId = metric.id;
+  const title = node("h3", "stock-metric-title", metric.name);
+  card.append(title);
+  if (metric.unit && !metric.unavailable) card.append(node("p", "signal-note", metric.unit));
+  if (metric.series?.length) {
+    const bars = node("div", "stock-bars");
+    const reported = metric.series.filter((point) => point.reported);
+    const max = Math.max(...reported.map((point) => point.value), 0);
+    bars.setAttribute("role", "img");
+    bars.setAttribute("aria-label", `${metric.name} by quarter`);
+    metric.series.forEach((point) => {
+      const bar = node("span", point.reported ? "stock-bar" : "stock-bar stock-bar-missing");
+      const height = point.reported && max ? Math.max(8, Math.round((point.value / max) * 100)) : 8;
+      bar.style.height = `${height}%`;
+      bar.title = point.reported ? `${point.fiscal_period} ${formatMetricValue(point.value, metric.unit)}` : `${point.fiscal_period} not reported`;
+      bars.append(bar);
+    });
+    card.append(bars);
+  }
+  const latest = node("p", "stock-latest");
+  latest.append(document.createTextNode(metric.unavailable ? "Unavailable. " : `Latest ${metric.latestPeriod ? `${metric.latestPeriod} ` : ""}`));
+  latest.append(node("span", "", metric.unavailable ? metric.sourceTitle : metric.latest));
+  if (!metric.unavailable && metric.qoq) {
+    latest.append(document.createTextNode(" "));
+    latest.append(node("span", metric.qoqValue > 0 ? "positive" : metric.qoqValue < 0 ? "negative" : "neutral", `QoQ ${metric.qoq}`));
+  }
+  if (!metric.unavailable && metric.yoy) {
+    latest.append(document.createTextNode(" "));
+    latest.append(node("span", metric.yoyValue > 0 ? "positive" : metric.yoyValue < 0 ? "negative" : "neutral", `YoY ${metric.yoy}`));
+  }
+  card.append(latest);
+  const provenance = node("p", "stock-provenance");
+  if (metric.sourceUrl) {
+    const link = node("a", "", metric.sourceTitle);
+    link.href = metric.sourceUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    provenance.append(link);
+  } else {
+    provenance.append(document.createTextNode(metric.sourceTitle || "Source unavailable"));
+  }
+  const details = [metric.published, metric.confidence, metric.approval].filter(Boolean).join(" · ");
+  if (details) provenance.append(document.createTextNode(`${metric.sourceUrl || metric.sourceTitle ? " · " : ""}${details}`));
+  card.append(provenance);
+  if (metric.xbrl) card.append(node("p", metric.xbrl === "XBRL mismatch" ? "stock-xbrl mismatch" : "stock-xbrl", metric.xbrl));
+  return card;
+}
+
+function renderStockPage() {
+  const tickerData = selectedData();
+  const chartData = session.chartData[session.selected] || null;
+  const chartDataState = session.chartDataState[session.selected] || "loading";
+  const payload = session.stockPage[session.selected] || null;
+  const pageState = session.stockPageState[session.selected] || "loading";
+  const panels = stockPanels(payload, chartData);
+  const badge = freshnessBadge(payload, pageState);
+  const history = tickerData?.price_history || [];
+  const bars = validBars(history);
+  const latest = bars.at(-1);
+  const dayChange = returns(history, 1);
+  root.replaceChildren();
+  applyTheme(session.prefs.display);
+  root.append(renderAppHeader(), renderWatchlist());
+
+  const heading = node("section", "panel stock-heading");
+  heading.dataset.stockPanel = "overview";
+  const back = action("← Dashboard", "button-link", () => navigateToDashboard());
+  back.dataset.stockBack = "dashboard";
+  const copy = node("div", "stock-heading-copy");
+  const title = node("h2", "", `${session.selected} · ${companyName(session.selected, payload)}`);
+  title.id = "stock-title";
+  title.tabIndex = -1;
+  const price = node("p", "stock-price");
+  price.append(node("span", "stock-price-value", latest ? formatPrice(displayPrice(latest)) : "—"));
+  if (isNumericValue(dayChange)) {
+    price.append(node("span", polarity(dayChange), ` ${formatPercent(dayChange)}`));
+  }
+  const updated = session.dashboard?.generated_at
+    ? `Updated ${formatTime(session.dashboard.generated_at, session.prefs.display.time_zone)}`
+    : "Updated time unavailable";
+  const freshness = node("p", "stock-freshness", badge.text);
+  freshness.dataset.tone = badge.tone;
+  copy.append(title, price, node("p", "overview-meta", updated), freshness);
+  heading.append(back, copy);
+  root.append(heading);
+
+  const page = node("main", "stock-page");
+  page.dataset.stockTab = session.stockTab;
+  page.setAttribute("aria-label", `${session.selected} company page`);
+
+  const chart = renderPricePanel(
+    tickerData,
+    chartData,
+    chartDataState,
+    selectChartPeriod,
+    (next) => updateChartSettings(session.selected, next),
+  );
+  chart.classList.add("price-panel-compact");
+  chart.dataset.stockPanel = "overview";
+
+  const section = (id, label, cards, empty) => {
+    const block = node("section", "stock-section");
+    block.dataset.stockPanel = id;
+    block.id = `stock-panel-${id}`;
+    block.append(node("h3", "stock-section-title", label));
+    if (!cards.length) block.append(node("p", "data-state", empty));
+    else {
+      const grid = node("div", "stock-metric-grid");
+      cards.forEach((metric) => grid.append(renderMetricCard(metric)));
+      block.append(grid);
+    }
+    return block;
+  };
+
+  const calls = callsCopy();
+  const callsBlock = node("section", "stock-section");
+  callsBlock.dataset.stockPanel = "calls";
+  callsBlock.id = "stock-panel-calls";
+  callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
+  if (panels.guidance.length) {
+    const grid = node("div", "stock-metric-grid");
+    panels.guidance.forEach((metric) => grid.append(renderMetricCard(metric)));
+    callsBlock.append(grid);
+  }
+  callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
+
+  page.append(
+    chart,
+    section("kpis", "Operating KPIs", panels.operating, emptyKpiCopy()),
+    section(
+      "fundamentals",
+      panels.fundamentalsSource === "edgar" ? "SEC filings" : "IR fundamentals",
+      panels.fundamentals,
+      "No IR fundamentals are approved, and no SEC XBRL series is in this snapshot.",
+    ),
+    callsBlock,
+  );
+
+  const tabs = node("div", "stock-page-tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Company page sections");
+  STOCK_TABS.forEach((item) => {
+    const tab = action(item.label, "", () => {
+      session.stockTab = item.id;
+      renderDashboard();
+      root.querySelector(`#stock-tab-${item.id}`)?.focus();
+    });
+    tab.id = `stock-tab-${item.id}`;
+    tab.dataset.stockTab = item.id;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", item.id === "overview" ? "stock-title" : `stock-panel-${item.id}`);
+    tab.setAttribute("aria-selected", String(item.id === session.stockTab));
+    tab.tabIndex = item.id === session.stockTab ? 0 : -1;
+    tab.addEventListener("keydown", (event) => {
+      const next = nextStockTab(item.id, event.key);
+      if (!next) return;
+      event.preventDefault();
+      root.querySelector(`#stock-tab-${next}`)?.click();
+    });
+    tabs.append(tab);
+  });
+  page.append(tabs);
+  root.append(page);
+  settings.refresh();
 }
 
 function renderResearchPage() {
@@ -1845,6 +2678,8 @@ function renderResearchPage() {
     alert.append(action("Open settings", "button-link", reopen));
     root.append(alert);
   }
+  const researchPanelError = renderPanelSaveError();
+  if (researchPanelError) root.append(researchPanelError);
 
   if (errorMessage) {
     const alert = node("p", "data-state error");
@@ -1895,6 +2730,21 @@ function renderNotFoundPage() {
   settings.refresh();
 }
 
+function navigateToStock(ticker) {
+  const hash = stockHash(ticker);
+  if (!hash) return;
+  if (session.route.page === "dashboard") session.dashboardSelection = session.selected;
+  const symbol = hash.slice("#stock/".length);
+  history.pushState(history.state, "", `/${hash}`);
+  session.route = routeFromLocation(location.pathname, hash);
+  session.selected = symbol;
+  session.stockTab = "overview";
+  renderDashboard();
+  loadChartData(symbol);
+  loadStockPage(symbol);
+  requestAnimationFrame(() => root.querySelector("#stock-title")?.focus());
+}
+
 function navigateToResearch(ticker) {
   const path = tickerResearchPath(ticker);
   if (!path) return;
@@ -1917,13 +2767,14 @@ function navigateToDashboard(ticker = session.dashboardSelection || session.sele
 }
 
 function handleRoutePopstate() {
-  const state = routeStateForPath(location.pathname, session.dashboardSelection, session.selected);
+  const state = routeStateForLocation(location.pathname, location.hash, session.dashboardSelection, session.selected);
   session.route = state.route;
   session.dashboardSelection = state.dashboardSelection
     || fallbackSelection(session.prefs, session.selected);
   session.selected = state.selected || fallbackSelection(session.prefs, session.dashboardSelection);
   renderDashboard();
   loadChartData(session.selected);
+  if (session.route.page === "stock") loadStockPage(session.selected);
   settings.openFromHash();
 }
 
@@ -1955,11 +2806,22 @@ async function selectChartPeriod(periodId) {
   }
 }
 
+function restoreDrawerFocus(id) {
+  if (!id) return;
+  root.querySelector(`[data-drawer-toggle="${id}"]`)?.focus();
+}
+
 function renderDashboard() {
+  const restoreDrawer = document.activeElement?.dataset?.drawerToggle || null;
   const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
+  if (session.route.page === "stock") {
+    renderStockPage();
+    return;
+  }
   if (session.route.page === "research") {
     renderResearchPage();
+    restoreDrawerFocus(restoreDrawer);
     return;
   }
   if (session.route.page === "not-found") {
@@ -1981,6 +2843,8 @@ function renderDashboard() {
     alert.append(action("Open settings", "button-link", reopen));
     root.append(alert);
   }
+  const panelSaveError = renderPanelSaveError();
+  if (panelSaveError) root.append(panelSaveError);
 
   if (errorMessage) {
     const alert = node("p", "data-state error");
@@ -2058,6 +2922,7 @@ function renderDashboard() {
     root.querySelector(".price-panel-state")?.remove();
   }
   settings.refresh();
+  restoreDrawerFocus(restoreDrawer);
 }
 
 async function refreshData(showLoading) {
@@ -2091,6 +2956,7 @@ async function refreshData(showLoading) {
   session.dashboardError = outcome.dashboardError;
   renderDashboard();
   await loadChartData(session.selected, true);
+  if (session.route.page === "stock") await loadStockPage(session.selected, true);
 }
 
 async function start() {
@@ -2130,8 +2996,9 @@ async function start() {
     const returnTicker = sessionStorage.getItem(authKeys.dashboardTicker);
     sessionStorage.removeItem(authKeys.dashboardTicker);
     session.dashboardSelection = fallbackSelection(session.prefs, returnTicker);
-    const routeState = routeStateForPath(
+    const routeState = routeStateForLocation(
       location.pathname,
+      location.hash,
       session.dashboardSelection,
       session.dashboardSelection,
     );
@@ -2140,7 +3007,11 @@ async function start() {
     session.selected = routeState.selected;
     renderDashboard();
     window.addEventListener("popstate", handleRoutePopstate);
-    window.addEventListener("hashchange", () => settings.openFromHash());
+    window.addEventListener("hashchange", () => {
+      const stock = parseStockHash(location.hash);
+      if (stock || session.route.page === "stock") handleRoutePopstate();
+      settings.openFromHash();
+    });
     settings.openFromHash();
     await refreshData(false);
   } catch (error) {
