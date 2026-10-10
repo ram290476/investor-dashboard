@@ -111,7 +111,7 @@ variable "max_tickers_per_user" {
 }
 
 variable "metrics_namespace" {
-  description = "CloudWatch namespace for the app's custom metrics. Keep the metric set at 10 or fewer to stay in the free tier."
+  description = "CloudWatch namespace for custom metrics. Job metrics use one service dimension. DashboardRawBytes and DashboardGzipBytes feed the 4 MiB payload alarm, ahead of the 6 MiB Lambda response limit."
   type        = string
   default     = "InvestorDashboard"
 }

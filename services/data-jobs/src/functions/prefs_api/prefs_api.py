@@ -21,6 +21,8 @@ Item (table user_prefs, partition key user_sub):
     updated_at    string   ISO-8601 UTC
 
 GET /chart/{ticker} checks that ticker is in this caller's preferences before reading its chart document.
+GET /dashboard, /chart/{ticker} and /status are gzip-encoded when the client accepts gzip and the
+JSON body is over 1 KB. The Lambda response stays under the 6 MiB synchronous payload limit.
 
 Adding a ticker nobody else follows publishes a TickerAdded event; the backfill
 job then loads 5 years of daily history for it.
@@ -28,10 +30,15 @@ job then loads 5 years of daily history for it.
 
 from __future__ import annotations
 
+import base64
+import gzip
+import hashlib
 import json
+import logging
 import os
 import re
 import time
+import zlib
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -85,6 +92,21 @@ _events = boto3.client("events")
 _s3 = boto3.client("s3")
 _session_cache: dict[str, tuple[float, object]] = {}
 
+# Warm-container cache of gzip bytes, keyed by S3 ETag (dashboard also includes the status ETag).
+_GZIP_CACHE: dict[str, bytes] = {}
+_GZIP_CACHE_MAX = 32
+# Keep level and mtime in sync with lake.write_json_and_gzip so a sibling .gz can be returned as stored.
+GZIP_LEVEL = 6
+GZIP_MIN_BYTES = 1024
+# Synchronous Lambda response limit. The measured size is the proxy JSON, including base64 expansion.
+LAMBDA_RESPONSE_LIMIT = 6 * 1024 * 1024
+SECURITY_HEADERS = {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+}
+logger = logging.getLogger(__name__)
 
 class ValidationError(ValueError):
     pass
@@ -232,19 +254,6 @@ def _table_for(sub: str):
     return table
 
 
-def _response(status: int, body: dict) -> dict:
-    return {
-        "statusCode": status,
-        "headers": {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff",
-            "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
-        },
-        "body": json.dumps(body, default=str),
-    }
-
-
 def _public_display(item: dict) -> dict:
     display = {"theme": DEFAULTS["display"]["theme"], **dict(item.get("display") or {})}
     raw_panels = display.get("panels")
@@ -340,6 +349,112 @@ def _public_stock(document: dict | None, ticker: str) -> dict:
         "unavailable": source.get("unavailable") or [],
         "mismatches": source.get("mismatches") or [],
     }
+
+
+def _accepts_gzip(event: dict | None) -> bool:
+    """True when Accept-Encoding lists gzip with q greater than zero. HTTP API lowercases names."""
+    if not event:
+        return False
+    headers = event.get("headers") or {}
+    value = ""
+    for key, item in headers.items():
+        if isinstance(key, str) and key.lower() == "accept-encoding" and isinstance(item, str):
+            value = item
+            break
+    for part in value.split(","):
+        token, _, params = part.strip().lower().partition(";")
+        if token != "gzip":
+            continue
+        quality = 1.0
+        for param in params.split(";"):
+            name, _, raw_q = param.strip().partition("=")
+            if name != "q":
+                continue
+            try:
+                quality = float(raw_q)
+            except ValueError:
+                quality = 0.0
+        return quality > 0
+    return False
+
+
+def _proxy_response_bytes(body: str, headers: dict, base64_encoded: bool) -> int:
+    """Bytes of the Lambda proxy JSON. That is the body the 6 MiB synchronous limit measures."""
+    envelope = {"statusCode": 200, "headers": headers, "body": body, "isBase64Encoded": base64_encoded}
+    return len(json.dumps(envelope).encode())
+
+
+def _remember_gzip(cache_key: str, payload: bytes) -> None:
+    _GZIP_CACHE.pop(cache_key, None)
+    while len(_GZIP_CACHE) >= _GZIP_CACHE_MAX:
+        _GZIP_CACHE.pop(next(iter(_GZIP_CACHE)))
+    _GZIP_CACHE[cache_key] = payload
+
+
+def _gzip_matches(payload: bytes, raw: bytes) -> bool:
+    try:
+        return gzip.decompress(payload) == raw
+    except (EOFError, OSError, zlib.error):
+        return False
+
+
+def _gzip_payload(cache_key: str | None, raw: bytes, gzip_key: str | None) -> bytes:
+    if cache_key:
+        cached = _GZIP_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+    sibling = _read_gzip_sibling(gzip_key) if gzip_key else None
+    if sibling is not None and not _gzip_matches(sibling, raw):
+        logger.warning("serving_gzip_mismatch", extra={"key": gzip_key})
+        sibling = None
+    payload = sibling if sibling is not None else gzip.compress(raw, compresslevel=GZIP_LEVEL, mtime=0)
+    if cache_key:
+        _remember_gzip(cache_key, payload)
+    return payload
+
+
+def _too_large(raw_bytes: int) -> dict:
+    logger.error("response_too_large", extra={"raw_bytes": raw_bytes, "limit_bytes": LAMBDA_RESPONSE_LIMIT})
+    return {
+        "statusCode": 503,
+        "headers": dict(SECURITY_HEADERS),
+        "body": json.dumps({"error": "The response is too large to deliver.", "code": "RESPONSE_TOO_LARGE"}),
+    }
+
+
+def _response(
+    status: int,
+    body: dict,
+    event: dict | None = None,
+    *,
+    raw: bytes | None = None,
+    gzip_key: str | None = None,
+    cache_key: str | None = None,
+) -> dict:
+    encoded = raw if raw is not None else json.dumps(body, default=str).encode()
+    headers = dict(SECURITY_HEADERS)
+    if len(encoded) > GZIP_MIN_BYTES:
+        headers["Vary"] = "Accept-Encoding"
+    if _accepts_gzip(event) and len(encoded) > GZIP_MIN_BYTES:
+        payload = _gzip_payload(cache_key, encoded, gzip_key)
+        body_text = base64.b64encode(payload).decode("ascii")
+        headers["Content-Encoding"] = "gzip"
+        if _proxy_response_bytes(body_text, headers, True) > LAMBDA_RESPONSE_LIMIT:
+            return _too_large(len(encoded))
+        return {"statusCode": status, "headers": headers, "isBase64Encoded": True, "body": body_text}
+    body_text = encoded.decode()
+    if _proxy_response_bytes(body_text, headers, False) > LAMBDA_RESPONSE_LIMIT:
+        return _too_large(len(encoded))
+    return {"statusCode": status, "headers": headers, "body": body_text}
+
+
+def _etag_token(etag: str, raw: bytes | None = None) -> str:
+    token = etag.strip().strip('"')
+    if token:
+        return token
+    if raw is None:
+        return "none"
+    return hashlib.sha256(raw).hexdigest()
 
 
 _ERROR_MESSAGES = {
@@ -441,15 +556,17 @@ def _queue_backfill(added: list[str], route: str, method: str) -> bool:
     return True
 
 
-def _read_serving_json(key: str) -> dict | None:
+def _read_serving_document(key: str) -> tuple[bytes, str, dict] | None:
+    """Return the stored bytes, S3 ETag and parsed object. Bytes stay intact so a .gz sibling can match."""
     if not LAKE_BUCKET:
         raise RuntimeError("LAKE_BUCKET is not configured")
     try:
-        body = _s3.get_object(Bucket=LAKE_BUCKET, Key=key)["Body"].read()
+        obj = _s3.get_object(Bucket=LAKE_BUCKET, Key=key)
     except ClientError as exc:
         if _aws_error_code(exc) in {"NoSuchKey", "404"}:
             return None
         raise
+    body = obj["Body"].read()
     try:
         document = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -458,7 +575,25 @@ def _read_serving_json(key: str) -> dict | None:
         raise ServingDocumentError("serving document must be a JSON object") from ValueError(
             "serving document must be a JSON object"
         )
-    return document
+    return body, str(obj.get("ETag") or ""), document
+
+
+def _read_gzip_sibling(key: str) -> bytes | None:
+    """Optional precompressed object. A miss falls back to compressing in this process."""
+    if not LAKE_BUCKET:
+        return None
+    try:
+        return _s3.get_object(Bucket=LAKE_BUCKET, Key=f"{key}.gz")["Body"].read()
+    except ClientError as exc:
+        code = _aws_error_code(exc)
+        if code not in {"NoSuchKey", "404"}:
+            logger.warning("serving_gzip_unavailable", extra={"key": key, "code": code})
+        return None
+
+
+def _read_serving_json(key: str) -> dict | None:
+    loaded = _read_serving_document(key)
+    return None if loaded is None else loaded[2]
 
 
 def _request_parts(event: dict) -> tuple[str | None, str, str, str]:
@@ -482,46 +617,74 @@ def _request_parts(event: dict) -> tuple[str | None, str, str, str]:
 
 
 def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
+    def respond(status: int, body: dict, **kwargs) -> dict:
+        return _response(status, body, event, **kwargs)
+
     if method == "GET" and path == "/dashboard":
-        dashboard = _read_serving_json("serving/dashboard.json")
-        if dashboard is None:
-            return _response(
+        loaded = _read_serving_document("serving/dashboard.json")
+        if loaded is None:
+            return respond(
                 503,
                 {"error": "Dashboard data has not been published yet", "code": "DASHBOARD_NOT_READY"},
             )
-        dashboard["status"] = _read_serving_json("serving/status.json")
-        return _response(200, dashboard)
+        raw_bytes, etag, dashboard = loaded
+        status_loaded = _read_serving_document("serving/status.json")
+        if status_loaded is None:
+            dashboard["status"] = None
+            status_token = "none"
+        else:
+            status_raw, status_etag, status_doc = status_loaded
+            dashboard["status"] = status_doc
+            status_token = _etag_token(status_etag, status_raw)
+        served = json.dumps(dashboard, separators=(",", ":"), default=str).encode()
+        gzip_key = "serving/dashboard.json" if served == raw_bytes else None
+        return respond(
+            200,
+            dashboard,
+            raw=served,
+            gzip_key=gzip_key,
+            cache_key=f"dashboard:{_etag_token(etag, raw_bytes)}:{status_token}",
+        )
     if method == "GET" and path == "/status":
-        status = _read_serving_json("serving/status.json")
-        if status is None:
-            return _response(503, {"error": "Refresh status has not been published yet", "code": "STATUS_NOT_READY"})
-        return _response(200, status)
+        loaded = _read_serving_document("serving/status.json")
+        if loaded is None:
+            return respond(503, {"error": "Refresh status has not been published yet", "code": "STATUS_NOT_READY"})
+        raw_bytes, etag, status_doc = loaded
+        return respond(200, status_doc, raw=raw_bytes, cache_key=f"status:{_etag_token(etag, raw_bytes)}")
     if method == "GET" and path.startswith("/chart/"):
         match = re.fullmatch(r"/chart/([A-Za-z][A-Za-z0-9.\-]{0,9})", path)
         if not match:
-            return _response(404, {"error": "Chart data not found"})
+            return respond(404, {"error": "Chart data not found"})
         ticker = match.group(1).upper()
         prefs = get_prefs(_table_for(sub), sub)
         if ticker not in prefs["tickers"]:
-            return _response(403, {"error": "Ticker is not in your watchlist"})
-        chart = _read_serving_json(f"serving/chart_data/{ticker}.json")
-        if chart is None:
-            return _response(503, {"error": "Chart data has not been published yet", "code": "CHART_NOT_READY"})
-        return _response(200, chart)
+            return respond(403, {"error": "Ticker is not in your watchlist"})
+        chart_key = f"serving/chart_data/{ticker}.json"
+        loaded = _read_serving_document(chart_key)
+        if loaded is None:
+            return respond(503, {"error": "Chart data has not been published yet", "code": "CHART_NOT_READY"})
+        raw_bytes, etag, chart = loaded
+        return respond(
+            200,
+            chart,
+            raw=raw_bytes,
+            gzip_key=chart_key,
+            cache_key=f"chart:{ticker}:{_etag_token(etag, raw_bytes)}",
+        )
     if method == "GET" and path.startswith("/stock/"):
         match = re.fullmatch(r"/stock/([A-Za-z][A-Za-z0-9.\-]{0,9})", path)
         if not match:
-            return _response(404, {"error": "Company page not found"})
+            return respond(404, {"error": "Company page not found"})
         ticker = match.group(1).upper()
         prefs = get_prefs(_table_for(sub), sub)
         if ticker not in prefs["tickers"]:
-            return _response(403, {"error": "Ticker is not in your watchlist"})
+            return respond(403, {"error": "Ticker is not in your watchlist"})
         document = _read_serving_json(f"serving/stock/{ticker}.json")
-        return _response(200, _public_stock(document, ticker))
+        return respond(200, _public_stock(document, ticker))
 
     table = _table_for(sub)
     if method == "GET":
-        return _response(200, get_prefs(table, sub))
+        return respond(200, get_prefs(table, sub))
     if method == "PUT":
         try:
             body = json.loads(event.get("body") or "{}")
@@ -535,18 +698,18 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
             if "chart_settings" not in body:
                 prefs["chart_settings"] = stored["chart_settings"]
         except (ValidationError, json.JSONDecodeError) as exc:
-            return _response(400, {"error": str(exc)})
+            return respond(400, {"error": str(exc)})
         try:
             saved, added = put_prefs(table, sub, prefs)
         except ValidationError as exc:
-            return _response(400, {"error": str(exc)})
+            return respond(400, {"error": str(exc)})
         except ClientError as exc:
             if _aws_error_code(exc) == "ConditionalCheckFailedException":
-                return _response(409, {"error": "Preferences changed in another tab; reload and try again"})
+                return respond(409, {"error": "Preferences changed in another tab; reload and try again"})
             raise
         saved["backfill_queued"] = _queue_backfill(added, route, _safe_method(method))
-        return _response(200, saved)
-    return _response(405, {"error": f"{method} not allowed"})
+        return respond(200, saved)
+    return respond(405, {"error": f"{method} not allowed"})
 
 
 def handler(event, context):
