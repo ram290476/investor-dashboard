@@ -1,0 +1,12 @@
+{
+  "directory": {
+    "item": [
+      {"name": "tsla-8k.htm", "type": "8-K", "description": "FORM 8-K"},
+      {
+        "name": "exhibit991.htm",
+        "type": "EX-99.1",
+        "description": "Q3 2026 Production, Deliveries & Deployments"
+      }
+    ]
+  }
+}

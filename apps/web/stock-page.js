@@ -121,9 +121,14 @@ export function formatChange(value) {
   return `${sign}${(number * 100).toFixed(1)}%`;
 }
 
-export function freshnessBadge(payload, state) {
+export function freshnessBadge(payload, state, ticker = "") {
   if (state === "loading") return { tone: "unavailable", text: "Loading company metrics" };
-  if (state === "error") return { tone: "unavailable", text: "Company metrics could not be loaded" };
+  if (state === "forbidden") {
+    const symbol = ticker || "this ticker";
+    return { tone: "unavailable", text: `Add ${symbol} to your watchlist to see company metrics` };
+  }
+  if (state === "missing") return { tone: "unavailable", text: "No company-specific metrics discovered" };
+  if (state === "error") return { tone: "unavailable", text: "Company metrics could not be loaded. Retry" };
   if (!payload) return { tone: "unavailable", text: "No company-specific metrics discovered" };
   if (payload.stale || payload.run_status === "partial" || payload.run_status === "failed") {
     return { tone: "partial", text: payload.freshness_label || "Partial run · previous approved values kept" };
@@ -132,6 +137,13 @@ export function freshnessBadge(payload, state) {
     return { tone: "unavailable", text: payload.freshness_label || "No approved company metrics" };
   }
   return { tone: "ok", text: payload.freshness_label || "IR data approved" };
+}
+
+export function stockFreshnessText(payload, state, ticker = "") {
+  const badge = freshnessBadge(payload, state, ticker);
+  if (state !== "ready" || !payload) return badge.text;
+  const extra = [payload.run_status, payload.generated_at].filter(Boolean);
+  return extra.length ? `${badge.text} · ${extra.join(" · ")}` : badge.text;
 }
 
 function presentMetric(metric) {

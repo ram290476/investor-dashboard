@@ -32,6 +32,7 @@ import {
   emptyKpiCopy,
   formatMetricValue,
   freshnessBadge,
+  stockFreshnessText,
   LONG_PRESS_MS,
   nextStockTab,
   stockPanels,
@@ -108,6 +109,7 @@ const session = {
   revealPanel: "",
   stockPage: {},
   stockPageState: {},
+  stockPageError: {},
   stockTab: "overview",
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
@@ -591,9 +593,13 @@ async function loadStockPage(ticker, force = false) {
   try {
     session.stockPage[ticker] = await apiGet(`stock/${encodeURIComponent(ticker)}`);
     session.stockPageState[ticker] = "ready";
+    session.stockPageError[ticker] = "";
   } catch (error) {
-    session.stockPageState[ticker] = "error";
     session.stockPage[ticker] = null;
+    if (error.status === 403) session.stockPageState[ticker] = "forbidden";
+    else if (error.status === 404) session.stockPageState[ticker] = "missing";
+    else session.stockPageState[ticker] = "error";
+    session.stockPageError[ticker] = freshnessBadge(null, session.stockPageState[ticker], ticker).text;
     if (error.status === 401) {
       settings.close();
       session.accessToken = null;
@@ -3016,7 +3022,8 @@ function renderStockPage() {
   const payload = session.stockPage[session.selected] || null;
   const pageState = session.stockPageState[session.selected] || "loading";
   const panels = stockPanels(payload, chartData);
-  const badge = freshnessBadge(payload, pageState);
+  const badge = freshnessBadge(payload, pageState, session.selected);
+  const freshnessText = stockFreshnessText(payload, pageState, session.selected);
   const history = tickerData?.price_history || [];
   const bars = validBars(history);
   const latest = bars.at(-1);
@@ -3039,7 +3046,7 @@ function renderStockPage() {
   const updated = session.dashboard?.generated_at
     ? `Updated ${formatTime(session.dashboard.generated_at, session.prefs.display.time_zone)}`
     : "Updated time unavailable";
-  const freshness = node("p", "stock-freshness", badge.text);
+  const freshness = node("p", "stock-freshness", freshnessText);
   freshness.dataset.tone = badge.tone;
   copy.append(title, price, node("p", "overview-meta", updated), freshness);
   const back = node("a", "stock-dashboard-link", "Back to dashboard");
