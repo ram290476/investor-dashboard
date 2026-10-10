@@ -356,6 +356,7 @@ def test_collect_stores_edgar_once_and_stops_on_429_without_retry(monkeypatch):
     requested = [url for url, _agent in calls]
     assert any(url.endswith("/000162828026064366/index.json") for url in requested)
     assert not any(url.endswith("-index.json") for url in requested)
+    assert not any(url.endswith(".txt") for url in requested)
     again = run_once(lambda key: key in stored)
     assert again["collected"] == 0
     assert again["documents"] >= 1
@@ -785,9 +786,7 @@ def test_exhibits_come_from_the_index_table_or_submission_type_not_the_filename(
     }
     assert ir.exhibits_from_index(gif_index) == []
     tesla = ir.exhibits_from_index_page(_real("tsla_q3_2026_index.html"))
-    assert tesla == [{"name": "exhibit991111111.htm", "type": "EX-99.1", "description": "EX-99.1"}] or (
-        tesla[0]["name"] == "exhibit991111111.htm" and tesla[0]["type"] == "EX-99.1"
-    )
+    assert tesla == [{"name": "exhibit991111111.htm", "type": "EX-99.1", "description": "EX-99.1"}]
     nvidia = ir.exhibits_from_index_page(_real("nvda_q2_fy27_index.html"))
     assert [item["name"] for item in nvidia] == ["q2fy27pr.htm", "q2fy27cfocommentary.htm"]
     assert [item["type"] for item in nvidia] == ["EX-99.1", "EX-99.2"]
@@ -802,7 +801,8 @@ def test_deliveries_release_is_classified_from_body_text_and_not_the_filing_date
     text = _real("tsla_q3_2026_deliveries.htm")
     assert ir.title_from_html(text) == "Document"
     assert ir.classify_release("Document", text) == "press_release"
-    assert ir.fiscal_period_for_end(date(2026, 10, 2)) == "2026Q4"
+    assert ir.fiscal_period_for_end(date(2026, 10, 2)) == "2026Q3"
+    assert ir.fiscal_period_for_end(date(2026, 10, 15)) == "2026Q4"
     assert ir.fiscal_period_from_text(text) == "2026Q3"
     catalog = ir.load_catalog("TSLA")
     parsed = ir.parse_company_document(text, catalog, **_meta(source_kind="deck", fiscal_period="2026Q4"))
@@ -900,15 +900,20 @@ def test_nvidia_exhibits_use_fiscal_q2_fy27_not_the_august_filing_date():
 
 
 def test_scale_flags_do_not_leak_across_tickers():
-    flags = [
-        {
-            "ticker": "TSLA",
-            "metric_id": "capex",
-            "fiscal_period": "2026Q1",
-            "status": "scale_error",
-            "reason": "scale_error",
-        }
-    ]
+    tagged = {
+        "ticker": "TSLA",
+        "metric_id": "capex",
+        "fiscal_period": "2026Q1",
+        "status": "scale_error",
+        "reason": "scale_error",
+    }
+    untagged = {
+        "metric_id": "capex",
+        "fiscal_period": "2026Q1",
+        "status": "scale_error",
+        "reason": "scale_error",
+    }
+    flags = [tagged, untagged]
     run = ir.run_record(status="ok", sources={"tickers": 2}, mismatches=flags)
     tesla = ir.build_serving(
         "TSLA",
@@ -926,7 +931,7 @@ def test_scale_flags_do_not_leak_across_tickers():
         generated_at="2026-10-10T00:00:00Z",
         mismatches=flags,
     )
-    assert tesla["mismatches"] == flags
+    assert tesla["mismatches"] == [tagged]
     assert spacex["mismatches"] == []
 
 
@@ -1071,3 +1076,190 @@ def test_xbrl_period_uses_fiscal_year_and_tag_gaps():
     assert _value(amzn, "gross_profit", "2026Q2") == 90
     assert not any(row["metric_id"] == "gross_profit" and row["fiscal_period"].startswith("2009") for row in amzn)
     assert all(row["metric_id"] != "research_and_development" for row in amzn)
+
+
+def _tagged_fact(start, end, value, accn, filed, form="10-Q", fp=None, fy=None):
+    fact = _cash_fact(start, end, value, form=form, fp=fp, fy=fy)
+    fact["accn"] = accn
+    fact["filed"] = filed
+    return fact
+
+
+def _xbrl_rows(gaap, ticker, fiscal_end_month=None):
+    kwargs = {
+        "ticker": ticker,
+        "source_url": "https://data.sec.gov/x",
+        "source_doc_hash": "e" * 64,
+        "extracted_at": EXTRACTED,
+    }
+    if fiscal_end_month is not None:
+        kwargs["fiscal_end_month"] = fiscal_end_month
+    rows, _flags = ir.companyfacts_observations({"facts": {"us-gaap": gaap}}, ir.load_catalog(ticker), **kwargs)
+    return rows
+
+
+def test_tesla_deck_keeps_balance_sheet_rows_and_positive_capex():
+    assert ir._parse_cell("(1)") == (None, False)
+    assert ir._parse_cell("(29)") == (-29.0, False)
+    assert ir.quarter_token("4Q-2022") == "2022Q4"
+    assert ir.quarter_token("2026Q2|2026-06-30") == "2026Q2"
+    parsed = ir.parse_company_document(
+        _real("tsla_q2_2026_deck.htm"),
+        ir.load_catalog("TSLA"),
+        **_meta(source_kind="deck", fiscal_period="2026Q2", published_date="2026-07-22"),
+    )
+    winners, _superseded = ir.dedupe_observations(parsed["rows"])
+    assert _value(winners, "capex", "2026Q2") == pytest.approx(5_789_000_000)
+    assert _value(winners, "inventory", "2026Q2") == pytest.approx(13_752_000_000)
+    assert _value(winners, "deferred_revenue", "2026Q2") == pytest.approx(3_427_000_000)
+    assert _value(winners, "days_sales_outstanding", "2026Q2") == 13
+    assert _value(winners, "days_payable_outstanding", "2026Q2") == 58
+    assert _value(winners, "free_cash_flow", "2026Q2") == pytest.approx(-1_092_000_000)
+
+
+def test_release_headings_pick_the_earliest_period_and_stay_unclassified():
+    update = "Q4 and FY 2025 Update\nLater mention of Q1 2026."
+    assert ir.classify_release("Document", update) == "deck"
+    assert ir.fiscal_period_from_text(update) == "2025Q4"
+    assert ir.fiscal_period_from_text("Q1 2026 results ahead of the Q4 and FY 2025 Update") == "2026Q1"
+    assert ir.fiscal_period_from_text("Results for the second quarter of fiscal year 2027") == "2027Q2"
+    assert ir.fiscal_period_from_text("second quarter FY2027") == "2027Q2"
+    assert ir.fiscal_period_from_text("Apple reports fiscal 2026 fourth quarter results") == "2026Q4"
+    assert ir.classify_release("Document", "The company entered into a lease.") == "other"
+
+
+def test_week_year_end_in_the_first_week_belongs_to_the_prior_month():
+    assert ir.fiscal_period_for_end(date(2027, 1, 2), 12) == "2026Q4"
+    assert ir.fiscal_period_for_end(date(2027, 1, 8), 12) == "2027Q1"
+
+
+def test_ytd_difference_stays_inside_one_filing_and_follows_a_year_end_change():
+    first = [
+        _tagged_fact("2025-01-01", "2025-03-31", 100, "filing-a", "2025-04-23"),
+        _tagged_fact("2025-01-01", "2025-06-30", 250, "filing-a", "2025-07-23"),
+        _tagged_fact("2025-01-01", "2025-06-30", 300, "filing-b", "2025-10-23"),
+    ]
+    assert ir.discrete_cashflow_quarters(first)["2025Q2"] == 150
+    restated = [
+        *first[:2],
+        _tagged_fact("2025-01-01", "2025-03-31", 120, "filing-b", "2025-10-23"),
+        _tagged_fact("2025-01-01", "2025-06-30", 300, "filing-b", "2025-10-23"),
+    ]
+    series = ir.discrete_cashflow_quarters(restated)
+    assert series["2025Q1"] == 120
+    assert series["2025Q2"] == 180
+    # A December year, filed while the catalog month is January, still uses the filing's own year end.
+    december_year = [
+        _tagged_fact("2024-01-01", "2024-03-31", 10, "fy2024", "2025-02-20"),
+        _tagged_fact("2024-01-01", "2024-06-30", 30, "fy2024", "2025-02-20"),
+        _tagged_fact("2024-01-01", "2024-12-31", 60, "fy2024", "2025-02-20", form="10-K", fp="FY", fy=2024),
+    ]
+    shifted = ir.discrete_cashflow_quarters(december_year, fiscal_end_month=1)
+    assert shifted["2024Q1"] == 10
+    assert shifted["2024Q2"] == 20
+    assert "2025Q1" not in shifted
+    assert "2025Q2" not in shifted
+
+
+def test_comparatives_and_restatements_use_the_fact_end_not_the_filing_label():
+    facts = [
+        _tagged_fact("2026-04-01", "2026-06-30", 130, "q2-2026", "2026-07-23", fp="Q2", fy=2026),
+        _tagged_fact("2025-04-01", "2025-06-30", 100, "q2-2026", "2026-07-23", fp="Q2", fy=2026),
+        _tagged_fact("2026-04-01", "2026-06-30", 128, "10k-2026", "2027-02-02", form="10-K", fp="FY", fy=2026),
+        _tagged_fact("2026-01-01", "2026-12-31", 500, "10k-2026", "2027-02-02", form="10-K", fp="FY", fy=2026),
+    ]
+    rows = _xbrl_rows({"Revenues": {"units": {"USD": facts}}}, "TSLA")
+    assert _value(rows, "revenue_gaap", "2026Q2") == 128
+    assert _value(rows, "revenue_gaap", "2025Q2") == 100
+    current = next(row for row in rows if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2026Q2")
+    assert current["period_end"] == date(2026, 6, 30)
+
+
+def test_period_end_comes_from_the_fact_the_release_or_the_fiscal_calendar():
+    nvidia = _tagged_fact("2026-04-27", "2026-07-26", 96_221_000_000, "nvda-q2", "2026-08-26", fp="Q2", fy=2027)
+    rows = _xbrl_rows({"Revenues": {"units": {"USD": [nvidia]}}}, "NVDA")
+    quarter = next(row for row in rows if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2027Q2")
+    assert quarter["period_end"] == date(2026, 7, 26)
+    assert ir.period_end_for("2027Q2", 1) == date(2026, 7, 31)
+    assert ir.period_end_for("2026Q2") == date(2026, 6, 30)
+    release = _real("nvda_q2_fy27_press_release.htm")
+    assert ir.period_ends_from_text(release, 1)["2027Q2"] == date(2026, 7, 26)
+    synthetic = """
+    NVIDIA Announces Financial Results for Second Quarter Fiscal 2027
+    Revenue for the quarter ended July 26, 2026.
+    <table>
+    <tr><td>($ in millions)</td><td>Q2 FY26</td><td>Q2 FY27</td></tr>
+    <tr><td>Revenue</td><td>30,040</td><td>96,221</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        synthetic,
+        ir.load_catalog("NVDA"),
+        **_meta(ticker="NVDA", fiscal_end_month=1, fiscal_period="2026Q3"),
+    )
+    assert _value(parsed["rows"], "revenue_gaap", "2027Q2") == pytest.approx(96_221_000_000)
+    ended = next(
+        row for row in parsed["rows"] if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2027Q2"
+    )
+    assert ended["period_end"] == date(2026, 7, 26)
+
+
+def test_capex_is_stored_as_positive_spend_for_the_deck_and_xbrl():
+    deck = """
+    ($ in millions) | Q1-2026 | Q2-2026
+    Capital expenditures | (1,000) | (5,789)
+    """
+    parsed = ir.parse_company_document(
+        deck,
+        ir.load_catalog("TSLA"),
+        **_meta(source_kind="deck", fiscal_period="2026Q2"),
+    )
+    facts = [
+        _cash_fact("2026-01-01", "2026-03-31", 1_000_000_000),
+        _cash_fact("2026-01-01", "2026-06-30", 6_789_000_000),
+    ]
+    xbrl = _xbrl_rows(
+        {"PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": facts}}},
+        "TSLA",
+    )
+    deck_capex = _value(parsed["rows"], "capex", "2026Q2")
+    xbrl_capex = _value(xbrl, "capex", "2026Q2")
+    assert deck_capex == pytest.approx(5_789_000_000)
+    assert xbrl_capex == pytest.approx(5_789_000_000)
+    assert ir.reconcile_xbrl(deck_capex, xbrl_capex)["status"] == "match"
+    assert ir.reconcile_rows(parsed["rows"], ir.xbrl_value_map(xbrl)) == []
+    negative = _xbrl_rows(
+        {
+            "PaymentsToAcquirePropertyPlantAndEquipment": {
+                "units": {"USD": [_cash_fact("2026-04-01", "2026-06-30", -5_789_000_000)]}
+            }
+        },
+        "TSLA",
+    )
+    assert _value(negative, "capex", "2026Q2") == pytest.approx(5_789_000_000)
+
+
+def test_collect_stops_on_the_time_budget_without_fetching_submission_text(monkeypatch):
+    monkeypatch.setenv("SEC_USER_AGENT", "investor-dashboard (contact: test@example.com)")
+    calls = []
+
+    def fetch(url, headers):
+        calls.append(url)
+        return _Response(200, "{}")
+
+    result = ir.run_collect(
+        {"source": "schedule"},
+        date(2026, 10, 5),
+        fetch=fetch,
+        exists=lambda key: False,
+        put_bytes=lambda key, body, content_type: None,
+        put_json=lambda key, obj: None,
+        read_json=lambda key: None,
+        tickers=["TSLA"],
+        pace=ir.Pace(0),
+        budget_s=0,
+    )
+    assert result["status"] == "partial"
+    assert any(reason.get("reason") == "time_budget" for reason in result["reasons"])
+    assert calls == []
+    assert not any(str(reason.get("url") or "").endswith(".txt") for reason in result["reasons"])
