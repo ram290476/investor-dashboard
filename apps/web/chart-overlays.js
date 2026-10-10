@@ -174,6 +174,23 @@ export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard })
   return alignedValues((chartData?.fundamentals || []).filter((row) => row.series_id === metric), bars);
 }
 
+const OVERLAY_UNITS = {
+  DGS10: "%", DGS2: "%", T10Y2Y: "%", DFII10: "%", SOFR: "%",
+  CPI_YOY: "%", CORE_CPI_YOY: "%", PCE_YOY: "%", T10YIE: "%",
+  DCOILWTICO: "USD",
+  "FUNDAMENTAL:revenue_gaap": "USD",
+  "FUNDAMENTAL:gross_profit_gaap": "USD",
+  "FUNDAMENTAL:gross_margin_gaap": "ratio",
+  "FUNDAMENTAL:shares_outstanding": "sh",
+  "FUNDAMENTAL:public_float_usd": "USD",
+  "FUNDAMENTAL:deliveries": "vehicles",
+  "FUNDAMENTAL:fsd_subscribers": "subscribers",
+};
+
+export function overlayUnit(id) {
+  return OVERLAY_UNITS[id] || "";
+}
+
 export function overlayDefinition(id) {
   return overlayById.get(id) || null;
 }

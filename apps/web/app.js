@@ -10,14 +10,14 @@ import {
 import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle } from "./trend-state.js";
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
-import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-scale.js";
+import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAmount, indexAtPlotX, niceAmountTicks, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
 import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
   catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
-  markerIndex, movingAverageRows, newsEmptyMessage, newsGroups, newsHeader, newsRowView, newsSummary,
-  sensitivityRows, sortedDrivers, upcomingEmptyMessage,
+  catalystSensitivityRows, markerIndex, movingAverageRows, newsEmptyMessage, newsGroups, newsHeader, newsRowView, newsSummary,
+  sortedDrivers, upcomingEmptyMessage,
 } from "./roadmap.js";
 import { legendItems, overlayCorrelation, seriesLineStyle } from "./chart-legend.js";
 import { sparkline, sparklineModel, sparklineSummary } from "./sparkline.js";
@@ -55,6 +55,7 @@ import {
   normalizePanelMode,
   overlayDefinition,
   overlayGroups,
+  overlayUnit,
   laneValues,
   panelVisible,
   pressureFillPath,
@@ -717,8 +718,37 @@ function scaleIndicator(values, inverse) {
   });
 }
 
+function axisCompact() {
+  return window.matchMedia("(max-width: 640px)").matches;
+}
+
+function timeTicks(bars, periodId) {
+  return chartTicks(bars, periodId, CHART_PLOT, { compact: axisCompact() });
+}
+
+function appendSvgText(svg, { x, y, text, anchor = "end", className = "chart-y-label" }) {
+  const label = document.createElementNS(svgNS, "text");
+  label.setAttribute("class", className);
+  label.setAttribute("x", String(x));
+  label.setAttribute("y", String(y));
+  label.setAttribute("text-anchor", anchor);
+  label.setAttribute("dominant-baseline", "middle");
+  label.textContent = text;
+  svg.append(label);
+  return label;
+}
+
 function appendTimeGrid(svg, bars, periodId, top, bottom) {
-  chartTicks(bars, periodId).forEach((tick) => {
+  timeTicks(bars, periodId).forEach((tick) => {
+    if (tick.boundary) {
+      const divider = document.createElementNS(svgNS, "line");
+      divider.setAttribute("class", "chart-year-divider");
+      divider.setAttribute("x1", String(tick.boundaryX));
+      divider.setAttribute("x2", String(tick.boundaryX));
+      divider.setAttribute("y1", String(top));
+      divider.setAttribute("y2", String(bottom));
+      svg.append(divider);
+    }
     const line = document.createElementNS(svgNS, "line");
     line.setAttribute("class", "chart-time-grid");
     line.setAttribute("x1", String(tick.x));
@@ -819,8 +849,10 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     : `Adjusted price range ${formatPrice(min)} to ${formatPrice(max)}. Latest price ${formatPrice(displayPrice(bars.at(-1)))}. Indicator overlays use normalized scales.`;
   svg.append(title, desc);
 
-  for (let index = 0; index < 4; index += 1) {
-    const y = top + ((bottom - top) / 3) * index;
+  const yTicks = niceAmountTicks(min, max, 4);
+  const priceUnit = compareMarkets ? "%" : "USD";
+  yTicks.forEach((value) => {
+    const y = yValue(value);
     const line = document.createElementNS(svgNS, "line");
     line.setAttribute("class", "chart-grid-line");
     line.setAttribute("x1", String(left));
@@ -828,14 +860,34 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     line.setAttribute("y1", String(y));
     line.setAttribute("y2", String(y));
     svg.append(line);
-    const label = document.createElementNS(svgNS, "text");
-    label.setAttribute("x", "4");
-    label.setAttribute("y", String(y + 4));
-    label.setAttribute("fill", "var(--muted)");
-    label.setAttribute("font-size", "11");
-    label.setAttribute("font-family", "IBM Plex Mono, monospace");
-    label.textContent = compareMarkets ? `${(max - ((max - min) / 3) * index).toFixed(1)}%` : formatPrice(max - ((max - min) / 3) * index);
-    svg.append(label);
+    appendSvgText(svg, { x: left - 8, y, text: formatAmount(value, priceUnit) });
+  });
+  const normalized = configured.filter((item) => (
+    ["macro", "fundamental", "sentiment"].includes(item.definition?.kind) && item.values.some(isNumericValue)
+  ));
+  if (normalized.length) {
+    const primary = normalized[0];
+    const native = primary.values.filter(isNumericValue).map(Number);
+    const nativeMin = Math.min(...native);
+    const nativeMax = Math.max(...native);
+    const spreadNative = nativeMax - nativeMin || 1;
+    const yNative = (value) => {
+      const ratio = (Number(value) - nativeMin) / spreadNative;
+      const scaled = primary.definition.inverse ? (1 - ratio) * 100 : ratio * 100;
+      return yNormalized(scaled);
+    };
+    niceAmountTicks(nativeMin, nativeMax, 3).forEach((value) => {
+      appendSvgText(svg, {
+        x: right + 8,
+        y: yNative(value),
+        text: formatAmount(value, overlayUnit(primary.id)),
+        anchor: "start",
+      });
+    });
+    if (normalized.length > 1) {
+      const extra = [...new Set(normalized.slice(1).map((item) => overlayUnit(item.id) || item.definition.short || item.definition.label))].join(" · ");
+      appendSvgText(svg, { x: right + 8, y: top + 8, text: extra, anchor: "start", className: "chart-y-label chart-y-unit" });
+    }
   }
   appendTimeGrid(svg, bars, periodId, top, bottom);
 
@@ -1262,35 +1314,6 @@ function renderWatchlist() {
       });
       item.append(researchLink);
     }
-    if (ticker === session.selected && stockHash(ticker)) {
-      const openPage = node("a", "ticker-stock-link", `Open ${ticker} page →`);
-      openPage.href = `/${stockHash(ticker)}`;
-      openPage.dataset.stockOpen = ticker;
-      openPage.setAttribute("aria-label", `Open ${ticker} page`);
-      let linkTimer = 0;
-      const cancelLinkPress = () => window.clearTimeout(linkTimer);
-      openPage.addEventListener("pointerdown", () => {
-        cancelLinkPress();
-        linkTimer = window.setTimeout(() => {
-          openPage.dataset.longPress = "1";
-          navigateToStock(ticker);
-        }, LONG_PRESS_MS);
-      });
-      openPage.addEventListener("pointerup", cancelLinkPress);
-      openPage.addEventListener("pointerleave", cancelLinkPress);
-      openPage.addEventListener("pointercancel", cancelLinkPress);
-      openPage.addEventListener("click", (event) => {
-        if (openPage.dataset.longPress === "1") {
-          delete openPage.dataset.longPress;
-          event.preventDefault();
-          return;
-        }
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        event.preventDefault();
-        navigateToStock(ticker);
-      });
-      item.append(openPage);
-    }
     list.append(item);
   });
   const manage = node("button", "ticker-button ticker-manage");
@@ -1602,10 +1625,16 @@ function crosshairText(bar, index, periodId, lanes) {
 function renderTimeAxis(bars, periodId) {
   const axis = node("div", "chart-time-axis");
   axis.dataset.chartLayer = "axis";
-  chartTicks(bars, periodId).forEach((tick) => {
+  const ticks = timeTicks(bars, periodId);
+  ticks.forEach((tick) => {
     const label = node("span", "chart-tick", tick.label);
-    label.dataset.anchor = tick.anchor;
+    label.dataset.anchor = "middle";
     label.style.left = `${(tick.x / CHART_PLOT.width) * 100}%`;
+    axis.append(label);
+  });
+  chartYearLabels(ticks).forEach((band) => {
+    const label = node("span", "chart-year", band.year);
+    label.style.left = `${(band.x / CHART_PLOT.width) * 100}%`;
     axis.append(label);
   });
   [["start", CHART_PLOT.left], ["end", CHART_PLOT.right]].forEach(([edge, x]) => {
@@ -1775,6 +1804,8 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState, periodId)
   appendTimeGrid(svg, bars, periodId, laneTop, laneBottom);
   if (lane.id === "VOL") {
     const max = Math.max(...valid) || 1;
+    appendSvgText(svg, { x: 6, y: laneTop + 7, text: formatAmount(max, "sh"), anchor: "start" });
+    appendSvgText(svg, { x: 6, y: laneBottom - 2, text: "0", anchor: "start" });
     const slot = bars.length > 1 ? (right - left) / (bars.length - 1) : right - left;
     const barWidth = Math.max(0.35, Math.min(slot * 0.72, 8));
     values.forEach((value, index) => {
@@ -1795,6 +1826,12 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState, periodId)
     const max = lane.id === "PRESS" ? 1 : Math.max(...domain);
     const spread = max - min || 1;
     const yAt = (value) => laneBottom - ((value - min) / spread) * (laneBottom - laneTop);
+    const shortPercent = lane.id === "SI" && alignedLaneValues(chartData?.short_interest, bars, "short_pct_denominator").some(isNumericValue);
+    const laneUnit = lane.id === "SI" ? (shortPercent ? "%" : "sh") : "P/C";
+    const highLabel = lane.id === "PRESS" ? "+1" : formatAmount(max, laneUnit);
+    const lowLabel = lane.id === "PRESS" ? "−1" : formatAmount(min, laneUnit);
+    appendSvgText(svg, { x: 6, y: laneTop + 7, text: highLabel, anchor: "start" });
+    appendSvgText(svg, { x: 6, y: laneBottom - 2, text: lowLabel, anchor: "start" });
     if (lane.id === "PRESS") {
       const points = values.map((value, index) => (
         isNumericValue(value) ? { x: xAt(index), value: Number(value) } : null
@@ -1954,6 +1991,20 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   }
   quoteBlock.append(meta);
   overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
+  if (session.route.page === "dashboard" && stockHash(session.selected)) {
+    const entry = node("div", "chart-entry");
+    const openPage = node("a", "company-page-link", `Open ${session.selected} page`);
+    openPage.href = `/${stockHash(session.selected)}`;
+    openPage.dataset.companyPage = session.selected;
+    openPage.setAttribute("aria-label", `Open ${session.selected} company page`);
+    openPage.addEventListener("click", (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigateToStock(session.selected);
+    });
+    entry.append(openPage);
+    panel.append(entry);
+  }
   panel.append(overview);
   panel.append(renderOverlayControls(controls.groups, chartDataState, onSettingsChange));
   const filters = node("div", "catalyst-filters");
@@ -2227,6 +2278,74 @@ function renderRecentCatalysts(events, tickerData) {
   return renderCatalystList(events, tickerData);
 }
 
+function regimeTone(state) {
+  if (state === "up" || state === "uptrend") return "up";
+  if (state === "down" || state === "downtrend") return "down";
+  return "flat";
+}
+
+function renderRegimePill(label, state, tone, tip) {
+  const pill = node("span", "regime-pill");
+  pill.title = tip || `${label}: ${state}`;
+  const dot = node("span", `regime-dot ${tone}`);
+  dot.setAttribute("aria-hidden", "true");
+  pill.append(dot, node("span", "regime-label", label), node("span", "regime-state", state));
+  return pill;
+}
+
+function renderTrends(tickerData, drivers) {
+  const regimes = node("div", "regime-pills");
+  regimes.setAttribute("role", "list");
+  regimes.setAttribute("aria-label", "Trends");
+  const priceTrend = resolveTrend(tickerData?.price_history || [], servingPriceTrend(tickerData, session.selected));
+  const priceTone = priceTrend.state === "uptrend" ? "up" : priceTrend.state === "downtrend" ? "down" : "flat";
+  regimes.append(renderRegimePill("Price", trendLabel(priceTrend), priceTone, trendSentence(priceTrend, formatPercent)));
+  [
+    ["DGS10", "Rates"],
+    ["T10Y2Y", "Curve"],
+    ["CPI_YOY", "Inflation"],
+    ["VIXCLS", "Volatility"],
+    ["DTWEXBGS", "Dollar"],
+    ["DCOILWTICO", "Oil"],
+    ["USEPUINDXD", "Trade tension"],
+  ].forEach(([id, label]) => {
+    const row = drivers.find((item) => item.series_id === id);
+    if (!row || signalNumber(row.value) == null) return;
+    const state = driverTrend(row).replace(" - ", " · ");
+    regimes.append(renderRegimePill(label, state, regimeTone(row.trend_state), `${label}: ${state}`));
+  });
+  return regimes;
+}
+
+function renderCatalystSensitivity(tickerData) {
+  const block = node("div", "sensitivity-block");
+  block.append(node("h3", "signal-label", "Catalyst sensitivity · avg |1d|"));
+  const bars = validBars(tickerData?.price_history || []);
+  const rows = catalystSensitivityRows(catalystRows(session.dashboard, session.selected), bars);
+  if (!rows.length) {
+    block.append(node("p", "signal-note", "Sensitivity unavailable until past events have a stored 1-day price move."));
+  }
+  rows.forEach((row) => {
+    const line = node("div", "sensitivity-row");
+    const name = node("span", "sensitivity-name");
+    name.append(document.createTextNode(`${row.label} `), node("span", "sensitivity-n", `(${row.n})`));
+    const track = node("span", "sensitivity-track");
+    const bar = node("span", "sensitivity-bar");
+    bar.style.width = `${Math.max(8, Math.round(row.width * 100))}%`;
+    track.append(bar);
+    const percent = formatPercent(row.average, 1).replace(/^\+/, "");
+    line.append(
+      name,
+      track,
+      node("span", "sensitivity-value mono", percent),
+      node("span", `sensitivity-trend ${row.trend}`, row.trendLabel),
+    );
+    block.append(line);
+  });
+  block.append(node("p", "signal-note", "Historical association, not a causal forecast."));
+  return block;
+}
+
 function renderDrivers(tickerData) {
   const panel = node("section", "panel signals-panel");
   panel.dataset.mobilePanel = "signals";
@@ -2261,19 +2380,9 @@ function renderDrivers(tickerData) {
       `${pressure.linked} of ${pressure.total} observed drivers linked. Monthly releases use separate event windows.`));
     const missing = tickerData?.trend?.coverage?.missing || [];
     if (missing.length) body.append(node("p", "signal-note", `${missing.length} inputs unavailable: ${missing.map(driverLabel).join(", ")}.`));
+    body.append(renderTrends(tickerData, drivers));
     body.append(node("h3", "signal-label", `Top drivers for ${session.selected}`), renderDriverList(drivers.slice(0, 5)));
-    const regimes = node("div", "regime-pills");
-    const priceTrend = resolveTrend(tickerData?.price_history || [], servingPriceTrend(tickerData, session.selected));
-    regimes.append(node("span", "regime-pill", `Price · ${trendLabel(priceTrend)}`));
-    drivers.filter(row => ["DGS10", "CPI_YOY", "VIXCLS", "DTWEXBGS", "DCOILWTICO"].includes(row.series_id))
-      .forEach(row => regimes.append(node("span", "regime-pill", `${driverLabel(row.series_id)} · ${driverTrend(row)}`)));
-    body.append(regimes);
-    const sensitivity = sensitivityRows(tickerData);
-    body.append(node("h3", "signal-label", "Catalyst sensitivity"));
-    if (!sensitivity.length) body.append(node("p", "signal-note", "Sensitivity unavailable: at least 12 paired releases and finite variation are required."));
-    sensitivity.slice(0, 3).forEach(row => body.append(node("p", "signal-note",
-      `${driverLabel(row.series_id)} · ${RELEASE_WINDOWS[row.window] || row.window} · ${signed(row.correlation_surprise)} correlation · n=${row.n_releases}`)));
-    body.append(node("p", "signal-note", "Historical association, not a causal forecast."));
+    body.append(renderCatalystSensitivity(tickerData));
     const recent = catalystRows(session.dashboard, session.selected)
       .filter(row => String(row.date).slice(0, 10) <= String(session.dashboard?.generated_at).slice(0, 10)).slice(-5).reverse();
     body.append(node("h3", "signal-label", `Recent ${session.selected} catalysts`));
@@ -2677,7 +2786,7 @@ function renderNewsHeadlineGroups(body, tickerData, headlines) {
     );
     const hidden = group.rows.length - shown.length;
     if (hidden > 0) {
-      section.append(action(`Show ${hidden} more`, "overlay-chip", () => {
+      section.append(action(`Show ${hidden} more`, "overlay-chip panel-action", () => {
         session.newsExpanded = { ...session.newsExpanded, [key]: true };
         renderDashboard();
       }));
@@ -2728,7 +2837,7 @@ function renderNews(tickerData) {
   body.append(node("p", "signal-note", header.sourceNote));
   const chartSettings = chartSettingsFor(session.prefs, session.selected);
   const overlaySelected = chartSettings.overlays.includes("NEWS:SENTIMENT");
-  const toggle = action(overlaySelected ? "Remove sentiment from chart" : "Overlay sentiment on chart", "overlay-chip", () => {
+  const toggle = action(overlaySelected ? "Remove sentiment from chart" : "Overlay sentiment on chart", "overlay-chip panel-action", () => {
     const overlays = overlaySelected ? chartSettings.overlays.filter(id => id !== "NEWS:SENTIMENT")
       : addOverlay(chartSettings.overlays, "NEWS:SENTIMENT", overlayGroups(tickerData,
         session.chartDataState[session.selected] === "ready" ? session.chartData[session.selected] : null,
@@ -2932,27 +3041,13 @@ function renderAppHeader() {
   brand.append(market);
   header.append(brand);
   const actions = node("div", "header-actions");
-  const when = session.dashboard?.generated_at
-    ? formatTime(session.dashboard.generated_at, zone)
-    : "";
-  const lastRefresh = when ? `Data ${when}` : "Refresh data";
-  const schedule = node("button", "");
-  schedule.type = "button";
-  schedule.append(node("span", "schedule-word", "Data"));
-  if (when) {
-    schedule.append(document.createTextNode(" "));
-    schedule.append(node("span", "schedule-when", when));
-  }
-  schedule.addEventListener("click", () => settings.open("refresh", "header-refresh"));
-  schedule.dataset.opener = "header-refresh";
-  schedule.setAttribute("aria-label", `${lastRefresh}; open collection schedules and data refresh status`);
   const refresh = action("↻", "", () => refreshData(true));
   refresh.setAttribute("aria-label", "Refresh dashboard data");
   refresh.dataset.refresh = "data";
   const date = node("time", "header-date", headerDate(now, zone));
   date.dataset.headerDate = "date";
   date.dateTime = now.toISOString();
-  actions.append(date, schedule, refresh, settings.renderAccountButton());
+  actions.append(date, refresh, settings.renderAccountButton());
   header.append(actions);
   armMarketTimer(view.boundary);
   return header;
@@ -2966,29 +3061,45 @@ function renderMetricCard(metric) {
   if (metric.unit && !metric.unavailable) card.append(node("p", "signal-note", metric.unit));
   if (metric.series?.length) {
     const chart = node("div", "stock-chart");
-    const bars = node("div", "stock-bars");
     const reported = metric.series.filter((point) => point.reported);
     const max = Math.max(...reported.map((point) => point.value), 0);
+    const yAxis = node("div", "stock-y-axis");
+    const amountUnit = metric.unit === "percent" ? "%" : metric.unit === "ratio" ? "ratio" : metric.unit === "USD" ? "USD" : metric.unit || "";
+    const ticks = max > 0 ? niceAmountTicks(0, max, 3) : [0];
+    [...ticks].reverse().forEach((value) => yAxis.append(node("span", "", formatAmount(value, amountUnit))));
+    const bars = node("div", "stock-bars");
     bars.setAttribute("role", "img");
     bars.setAttribute("aria-label", `${metric.name} by quarter`);
-    metric.series.forEach((point) => {
+    const axisModel = fiscalAxis(metric.series.map((point) => point.fiscal_period), { compact: axisCompact() || metric.series.length > 12 });
+    metric.series.forEach((point, index) => {
       const bar = node("span", point.reported ? "stock-bar" : "stock-bar stock-bar-missing");
+      if (axisModel.years.some((band) => band.start === index && band.start > 0)) bar.classList.add("stock-bar-year");
       const height = point.reported && max ? Math.max(8, Math.round((point.value / max) * 100)) : 8;
       bar.style.height = `${height}%`;
-      bar.title = point.reported ? `${point.fiscal_period} ${formatMetricValue(point.value, metric.unit)}` : `${point.fiscal_period} not reported`;
+      const quarter = axisModel.ticks[index];
+      bar.title = point.reported
+        ? `${quarter?.label || ""} ${quarter?.year || ""} ${formatMetricValue(point.value, metric.unit)}`.trim()
+        : `${point.fiscal_period} not reported`;
       bars.append(bar);
     });
-    const axis = node("div", "stock-axis");
-    const first = metric.series[0]?.fiscal_period;
-    const last = metric.series.at(-1)?.fiscal_period;
-    if (first) axis.append(node("span", "", first));
-    if (last && last !== first) axis.append(node("span", "", last));
-    chart.append(bars, axis);
+    const quarters = node("div", "stock-axis stock-quarters");
+    quarters.style.gridTemplateColumns = `repeat(${metric.series.length}, minmax(0, 1fr))`;
+    axisModel.ticks.forEach((tick) => quarters.append(node("span", "", tick.show ? tick.label : "")));
+    const yearTrack = node("div", "stock-years stock-year-track");
+    yearTrack.style.gridTemplateColumns = `repeat(${metric.series.length}, minmax(0, 1fr))`;
+    axisModel.years.forEach((band) => {
+      const label = node("span", "stock-year", band.year);
+      label.style.gridColumn = `${band.start + 1} / ${band.end + 2}`;
+      yearTrack.append(label);
+    });
+    chart.append(yAxis, bars, quarters, yearTrack);
     card.append(chart);
   }
   const latest = node("p", "stock-latest");
-  latest.append(document.createTextNode(metric.unavailable ? "Unavailable. " : `Latest ${metric.latestPeriod ? `${metric.latestPeriod} ` : ""}`));
-  latest.append(node("span", "", metric.unavailable ? metric.sourceTitle : metric.latest));
+  const fiscal = /^(\d{4})Q([1-4])$/.exec(metric.latestPeriod || "");
+  const periodText = fiscal ? `Q${fiscal[2]}` : metric.latestPeriod;
+  latest.append(document.createTextNode(metric.unavailable ? "Unavailable. " : `Latest ${periodText ? `${periodText} ` : ""}`));
+  latest.append(node("span", "", metric.unavailable ? "not reported" : metric.latest));
   if (!metric.unavailable && metric.qoq) {
     latest.append(document.createTextNode(" "));
     latest.append(node("span", metric.qoqValue > 0 ? "positive" : metric.qoqValue < 0 ? "negative" : "neutral", `QoQ ${metric.qoq}`));
@@ -2998,20 +3109,6 @@ function renderMetricCard(metric) {
     latest.append(node("span", metric.yoyValue > 0 ? "positive" : metric.yoyValue < 0 ? "negative" : "neutral", `YoY ${metric.yoy}`));
   }
   card.append(latest);
-  const provenance = node("p", "stock-provenance");
-  if (metric.sourceUrl) {
-    const link = node("a", "", metric.sourceTitle);
-    link.href = metric.sourceUrl;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    provenance.append(link);
-  } else {
-    provenance.append(document.createTextNode(metric.sourceTitle || "Source unavailable"));
-  }
-  const details = [metric.published, metric.confidence, metric.approval].filter(Boolean).join(" · ");
-  if (details) provenance.append(document.createTextNode(`${metric.sourceUrl || metric.sourceTitle ? " · " : ""}${details}`));
-  card.append(provenance);
-  if (metric.xbrl) card.append(node("p", metric.xbrl === "XBRL mismatch" ? "stock-xbrl mismatch" : "stock-xbrl", metric.xbrl));
   return card;
 }
 

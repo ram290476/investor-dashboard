@@ -7,8 +7,6 @@ export const CHART_PLOT = Object.freeze({
   right: 890,
 });
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 export function plotX(index, count, plot = CHART_PLOT) {
   const steps = Math.max(1, count - 1);
   const clamped = !count || count <= 1 ? 0 : Math.min(Math.max(Number(index) || 0, 0), count - 1);
@@ -34,82 +32,142 @@ export function barStamp(bar) {
   return String(bar?.ts || bar?.date || "");
 }
 
-function dateParts(bar) {
+function quarterOf(bar) {
   const stamp = barStamp(bar);
   const date = stamp.slice(0, 10);
+  const year = date.slice(0, 4);
   const month = Number(date.slice(5, 7));
-  return {
-    stamp,
-    date,
-    year: date.slice(0, 4),
-    month,
-    day: Number(date.slice(8, 10)),
-    monthName: MONTHS[month - 1] || "",
-  };
+  if (!/^\d{4}$/.test(year) || month < 1 || month > 12) return null;
+  const quarter = Math.floor((month - 1) / 3) + 1;
+  return { year, quarter, key: `${year}Q${quarter}` };
 }
 
-export function formatAxisTick(bar, periodId, { withYear = false } = {}) {
-  const { stamp, year, monthName, day } = dateParts(bar);
-  if (periodId === "1D") return stamp.includes("T") ? stamp.slice(11, 16) : stamp.slice(0, 10);
-  if (periodId === "3Y" || periodId === "5Y") return year;
-  if (periodId === "YTD" || periodId === "1Y") return withYear && year ? `${monthName} ${year.slice(2)}` : monthName;
-  return `${monthName} ${day}`.trim();
+export function formatAxisTick(bar) {
+  const quarter = quarterOf(bar);
+  return quarter ? `Q${quarter.quarter}` : "";
 }
 
-function weekKey(date) {
-  const parsed = Date.parse(`${date}T00:00:00Z`);
-  if (!Number.isFinite(parsed)) return date;
-  const value = new Date(parsed);
-  value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
-  return value.toISOString().slice(0, 10);
+function niceStep(span, count) {
+  const rough = Math.abs(span) / Math.max(1, count - 1);
+  if (!Number.isFinite(rough) || rough === 0) return 1;
+  const power = 10 ** Math.floor(Math.log10(rough));
+  const error = rough / power;
+  const nice = error >= 7.5 ? 10 : error >= 3.5 ? 5 : error >= 1.5 ? 2 : 1;
+  return nice * power;
 }
 
-function bucketKey(bar, periodId) {
-  const { stamp, date, year } = dateParts(bar);
-  if (periodId === "1D") return stamp.includes("T") ? stamp.slice(0, 13) : date;
-  if (periodId === "1W") return date;
-  if (periodId === "1M" || periodId === "3M") return weekKey(date);
-  if (periodId === "YTD" || periodId === "1Y") return date.slice(0, 7);
-  return year;
-}
-
-export function chartTicks(bars, periodId, plot = CHART_PLOT) {
-  if (!Array.isArray(bars) || !bars.length) return [];
-  const span = plot.right - plot.left;
-  const budget = periodId === "1W" ? bars.length : 5;
-  const minGap = bars.length <= budget ? 0 : span / budget;
-  const candidates = [];
-  let previousKey = null;
-  bars.forEach((bar, index) => {
-    const key = bucketKey(bar, periodId);
-    if (key === previousKey) return;
-    previousKey = key;
-    candidates.push({ index, key, x: plotX(index, bars.length, plot), bar });
-  });
-  const chosen = [];
-  candidates.forEach((tick) => {
-    const previous = chosen.at(-1);
-    if (previous && tick.x - previous.x < minGap - 0.5) return;
-    chosen.push(tick);
-  });
-  const last = candidates.at(-1);
-  if (last && !chosen.some((tick) => tick.index === last.index)) {
-    const previous = chosen.at(-1);
-    if (!previous || last.key !== previous.key && last.x - previous.x >= minGap * 0.55) chosen.push(last);
+export function niceAmountTicks(min, max, count = 4) {
+  let lo = Number(min);
+  let hi = Number(max);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [];
+  if (lo === hi) {
+    const pad = Math.abs(lo) || 1;
+    lo -= pad;
+    hi += pad;
   }
-  const monthCounts = new Map();
-  if (periodId === "YTD" || periodId === "1Y") {
-    chosen.forEach((tick) => {
-      const name = dateParts(tick.bar).monthName;
-      monthCounts.set(name, (monthCounts.get(name) || 0) + 1);
-    });
+  if (lo > hi) [lo, hi] = [hi, lo];
+  const step = niceStep(hi - lo, count);
+  const start = Math.ceil((lo - step * 1e-9) / step) * step;
+  const ticks = [];
+  for (let value = start; value <= hi + step * 1e-6; value += step) {
+    const rounded = Number(value.toPrecision(12));
+    if (rounded >= lo - step * 0.05 && rounded <= hi + step * 0.05) ticks.push(rounded);
   }
-  return chosen.map((tick) => ({
-    index: tick.index,
-    x: tick.x,
-    label: formatAxisTick(tick.bar, periodId, {
-      withYear: (monthCounts.get(dateParts(tick.bar).monthName) || 0) > 1,
-    }),
-    anchor: tick.index === 0 ? "start" : tick.index === bars.length - 1 ? "end" : "middle",
+  return ticks.length >= 2 ? ticks : [lo, hi];
+}
+
+export function formatAmount(value, unit = "") {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  const abs = Math.abs(number);
+  if (unit === "%" || unit === "percent") {
+    return `${number.toFixed(abs >= 10 ? 0 : 1)}%`;
+  }
+  if (unit === "ratio") {
+    const percent = number * 100;
+    const digits = Math.abs(percent) >= 10 && Math.abs(percent - Math.round(percent)) < 0.05 ? 0 : 1;
+    return `${percent.toFixed(digits)}%`;
+  }
+  if (unit === "USD" || unit === "$" || unit === "currency") {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      notation: abs >= 1000 ? "compact" : "standard",
+      maximumFractionDigits: abs >= 1000 ? 1 : abs >= 100 ? 0 : 2,
+    }).format(number);
+  }
+  const body = new Intl.NumberFormat("en-US", {
+    notation: abs >= 1000 ? "compact" : "standard",
+    maximumFractionDigits: abs >= 100 ? 0 : abs >= 10 ? 1 : 2,
+  }).format(number);
+  return unit ? `${body} ${unit}` : body;
+}
+
+export function fiscalAxis(periods, { compact = false } = {}) {
+  const parsed = (periods || []).map((period) => {
+    const match = /^(\d{4})Q([1-4])$/.exec(String(period || ""));
+    return match ? { year: match[1], quarter: Number(match[2]), label: `Q${match[2]}` } : null;
+  });
+  const step = compact || parsed.length > 12 ? 2 : 1;
+  const ticks = parsed.map((item, index) => ({
+    year: item?.year || "",
+    quarter: item?.quarter || 0,
+    label: item?.label || "",
+    show: Boolean(item) && (index % step === 0 || index === parsed.length - 1),
   }));
+  const years = [];
+  ticks.forEach((tick, index) => {
+    if (!tick.year) return;
+    const last = years.at(-1);
+    if (!last || last.year !== tick.year) years.push({ year: tick.year, start: index, end: index });
+    else last.end = index;
+  });
+  return { ticks, years };
+}
+
+export function chartTicks(bars, periodId, plot = CHART_PLOT, { compact = false } = {}) {
+  if (!Array.isArray(bars) || !bars.length) return [];
+  const groups = [];
+  bars.forEach((bar, index) => {
+    const quarter = quarterOf(bar);
+    if (!quarter) return;
+    const last = groups.at(-1);
+    if (!last || last.key !== quarter.key) {
+      groups.push({ ...quarter, start: index, end: index });
+    } else last.end = index;
+  });
+  if (!groups.length) return [];
+  const step = compact ? 2 : 1;
+  const shown = groups.filter((group, index) => index % step === 0 || index === groups.length - 1);
+  return shown.map((group) => {
+    const full = groups.find((item) => item.key === group.key);
+    const index = Math.round((full.start + full.end) / 2);
+    const previous = groups[groups.indexOf(full) - 1];
+    return {
+      index,
+      x: plotX(index, bars.length, plot),
+      label: `Q${group.quarter}`,
+      year: group.year,
+      anchor: "middle",
+      boundary: Boolean(previous && previous.year !== group.year),
+      boundaryX: plotX(full.start, bars.length, plot),
+      spanStart: plotX(full.start, bars.length, plot),
+      spanEnd: plotX(full.end, bars.length, plot),
+    };
+  });
+}
+
+export function chartYearLabels(ticks) {
+  const groups = [];
+  (ticks || []).forEach((tick) => {
+    if (!tick?.year) return;
+    const last = groups.at(-1);
+    if (!last || last.year !== tick.year) groups.push({ year: tick.year, ticks: [tick] });
+    else last.ticks.push(tick);
+  });
+  return groups.map((group) => {
+    const start = Math.min(...group.ticks.map((tick) => tick.spanStart ?? tick.x));
+    const end = Math.max(...group.ticks.map((tick) => tick.spanEnd ?? tick.x));
+    return { year: group.year, x: (start + end) / 2, start, end };
+  });
 }

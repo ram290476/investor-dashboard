@@ -791,3 +791,44 @@ export function sensitivityRows(tickerData) {
     .filter(row => number(row.correlation_surprise) != null && number(row.n_releases) >= 12)
     .slice().sort((a, b) => Math.abs(Number(b.correlation_surprise)) - Math.abs(Number(a.correlation_surprise)));
 }
+
+const SENSITIVITY_TREND = {
+  intensifying: "▲ intensifying",
+  fading: "▼ fading",
+  stable: "→ stable",
+};
+
+export function catalystSensitivityRows(events, bars) {
+  const grouped = new Map();
+  (events || []).forEach((event) => {
+    const move = catalystMove(event, bars);
+    if (move == null || !event?.category) return;
+    const list = grouped.get(event.category) || [];
+    list.push(Math.abs(move));
+    grouped.set(event.category, list);
+  });
+  const rows = CATALYST_CATEGORIES.flatMap((category) => {
+    const moves = grouped.get(category.id);
+    if (!moves?.length) return [];
+    const average = moves.reduce((sum, value) => sum + value, 0) / moves.length;
+    let trend = "stable";
+    if (moves.length >= 2) {
+      const mid = Math.ceil(moves.length / 2);
+      const early = moves.slice(0, mid).reduce((sum, value) => sum + value, 0) / mid;
+      const lateCount = moves.length - mid;
+      const late = moves.slice(mid).reduce((sum, value) => sum + value, 0) / (lateCount || 1);
+      if (late > early * 1.2) trend = "intensifying";
+      else if (late < early * 0.8) trend = "fading";
+    }
+    return [{
+      id: category.id,
+      label: category.label,
+      n: moves.length,
+      average,
+      trend,
+      trendLabel: moves.length < 2 ? "one event" : SENSITIVITY_TREND[trend],
+    }];
+  });
+  const max = Math.max(...rows.map((row) => row.average), 0) || 1;
+  return rows.map((row) => ({ ...row, width: row.average / max }));
+}
