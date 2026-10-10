@@ -9,6 +9,7 @@ import {
   fillQuarterGaps,
   formatMetricValue,
   freshnessBadge,
+  monthDayLabel,
   nextStockTab,
   stockFreshnessText,
   safeHttpUrl,
@@ -71,12 +72,15 @@ test("company metric errors stay distinct from an empty catalog", () => {
     metrics: [{ metric_id: "tesla_semi", approved: true, approval_state: "approved" }],
   }, "ready");
   assert.equal(ready.tone, "ok");
-  assert.match(stockFreshnessText({
+  const now = new Date("2026-10-10T15:00:00Z");
+  assert.equal(stockFreshnessText({
     freshness_label: "IR data approved",
     run_status: "ok",
     generated_at: "2026-10-08T12:00:00Z",
     metrics: [{ metric_id: "tesla_semi", approved: true, approval_state: "approved" }],
-  }, "ready", "TSLA"), /IR data approved · ok · 2026-10-08/);
+  }, "ready", "TSLA", now, "America/New_York"), "IR data approved · ok · Oct 8");
+  assert.equal(monthDayLabel("2026-10-02", now, "America/New_York"), "Oct 2");
+  assert.equal(monthDayLabel("2025-10-02", now, "UTC"), "Oct 2, 2025");
 });
 
 test("a partial payload keeps a stale badge and does not invent a zero", () => {
