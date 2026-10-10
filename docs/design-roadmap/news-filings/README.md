@@ -15,3 +15,5 @@ Supporting images for the News & sentiment / Filings & events theme, AI summary 
 
 `mock_dates.js` builds the before/after image. `mock_news.js` is the injected mockup (it only uses existing CSS variables) and `design-ref.html` is the static design re-render.
 Captures come from a Playwright harness that serves `apps/web` with mocked `/dashboard`, `/prefs`, `/status` and `/chart` responses at device scale factor 2.
+
+The `current-*` files are `main` at `9436287`, before catalyst rows (#127), news rows (#130), and the #134 spacing fix. They stay the baseline for the mockups on this page. The news panel after those changes is the right side of [`../issue-133/08-news-industrial-dark-1440.png`](../issue-133/08-news-industrial-dark-1440.png) (also clean light, and both themes at 390). The page-link mockup is an earlier proposal; the shipped link is the right side of [`../issue-133/05-entry-industrial-dark-1440.png`](../issue-133/05-entry-industrial-dark-1440.png).

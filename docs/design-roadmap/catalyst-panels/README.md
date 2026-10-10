@@ -11,3 +11,5 @@ Supporting images for the "Update Filings & events and Catalyst calendar panels"
 | `design-catalyst-calendar.png` | Catalyst calendar drawer re-rendered from `design/ai-generated/Main.dc.html` L448–466 with its placeholder rows (L1448–1457) | Design placeholders. Expected-move values are shown as `[x]` |
 
 `mock_rows.js` is the injected mockup. It imports `overlayColor` from `apps/web/theme.js` and uses only existing classes. `design-cal.html` is the design re-render.
+
+#127 shared this row across filings and the calendar after these captures. The `current-*` images stay the before side of this comparison, and the `proposed-*` images stay the mockup. There is no later filings-only or calendar-only screenshot. The full dashboard after that change is [`../current-app/industrial-dark-1440.png`](../current-app/industrial-dark-1440.png).
