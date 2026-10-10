@@ -1,6 +1,5 @@
 """Fixture tests for company IR collection, extraction, catalog gating and serving JSON."""
 
-import json
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -55,7 +54,7 @@ def test_tesla_catalog_lists_required_metrics_as_proposed():
     assert all(item["approved_by"] is None for item in catalog["metrics"])
 
 
-def test_fixture_deck_keeps_four_quarters_and_does_not_serve_them_until_approved():
+def test_fixture_deck_serves_proposed_metrics_with_pending_status():
     catalog = ir.load_catalog("TSLA")
     names = [ir.catalog_entry(catalog, metric_id)["aliases"][0] for metric_id in REQUIRED_WITH_HISTORY]
     rows = ir.parse_deck_text(_deck(names), catalog, **_meta())
@@ -72,11 +71,15 @@ def test_fixture_deck_keeps_four_quarters_and_does_not_serve_them_until_approved
         run=ir.run_record(status="ok", sources={"fetched": 1}),
         generated_at="2026-10-08T12:00:00Z",
     )
-    assert payload["metrics"] == []
-    assert payload["discovered"] is False
+    assert payload["metrics"]
+    assert payload["discovered"] is True
+    assert payload["freshness_label"] == "Pending review"
+    assert all(item["approval_state"] == "proposed" and item["approved"] is False for item in payload["metrics"])
+    assert all(item["status"] == "proposed" for item in payload["metrics"])
+    assert all(item["provenance"]["source_url"].startswith("https://") for item in payload["metrics"])
+    assert all(item["provenance"]["confidence"] == ir.CONFIDENCE["table"] for item in payload["metrics"])
     blob = ir.visible_html(payload)
     assert "<script" not in blob.lower()
-    assert "10" not in json.dumps(payload["metrics"])
 
 
 def test_not_reported_cells_are_omitted_rather_than_zero():
@@ -327,6 +330,59 @@ def test_collection_window_and_edgar_exhibit_trigger():
     assert edgar["extract"] is True and edgar["reason"] == "edgar-8k"
 
 
+def test_proposed_capex_is_served_with_revision_and_provenance():
+    catalog = ir.load_catalog("TSLA")
+    rows = []
+    for period, value, period_end in (
+        ("2024Q4", 2000.0, date(2024, 12, 31)),
+        ("2025Q1", 2493.0, date(2025, 3, 31)),
+    ):
+        rows.append({
+            "metric_id": "capex",
+            "fiscal_period": period,
+            "period_end": period_end,
+            "value": value,
+            "approved": False,
+            "method": "table",
+            "confidence": 0.95,
+            "source_url": "https://www.sec.gov/Archives/edgar/data/fixture/capex",
+            "source_kind": "xbrl",
+            "published_date": "2025-04-23",
+        })
+    rows.append({
+        "metric_id": "optimus",
+        "fiscal_period": "2025Q1",
+        "period_end": date(2025, 3, 31),
+        "value": 1.0,
+        "approved": False,
+        "method": "llm",
+        "source_kind": "llm",
+        "confidence": 0.4,
+        "source_url": "https://www.sec.gov/Archives/edgar/data/fixture/llm",
+    })
+    payload = ir.build_serving(
+        "TSLA",
+        catalog,
+        rows,
+        run=ir.run_record(status="ok", sources={"fetched": 1}),
+        generated_at="2026-10-08T12:00:00Z",
+    )
+    assert [item["metric_id"] for item in payload["metrics"]] == ["capex"]
+    metric = payload["metrics"][0]
+    assert metric["approval_state"] == "proposed"
+    assert metric["approved"] is False
+    assert metric["provenance"]["confidence"] == 0.95
+    assert metric["provenance"]["source_url"].startswith("https://www.sec.gov/")
+    assert metric["provenance"]["source_kind"] == "xbrl"
+    assert metric["revised_from"] == "2025Q1"
+    revised = next(point for point in metric["series"] if point["fiscal_period"] == "2025Q1")
+    earlier = next(point for point in metric["series"] if point["fiscal_period"] == "2024Q4")
+    assert revised["revised"] is True
+    assert earlier["revised"] is False
+    public = ir.public_stock_document(payload, "TSLA")
+    assert public["metrics"][0]["approval_state"] == "proposed"
+
+
 def test_transcripts_stay_closed_for_paywalled_sources():
     assert ir.transcripts_permitted(None) is False
     assert ir.transcripts_permitted({"paywalled": True, "company_hosted": True}) is False
@@ -334,16 +390,25 @@ def test_transcripts_stay_closed_for_paywalled_sources():
     assert ir.transcripts_permitted({"explicitly_permitted": True}) is True
 
 
-def test_public_document_drops_proposed_metrics_and_source_has_no_secret_literal():
+def test_public_document_keeps_proposed_metrics_and_drops_rejected():
     leaked = {
         "ticker": "TSLA",
         "metrics": [
-            {"metric_id": "optimus", "approved": False, "approval_state": "proposed", "latest": {"value": 99}},
+            {
+                "metric_id": "optimus",
+                "approved": False,
+                "approval_state": "proposed",
+                "latest": {"value": 99},
+                "provenance": {"confidence": 0.95, "source_url": "https://www.sec.gov/Archives/edgar/data/fixture"},
+            },
             {"metric_id": "tesla_semi", "approved": True, "approval_state": "approved", "latest": {"value": 1}},
+            {"metric_id": "secret", "approved": False, "approval_state": "rejected", "latest": {"value": 5}},
         ],
     }
     public = ir.public_stock_document(leaked, "tsla")
-    assert [item["metric_id"] for item in public["metrics"]] == ["tesla_semi"]
+    assert [item["metric_id"] for item in public["metrics"]] == ["tesla_semi", "optimus"]
+    assert public["metrics"][1]["provenance"]["confidence"] == 0.95
+    assert public["metrics"][1]["provenance"]["source_url"].startswith("https://")
     empty = ir.public_stock_document(None, "NVDA")
     assert empty["metrics"] == [] and empty["discovered"] is False
     source = Path(ir.__file__).read_text(encoding="utf-8")

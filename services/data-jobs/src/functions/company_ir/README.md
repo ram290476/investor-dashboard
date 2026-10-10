@@ -1,6 +1,6 @@
 # Company metrics catalog
 
-The collector discovers row labels from SEC exhibits and writes `proposed` entries. Nothing is auto-approved, including optional narrative candidates. A metric appears on `/#stock/TSLA` only after a person sets `status` to `approved` and names `approved_by`.
+The collector discovers row labels from SEC exhibits and writes `proposed` entries. Nothing is auto-approved, including optional narrative candidates. Proposed metrics are served with status, confidence and source so the company page can label them Pending review. Approved metrics stay primary. A metric is treated as approved only after a person sets `status` to `approved` and names `approved_by`. Rejected metrics are not served.
 
 ## Approve or reject
 

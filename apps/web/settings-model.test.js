@@ -44,11 +44,11 @@ test("deep links open the matching tab and unknown tabs fall back to My tickers"
 
 test("tab keys wrap with arrows and jump with Home/End", () => {
   assert.equal(tabAfterKey("tickers", "ArrowRight"), "theme");
-  assert.equal(tabAfterKey("profile", "ArrowRight"), "refresh");
-  assert.equal(tabAfterKey("tickers", "ArrowLeft"), "refresh");
+  assert.equal(tabAfterKey("profile", "ArrowRight"), "tickers");
+  assert.equal(tabAfterKey("tickers", "ArrowLeft"), "profile");
   assert.equal(tabAfterKey("theme", "Home"), "tickers");
-  assert.equal(tabAfterKey("tickers", "End"), "refresh");
-  assert.equal(tabAfterKey("refresh", "ArrowRight"), "tickers");
+  assert.equal(tabAfterKey("tickers", "End"), "profile");
+  assert.equal(tabAfterKey("profile", "ArrowLeft"), "theme");
   assert.equal(tabAfterKey("tickers", "a"), null);
 });
 

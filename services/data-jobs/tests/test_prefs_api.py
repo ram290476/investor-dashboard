@@ -140,16 +140,19 @@ def test_chart_route_only_reads_a_ticker_in_the_callers_watchlist(api, monkeypat
     assert reads == ["serving/chart_data/TSLA.json"]
 
 
-def test_stock_route_hides_proposed_metrics_and_stays_on_the_watchlist(api, monkeypatch):
+def test_stock_route_serves_proposed_metrics_with_status_and_stays_on_the_watchlist(api, monkeypatch):
     mod, _ = api
     mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
     stored = {
         "ticker": "TSLA",
         "generated_at": "2026-10-08T12:00:00Z",
         "run_status": "ok",
+        "freshness_label": "Pending review",
         "metrics": [
-            {"metric_id": "optimus", "approved": False, "approval_state": "proposed", "latest": {"value": 9}},
+            {"metric_id": "optimus", "approved": False, "approval_state": "proposed", "latest": {"value": 9},
+             "provenance": {"confidence": 0.95, "source_url": "https://www.sec.gov/Archives/edgar/data/fixture"}},
             {"metric_id": "tesla_semi", "approved": True, "approval_state": "approved", "latest": {"value": 4}},
+            {"metric_id": "secret", "approved": False, "approval_state": "rejected", "latest": {"value": 1}},
         ],
     }
     monkeypatch.setattr(mod, "_read_serving_json", lambda key: stored if key == "serving/stock/TSLA.json" else None)
@@ -157,7 +160,9 @@ def test_stock_route_hides_proposed_metrics_and_stays_on_the_watchlist(api, monk
     event = _event("GET")
     event["rawPath"] = "/stock/TSLA"
     body = json.loads(mod.handler(event, None)["body"])
-    assert [item["metric_id"] for item in body["metrics"]] == ["tesla_semi"]
+    assert [item["metric_id"] for item in body["metrics"]] == ["tesla_semi", "optimus"]
+    assert body["metrics"][1]["approval_state"] == "proposed"
+    assert body["metrics"][1]["provenance"]["confidence"] == 0.95
 
     missing = _event("GET")
     missing["rawPath"] = "/stock/SPCX"

@@ -10,7 +10,6 @@ export const SETTINGS_TABS = [
   { id: "tickers", label: "My tickers" },
   { id: "theme", label: "Theme & display" },
   { id: "profile", label: "Profile & time zone" },
-  { id: "refresh", label: "Data refresh" },
 ];
 
 export const PALETTES = [
@@ -40,10 +39,12 @@ function clone(prefs) {
   };
 }
 
-/** "#settings/theme" -> "theme"; unknown tabs fall back to My tickers; other hashes -> null. */
+/** "#settings/theme" -> "theme". "#settings/refresh" opens the data refresh pop-up.
+ * Unknown tabs fall back to My tickers. Other hashes return null. */
 export function parseSettingsHash(hash) {
   const match = /^#settings(?:\/([a-z-]*))?$/.exec(String(hash || ""));
   if (!match) return null;
+  if (match[1] === "refresh") return "refresh";
   return SETTINGS_TABS.some((tab) => tab.id === match[1]) ? match[1] : "tickers";
 }
 
