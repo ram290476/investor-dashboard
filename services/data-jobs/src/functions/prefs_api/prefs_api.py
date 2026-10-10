@@ -13,7 +13,9 @@ Item (table user_prefs, partition key user_sub):
     pinned        list     pinned tickers, in order (max 6, each also in tickers)
     display       map      time_zone (IANA, e.g. America/Los_Angeles), updown_palette (see PALETTES),
                            chart_period (1D|1W|1M|3M|YTD|1Y|3Y|5Y; unknown values are stored as 1M),
-                           theme (see THEMES; missing legacy values default to industrial-dark)
+                           theme (see THEMES; missing legacy values default to industrial-dark),
+                           panels (optional map of bottom-drawer id -> "open"|"closed"; unknown ids
+                           are ignored, other values are rejected, omitted key keeps the stored map)
     chart_settings map     per-ticker overlay IDs and under-chart lane IDs, limited to tickers and allowlists
     version       number   optimistic concurrency; PUT must send the version it read
     updated_at    string   ISO-8601 UTC
@@ -50,6 +52,12 @@ THEMES = {
     "clean-light", "colorblind-hc", "midnight-slate",
 }
 CHART_PERIODS = {"1D", "1W", "1M", "3M", "YTD", "1Y", "3Y", "5Y"}
+PANEL_IDS = {
+    "rates", "inflation", "market-comparison", "moving-averages", "volatility",
+    "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "company",
+    "contracts", "about-data",
+}
+PANEL_STATES = {"open", "closed"}
 CHART_LANES = {"VOL", "SI", "OPT", "PRESS"}
 CHART_OVERLAYS = {
     "SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH",
@@ -81,6 +89,21 @@ logger = logging.getLogger(__name__)
 
 class ValidationError(ValueError):
     pass
+
+
+def normalize_panels(raw) -> dict:
+    """Known drawer ids only. Unknown ids are ignored. Any other value is rejected."""
+    if not isinstance(raw, dict):
+        raise ValidationError("display.panels must be an object")
+    panels = {}
+    for key, value in raw.items():
+        panel_id = str(key)
+        if panel_id not in PANEL_IDS:
+            continue
+        if value not in PANEL_STATES:
+            raise ValidationError("panel state must be open or closed")
+        panels[panel_id] = value
+    return panels
 
 
 def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
@@ -117,6 +140,7 @@ def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
         raise ValidationError("pinned tickers must be unique and also in tickers")
     if not isinstance(display, dict):
         raise ValidationError("display must be an object")
+    panels = normalize_panels(display["panels"]) if "panels" in display else None
     theme = display.get("theme", DEFAULTS["display"]["theme"])
     if not isinstance(theme, str) or theme not in THEMES:
         raise ValidationError(f"theme must be one of {sorted(THEMES)}")
@@ -161,10 +185,13 @@ def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
     version = body.get("version", 0)
     if not isinstance(version, int) or version < 0:
         raise ValidationError("version must be the non-negative integer returned by GET")
+    clean_display = {"time_zone": str(tz), "updown_palette": palette, "chart_period": chart_period, "theme": theme}
+    if panels is not None:
+        clean_display["panels"] = panels
     return {
         "tickers": clean,
         "pinned": pins,
-        "display": {"time_zone": str(tz), "updown_palette": palette, "chart_period": chart_period, "theme": theme},
+        "display": clean_display,
         "chart_settings": chart_settings,
         "version": version,
     }
@@ -206,12 +233,26 @@ def _response(status: int, body: dict) -> dict:
     }
 
 
+def _public_display(item: dict) -> dict:
+    display = {"theme": DEFAULTS["display"]["theme"], **dict(item.get("display") or {})}
+    raw_panels = display.get("panels")
+    if isinstance(raw_panels, dict):
+        display["panels"] = {
+            str(key): value
+            for key, value in raw_panels.items()
+            if str(key) in PANEL_IDS and value in PANEL_STATES
+        }
+    else:
+        display.pop("panels", None)
+    return display
+
+
 def _public(item: dict) -> dict:
     chart_settings = item.get("chart_settings", {})
     return {
         "tickers": list(item.get("tickers", [])),
         "pinned": list(item.get("pinned", [])),
-        "display": {"theme": DEFAULTS["display"]["theme"], **dict(item.get("display", {}))},
+        "display": _public_display(item),
         "chart_settings": {
             ticker: {"overlays": list(settings.get("overlays", [])), "lanes": list(settings.get("lanes", []))}
             for ticker, settings in chart_settings.items()
@@ -325,9 +366,13 @@ def handler(event, context):
         if method == "PUT":
             try:
                 body = json.loads(event.get("body") or "{}")
-                prefs = validate(body, get_prefs(table, sub)["tickers"])
+                stored = get_prefs(table, sub)
+                prefs = validate(body, stored["tickers"])
+                incoming = body.get("display") if isinstance(body.get("display"), dict) else {}
+                if "panels" not in incoming:
+                    prefs["display"]["panels"] = dict(stored["display"].get("panels") or {})
                 if "chart_settings" not in body:
-                    prefs["chart_settings"] = get_prefs(table, sub)["chart_settings"]
+                    prefs["chart_settings"] = stored["chart_settings"]
             except (ValidationError, json.JSONDecodeError) as exc:
                 return _response(400, {"error": str(exc)})
             try:

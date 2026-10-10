@@ -21,9 +21,9 @@ Use the following link and demo credentials to log in to the dashboard:
 The dashboard works in desktop and mobile browsers. On a wide screen the price chart and macro panels are in the main column, with macro signals, news and filings alongside. On a phone (640px wide or less) four tabs at the top switch views:
 
 - **Chart**: price, overlays, mini charts and catalyst toggles
-- **Signals**: macro signals, rates, market comparison, moving averages and other trend panels
-- **Calendar**: inflation and release links, and the catalyst calendar
-- **More**: news, filings, government contracts and company context
+- **Signals**: macro signals, plus the rates, market, moving-average and other trend drawers
+- **Calendar**: inflation and the catalyst calendar drawers
+- **More**: news, filings, and the company, contracts and about-this-data drawers
 
 <img src="docs/design-roadmap/issue-76/industrial-dark-390.png" alt="Dashboard on a phone, Chart tab" width="300">
 
@@ -67,7 +67,7 @@ Dots on the price chart mark catalysts: published macro releases, curated events
   - **Top drivers**: the series with the largest effects, each labelled Tailwind, Headwind or Neutral, with 1–3 strength bars, its latest value, 1-month change and trend state (Uptrend / Downtrend / Range, based on the 1-month z-score).
   - Regime pills, catalyst sensitivity and recent catalysts, plus an "All driver trends" list you can sort.
 - **Inflation & release links**: the latest CPI and PCE releases (YoY level, trend, surprise) and how the ticker has historically moved around release dates: correlation for the week before, the days before and release day, with sample sizes. At least 12 paired releases are required.
-- **Rates & yields, Correlation drift, Market comparison, Moving averages, Volatility, Dollar & oil** and other panels add more detail.
+- **Rates & yields, Correlation drift, Market comparison, Moving averages, Volatility, Dollar & oil** and the other bottom panels are collapsible drawers. The header (chevron, title, one-line summary, Show/Hide) toggles the panel. Rates, inflation, moving averages and the company panel start open; the rest start collapsed. Your open and closed choices are saved to your account and follow you across reloads, tickers and devices. Choosing a catalyst opens the catalyst calendar. On a phone the same drawers appear in the Signals, Calendar and More tabs.
 
 All correlations describe historical association, not causation or a forecast.
 

@@ -18,7 +18,7 @@ import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
   number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
 } from "./signals.js";
-import { emailFromIdToken, fallbackSelection, parseSettingsHash, stripOrder } from "./settings-model.js";
+import { drawerControls, emailFromIdToken, fallbackSelection, isPanelOpen, parseSettingsHash, stripOrder, withPanelState } from "./settings-model.js";
 import {
   CHART_LANES,
   OVERLAYS,
@@ -71,7 +71,9 @@ const session = {
   catalystCategories: CATALYST_CATEGORIES.map(category => category.id),
   focusCatalyst: null,
   driverSort: "effect",
-  openDrawers: new Set(),
+  // Inner disclosures that are not bottom drawers (all drivers, release calendar).
+  innerDrawers: new Set(),
+  panelSaveError: "",
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 let prefsSaveQueue = Promise.resolve();
@@ -91,25 +93,54 @@ function action(label, className, onClick) {
   return button;
 }
 
-function rememberDrawer(drawer, key) {
-  drawer.open = session.openDrawers.has(key);
+function rememberInner(drawer, key) {
+  drawer.open = session.innerDrawers.has(key);
   drawer.addEventListener("toggle", () => {
     if (!drawer.isConnected) return;
-    if (drawer.open) session.openDrawers.add(key);
-    else session.openDrawers.delete(key);
+    if (drawer.open) session.innerDrawers.add(key);
+    else session.innerDrawers.delete(key);
   });
   return drawer;
+}
+
+let panelSaveTimer = 0;
+
+function schedulePanelSave() {
+  window.clearTimeout(panelSaveTimer);
+  panelSaveTimer = window.setTimeout(() => {
+    savePrefs({ display: session.prefs.display }).then(() => {
+      session.panelSaveError = "";
+      root.querySelector("[data-panel-save-error]")?.remove();
+    }).catch((error) => {
+      if (error.status === 401) {
+        settings.close();
+        session.accessToken = null;
+        showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+        return;
+      }
+      session.panelSaveError = error.message;
+      renderDashboard();
+    });
+  }, 400);
+}
+
+function setPanelOpen(id, open) {
+  const panels = withPanelState(session.prefs.display?.panels, id, open);
+  session.prefs = { ...session.prefs, display: { ...session.prefs.display, panels } };
+  schedulePanelSave();
 }
 
 function selectCatalyst(event) {
   session.focusCatalyst = event.id;
   if (!session.catalystCategories.includes(event.category)) session.catalystCategories.push(event.category);
-  session.mobileView = "chart";
+  setPanelOpen("catalyst-calendar", true);
+  session.mobileView = "calendar";
   renderDashboard();
   requestAnimationFrame(() => {
-    const marker = document.getElementById(`catalyst-${event.id}`);
-    marker?.focus();
-    marker?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    const row = document.getElementById(`calendar-${event.id}`);
+    const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    row?.focus();
+    row?.scrollIntoView({ block: "nearest", behavior });
   });
 }
 
@@ -600,13 +631,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     const title = document.createElementNS(svgNS, "title");
     title.textContent = `${event.title} · ${event.date} · ${event.source}`;
     marker.append(hit, dot, title);
-    marker.addEventListener("click", () => {
-      session.focusCatalyst = event.id;
-      session.openDrawers.add("catalyst-calendar");
-      session.mobileView = "calendar";
-      renderDashboard();
-      document.getElementById(`calendar-${event.id}`)?.focus();
-    });
+    marker.addEventListener("click", () => selectCatalyst(event));
     marker.addEventListener("keydown", key => {
       if (key.key === "Enter" || key.key === " ") { key.preventDefault(); marker.dispatchEvent(new Event("click")); }
     });
@@ -638,6 +663,191 @@ function sectionHeader(title, subtitle = "") {
   if (subtitle) copy.append(node("p", "panel-subtitle", subtitle));
   header.append(copy);
   return header;
+}
+
+function renderPanelSaveError() {
+  if (!session.panelSaveError) return null;
+  const alert = node("p", "data-state error", `${session.panelSaveError} `);
+  alert.dataset.panelSaveError = "true";
+  alert.setAttribute("role", "alert");
+  alert.append(action("Try again", "button-link", () => {
+    session.panelSaveError = "";
+    schedulePanelSave();
+  }));
+  return alert;
+}
+
+function renderDrawer({ id, title, subtitle, summary, mobilePanel, panelId }, renderBody) {
+  const open = isPanelOpen(session.prefs.display?.panels, id);
+  const controls = drawerControls(id, open);
+  const panel = node("section", `panel panel-drawer${open ? " is-open" : ""}`);
+  if (mobilePanel) panel.dataset.mobilePanel = mobilePanel;
+  if (panelId) panel.id = panelId;
+  const header = node("div", "panel-header drawer-header");
+  const heading = node("h2", "");
+  const button = node("button", "drawer-toggle");
+  button.type = "button";
+  button.dataset.drawerToggle = id;
+  button.setAttribute("aria-expanded", controls.ariaExpanded);
+  button.setAttribute("aria-controls", controls.ariaControls);
+  const chevron = node("span", "drawer-chevron", controls.chevron);
+  chevron.setAttribute("aria-hidden", "true");
+  const titleEl = node("span", "drawer-title", title);
+  titleEl.title = title;
+  const summaryEl = node("span", "drawer-summary", summary);
+  summaryEl.title = summary;
+  const cue = node("span", "drawer-cue", controls.cue);
+  button.append(chevron, titleEl, summaryEl, cue);
+  heading.append(button);
+  header.append(heading);
+  const body = node("div", "panel-body drawer-body");
+  body.id = controls.ariaControls;
+  body.hidden = controls.bodyHidden;
+  if (subtitle) body.append(node("p", "panel-subtitle", subtitle));
+  renderBody(body);
+  button.addEventListener("click", () => {
+    setPanelOpen(id, !isPanelOpen(session.prefs.display?.panels, id));
+    renderDashboard();
+  });
+  panel.append(header, body);
+  return panel;
+}
+
+function shortReleaseDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return String(value || "").slice(0, 10);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short", day: "numeric", timeZone: session.prefs.display?.time_zone || "UTC",
+  }).format(date);
+}
+
+function observationText(row) {
+  const value = signalNumber(row?.value);
+  if (value == null) return null;
+  if (row.unit === "%") return `${value.toFixed(2)}%`;
+  if (row.unit === "USD") return formatPrice(value);
+  return Math.abs(value) >= 100 ? String(Math.round(value)) : value.toFixed(1);
+}
+
+function trendWord(row) {
+  return driverTrend(row).split(" - ")[0];
+}
+
+function directionMark(row) {
+  if (!row || signalNumber(row.value) == null) return "—";
+  if (row.trend_state === "up") return "▲";
+  if (row.trend_state === "down") return "▼";
+  return "·";
+}
+
+function ratesSummary(rows) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const ten = rows.find((row) => row.series_id === "DGS10");
+  const two = rows.find((row) => row.series_id === "DGS2");
+  if (!ten && !two) return "Unavailable";
+  const parts = [];
+  if (observationText(ten)) parts.push(`10Y ${observationText(ten)}`);
+  if (observationText(two)) parts.push(`2Y ${observationText(two)}`);
+  if (ten) parts.push(`1M ${driverChange(ten)}`);
+  return parts.join(" · ") || "Unavailable";
+}
+
+function inflationSummary(tickerData) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const latest = (tickerData?.release_links?.latest || []).find((row) => row.series_id === "CPI_YOY");
+  const next = (session.dashboard?.releases?.next || [])[0];
+  const parts = [];
+  if (signalNumber(latest?.yoy) != null) parts.push(`CPI YoY ${Number(latest.yoy).toFixed(1)}%`);
+  if (next?.release_ts) parts.push(`next release ${shortReleaseDate(next.release_ts)}`);
+  return parts.join(" · ") || "Unavailable";
+}
+
+function marketSummary() {
+  if (session.dashboardState === "loading") return "Loading…";
+  const quote = (id) => periodQuote(session.dashboard?.tickers?.[id]?.price_history || [], "1M");
+  const own = quote(session.selected);
+  const spy = quote("SPY");
+  if (!own.available && !spy.available) return "Unavailable";
+  const text = (id, item) => `${id} ${item.available ? formatPercent(item.returnValue, 1) : "—"}`;
+  return `${text(session.selected, own)} vs ${text("SPY", spy)} (1M)`;
+}
+
+function movingAverageSummary(history) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const rows = movingAverageRows(history);
+  const known = rows.filter((row) => row.distance != null);
+  if (!known.length) return "Unavailable";
+  const above = known.filter((row) => row.distance > 0).length;
+  return `Above ${above} of ${rows.length} averages`;
+}
+
+function seriesSummary(rows, seriesId, label) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const row = rows.find((item) => item.series_id === seriesId);
+  const value = observationText(row);
+  if (!value) return "Unavailable";
+  return `${label} ${value} · ${trendWord(row)}`;
+}
+
+function dollarSummary(rows) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const dollar = rows.find((row) => row.series_id === "DTWEXBGS");
+  const oil = rows.find((row) => row.series_id === "DCOILWTICO");
+  if (!dollar && !oil) return "Unavailable";
+  return `Dollar ${directionMark(dollar)} · WTI ${directionMark(oil)}`;
+}
+
+function tariffSummary(rows) {
+  if (session.dashboardState === "loading") return "Loading…";
+  const row = rows.find((item) => item.series_id === "USEPUINDXD");
+  const events = catalystRows(session.dashboard, session.selected).filter((event) => event.category === "policy").slice(-3);
+  if (!row && !events.length) return "Unavailable";
+  const value = observationText(row) || "Unavailable";
+  return `Policy uncertainty ${value} · ${events.length} recent event${events.length === 1 ? "" : "s"}`;
+}
+
+function correlationSummary(rows, chartData, chartDataState) {
+  if (session.dashboardState === "loading" || chartDataState === "loading") return "Loading…";
+  const daily = rows.filter((row) => !row.series_id.endsWith("_YOY"));
+  if (!daily.length) return "Unavailable";
+  let known = 0;
+  let strengthening = 0;
+  let flips = 0;
+  daily.forEach((row) => {
+    const change = correlationDrift(row, chartData?.correlation_history?.[row.series_id] || []);
+    if (!change) return;
+    known += 1;
+    if (change.stronger) strengthening += 1;
+    if (change.signFlip) flips += 1;
+  });
+  if (!known) return "Unavailable";
+  return `${strengthening} strengthening · ${flips} sign flip${flips === 1 ? "" : "s"}`;
+}
+
+function catalystSummary(events) {
+  if (session.dashboardState === "loading") return "Loading…";
+  if (!events.length) return session.dashboardState === "error" ? "Unavailable" : "No published events";
+  const today = String(session.dashboard?.generated_at || "").slice(0, 10);
+  const upcoming = events.filter((event) => String(event.date).slice(0, 10) >= today);
+  const next = upcoming[0];
+  return `${upcoming.length} upcoming${next ? ` · next: ${String(next.date).slice(0, 10)} ${next.title}` : ""}`;
+}
+
+function companySummary(tickerData, events) {
+  if (session.dashboardState === "loading") return "Loading…";
+  if (session.selected === "SPCX" && isNumericValue(tickerData?.contracts?.ttm_obligated)) {
+    return `TTM obligations ${formatPrice(tickerData.contracts.ttm_obligated)}`;
+  }
+  if (session.dashboardState === "error" && !events.length) return "Unavailable";
+  return `${events.length} event${events.length === 1 ? "" : "s"}`;
+}
+
+function contractsSummary(contracts) {
+  if (!isNumericValue(contracts?.ttm_obligated)) return "Unavailable";
+  const amount = new Intl.NumberFormat("en-US", {
+    style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1,
+  }).format(Number(contracts.ttm_obligated));
+  return `TTM ${amount}`;
 }
 
 function renderWatchlist() {
@@ -1448,25 +1658,30 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
 function renderContracts(tickerData) {
   const contracts = tickerData?.contracts;
   if (!contracts) return null;
-  const panel = node("section", "panel");
-  panel.append(sectionHeader("Government contracts", "Trailing 12 months · SpaceX and Tesla awards"));
+  const panel = renderDrawer({
+    id: "contracts",
+    title: "Government contracts",
+    subtitle: "Trailing 12 months · SpaceX and Tesla awards",
+    summary: contractsSummary(contracts),
+    mobilePanel: "more",
+  }, (body) => {
   const total = isNumericValue(contracts.ttm_obligated)
     ? formatPrice(contracts.ttm_obligated)
     : "unavailable (no dated source rows)";
-  panel.append(node("p", "news-score", `TTM federal obligations ${total}`));
+  body.append(node("p", "news-score", `TTM federal obligations ${total}`));
   const freshness = contracts.freshness === "stale" ? "stale (>7 days old)"
     : contracts.freshness === "fresh" ? "current"
       : "unavailable";
   const sourceIds = contracts.source_ids?.length ? contracts.source_ids.join(", ") : "source unavailable";
   const observed = contracts.observed_at ? formatTime(contracts.observed_at, session.prefs.display.time_zone)
     : "observation date unavailable";
-  panel.append(node("p", "signal-note",
+  body.append(node("p", "signal-note",
     `Rollup ${freshness} · as of ${contracts.as_of || "date unavailable"} · sources ${sourceIds} · last source observation ${observed}`));
   if (contracts.coverage === "unavailable") {
-    panel.append(node("p", "data-state", "No dated source rows support a trailing-12-month amount; zero is not inferred."));
+    body.append(node("p", "data-state", "No dated source rows support a trailing-12-month amount; zero is not inferred."));
   }
   const quarters = (contracts.by_agency || []).map(row => `${row.quarter}: ${formatPrice(row.obligated)}`);
-  if (quarters.length) panel.append(node("p", "signal-note", `Agency/fiscal-quarter breakdown · ${quarters.join(" · ")}`));
+  if (quarters.length) body.append(node("p", "signal-note", `Agency/fiscal-quarter breakdown · ${quarters.join(" · ")}`));
   const list = node("ul", "news-list");
   (contracts.recent || []).slice(0, 5).forEach((row) => {
     const item = node("li", "news-item");
@@ -1485,10 +1700,11 @@ function renderContracts(tickerData) {
     list.append(item);
   });
   if (!list.childElementCount) {
-    panel.append(node("p", "data-state", "No awards in the last 30 days."));
+    body.append(node("p", "data-state", "No awards in the last 30 days."));
   } else {
-    panel.append(list);
+    body.append(list);
   }
+  });
   return panel;
 }
 
@@ -1549,7 +1765,7 @@ function renderDrivers(tickerData) {
       if (button.disabled) button.title = "Outside the selected chart period. Choose a longer period to focus this catalyst.";
       body.append(button);
     });
-    const all = rememberDrawer(node("details", "signal-drawer"), "all-drivers");
+    const all = rememberInner(node("details", "signal-drawer"), "all-drivers");
     const sort = node("select", "driver-sort");
     sort.setAttribute("aria-label", "Sort all driver trends");
     [["effect", "Effect magnitude"], ["name", "Series name"], ["change", "1M change magnitude"], ["correlation", "90D correlation magnitude"]].forEach(([value, label]) => {
@@ -1630,10 +1846,13 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   const grid = node("div", "macro-panel-grid");
   const rows = driverRows(tickerData);
   const rates = rows.filter(row => ["DGS2", "DGS10", "DGS30", "T10Y2Y", "DFII10", "SOFR", "T10YIE"].includes(row.series_id));
-  const ratesPanel = node("section", "panel");
-  ratesPanel.dataset.mobilePanel = "signals";
-  ratesPanel.append(sectionHeader("Rates & yields", "Latest available observations · 1M change in basis points"));
-  const rateBody = node("div", "panel-body");
+  const ratesPanel = renderDrawer({
+    id: "rates",
+    title: "Rates & yields",
+    subtitle: "Latest available observations · 1M change in basis points",
+    summary: ratesSummary(rates),
+    mobilePanel: "signals",
+  }, (rateBody) => {
   if (!rates.length) rateBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading rates…"
     : session.dashboardState === "error" ? "Rates could not be loaded. Refresh data to retry."
       : "Rates are unavailable until D1 observations reach the trend build."));
@@ -1648,12 +1867,15 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
       "var(--price)", `${driverLabel(row.series_id)} over the last 63 stored sessions`));
     rateBody.append(entry);
   });
-  ratesPanel.append(rateBody);
-  const inflation = node("section", "panel");
-  inflation.dataset.mobilePanel = "calendar";
-  inflation.id = "mobile-panel-calendar";
-  inflation.append(sectionHeader("Inflation & release links", `YoY trend · historical links to ${session.selected}`));
-  const releaseBody = node("div", "panel-body");
+  });
+  const inflation = renderDrawer({
+    id: "inflation",
+    title: "Inflation & release links",
+    subtitle: `YoY trend · historical links to ${session.selected}`,
+    summary: inflationSummary(tickerData),
+    mobilePanel: "calendar",
+    panelId: "mobile-panel-calendar",
+  }, (releaseBody) => {
   const links = tickerData?.release_links;
   const latest = (links?.latest || []).filter(row => /^(CORE_)?(CPI|PCE)_YOY$/.test(row.series_id));
   if (!latest.length) releaseBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading releases…"
@@ -1678,18 +1900,20 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   });
   const calendar = session.dashboard?.releases?.next || [];
   if (calendar.length) {
-    const drawer = rememberDrawer(node("details", "signal-drawer"), "release-calendar");
+    const drawer = rememberInner(node("details", "signal-drawer"), "release-calendar");
     drawer.append(node("summary", "", `Release calendar · ${calendar.length} upcoming`));
     calendar.forEach(row => drawer.append(node("p", "signal-note", `${row.series} · ${formatTime(row.release_ts, session.prefs.display.time_zone)}`)));
     releaseBody.append(drawer);
   }
   releaseBody.append(node("p", "signal-note", "Monthly releases are excluded from daily rolling correlations. Missing consensus uses YoY change, not a consensus surprise. Links describe historical association, not causation."));
-  inflation.append(releaseBody);
-  const drift = node("section", "panel");
-  drift.dataset.mobilePanel = "signals";
-  drift.append(sectionHeader("Correlation drift", `${session.selected} · 30D / 90D rolling correlations`));
-  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "correlation");
-  drawer.append(node("summary", "", "Show correlation history and month-over-month drift"));
+  });
+  const drift = renderDrawer({
+    id: "correlation",
+    title: "Correlation drift",
+    subtitle: `${session.selected} · 30D / 90D rolling correlations`,
+    summary: correlationSummary(rows, chartData, chartDataState),
+    mobilePanel: "signals",
+  }, (drawer) => {
   if (chartDataState === "error") drawer.append(node("p", "data-state error", "Correlation history could not be loaded. Use Try again above."));
   else if (chartDataState === "loading") drawer.append(node("p", "data-state", "Loading correlation history…"));
   const daily = rows.filter(row => !row.series_id.endsWith("_YOY"));
@@ -1704,23 +1928,19 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
     drawer.append(entry);
   });
   if (!daily.length) drawer.append(node("p", "data-state", "No daily driver correlations available yet."));
-  drift.append(drawer);
+  });
   grid.append(ratesPanel, inflation, ...renderDetailPanels(tickerData, chartData, chartDataState), drift, renderCatalystCalendar(tickerData));
   return grid;
 }
 
 function renderDetailPanels(tickerData, chartData, chartDataState) {
   const panels = [];
-  const create = (title, subtitle) => {
-    const panel = node("section", "panel");
-    panel.dataset.mobilePanel = "signals";
-    panel.append(sectionHeader(title, subtitle));
-    const body = node("div", "panel-body");
-    panel.append(body);
-    panels.push(panel);
+  const create = (id, title, subtitle, summary) => {
+    let body;
+    panels.push(renderDrawer({ id, title, subtitle, summary, mobilePanel: "signals" }, (target) => { body = target; }));
     return body;
   };
-  const market = create("Market comparison", `1M adjusted returns · ${session.selected} and ETF proxies`);
+  const market = create("market-comparison", "Market comparison", `1M adjusted returns · ${session.selected} and ETF proxies`, marketSummary());
   if (session.dashboardState === "loading") market.append(node("p", "data-state", "Loading market prices…"));
   else if (session.dashboardState === "error") market.append(node("p", "data-state error", "Market prices could not be loaded. Refresh data to retry."));
   [session.selected, "SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH"].filter((id, i, ids) => ids.indexOf(id) === i).forEach(id => {
@@ -1729,18 +1949,18 @@ function renderDetailPanels(tickerData, chartData, chartDataState) {
     market.append(node("p", "signal-heading", `${id} · ${quote.available ? formatPercent(quote.returnValue, 1) : "History unavailable"}`),
       signalSparkline(history.slice(-63).map(bar => ({ value: chartValue(bar) })), "var(--price)", `${id} adjusted closes`));
   });
-  const averages = create("Moving averages", `${session.selected} · adjusted daily closes`);
+  const averages = create("moving-averages", "Moving averages", `${session.selected} · adjusted daily closes`, movingAverageSummary(tickerData?.price_history));
   if (session.dashboardState === "loading") averages.append(node("p", "data-state", "Loading daily closes…"));
   else if (session.dashboardState === "error") averages.append(node("p", "data-state error", "Daily closes could not be loaded."));
   movingAverageRows(tickerData?.price_history).forEach(row => averages.append(node("p", "signal-heading",
     `${row.window}D · ${row.value == null ? "Insufficient history" : `${formatPrice(row.value)} · price ${formatPercent(row.distance, 1)} vs average`}`)));
   const drivers = driverRows(tickerData);
   [
-    ["Volatility", ["VIXCLS"], "VIX levels and observed trend"],
-    ["Dollar & oil", ["DTWEXBGS", "DCOILWTICO"], "Observed macro series, not forecasts"],
-    ["Tariffs & geopolitics", ["USEPUINDXD"], "Policy-uncertainty proxy and curated policy events"],
-  ].forEach(([title, ids, subtitle]) => {
-    const body = create(title, subtitle);
+    ["volatility", "Volatility", ["VIXCLS"], "VIX levels and observed trend", seriesSummary(drivers, "VIXCLS", "VIX")],
+    ["dollar-oil", "Dollar & oil", ["DTWEXBGS", "DCOILWTICO"], "Observed macro series, not forecasts", dollarSummary(drivers)],
+    ["tariffs", "Tariffs & geopolitics", ["USEPUINDXD"], "Policy-uncertainty proxy and curated policy events", tariffSummary(drivers)],
+  ].forEach(([id, title, ids, subtitle, summary]) => {
+    const body = create(id, title, subtitle, summary);
     if (chartDataState === "loading") body.append(node("p", "data-state", "Loading historical series…"));
     else if (chartDataState === "error") body.append(node("p", "data-state error", "Historical series could not be loaded. Refresh data to retry."));
     ids.forEach(id => {
@@ -1765,12 +1985,14 @@ function renderDetailPanels(tickerData, chartData, chartDataState) {
 }
 
 function renderCatalystCalendar(tickerData) {
-  const panel = node("section", "panel");
-  panel.dataset.mobilePanel = "calendar";
-  panel.append(sectionHeader("Catalyst calendar", `Published events for ${session.selected} and the macro universe`));
-  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "catalyst-calendar");
   const events = catalystRows(session.dashboard, session.selected);
-  drawer.append(node("summary", "", `Upcoming and past catalysts · ${events.length} published`));
+  const panel = renderDrawer({
+    id: "catalyst-calendar",
+    title: "Catalyst calendar",
+    subtitle: `Published events for ${session.selected} and the macro universe`,
+    summary: catalystSummary(events),
+    mobilePanel: "calendar",
+  }, (drawer) => {
   if (!events.length) drawer.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading catalysts…"
     : session.dashboardState === "error" ? "Catalysts could not be loaded. Refresh data to retry." : "No catalyst feed has been published."));
   const bars = selectedChartBars(tickerData);
@@ -1789,7 +2011,7 @@ function renderCatalystCalendar(tickerData) {
     drawer.append(row);
   });
   drawer.append(node("p", "signal-note", "Nontrading-day catalysts align to the next stored session. Intraday markers use the first stored bar on the event date. No demo events are included."));
-  panel.append(drawer);
+  });
   return panel;
 }
 
@@ -1912,12 +2134,17 @@ function renderFilings(tickerData) {
 }
 
 function renderCompanyPanel(tickerData, chartData, chartDataState) {
-  const panel = node("section", "panel");
-  panel.dataset.mobilePanel = "more";
-  panel.append(sectionHeader(session.selected === "TSLA" ? "Tesla · robotaxi & company themes"
-    : session.selected === "SPCX" ? "SpaceX · operations & contracts" : `${session.selected} · company themes`,
-  "Published lake data only · no design-demo facts"));
-  const body = node("div", "panel-body");
+  const events = catalystRows(session.dashboard, session.selected)
+    .filter(event => event.category === (session.selected === "SPCX" ? "space" : "robotaxi"));
+  const title = session.selected === "TSLA" ? "Tesla · robotaxi & company themes"
+    : session.selected === "SPCX" ? "SpaceX · operations & contracts" : `${session.selected} · company themes`;
+  const panel = renderDrawer({
+    id: "company",
+    title,
+    subtitle: "Published lake data only · no design-demo facts",
+    summary: companySummary(tickerData, events),
+    mobilePanel: "more",
+  }, (body) => {
   if (session.dashboardState === "loading") body.append(node("p", "data-state", "Loading company events…"));
   else if (session.dashboardState === "error") body.append(node("p", "data-state error", "Company events could not be loaded. Refresh data to retry."));
   if (session.selected === "TSLA") {
@@ -1943,8 +2170,6 @@ function renderCompanyPanel(tickerData, chartData, chartDataState) {
   } else {
     body.append(node("p", "signal-note", "No company-specific operating-metrics feed is configured for this symbol. Available SEC financial series remain in the Fundamentals overlays."));
   }
-  const events = catalystRows(session.dashboard, session.selected)
-    .filter(event => event.category === (session.selected === "SPCX" ? "space" : "robotaxi"));
   if (!events.length) body.append(node("p", "data-state", "No matching company operating events are available."));
   events.slice(-5).reverse().forEach(event => {
     const observed = event.observed_at ? ` · collected ${String(event.observed_at).slice(0, 10)}` : "";
@@ -1963,15 +2188,18 @@ function renderCompanyPanel(tickerData, chartData, chartDataState) {
     renderDashboard();
     root.querySelector('[data-overlay-tab="Fundamentals"]')?.focus();
   }));
-  panel.append(body);
+  });
   return panel;
 }
 
 function renderAboutData() {
-  const panel = node("section", "panel");
-  panel.dataset.mobilePanel = "more";
-  const drawer = rememberDrawer(node("details", "signal-drawer panel-body"), "about-data");
-  drawer.append(node("summary", "", "About this data · provenance and methodology"),
+  const panel = renderDrawer({
+    id: "about-data",
+    title: "About this data",
+    summary: "Sources, trend definitions, methodology",
+    mobilePanel: "more",
+  }, (drawer) => {
+  drawer.append(
     node("p", "signal-note", "Source IDs identify FRED/Treasury macro series, price-provider histories, SEC EDGAR financial facts and filings, curated release/event calendars, and provider news. Observed and available dates appear in driver tooltips; collection health and schedules are separate from observation freshness."),
     node("p", "signal-note", "Prices use split/dividend-adjusted daily closes for historical comparisons. Intraday bars and live quotes are separate; ETF comparisons use their own stored price histories."),
     node("p", "signal-note", "Driver trends use 5/21/63-session changes and a 1M z-score, not stock moving averages. Stock trend uses 20/50-day averages. The 1Y range is a high-low position, not an empirical percentile."),
@@ -1980,7 +2208,7 @@ function renderAboutData() {
     node("p", "signal-note", "Quarterly fundamentals change on filing/release dates. Public float is reported USD, usually annual; estimated float shares in the short-interest lane are a separate calculation."),
     node("p", "signal-note", "News sentiment is a rolling mean of available daily scores over seven calendar days, mixing provider sentiment with a headline lexicon fallback. Missing days are not fabricated. Catalyst feeds are bounded published events, not an exhaustive corporate calendar."),
     action("View collection schedules and source health", "button-link", () => settings.open("refresh", "about-data")));
-  panel.append(drawer);
+  });
   return panel;
 }
 
@@ -2033,6 +2261,8 @@ function renderResearchPage() {
     alert.append(action("Open settings", "button-link", reopen));
     root.append(alert);
   }
+  const researchPanelError = renderPanelSaveError();
+  if (researchPanelError) root.append(researchPanelError);
 
   if (errorMessage) {
     const alert = node("p", "data-state error");
@@ -2143,11 +2373,18 @@ async function selectChartPeriod(periodId) {
   }
 }
 
+function restoreDrawerFocus(id) {
+  if (!id) return;
+  root.querySelector(`[data-drawer-toggle="${id}"]`)?.focus();
+}
+
 function renderDashboard() {
+  const restoreDrawer = document.activeElement?.dataset?.drawerToggle || null;
   const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
   if (session.route.page === "research") {
     renderResearchPage();
+    restoreDrawerFocus(restoreDrawer);
     return;
   }
   if (session.route.page === "not-found") {
@@ -2169,6 +2406,8 @@ function renderDashboard() {
     alert.append(action("Open settings", "button-link", reopen));
     root.append(alert);
   }
+  const panelSaveError = renderPanelSaveError();
+  if (panelSaveError) root.append(panelSaveError);
 
   if (errorMessage) {
     const alert = node("p", "data-state error");
@@ -2246,6 +2485,7 @@ function renderDashboard() {
     root.querySelector(".price-panel-state")?.remove();
   }
   settings.refresh();
+  restoreDrawerFocus(restoreDrawer);
 }
 
 async function refreshData(showLoading) {

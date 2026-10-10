@@ -4,13 +4,17 @@ import test from "node:test";
 import {
   MAX_PINNED,
   MAX_TICKERS,
+  PANEL_IDS,
   PIN_LIMIT_MESSAGE,
   addTicker,
   canRemove,
+  drawerControls,
   emailFromIdToken,
   fallbackSelection,
   historyState,
+  isPanelOpen,
   moveTicker,
+  normalizePanels,
   parseSettingsHash,
   refreshSummary,
   removeTicker,
@@ -19,6 +23,7 @@ import {
   tabAfterKey,
   togglePin,
   validateNewTicker,
+  withPanelState,
 } from "./settings-model.js";
 
 const prefs = (tickers, pinned = []) => ({ tickers, pinned, display: { time_zone: "America/New_York" }, version: 3 });
@@ -144,4 +149,46 @@ test("refresh summary counts ok jobs and flags partial or failed ones", () => {
   assert.deepEqual(refreshSummary(status), { ok: 2, issues: 1, tone: "partial", text: "2 jobs ok · 1 need attention" });
   assert.equal(refreshSummary(null).text, "no refresh data yet");
   assert.equal(refreshSummary({ jobs: [{ status: "ok" }] }).tone, "ok");
+});
+
+test("panel drawer state round-trips and keeps defaults for unsaved ids", () => {
+  const saved = normalizePanels({
+    rates: "closed",
+    "not-a-panel": "open",
+    volatility: "wide-open",
+    company: "open",
+  });
+  assert.deepEqual(saved, { rates: "closed", company: "open" });
+  const again = normalizePanels(JSON.parse(JSON.stringify({ ...saved, tariffs: "closed" })));
+  assert.deepEqual(again, { rates: "closed", company: "open", tariffs: "closed" });
+  assert.equal(isPanelOpen(again, "rates"), false);
+  assert.equal(isPanelOpen(again, "inflation"), true);
+  assert.equal(isPanelOpen(again, "moving-averages"), true);
+  assert.equal(isPanelOpen(again, "company"), true);
+  for (const id of ["market-comparison", "volatility", "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "contracts", "about-data"]) {
+    assert.equal(isPanelOpen({}, id), false, id);
+  }
+  assert.equal(isPanelOpen(again, "tariffs"), false);
+  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company"]);
+});
+
+test("drawer toggle updates one panel and exposes the collapsed ARIA state", () => {
+  let panels = {};
+  assert.equal(isPanelOpen(panels, "rates"), true);
+  panels = withPanelState(panels, "rates", false);
+  const collapsed = drawerControls("rates", isPanelOpen(panels, "rates"));
+  assert.equal(collapsed.ariaExpanded, "false");
+  assert.equal(collapsed.ariaControls, "drawer-body-rates");
+  assert.equal(collapsed.bodyHidden, true);
+  assert.equal(collapsed.cue, "Show");
+  assert.equal(collapsed.chevron, "▸");
+  panels = withPanelState(panels, "rates", true);
+  const expanded = drawerControls("rates", isPanelOpen(panels, "rates"));
+  assert.equal(expanded.ariaExpanded, "true");
+  assert.equal(expanded.bodyHidden, false);
+  assert.equal(expanded.cue, "Hide");
+  assert.equal(expanded.ariaControls, collapsed.ariaControls);
+  const ignored = withPanelState(panels, "nope", false);
+  assert.deepEqual(ignored, panels);
+  assert.equal(isPanelOpen(panels, "company"), true);
 });

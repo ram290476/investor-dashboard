@@ -330,6 +330,62 @@ def test_chart_settings_reject_unknown_or_excess_values(api, settings, msg):
     assert msg in json.loads(response["body"])["error"]
 
 
+def test_panel_drawers_round_trip_and_ignore_unknown_ids(api):
+    mod, _ = api
+    saved = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"panels": {"rates": "closed", "made-up": "open", "company": "open"}},
+                    "version": 0,
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert saved["display"]["panels"] == {"rates": "closed", "company": "open"}
+    kept = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"theme": "clean-light"},
+                    "version": saved["version"],
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert kept["display"]["panels"] == {"rates": "closed", "company": "open"}
+    assert kept["display"]["theme"] == "clean-light"
+    again = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert again["display"]["panels"] == kept["display"]["panels"]
+
+
+@pytest.mark.parametrize(
+    "panels,msg",
+    [
+        ("open", "must be an object"),
+        ({"rates": "expanded"}, "open or closed"),
+        ([], "must be an object"),
+    ],
+)
+def test_panel_drawers_reject_invalid_values(api, panels, msg):
+    mod, _ = api
+    response = mod.handler(
+        _event("PUT", body={"tickers": ["TSLA"], "pinned": [], "display": {"panels": panels}, "version": 0}),
+        None,
+    )
+    assert response["statusCode"] == 400
+    assert msg in json.loads(response["body"])["error"]
+    assert json.loads(mod.handler(_event("GET"), None)["body"])["version"] == 0
+
+
 def test_unauthenticated(api):
     mod, _ = api
     assert mod.handler({"requestContext": {"http": {"method": "GET"}}}, None)["statusCode"] == 401
