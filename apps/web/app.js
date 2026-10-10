@@ -14,6 +14,7 @@ import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-s
 import { applyTheme, overlayColor } from "./theme.js";
 import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystDateLabel, catalystMove, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
+import { legendItems, overlayCorrelation, seriesLineStyle } from "./chart-legend.js";
 import { sparkline, sparklineModel, sparklineSummary } from "./sparkline.js";
 import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
@@ -603,8 +604,11 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
   area.setAttribute("class", "chart-area");
   area.setAttribute("d", `${pricePath} L${right} ${bottom} L${left} ${bottom} Z`);
   const priceLine = document.createElementNS(svgNS, "path");
+  const priceStyle = seriesLineStyle("price");
   priceLine.setAttribute("class", "chart-path");
   priceLine.setAttribute("d", pricePath);
+  priceLine.setAttribute("stroke-dasharray", priceStyle.dash);
+  priceLine.setAttribute("stroke-width", String(priceStyle.width));
   svg.append(area, priceLine);
 
   configured.forEach(({ id, definition, scaled, values }) => {
@@ -616,8 +620,10 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
       (value) => ["macro", "fundamental", "sentiment"].includes(definition.kind) ? yNormalized(value) : yValue(value),
       definition.kind === "fundamental",
     ));
+    const style = seriesLineStyle(definition.kind);
     path.setAttribute("stroke", overlayColor(definition.color, session.prefs.display.theme));
-    path.setAttribute("stroke-dasharray", definition.kind === "average" ? "none" : "5 4");
+    path.setAttribute("stroke-dasharray", style.dash);
+    path.setAttribute("stroke-width", String(style.width));
     path.dataset.overlay = id;
     if (definition.kind === "fundamental") {
       const title = document.createElementNS(svgNS, "title");
@@ -1590,6 +1596,24 @@ function renderLaneControls(settings, available, chartDataState, onSettingsChang
   return group;
 }
 
+function legendKey(item, color) {
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("class", "legend-line");
+  svg.setAttribute("viewBox", "0 0 28 8");
+  svg.setAttribute("aria-hidden", "true");
+  const line = document.createElementNS(svgNS, "line");
+  line.setAttribute("x1", "1");
+  line.setAttribute("y1", "4");
+  line.setAttribute("x2", "27");
+  line.setAttribute("y2", "4");
+  line.setAttribute("stroke", color);
+  line.setAttribute("stroke-width", String(item.width));
+  line.setAttribute("stroke-dasharray", item.dash);
+  line.setAttribute("stroke-linecap", "round");
+  svg.append(line);
+  return svg;
+}
+
 function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, onSettingsChange) {
   const history = tickerData?.price_history || [];
   const bars = validBars(history);
@@ -1693,43 +1717,47 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       placedLanes = true;
       const legend = node("div", "chart-legend");
       const values = chartHistory.map(chartValue);
+      const numericValues = values.filter(isNumericValue).map(Number);
       legend.append(
         node(
           "span",
-          "",
+          "chart-legend-summary",
           `${activeId} · ${formatPercent(activeId === "1D" && isNumericValue(live?.change_pct) ? live.change_pct : quote.returnValue, 1)} · ${chartHistory.length.toLocaleString()} ${activeId === "1D" && intradayBars.length >= 2 ? "hourly bars" : "sessions · daily closes"}`,
         ),
       );
-      legend.append(
-        node(
-          "span",
-          "",
-          chart.dataset.scaleMode === "percent"
-            ? "Price and market overlays · percent change from period start"
-            : `Adjusted ${formatPrice(Math.min(...values))} – ${formatPrice(Math.max(...values))}`,
-        ),
-      );
-      visibleOverlays.forEach((id) => {
-        const definition = overlayDefinition(id);
-        const series = valuesForOverlay(id, { bars: chartHistory, tickerData, chartData, dashboard: session.dashboard });
-        const lastObservationIndex = series.findLastIndex(isNumericValue);
-        const latestValue = series[lastObservationIndex];
-        if (!definition) return;
+      if (chart.dataset.scaleMode === "percent") {
+        legend.append(node("span", "chart-legend-summary", "Price and market overlays · percent change from period start"));
+      }
+      const theme = session.prefs.display.theme;
+      legendItems({
+        ticker: session.selected,
+        prices: values,
+        adjustedMin: numericValues.length ? Math.min(...numericValues) : null,
+        adjustedMax: numericValues.length ? Math.max(...numericValues) : null,
+        overlays: visibleOverlays.map((id) => {
+          const definition = overlayDefinition(id);
+          const series = valuesForOverlay(id, { bars: chartHistory, tickerData, chartData, dashboard: session.dashboard });
+          const lastObservationIndex = series.findLastIndex(isNumericValue);
+          return {
+            definition,
+            values: series,
+            correlation: overlayCorrelation(id, tickerData, chartData),
+            summary: definition?.kind === "fundamental"
+              ? fundamentalSummary(id, chartData, chartHistory.at(-1)?.ts || chartHistory.at(-1)?.date)
+              : "",
+            observedOn: lastObservationIndex >= 0
+              ? String(chartHistory[lastObservationIndex]?.ts || chartHistory[lastObservationIndex]?.date || "").slice(0, 10)
+              : "",
+          };
+        }),
+      }, { money: formatPrice }).forEach((item) => {
         const label = node("span", "chart-legend-item");
-        const swatch = node("span", "overlay-swatch");
-        swatch.style.setProperty("--overlay-color", overlayColor(definition.color, session.prefs.display.theme));
-        label.append(swatch);
-        const shown = !isNumericValue(latestValue) ? "not available"
-          : definition.kind === "fundamental"
-            ? fundamentalSummary(id, chartData, chartHistory.at(-1)?.ts || chartHistory.at(-1)?.date)
-          : definition.kind === "market"
-          ? formatPercent(Number(latestValue) / Number(series.find(isNumericValue)) - 1, 1)
-          : definition.kind === "average"
-            ? formatPrice(latestValue)
-            : definition.kind === "sentiment"
-              ? `${Number(latestValue).toFixed(2)} · observed ${String(chartHistory[lastObservationIndex]?.ts || chartHistory[lastObservationIndex]?.date).slice(0, 10)}`
-            : Number(latestValue).toFixed(2);
-        label.append(document.createTextNode(`${definition.label} · ${shown}`));
+        if (item.id !== "price") label.dataset.overlay = item.id;
+        if (item.title) label.title = item.title;
+        const color = item.kind === "price"
+          ? "var(--price)"
+          : overlayColor(overlayDefinition(item.id).color, theme);
+        label.append(legendKey(item, color), node("span", "legend-copy", item.text));
         legend.append(label);
       });
       panel.append(legend);

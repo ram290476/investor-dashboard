@@ -66,6 +66,7 @@ jobs:
         run: |
           node --check apps/web/app.js
           node --check apps/web/chart-overlays.js
+          node --check apps/web/chart-legend.js
           node --check apps/web/chart-scale.js
           node --check apps/web/chart-period.js
           node --check apps/web/api-response.js
