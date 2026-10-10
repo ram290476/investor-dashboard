@@ -197,3 +197,49 @@ export function fundamentalSummary(id, chartData, through) {
 export function isMarketOverlay(id) {
   return overlayById.get(id)?.kind === "market";
 }
+
+// Detail cards that follow overlay groups (#94). Unmapped drawers stay up until dismissed.
+export const DETAIL_PANELS = Object.freeze([
+  { id: "market-comparison", groups: Object.freeze(["Market"]) },
+  { id: "moving-averages", groups: Object.freeze(["Moving averages"]) },
+  { id: "rates", groups: Object.freeze(["Rates"]) },
+  { id: "inflation", groups: Object.freeze(["Inflation"]) },
+  { id: "volatility", groups: Object.freeze(["Risk"]) },
+  { id: "dollar-oil", groups: Object.freeze(["Risk"]) },
+  { id: "tariffs", groups: Object.freeze(["Policy & geo"]) },
+  { id: "company", groups: Object.freeze(["Fundamentals"]) },
+  { id: "news", groups: Object.freeze(["Sentiment"]) },
+]);
+
+const detailById = new Map(DETAIL_PANELS.map((panel) => [panel.id, panel]));
+
+export function activeOverlayGroups(overlayIds) {
+  const groups = [];
+  for (const id of overlayIds || []) {
+    const group = overlayById.get(id)?.group;
+    if (group && !groups.includes(group)) groups.push(group);
+  }
+  return groups;
+}
+
+export function normalizePanelMode(value) {
+  return value === "all" ? "all" : "follow";
+}
+
+export function detailPanelGroups(id) {
+  return detailById.get(id)?.groups || null;
+}
+
+export function panelsRevealedByOverlay(overlayId) {
+  const group = overlayById.get(overlayId)?.group;
+  if (!group) return [];
+  return DETAIL_PANELS.filter((panel) => panel.groups.includes(group)).map((panel) => panel.id);
+}
+
+/** Follow mode shows a mapped card only when one of its groups is active. Dismissed cards stay hidden. */
+export function panelVisible(id, { mode = "follow", state = "", groups = [] } = {}) {
+  if (state === "dismissed") return false;
+  const spec = detailById.get(id);
+  if (!spec || normalizePanelMode(mode) === "all") return true;
+  return spec.groups.some((group) => groups.includes(group));
+}

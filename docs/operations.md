@@ -484,6 +484,16 @@ The #27 roadmap UI consumes the existing schema-v3 serving document and chart hi
   during redraws without changing ticker, period or overlays. Driver sorting is local
   session state. The header data-time button opens collection schedules; its separate
   refresh button still reloads serving documents, not provider jobs.
+- Detail cards use the same `display.panels` string map as the drawers. A third value,
+  `dismissed`, hides a card until Hidden panels restores it to `open`. `display.panel_mode`
+  is `follow` (the default when the key is missing) or `all`. Ram has not confirmed the
+  default, and has not decided whether adding an overlay should reopen a dismissed card.
+  This build does not reopen it. Follow mode shows Market comparison, Moving averages,
+  Rates & yields, Inflation & release links, Volatility, Dollar & oil, Tariffs &
+  geopolitics, the company panel and News & sentiment only when that overlay group is
+  active. Risk covers both Volatility and Dollar & oil. Correlation drift has no group,
+  so it stays visible in Follow mode until dismissed. A PUT that omits `panels` or
+  `panel_mode` keeps the stored value.
 
 Local roadmap captures use captured live market/news data with mock authentication and
 preferences; they do not verify a production Cognito sign-in or deployment.

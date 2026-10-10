@@ -117,7 +117,7 @@ Evidence for an assessor: the daily `key_rotation_status` log lines (kept 400 da
 | Trend metrics | `serving/trend_metrics/ticker=<T>/trend_metrics.parquet`, `serving/trend_metrics/latest/<T>.json` | `series_id, ticker, date, value, chg_1w, chg_1m, chg_3m, z_1w, z_1m, z_3m, range_pct_1y, trend_state, days_in_state, corr_30d, corr_90d, effect, net_pressure` |
 | Fundamentals | `serving/fundamentals_quarterly.json` | `ticker, metric (shares_outstanding, public_float_usd, gross_margin_gaap, revenue_gaap, gross_profit_gaap, deliveries, fsd_subscribers), fiscal_quarter, release_date, measurement_date, value, unit, source_id`; ticker_status distinguishes non-filers/no XBRL/no supported facts. Public float is reported USD, not float shares; the SI lane retains its existing estimation logic |
 | Chart series | `serving/chart_data/<ticker>.json` | Macro series and pressure, FINRA short interest (with SEC shares-outstanding proxy), options put/call and optional IV30, quarterly fundamentals |
-| Refresh status | `serving/status.json` | `generated_at`, `jobs[]: job, name, status (ok, partial, failed, never_run), last_run, last_outcome, failed_sources, next_run` |
+| Refresh status | `serving/status.json` | `generated_at`, `jobs[]: job, name, status (ok, partial, failed, never_run), last_run, last_outcome, failed_sources, next_run, trigger` |
 
 Sign-in is invite-only: create users with
 `aws cognito-idp admin-create-user --user-pool-id <id> --username you@example.com`.

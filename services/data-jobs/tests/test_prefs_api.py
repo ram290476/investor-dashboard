@@ -399,11 +399,76 @@ def test_panel_drawers_round_trip_and_ignore_unknown_ids(api):
     assert again["display"]["panels"] == kept["display"]["panels"]
 
 
+def test_dismissed_panels_and_panel_mode_round_trip(api):
+    mod, _ = api
+    saved = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {
+                        "panels": {"rates": "dismissed", "news": "closed", "made-up": "dismissed"},
+                        "panel_mode": "follow",
+                    },
+                    "version": 0,
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert saved["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    assert saved["display"]["panel_mode"] == "follow"
+    kept = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"theme": "clean-light"},
+                    "version": saved["version"],
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert kept["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    assert kept["display"]["panel_mode"] == "follow"
+    assert kept["display"]["theme"] == "clean-light"
+    shown = json.loads(
+        mod.handler(
+            _event(
+                "PUT",
+                body={
+                    "tickers": ["TSLA"],
+                    "pinned": [],
+                    "display": {"panel_mode": "all"},
+                    "version": kept["version"],
+                },
+            ),
+            None,
+        )["body"]
+    )
+    assert shown["display"]["panel_mode"] == "all"
+    assert shown["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    rejected = mod.handler(
+        _event(
+            "PUT",
+            body={"tickers": ["TSLA"], "pinned": [], "display": {"panel_mode": "pinned"}, "version": shown["version"]},
+        ),
+        None,
+    )
+    assert rejected["statusCode"] == 400
+    assert "follow or all" in json.loads(rejected["body"])["error"]
+
+
 @pytest.mark.parametrize(
     "panels,msg",
     [
         ("open", "must be an object"),
-        ({"rates": "expanded"}, "open or closed"),
+        ({"rates": "expanded"}, "open, closed, or dismissed"),
         ([], "must be an object"),
     ],
 )

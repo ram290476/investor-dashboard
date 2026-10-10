@@ -15,7 +15,10 @@ import {
   isPanelOpen,
   moveTicker,
   normalizePanels,
+  panelState,
   parseSettingsHash,
+  lastRunLabel,
+  nextRunLabel,
   refreshSummary,
   removeTicker,
   restoreTicker,
@@ -137,6 +140,23 @@ test("history state reports loading until a new ticker has price history", () =>
   assert.equal(historyState({ price_history: [{ date: "2026-10-06", close: 1 }] }, true), "ready");
 });
 
+test("data refresh labels name the trigger and a first run that has not happened", () => {
+  assert.deepEqual(nextRunLabel({ next_run: "2026-10-08T13:35:00Z", trigger: null }), { kind: "time" });
+  assert.deepEqual(nextRunLabel({ next_run: "2026-10-08T13:35:00Z", trigger: "ignored" }), { kind: "time" });
+  assert.deepEqual(nextRunLabel({ next_run: null, trigger: "When a ticker is added" }), {
+    kind: "event",
+    text: "When a ticker is added",
+  });
+  assert.deepEqual(nextRunLabel({ next_run: null, trigger: null }), { kind: "none", text: "—" });
+  assert.deepEqual(nextRunLabel({}), { kind: "none", text: "—" });
+  assert.equal(lastRunLabel({ status: "never_run", last_run: null }), "Waiting for first run");
+  assert.equal(lastRunLabel({}), "Waiting for first run");
+  assert.equal(lastRunLabel({ status: "ok", last_run: "2026-10-07T20:45:00Z" }), null);
+  assert.equal(lastRunLabel({ status: "partial", last_run: "2026-10-07T20:45:00Z" }), null);
+  assert.equal(lastRunLabel({ status: "skipped", last_run: "2026-10-07T20:45:00Z" }), null);
+  assert.equal(JSON.stringify(nextRunLabel({ trigger: "When a ticker is added" })).includes("not scheduled"), false);
+});
+
 test("refresh summary counts ok jobs and flags partial or failed ones", () => {
   const status = {
     jobs: [
@@ -157,10 +177,11 @@ test("panel drawer state round-trips and keeps defaults for unsaved ids", () => 
     "not-a-panel": "open",
     volatility: "wide-open",
     company: "open",
+    news: "dismissed",
   });
-  assert.deepEqual(saved, { rates: "closed", company: "open" });
+  assert.deepEqual(saved, { rates: "closed", company: "open", news: "dismissed" });
   const again = normalizePanels(JSON.parse(JSON.stringify({ ...saved, tariffs: "closed" })));
-  assert.deepEqual(again, { rates: "closed", company: "open", tariffs: "closed" });
+  assert.deepEqual(again, { rates: "closed", company: "open", news: "dismissed", tariffs: "closed" });
   assert.equal(isPanelOpen(again, "rates"), false);
   assert.equal(isPanelOpen(again, "inflation"), true);
   assert.equal(isPanelOpen(again, "moving-averages"), true);
@@ -169,7 +190,18 @@ test("panel drawer state round-trips and keeps defaults for unsaved ids", () => 
     assert.equal(isPanelOpen({}, id), false, id);
   }
   assert.equal(isPanelOpen(again, "tariffs"), false);
-  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company"]);
+  assert.equal(isPanelOpen(again, "news"), false);
+  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company", "news"]);
+});
+
+test("dismissed panels stay dismissed until the user restores them", () => {
+  let panels = withPanelState({}, "rates", "dismissed");
+  assert.equal(panelState(panels, "rates"), "dismissed");
+  assert.equal(isPanelOpen(panels, "rates"), false);
+  panels = withPanelState(panels, "rates", true);
+  assert.equal(panelState(panels, "rates"), "open");
+  assert.equal(isPanelOpen(panels, "rates"), true);
+  assert.equal(panelState(withPanelState(panels, "nope", "dismissed"), "nope"), "");
 });
 
 test("drawer toggle updates one panel and exposes the collapsed ARIA state", () => {

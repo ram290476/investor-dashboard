@@ -179,7 +179,7 @@ Each job has its own role: read and write only its listed lake prefixes, read on
 
 ### Refresh status and outbound allowlist
 
-- **Status feed** (serving/status.json, behind sign-in): for each job, its name, status (ok, partial, failed, never_run), last_run, last_outcome, failed_sources and next_run. next_run skips weekends and NYSE or federal holidays. Updates use S3 conditional writes, so concurrent jobs can't overwrite each other.
+- **Status feed** (serving/status.json, behind sign-in): for each job, its name, status (ok, partial, failed, never_run), last_run, last_outcome, failed_sources, next_run and trigger. next_run skips weekends and NYSE or federal holidays. Event-driven jobs leave next_run empty and set trigger (Trend metrics after market close and release day; ticker backfill when a ticker is added). Updates use S3 conditional writes, so concurrent jobs can't overwrite each other.
 
 - **Allowlist:** the jobs' HTTP client (app/http_client.py) refuses any host not in the source catalog. It now includes Kalshi, the Atlanta and Cleveland Feds, FINRA and the Alpaca options host. This is the software control listed under the accepted VPC risk.
 

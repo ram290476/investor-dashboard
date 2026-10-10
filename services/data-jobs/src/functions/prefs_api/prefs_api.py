@@ -55,9 +55,10 @@ CHART_PERIODS = {"1D", "1W", "1M", "3M", "YTD", "1Y", "3Y", "5Y"}
 PANEL_IDS = {
     "rates", "inflation", "market-comparison", "moving-averages", "volatility",
     "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "company",
-    "contracts", "about-data",
+    "contracts", "about-data", "news",
 }
-PANEL_STATES = {"open", "closed"}
+PANEL_STATES = {"open", "closed", "dismissed"}
+PANEL_MODES = {"follow", "all"}
 CHART_LANES = {"VOL", "SI", "OPT", "PRESS"}
 CHART_OVERLAYS = {
     "SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH",
@@ -101,9 +102,15 @@ def normalize_panels(raw) -> dict:
         if panel_id not in PANEL_IDS:
             continue
         if value not in PANEL_STATES:
-            raise ValidationError("panel state must be open or closed")
+            raise ValidationError("panel state must be open, closed, or dismissed")
         panels[panel_id] = value
     return panels
+
+
+def normalize_panel_mode(raw) -> str:
+    if raw not in PANEL_MODES:
+        raise ValidationError("panel_mode must be follow or all")
+    return raw
 
 
 def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
@@ -141,6 +148,7 @@ def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
     if not isinstance(display, dict):
         raise ValidationError("display must be an object")
     panels = normalize_panels(display["panels"]) if "panels" in display else None
+    panel_mode = normalize_panel_mode(display["panel_mode"]) if "panel_mode" in display else None
     theme = display.get("theme", DEFAULTS["display"]["theme"])
     if not isinstance(theme, str) or theme not in THEMES:
         raise ValidationError(f"theme must be one of {sorted(THEMES)}")
@@ -188,6 +196,8 @@ def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
     clean_display = {"time_zone": str(tz), "updown_palette": palette, "chart_period": chart_period, "theme": theme}
     if panels is not None:
         clean_display["panels"] = panels
+    if panel_mode is not None:
+        clean_display["panel_mode"] = panel_mode
     return {
         "tickers": clean,
         "pinned": pins,
@@ -244,6 +254,11 @@ def _public_display(item: dict) -> dict:
         }
     else:
         display.pop("panels", None)
+    mode = display.get("panel_mode")
+    if mode in PANEL_MODES:
+        display["panel_mode"] = mode
+    else:
+        display.pop("panel_mode", None)
     return display
 
 
@@ -408,6 +423,8 @@ def handler(event, context):
                 incoming = body.get("display") if isinstance(body.get("display"), dict) else {}
                 if "panels" not in incoming:
                     prefs["display"]["panels"] = dict(stored["display"].get("panels") or {})
+                if "panel_mode" not in incoming and stored["display"].get("panel_mode") in PANEL_MODES:
+                    prefs["display"]["panel_mode"] = stored["display"]["panel_mode"]
                 if "chart_settings" not in body:
                     prefs["chart_settings"] = stored["chart_settings"]
             except (ValidationError, json.JSONDecodeError) as exc:
