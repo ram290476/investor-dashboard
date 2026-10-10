@@ -10,6 +10,7 @@ import {
 import { resolveTrend, servingPriceTrend, trendLabel, trendSentence, trendTitle } from "./trend-state.js";
 import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiResponse } from "./api-response.js";
 import { createAccountSettings } from "./account-settings.js";
+import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
 import { routeFromPath, routeStateForPath, tickerResearchPath } from "./routes.js";
 import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
@@ -404,6 +405,49 @@ function scaleIndicator(values, inverse) {
   });
 }
 
+function appendTimeGrid(svg, bars, periodId, top, bottom) {
+  chartTicks(bars, periodId).forEach((tick) => {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("class", "chart-time-grid");
+    line.setAttribute("x1", String(tick.x));
+    line.setAttribute("x2", String(tick.x));
+    line.setAttribute("y1", String(top));
+    line.setAttribute("y2", String(bottom));
+    svg.append(line);
+  });
+}
+
+function appendChartInteraction(svg, { top, bottom, layer, viewHeight }) {
+  svg.dataset.chartLayer = layer;
+  svg.dataset.plotLeft = String(CHART_PLOT.left);
+  svg.dataset.plotRight = String(CHART_PLOT.right);
+  const hit = document.createElementNS(svgNS, "rect");
+  hit.setAttribute("class", "chart-hit");
+  hit.setAttribute("x", "0");
+  hit.setAttribute("y", "0");
+  hit.setAttribute("width", String(CHART_PLOT.width));
+  hit.setAttribute("height", String(viewHeight));
+  svg.insertBefore(hit, svg.firstChild);
+  for (const [edge, x] of [["start", CHART_PLOT.left], ["end", CHART_PLOT.right]]) {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("class", "chart-plot-edge");
+    line.dataset.plotEdge = edge;
+    line.setAttribute("x1", String(x));
+    line.setAttribute("x2", String(x));
+    line.setAttribute("y1", String(top));
+    line.setAttribute("y2", String(bottom));
+    svg.append(line);
+  }
+  const cross = document.createElementNS(svgNS, "line");
+  cross.setAttribute("class", "chart-crosshair");
+  cross.setAttribute("x1", String(CHART_PLOT.left));
+  cross.setAttribute("x2", String(CHART_PLOT.left));
+  cross.setAttribute("y1", String(top));
+  cross.setAttribute("y2", String(bottom));
+  cross.setAttribute("visibility", "hidden");
+  svg.append(cross);
+}
+
 function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartContext = {}) {
   if (!history?.length) return null;
   const bars = history;
@@ -437,16 +481,18 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
   const min = Math.min(...axisValues);
   const max = Math.max(...axisValues);
   const spread = max - min || 1;
-  const left = 70;
-  const right = 890;
-  const top = 18;
-  const bottom = 178;
-  const xAt = (index) => left + (index / (bars.length - 1)) * (right - left);
+  const { left, right } = CHART_PLOT;
+  const compact = window.matchMedia("(max-width: 640px)").matches;
+  const top = 16;
+  const bottom = compact ? 320 : 196;
+  const viewHeight = compact ? 340 : 210;
+  const xAt = (index) => plotX(index, bars.length);
   const yValue = (value) => bottom - ((value - min) / spread) * (bottom - top);
   const yNormalized = (value) => bottom - (value / 100) * (bottom - top);
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("class", "price-chart");
-  svg.setAttribute("viewBox", "0 0 940 210");
+  svg.setAttribute("viewBox", `0 0 ${CHART_PLOT.width} ${viewHeight}`);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${ticker} ${periodId} chart, ${bars.length} observations`);
   svg.dataset.period = periodId;
@@ -479,6 +525,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     label.textContent = compareMarkets ? `${(max - ((max - min) / 3) * index).toFixed(1)}%` : formatPrice(max - ((max - min) / 3) * index);
     svg.append(label);
   }
+  appendTimeGrid(svg, bars, periodId, top, bottom);
 
   const pricePath = seriesPath(prices, xAt, (value) => yValue(value));
   const area = document.createElementNS(svgNS, "path");
@@ -537,17 +584,19 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
     const category = CATALYST_CATEGORIES.find(category => category.id === event.category);
     const marker = document.createElementNS(svgNS, "g");
     marker.id = `catalyst-${event.id}`;
+    marker.dataset.category = category.id;
     marker.setAttribute("class", `catalyst-marker${session.focusCatalyst === event.id ? " selected" : ""}`);
     marker.setAttribute("tabindex", "0");
     marker.setAttribute("role", "button");
     marker.setAttribute("aria-label", `${category.label}: ${event.title}, ${event.date}`);
-    marker.setAttribute("transform", `translate(${xAt(index)},${182 - peers.indexOf(event) * spacing})`);
+    marker.setAttribute("transform", `translate(${xAt(index)},${bottom + 4 - peers.indexOf(event) * spacing})`);
     const hit = document.createElementNS(svgNS, "circle");
     hit.setAttribute("r", String(Math.min(12, spacing / 2)));
     hit.setAttribute("fill", "transparent");
     const dot = document.createElementNS(svgNS, "circle");
     dot.setAttribute("r", "4");
     dot.setAttribute("fill", overlayColor(category.slot, session.prefs.display.theme));
+    dot.dataset.catalystColor = dot.getAttribute("fill");
     const title = document.createElementNS(svgNS, "title");
     title.textContent = `${event.title} · ${event.date} · ${event.source}`;
     marker.append(hit, dot, title);
@@ -578,21 +627,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
       svg.append(marker);
     }
   }
-  [
-    { bar: bars[0], x: left, anchor: "start" },
-    { bar: bars.at(-1), x: right, anchor: "end" },
-  ].forEach(({ bar, x, anchor }) => {
-    const label = document.createElementNS(svgNS, "text");
-    label.setAttribute("x", String(x));
-    label.setAttribute("y", "202");
-    label.setAttribute("fill", "var(--muted)");
-    label.setAttribute("font-size", "10");
-    label.setAttribute("font-family", "IBM Plex Mono, monospace");
-    label.setAttribute("text-anchor", anchor);
-    const stamp = String(bar?.ts || bar?.date || "");
-    label.textContent = periodId === "1D" && stamp.includes("T") ? stamp.slice(11, 16) : stamp.slice(0, 10);
-    svg.append(label);
-  });
+  appendChartInteraction(svg, { top, bottom, layer: "price", viewHeight });
   return svg;
 }
 
@@ -970,8 +1005,130 @@ function renderOverlayControls(groups, chartDataState, onSettingsChange) {
   return panel;
 }
 
-function renderLane(lane, bars, tickerData, chartData, chartDataState) {
+function formatCompactNumber(value) {
+  if (!isNumericValue(value)) return "—";
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value));
+}
+
+function formatLanePoint(lane, value) {
+  if (!isNumericValue(value)) return "—";
+  if (lane.id === "VOL") return `${formatCompactNumber(value)} sh`;
+  if (lane.id === "PRESS") return `${Number(value) > 0 ? "+" : ""}${Number(value).toFixed(2)}`;
+  if (lane.id === "SI") return lane.percent ? `${Number(value).toFixed(2)}%` : `${Math.round(Number(value)).toLocaleString()} sh`;
+  return `${Number(value).toFixed(2)} P/C`;
+}
+
+function crosshairText(bar, index, periodId, lanes) {
+  const stamp = barStamp(bar);
+  const when = periodId === "1D" && stamp.includes("T") ? `${stamp.slice(0, 10)} ${stamp.slice(11, 16)}` : stamp.slice(0, 10);
+  const traded = displayPrice(bar);
+  const parts = [when, formatPrice(isNumericValue(traded) ? traded : chartValue(bar))];
+  const volumeLane = lanes.find((lane) => lane.id === "VOL");
+  parts.push(`Volume ${formatLanePoint({ id: "VOL" }, volumeLane ? volumeLane.values[index] : bar.volume)}`);
+  lanes.filter((lane) => lane.id !== "VOL").forEach((lane) => {
+    parts.push(`${lane.label} ${formatLanePoint(lane, lane.values[index])}`);
+  });
+  return parts.join(" · ");
+}
+
+function renderTimeAxis(bars, periodId) {
+  const axis = node("div", "chart-time-axis");
+  axis.dataset.chartLayer = "axis";
+  chartTicks(bars, periodId).forEach((tick) => {
+    const label = node("span", "chart-tick", tick.label);
+    label.dataset.anchor = tick.anchor;
+    label.style.left = `${(tick.x / CHART_PLOT.width) * 100}%`;
+    axis.append(label);
+  });
+  [["start", CHART_PLOT.left], ["end", CHART_PLOT.right]].forEach(([edge, x]) => {
+    const marker = node("span", "chart-axis-edge");
+    marker.dataset.plotEdge = edge;
+    marker.style.left = `${(x / CHART_PLOT.width) * 100}%`;
+    axis.append(marker);
+  });
+  const cross = node("span", "chart-axis-crosshair");
+  cross.hidden = true;
+  axis.append(cross);
+  return axis;
+}
+
+function attachSharedCrosshair(stack, bars, periodId, lanes) {
+  const layers = [...stack.querySelectorAll("[data-chart-layer]")];
+  const readout = stack.querySelector(".chart-readout");
+  let index = null;
+  const show = (next) => {
+    if (!Number.isInteger(next) || next < 0 || next >= bars.length) return;
+    index = next;
+    const x = plotX(index, bars.length);
+    layers.forEach((layer) => {
+      const line = layer.querySelector(".chart-crosshair");
+      if (line) {
+        line.setAttribute("x1", String(x));
+        line.setAttribute("x2", String(x));
+        line.setAttribute("visibility", "visible");
+      }
+      const marker = layer.querySelector(".chart-axis-crosshair");
+      if (marker) {
+        marker.hidden = false;
+        marker.style.left = `${(x / CHART_PLOT.width) * 100}%`;
+      }
+    });
+    if (readout) readout.textContent = crosshairText(bars[index], index, periodId, lanes);
+  };
+  const clear = () => {
+    index = null;
+    layers.forEach((layer) => {
+      layer.querySelector(".chart-crosshair")?.setAttribute("visibility", "hidden");
+      const marker = layer.querySelector(".chart-axis-crosshair");
+      if (marker) marker.hidden = true;
+    });
+    if (readout) readout.textContent = "Hover, tap, or use arrow keys to read a date across the charts.";
+  };
+  const indexFromEvent = (event, layer) => {
+    const rect = layer.getBoundingClientRect();
+    if (!rect.width) return null;
+    const viewX = ((event.clientX - rect.left) / rect.width) * CHART_PLOT.width;
+    return indexAtPlotX(viewX, bars.length);
+  };
+  layers.forEach((layer) => {
+    layer.addEventListener("pointerdown", (event) => {
+      if (event.button != null && event.button !== 0) return;
+      try { layer.setPointerCapture?.(event.pointerId); } catch { /* synthetic or unsupported */ }
+      const next = indexFromEvent(event, layer);
+      if (next != null) show(next);
+    });
+    layer.addEventListener("pointermove", (event) => {
+      const dragging = event.pointerType !== "mouse" && layer.hasPointerCapture?.(event.pointerId);
+      if (event.pointerType !== "mouse" && !dragging) return;
+      const next = indexFromEvent(event, layer);
+      if (next != null) show(next);
+    });
+  });
+  stack.addEventListener("pointerleave", (event) => {
+    if (event.pointerType !== "mouse" || stack.contains(document.activeElement)) return;
+    clear();
+  });
+  stack.addEventListener("keydown", (event) => {
+    if (event.target !== stack) return;
+    const current = index ?? bars.length - 1;
+    const next = event.key === "ArrowLeft" ? Math.max(0, current - 1)
+      : event.key === "ArrowRight" ? Math.min(bars.length - 1, current + 1)
+      : event.key === "Home" ? 0
+      : event.key === "End" ? bars.length - 1
+      : null;
+    if (next == null) return;
+    event.preventDefault();
+    show(next);
+  });
+  stack.addEventListener("focus", () => { if (index == null) show(bars.length - 1); });
+  stack.addEventListener("blur", (event) => {
+    if (event.relatedTarget && !stack.contains(event.relatedTarget)) clear();
+  });
+}
+
+function renderLane(lane, bars, tickerData, chartData, chartDataState, periodId) {
   const row = node("section", "chart-lane");
+  row.dataset.lane = lane.id;
   row.setAttribute("aria-label", `${lane.label} chart lane`);
   const info = node("div", "lane-info");
   info.append(node("h3", "lane-title", lane.label));
@@ -1032,27 +1189,33 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState) {
   }
   info.append(node("strong", `lane-stat ${lane.id === "PRESS" ? polarity(latest) : ""}`.trim(), stat));
 
+  const viewHeight = 64;
+  const laneTop = 6;
+  const laneBottom = 58;
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("class", `lane-chart lane-${lane.id.toLowerCase()}`);
-  svg.setAttribute("viewBox", "0 0 940 68");
+  svg.setAttribute("viewBox", `0 0 ${CHART_PLOT.width} ${viewHeight}`);
+  svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${lane.label} over ${bars.length} chart observations`);
   const title = document.createElementNS(svgNS, "title");
   title.textContent = `${lane.label}: ${stat}`;
   svg.append(title);
-  const left = 70;
-  const right = 890;
-  const bottom = 64;
-  const xAt = (index) => left + (index / Math.max(1, values.length - 1)) * (right - left);
+  const { left, right } = CHART_PLOT;
+  const xAt = (index) => plotX(index, bars.length);
+  appendTimeGrid(svg, bars, periodId, laneTop, laneBottom);
   if (lane.id === "VOL") {
     const max = Math.max(...valid) || 1;
+    const slot = bars.length > 1 ? (right - left) / (bars.length - 1) : right - left;
+    const barWidth = Math.max(0.35, Math.min(slot * 0.72, 8));
     values.forEach((value, index) => {
       if (!isNumericValue(value)) return;
-      const height = (Number(value) / max) * 54;
+      const height = (Number(value) / max) * (laneBottom - laneTop);
       const bar = document.createElementNS(svgNS, "rect");
-      bar.setAttribute("x", String(xAt(index) - Math.max(1, 7 - values.length / 100) / 2));
-      bar.setAttribute("y", String(bottom - height));
-      bar.setAttribute("width", String(Math.max(1, 7 - values.length / 100)));
+      const x = Math.min(Math.max(xAt(index) - barWidth / 2, left), right - barWidth);
+      bar.setAttribute("x", String(x));
+      bar.setAttribute("y", String(laneBottom - height));
+      bar.setAttribute("width", String(barWidth));
       bar.setAttribute("height", String(height));
       bar.setAttribute("class", "lane-volume-bar");
       svg.append(bar);
@@ -1061,7 +1224,7 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState) {
     const min = lane.id === "PRESS" ? -1 : Math.min(...valid);
     const max = lane.id === "PRESS" ? 1 : Math.max(...valid);
     const spread = max - min || 1;
-    const yAt = (value) => bottom - 6 - ((value - min) / spread) * 52;
+    const yAt = (value) => laneBottom - ((value - min) / spread) * (laneBottom - laneTop);
     if (lane.id === "PRESS") {
       const zero = document.createElementNS(svgNS, "line");
       zero.setAttribute("x1", String(left));
@@ -1072,18 +1235,19 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState) {
       svg.append(zero);
     }
     const path = document.createElementNS(svgNS, "path");
-    path.setAttribute("d", seriesPath(values, xAt, (value) => yAt(value)));
+    path.setAttribute("d", seriesPath(values, xAt, (value) => yAt(value), lane.id === "SI"));
     path.setAttribute("class", `lane-line ${lane.id === "PRESS" ? "lane-pressure-line" : ""}`.trim());
     svg.append(path);
   }
+  appendChartInteraction(svg, { top: laneTop, bottom: laneBottom, layer: "lane", viewHeight });
   row.append(info, svg);
   return row;
 }
 
-function renderChartLanes(settings, bars, tickerData, chartData, chartDataState, available) {
+function renderChartLanes(settings, bars, tickerData, chartData, chartDataState, available, periodId) {
   const lanes = node("div", "chart-lanes");
   available.filter(lane => settings.lanes.includes(lane.id)).forEach(lane => {
-    lanes.append(renderLane(lane, bars, tickerData, chartData, chartDataState));
+    lanes.append(renderLane(lane, bars, tickerData, chartData, chartDataState, periodId));
   });
   return lanes;
 }
@@ -1156,14 +1320,23 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   const categories = catalystCategoriesInWindow(session.dashboard, session.selected, chartHistory);
   categories.forEach(category => {
     const enabled = session.catalystCategories.includes(category.id);
-    const toggle = action(category.label, "overlay-chip", () => {
+    const color = overlayColor(category.slot, session.prefs.display.theme);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "overlay-chip catalyst-chip";
+    toggle.style.setProperty("--catalyst-color", color);
+    toggle.dataset.catalystCategory = category.id;
+    toggle.dataset.catalystColor = color;
+    toggle.setAttribute("aria-pressed", String(enabled));
+    const swatch = node("span", "catalyst-swatch");
+    swatch.setAttribute("aria-hidden", "true");
+    toggle.append(swatch, document.createTextNode(category.label));
+    toggle.addEventListener("click", () => {
       session.catalystCategories = enabled ? session.catalystCategories.filter(id => id !== category.id)
         : [...session.catalystCategories, category.id];
       renderDashboard();
       root.querySelector(`[data-catalyst-category="${category.id}"]`)?.focus();
     });
-    toggle.dataset.catalystCategory = category.id;
-    toggle.setAttribute("aria-pressed", String(enabled));
     filters.append(toggle);
   });
   const clearCatalysts = action("Clear all", "overlay-chip bulk-control", () => {
@@ -1181,16 +1354,31 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
     panel.append(error);
   }
 
+  let placedLanes = false;
   if (chartHistory.length >= 2) {
-    const wrap = node("div", "chart-wrap");
     const chart = drawChart(chartHistory, session.selected, activeId, visibleOverlays, {
       tickerData,
       chartData,
       dashboard: session.dashboard,
     });
     if (chart) {
-      wrap.append(chart);
-      panel.append(wrap);
+      const stack = node("div", "chart-stack");
+      stack.tabIndex = 0;
+      stack.setAttribute("role", "group");
+      stack.setAttribute("aria-label", `${session.selected} price chart and under-chart lanes. Left and right arrow keys move the date crosshair.`);
+      const readout = node("p", "chart-readout", "Hover, tap, or use arrow keys to read a date across the charts.");
+      readout.setAttribute("role", "status");
+      readout.setAttribute("aria-live", "polite");
+      const lanes = renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes, activeId);
+      const laneSeries = controls.lanes.filter((lane) => chartSettings.lanes.includes(lane.id)).map((lane) => ({
+        ...lane,
+        values: lane.id === "VOL" || chartDataState === "ready" ? laneValues(lane.id, chartHistory, chartData) : [],
+        percent: lane.id === "SI" && alignedLaneValues(chartData?.short_interest, chartHistory, "short_pct_denominator").some(isNumericValue),
+      }));
+      stack.append(readout, chart, lanes, renderTimeAxis(chartHistory, activeId));
+      attachSharedCrosshair(stack, chartHistory, activeId, laneSeries);
+      panel.append(stack);
+      placedLanes = true;
       const legend = node("div", "chart-legend");
       const values = chartHistory.map(chartValue);
       legend.append(
@@ -1251,8 +1439,8 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       ),
     );
   }
-  panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes),
-    renderLaneControls(chartSettings, controls.lanes, chartDataState, onSettingsChange));
+  if (!placedLanes) panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes, activeId));
+  panel.append(renderLaneControls(chartSettings, controls.lanes, chartDataState, onSettingsChange));
   if (categories.length) panel.append(filters);
   return panel;
 }

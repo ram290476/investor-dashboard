@@ -653,9 +653,24 @@ a {
   color: var(--muted);
 }
 
-.chart-wrap {
-  min-height: 200px;
+.chart-stack {
+  min-width: 0;
   padding: 8px 12px 4px;
+  touch-action: pan-y;
+}
+
+.chart-stack:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.chart-readout {
+  min-height: 18px;
+  margin: 0 0 6px;
+  color: var(--secondary);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .price-chart {
@@ -665,9 +680,34 @@ a {
   overflow: visible;
 }
 
-.chart-grid-line {
+.chart-grid-line,
+.chart-time-grid {
   stroke: var(--grid);
   stroke-dasharray: 3 5;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.chart-crosshair {
+  stroke: var(--text);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.chart-plot-edge,
+.chart-hit {
+  pointer-events: none;
+}
+
+.chart-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.chart-plot-edge {
+  stroke: transparent;
   stroke-width: 1;
 }
 
@@ -773,6 +813,31 @@ a {
   color: var(--text);
 }
 
+.catalyst-chip,
+.catalyst-chip[aria-pressed="true"],
+.catalyst-chip[aria-pressed="false"] {
+  border-color: var(--catalyst-color, var(--control-line));
+  color: var(--text);
+}
+
+.catalyst-chip[aria-pressed="false"] {
+  background: transparent;
+}
+
+.catalyst-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  box-sizing: border-box;
+  border: 2px solid var(--catalyst-color, var(--control-line));
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.catalyst-chip[aria-pressed="true"] .catalyst-swatch {
+  background: var(--catalyst-color, var(--control-line));
+}
+
 .overlay-chip {
   min-height: 28px;
   border-radius: 999px;
@@ -814,7 +879,7 @@ a {
 .chart-lanes {
   display: grid;
   min-width: 0;
-  padding: 0 12px 8px;
+  padding: 0;
 }
 
 .chart-lane {
@@ -849,7 +914,7 @@ a {
 .lane-subtitle {
   margin: 0;
   color: var(--subtle);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -861,11 +926,65 @@ a {
   font-size: 11px;
 }
 
+.lane-stat.positive {
+  color: var(--green);
+}
+
+.lane-stat.negative {
+  color: var(--red);
+}
+
 .lane-chart {
   display: block;
   width: 100%;
   height: 48px;
   overflow: visible;
+}
+
+.lane-chart.lane-vol {
+  height: 64px;
+}
+
+.chart-time-axis {
+  position: relative;
+  width: 100%;
+  height: 20px;
+  margin-top: 2px;
+}
+
+.chart-tick {
+  position: absolute;
+  top: 2px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.chart-tick[data-anchor="middle"] {
+  transform: translateX(-50%);
+}
+
+.chart-tick[data-anchor="end"] {
+  transform: translateX(-100%);
+}
+
+.chart-axis-edge {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.chart-axis-crosshair {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--text);
+  pointer-events: none;
 }
 
 .lane-volume-bar {
@@ -2041,9 +2160,8 @@ input::placeholder {
     padding: 13px;
   }
 
-  .chart-wrap {
-    min-height: 170px;
-    padding-inline: 4px;
+  .chart-stack {
+    padding-inline: 8px;
   }
 
   .chart-legend {
@@ -2055,7 +2173,7 @@ input::placeholder {
   }
 
   .chart-lanes {
-    padding-inline: 8px;
+    padding-inline: 0;
   }
 
   .chart-lane {
@@ -2069,12 +2187,12 @@ input::placeholder {
     gap: 6px;
   }
 
-  .lane-subtitle {
-    font-size: 9px;
+  .lane-chart {
+    height: 56px;
   }
 
-  .lane-chart {
-    height: 52px;
+  .lane-chart.lane-vol {
+    height: 72px;
   }
 
   .gate {
