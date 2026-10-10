@@ -15,6 +15,7 @@ import {
   isPanelOpen,
   moveTicker,
   normalizePanels,
+  panelState,
   parseSettingsHash,
   refreshSummary,
   removeTicker,
@@ -157,10 +158,11 @@ test("panel drawer state round-trips and keeps defaults for unsaved ids", () => 
     "not-a-panel": "open",
     volatility: "wide-open",
     company: "open",
+    news: "dismissed",
   });
-  assert.deepEqual(saved, { rates: "closed", company: "open" });
+  assert.deepEqual(saved, { rates: "closed", company: "open", news: "dismissed" });
   const again = normalizePanels(JSON.parse(JSON.stringify({ ...saved, tariffs: "closed" })));
-  assert.deepEqual(again, { rates: "closed", company: "open", tariffs: "closed" });
+  assert.deepEqual(again, { rates: "closed", company: "open", news: "dismissed", tariffs: "closed" });
   assert.equal(isPanelOpen(again, "rates"), false);
   assert.equal(isPanelOpen(again, "inflation"), true);
   assert.equal(isPanelOpen(again, "moving-averages"), true);
@@ -169,7 +171,18 @@ test("panel drawer state round-trips and keeps defaults for unsaved ids", () => 
     assert.equal(isPanelOpen({}, id), false, id);
   }
   assert.equal(isPanelOpen(again, "tariffs"), false);
-  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company"]);
+  assert.equal(isPanelOpen(again, "news"), false);
+  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company", "news"]);
+});
+
+test("dismissed panels stay dismissed until the user restores them", () => {
+  let panels = withPanelState({}, "rates", "dismissed");
+  assert.equal(panelState(panels, "rates"), "dismissed");
+  assert.equal(isPanelOpen(panels, "rates"), false);
+  panels = withPanelState(panels, "rates", true);
+  assert.equal(panelState(panels, "rates"), "open");
+  assert.equal(isPanelOpen(panels, "rates"), true);
+  assert.equal(panelState(withPanelState(panels, "nope", "dismissed"), "nope"), "");
 });
 
 test("drawer toggle updates one panel and exposes the collapsed ARIA state", () => {

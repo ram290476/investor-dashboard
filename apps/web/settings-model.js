@@ -172,34 +172,39 @@ export function timeZoneLabel(zone) {
 export const PANEL_IDS = [
   "rates", "inflation", "market-comparison", "moving-averages", "volatility",
   "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "company",
-  "contracts", "about-data",
+  "contracts", "about-data", "news",
 ];
 
-const DEFAULT_OPEN_PANELS = new Set(["rates", "inflation", "moving-averages", "company"]);
+const PANEL_STATES = new Set(["open", "closed", "dismissed"]);
+const DEFAULT_OPEN_PANELS = new Set(["rates", "inflation", "moving-averages", "company", "news"]);
 
-/** Keep known ids with an open/closed value. Unknown ids and other values are dropped. */
+/** Keep known ids with an open, closed, or dismissed value. Unknown ids and other values are dropped. */
 export function normalizePanels(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const panels = {};
   for (const [id, value] of Object.entries(raw)) {
-    if (!PANEL_IDS.includes(id) || (value !== "open" && value !== "closed")) continue;
+    if (!PANEL_IDS.includes(id) || !PANEL_STATES.has(value)) continue;
     panels[id] = value;
   }
   return panels;
 }
 
+export function panelState(panels, id) {
+  return normalizePanels(panels)[id] || "";
+}
+
 export function isPanelOpen(panels, id) {
-  const saved = normalizePanels(panels)[id];
+  const saved = panelState(panels, id);
   if (saved === "open") return true;
-  if (saved === "closed") return false;
+  if (saved === "closed" || saved === "dismissed") return false;
   return DEFAULT_OPEN_PANELS.has(id);
 }
 
-/** Next saved map after the user opens or closes one drawer. Unknown ids are ignored. */
+/** Next saved map after the user opens, closes, or dismisses one drawer. Unknown ids are ignored. */
 export function withPanelState(panels, id, open) {
   const next = normalizePanels(panels);
   if (!PANEL_IDS.includes(id)) return next;
-  next[id] = open ? "open" : "closed";
+  next[id] = open === "dismissed" ? "dismissed" : open ? "open" : "closed";
   return next;
 }
 

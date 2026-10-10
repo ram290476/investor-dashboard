@@ -2126,6 +2126,151 @@ input::placeholder {
   display: none;
 }
 
+/* detail panel dismiss and follow mode (#94) */
+.panel-drawer .drawer-header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.drawer-header-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.panel-drawer .drawer-header-row h2 {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.panel-dismiss {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  margin-right: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.panel-dismiss:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.drawer-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 0 16px 10px;
+}
+
+.drawer-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--secondary);
+  font-size: 11px;
+}
+
+.drawer-key-label {
+  overflow-wrap: anywhere;
+}
+
+.panel-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.panel-mode-option {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.panel-mode-option[aria-pressed="true"] {
+  border-color: var(--blue);
+  background: var(--selected);
+  color: var(--text);
+}
+
+.panel-toolbar-extra,
+.hidden-panels-extra,
+.panel-empty {
+  display: none;
+}
+
+.hidden-panels {
+  position: relative;
+  margin: 4px 0 12px;
+}
+
+.hidden-panels-toggle {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hidden-panels-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.hidden-panels-item {
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.hidden-panels-item:hover {
+  background: var(--hover);
+}
+
+.macro-panel-grid > .panel-mode,
+.macro-panel-grid > .panel-empty,
+.macro-panel-grid > .hidden-panels,
+.macro-panel-grid > [data-drawer="catalyst-calendar"] {
+  grid-column: 1 / -1;
+}
+
+.panel-empty {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+/* end detail panel dismiss and follow mode (#94) */
+
 .macro-panel-grid > :last-child {
   grid-column: 1 / -1;
 }
