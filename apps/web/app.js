@@ -503,6 +503,7 @@ function signOut() {
   location.assign(logout);
 }
 
+// apiGet and putPrefs both surface prefs_api 502/503 codes through readApiResponse.
 async function apiGet(path) {
   const what = apiLabels[path] || (String(path).startsWith("stock/") ? "Company page" : "The request");
   let response;
