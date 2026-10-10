@@ -6,6 +6,10 @@ Each run requests the last 7 days three times, once per Alpaca adjustment, and s
     adj_close   adjustment=all    split- and dividend-adjusted as of today (Yahoo's adjclose)
 Rows older than the window are re-adjusted by the nightly price_reconcile job when a split or
 dividend appears.
+
+Volume on these rows is Alpaca's free IEX feed (volume_source DS-02, also kept on volume_iex).
+That print is a few percent of consolidated volume. price_reconcile replaces the last 10 sessions
+with Yahoo consolidated volume (DS-05) when Yahoo has the session.
 """
 
 from __future__ import annotations
@@ -41,6 +45,8 @@ def normalize_daily_bars(payload: dict) -> list[dict]:
                     "date": stamp.astimezone(UTC).date(),
                     "close": float(bar["c"]),
                     "volume": int(bar["v"]),
+                    "volume_iex": int(bar["v"]),
+                    "volume_source": "DS-02",
                     "source_id": "DS-02",
                 }
             )
@@ -70,6 +76,8 @@ def combine_daily_bars(raw: list[dict], split: list[dict], adjusted: list[dict])
                 "close_raw": r["close"],
                 "adj_close": adj_close.get(key),
                 "volume": r["volume"],
+                "volume_iex": r.get("volume_iex", r["volume"]),
+                "volume_source": r.get("volume_source", "DS-02"),
                 "source_id": r["source_id"],
             }
         )

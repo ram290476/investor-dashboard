@@ -67,7 +67,7 @@ Tables are grouped by how often they change, and that sets their file layout: ho
 | Table | Tier | Key | Main columns | Partition | Filled by |
 |----|----|----|----|----|----|
 | prices_hourly | Hourly | ticker, bar_ts | open, high, low, close, volume, feed; covers the user-ticker union and index ETFs SPY, DIA, QQQ, IWM, XLY, ITA, SMH | year/month | H1, F1 |
-| prices_daily | Daily | ticker, date | close, adj_close, volume, source_id | ticker | D4 close check, backfill (DS-05) |
+| prices_daily | Daily | ticker, date | close, adj_close, volume, volume_iex, volume_source (DS-05 consolidated or DS-02 IEX), source_id | ticker | D4 close check, backfill (DS-05); price-reconcile refreshes the last 10 sessions' volume from Yahoo |
 | news_articles | Hourly | url_hash | published_at, tickers\[\], title, source, sentiment, topics\[\] | year/month | H2 |
 | events | Hourly / daily | event_id | event_ts, category, subcategory, title, url, entities\[\], severity | year/month | H3, D2, W1 |
 | filings | Hourly | accession_no | cik, form, filed_at, url | year | H3 |

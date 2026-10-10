@@ -34,7 +34,15 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
     assert snapshot["generated_at"] == "2026-10-04T22:00:00+00:00"
     assert snapshot["data_status"] == "available"
     assert snapshot["tickers"]["TSLA"]["price_history"] == [
-        {"date": "2026-10-02", "close": 441.0, "close_raw": None, "adj_close": 441.0, "volume": 101}
+        {
+            "date": "2026-10-02",
+            "close": 441.0,
+            "close_raw": None,
+            "adj_close": 441.0,
+            "volume": 101,
+            "volume_source": None,
+            "volume_iex": None,
+        }
     ]
     assert snapshot["tickers"]["TSLA"]["trend"]["ticker"] == "TSLA"
     assert snapshot["tickers"]["SPCX"]["price_status"] == "unavailable"
@@ -185,7 +193,79 @@ def test_snapshot_carries_close_raw_and_tolerates_rows_without_it():
     )
     history = snapshot["tickers"]["TSLA"]["price_history"]
     assert history[0]["close_raw"] is None and history[0]["adj_close"] is None
-    assert history[1] == {"date": "2026-10-02", "close": 150.0, "close_raw": 300.0, "adj_close": 149.0, "volume": 2}
+    assert history[1] == {
+        "date": "2026-10-02",
+        "close": 150.0,
+        "close_raw": 300.0,
+        "adj_close": 149.0,
+        "volume": 2,
+        "volume_source": None,
+        "volume_iex": None,
+    }
+
+
+def test_snapshot_serves_volume_source_and_an_explicit_change_point():
+    """A mixed series stays intact and names the session where the source changes."""
+    snapshot = dashboard_build.build_snapshot(
+        tickers=["TSLA"],
+        prices={
+            "TSLA": [
+                {
+                    "date": "2026-09-28",
+                    "close": 357.0,
+                    "volume": 39452900,
+                    "volume_source": "DS-05",
+                    "source_id": "DS-05",
+                },
+                {
+                    "date": "2026-09-29",
+                    "close": 352.0,
+                    "volume": 524882,
+                    "volume_iex": 524882,
+                    "volume_source": "DS-02",
+                    "source_id": "DS-02",
+                },
+                {
+                    "date": "2026-09-30",
+                    "close": 354.0,
+                    "volume": 39235800,
+                    "volume_iex": 779713,
+                    "volume_source": "DS-05",
+                    "source_id": "DS-02",
+                },
+            ]
+        },
+        trends={},
+        fundamentals=[],
+        status=None,
+    )
+    history = snapshot["tickers"]["TSLA"]["price_history"]
+    assert [row["volume_source"] for row in history] == ["DS-05", "DS-02", "DS-05"]
+    assert history[1]["volume"] == 524882 and history[1]["volume_iex"] == 524882
+    assert history[2]["volume"] == 39235800 and history[2]["volume_iex"] == 779713
+    assert snapshot["tickers"]["TSLA"]["volume_source_changes"] == [
+        {"date": "2026-09-29", "from": "DS-05", "to": "DS-02"},
+        {"date": "2026-09-30", "from": "DS-02", "to": "DS-05"},
+    ]
+
+    uniform = dashboard_build.build_snapshot(
+        tickers=["TSLA"],
+        prices={
+            "TSLA": [
+                {"date": "2026-09-29", "close": 1.0, "volume": 100, "source_id": "DS-05"},
+                {"date": "2026-09-30", "close": 1.0, "volume": 110, "volume_source": "DS-05", "source_id": "DS-02"},
+            ]
+        },
+        trends={},
+        fundamentals=[],
+        status=None,
+    )
+    assert snapshot_sources(uniform) == ["DS-05", "DS-05"]
+    assert uniform["tickers"]["TSLA"]["volume_source_changes"] == []
+
+
+def snapshot_sources(snapshot):
+    return [row["volume_source"] for row in snapshot["tickers"]["TSLA"]["price_history"]]
 
 
 def test_news_keeps_the_last_48_hours_and_a_seven_day_mean():
