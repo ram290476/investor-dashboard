@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 # Third-party actions are pinned to full commit SHAs (tag in the trailing comment).
