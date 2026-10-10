@@ -210,6 +210,9 @@ The workflow runs `terraform apply` for the whole stack, so the role is broad:
   - manage `invdash-*` managed policies, except the boundary itself;
   - pass `invdash-*` roles only to the services the stack uses (Lambda, Scheduler, Config, S3,
     EventBridge, GuardDuty malware protection, Synthetics);
+  - create the DynamoDB Application Auto Scaling service-linked role
+    (`AWSServiceRoleForApplicationAutoScaling_DynamoDBTable`) the first time the prefs
+    table registers a scalable target. PowerUserAccess cannot create that role;
   - manage the account password policy.
 - **Explicit denies:**
   - removing any permissions boundary;
@@ -553,8 +556,9 @@ This is separate from **AWS console / IAM Identity Center MFA**, which remains r
 on console MFA changes (for example `DeactivateMFADevice`) is unchanged.
 
 Use CloudWatch dashboards, alarms and the SNS ops topic from Terraform outputs to review Lambda
-errors/throttles, API 5xx responses, data freshness/job status, dead-letter messages, CloudFront
-errors and deployment health. The audit bucket (CloudTrail) and the config bucket (AWS Config history) retain infrastructure events.
+errors/throttles, API 5xx responses, prefs-table read/write throttles, data freshness/job status,
+dead-letter messages, CloudFront errors and deployment health. The audit bucket (CloudTrail) and
+the config bucket (AWS Config history) retain infrastructure events.
 CloudFront hosting and the API are monitored; the Synthetics freshness canary remains off until
 the pipeline exposes a deliberately public, non-sensitive health document.
 
@@ -640,9 +644,39 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 | API returns 5xx | Review API Gateway access logs and `invdash-prefs-api` Lambda logs; verify scoped DynamoDB role, KMS decrypt and S3 read permissions. |
 | Site does not load or sign-in loops | Check `config.json`, callback/logout URLs, CORS origin, Cognito domain/client, CloudFront status and browser network errors. Invalidate after config changes. |
 | Collector fails or goes to DLQ | Inspect structured Lambda logs and `failed_sources`, verify SSM credentials and allowlisted host, fix the root cause, then manually replay an idempotent event. |
-| Database/DynamoDB failure | Check table status, KMS key state, API Lambda role assumptions and CloudWatch API alarm. Preferences use point-in-time recovery. |
+| Database/DynamoDB failure | Check table status, provisioned capacity, KMS key state, API Lambda role assumptions, the API alarm, and `invdash-user-prefs-read-throttle` / `invdash-user-prefs-write-throttle`. Preferences use point-in-time recovery. |
 | Infrastructure apply fails | Read the first Terraform error, inspect state lock and AWS service quotas, then rerun `terraform plan`; do not force-unlock unless the lock owner is confirmed stopped. |
 | CI/CD fails | Start with the failed job logs. A failed check never deploys. For an AWS failure verify the production environment approval, OIDC subject trust, role permissions, tfvars/backend config and ECR/site outputs. |
+
+## Preferences table cost
+
+`invdash-user-prefs` is the only DynamoDB table in this stack (us-west-1). It uses provisioned
+capacity so reads and writes stay inside the always-free DynamoDB allowance: 25 GB of storage,
+25 read capacity units, and 25 write capacity units per account per Region. On-demand
+(`PAY_PER_REQUEST`) requests are billed from the first request and do not use that allowance.
+
+Steady capacity is 5 RCU and 5 WCU. Application Auto Scaling may raise either dimension while
+utilization stays above 70%, and it will not go above 25 or below 5. Those maxima are the whole
+Regional free-tier ceiling. Another DynamoDB table in this account and Region would have to share
+them. A settings save or a chart watchlist check is one item under 4 KB (1 WCU or 1 RCU).
+
+Alarms `invdash-user-prefs-read-throttle` and `invdash-user-prefs-write-throttle` notify the ops
+topic when `ReadThrottleEvents` or `WriteThrottleEvents` is greater than 0. Billing mode can
+change only once per 24 hours. Apply in a quiet window. The update is in place: same table, no
+data copy. If a plan shows capacity moving back to 5 while the table is scaled up, wait until it
+scales in. Terraform sets the 5/5 baseline; auto scaling owns the burst. Terraform does not ignore
+later capacity drift, because ignoring it on this switch would seed 1 capacity unit instead of 5.
+
+Charges that are not covered by the capacity free tier:
+
+* **Point-in-time recovery** stays on (CP-9, CP-10). It is billed per GB-month (about $0.20/GB-month
+  in us-west-1) and is not in the free tier. The table is well under 1 MB, so this line is a
+  fraction of a cent. Deletion protection stays on and has no charge.
+* **Customer-managed KMS.** The data key is shared with the data lake. The key itself is about
+  $1/month, plus requests above the 20,000 free requests per month. That charge is not specific
+  to this table.
+* **Throttle alarms.** Two standard-resolution CloudWatch alarms. The account is already past
+  the 10 free alarms, so these add about $0.10 each per month ($0.20).
 
 ## Known gaps and assumptions
 
