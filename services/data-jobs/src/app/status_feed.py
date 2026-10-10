@@ -35,6 +35,10 @@ JOBS: dict[str, tuple[str, str | None, str, str | None]] = {
     "D5": ("Government contracts", "45 17 * * 1-5", "federal", None),
     "M1": ("Release-day data & calendar", "35 6 * * 1-5", "federal", None),
     "Q1": ("Quarterly fundamentals", "30 8 * * 1", "nyse", None),
+    # 07:15 ET matches the EventBridge schedule (America/New_York), not 07:15 UTC.
+    "Q2C": ("Company IR collect", "15 7 * * 1-5", "federal", None),
+    "Q2X": ("Company IR extract", None, "federal", "After company IR collect"),
+    "Q2S": ("Company metrics serve", None, "federal", "After company IR extract"),
     "SHORT": ("Short interest", "30 18 * * 1-5", "nyse", None),
     "OPTIONS": ("Options put/call and IV", "50 16 * * 1-5", "nyse", None),
     "TREND": ("Trend metrics", None, "nyse", "After market close and release day"),

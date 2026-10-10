@@ -39,6 +39,27 @@ def assert_prod_user_agent(value: str | None) -> None:
         raise RuntimeError("SEC_USER_AGENT must identify a contact and must not be the placeholder")
 
 
+def earnings_filing_detail(rows: list[dict], today: date) -> dict | None:
+    """A new 8-K Item 2.02 filed today. Item 9.01 means the EX-99.1 exhibit is in the filing index."""
+    fresh = [
+        row for row in rows
+        if row.get("form") == "8-K"
+        and "2.02" in (row.get("items") or [])
+        and str(row.get("filed_at") or "")[:10] == today.isoformat()
+    ]
+    if not fresh:
+        return None
+    first = fresh[0]
+    exhibits = ["EX-99.1"] if "9.01" in (first.get("items") or []) else []
+    return {
+        "form": "8-K",
+        "exhibits": exhibits,
+        "ticker": first.get("ticker"),
+        "accession": first.get("accession_no"),
+        "items": list(first.get("items") or []),
+    }
+
+
 def classify_8k(items: list[str]) -> str:
     found = {ITEM_CLASS[item] for item in items if item in ITEM_CLASS}
     for name in ("earnings", "officer", "agreement", "other"):
@@ -418,6 +439,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             counts_key = f"curated/events_daily/date={now.date().isoformat()}/counts.parquet"
             write_parquet(pl.DataFrame(daily_counts(fresh_events)), counts_key)
         write_json(state, STATE_KEY)
-        return {"status": "success", "filings": len(fresh_filings), "events": len(fresh_events)}
+        result = {"status": "success", "filings": len(fresh_filings), "events": len(fresh_events)}
+        filing = earnings_filing_detail(fresh_filings, now.date())
+        if filing:
+            result["filing"] = filing
+        return result
 
     return run(event, context)

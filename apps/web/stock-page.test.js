@@ -10,6 +10,7 @@ import {
   formatMetricValue,
   freshnessBadge,
   nextStockTab,
+  stockFreshnessText,
   safeHttpUrl,
   stockPanels,
   STOCK_TABS,
@@ -56,6 +57,25 @@ test("proposed metrics are omitted and missing quarters say not reported", () =>
   assert.equal(card.sourceUrl, "https://ir.example/update");
   assert.equal(safeHttpUrl("javascript:alert(1)"), "");
   assert.equal(panels.fundamentalsSource, "none");
+});
+
+test("company metric errors stay distinct from an empty catalog", () => {
+  assert.equal(freshnessBadge(null, "forbidden", "TSLA").text, "Add TSLA to your watchlist to see company metrics");
+  assert.equal(freshnessBadge(null, "missing").text, "No company-specific metrics discovered");
+  assert.equal(freshnessBadge(null, "error").text, "Company metrics could not be loaded. Retry");
+  const ready = freshnessBadge({
+    freshness_label: "IR data approved",
+    run_status: "ok",
+    generated_at: "2026-10-08T12:00:00Z",
+    metrics: [{ metric_id: "tesla_semi", approved: true, approval_state: "approved" }],
+  }, "ready");
+  assert.equal(ready.tone, "ok");
+  assert.match(stockFreshnessText({
+    freshness_label: "IR data approved",
+    run_status: "ok",
+    generated_at: "2026-10-08T12:00:00Z",
+    metrics: [{ metric_id: "tesla_semi", approved: true, approval_state: "approved" }],
+  }, "ready", "TSLA"), /IR data approved · ok · 2026-10-08/);
 });
 
 test("a partial payload keeps a stale badge and does not invent a zero", () => {

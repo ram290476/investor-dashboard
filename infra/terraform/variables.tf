@@ -444,18 +444,20 @@ variable "jobs" {
       triggers       = ["ticker-added"]
       memory         = 1024
       timeout        = 300
-      read_prefixes  = ["manual/fundamentals/", "curated/fundamentals_quarterly/"]
+      read_prefixes  = ["manual/fundamentals/", "curated/fundamentals_quarterly/", "curated/company_metrics/"]
       write_prefixes = ["curated/fundamentals_quarterly/", "serving/fundamentals_quarterly.json"]
       api_keys       = []
       reads_prefs    = true
     }
-    # Weekday schedule. The handler fetches on the weekly baseline, inside an earnings
-    # window (T-3 through T+5), and when an event asks for an 8-K EX-99.1 extraction.
-    # Not applied in this change. Ram approves the metric catalog before any panel is served.
+    # Weekday 07:15 America/New_York. The handler collects on Monday, inside an earnings
+    # window (T-3 through T+5), and when H3 reports a new 8-K Item 2.02 with EX-99.1.
+    # deploy.yml applies this map whenever jobs_image_uri is set. SEC_USER_AGENT is already
+    # in the shared job environment. COMPANY_IR_LLM_SECRET_ID stays unset. Catalog approval
+    # is a reviewed JSON edit; the job does not approve metrics.
     q2-company-ir-collect = {
       handler        = "company_ir.collect_handler"
       schedule       = "cron(15 7 ? * MON-FRI *)"
-      triggers       = ["ticker-added"]
+      triggers       = ["ticker-added", "job:H3"]
       memory         = 1024
       timeout        = 300
       read_prefixes  = ["raw/company_ir/", "curated/company_metrics/"]
@@ -480,7 +482,7 @@ variable "jobs" {
       triggers       = ["job:Q2X"]
       memory         = 512
       timeout        = 120
-      read_prefixes  = ["curated/company_metrics/"]
+      read_prefixes  = ["curated/company_metrics/", "serving/stock/"]
       write_prefixes = ["serving/stock/"]
       api_keys       = []
       reads_prefs    = false

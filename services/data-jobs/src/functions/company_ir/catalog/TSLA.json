@@ -1,34 +1,1225 @@
 {
   "ticker": "TSLA",
-  "catalog_version": 1,
-  "approval_note": "Every entry is proposed. Panels stay off the page until Ram approves, renames, merges, or rejects each one.",
+  "catalog_version": 2,
+  "approval_note": "Every entry is proposed. disclosure_status records what Tesla actually publishes. Panels stay off the page until Ram approves, renames, merges, or rejects each one. An agent must not set status to approved.",
   "metrics": [
-    {"metric_id": "fsd_subscriptions", "display_name": "FSD (Supervised) subscriptions", "unit": "subscribers", "definition": "Active FSD (Supervised) subscriptions disclosed in the quarterly update.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 10, "aliases": ["FSD subscriptions", "FSD (Supervised) subscriptions"]},
-    {"metric_id": "fsd_miles", "display_name": "Cumulative FSD miles", "unit": "miles", "definition": "Cumulative miles driven on FSD (Supervised), when Tesla publishes the figure.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 20, "aliases": ["FSD miles", "Cumulative FSD miles"]},
-    {"metric_id": "tesla_semi", "display_name": "Tesla Semi", "unit": "vehicles", "definition": "Semi production or deliveries, and factory status when a number is published.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 30, "aliases": ["Tesla Semi", "Semi deliveries", "Semi production"]},
-    {"metric_id": "robotaxi_fleet", "display_name": "Robotaxi fleet", "unit": "vehicles", "definition": "Robotaxi vehicles in fleet. Cities, service areas, paid rides and miles stay unavailable until published as structured figures.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 40, "aliases": ["Robotaxi fleet", "Robotaxi vehicles"]},
-    {"metric_id": "robotaxi_paid_miles", "display_name": "Robotaxi paid miles", "unit": "miles", "definition": "Paid robotaxi miles when Tesla reports them.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 50, "aliases": ["Robotaxi paid miles", "Paid miles"]},
-    {"metric_id": "supercharger_stations", "display_name": "Supercharger stations", "unit": "stations", "definition": "Supercharger stations in the operational summary.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 60, "aliases": ["Supercharger stations"]},
-    {"metric_id": "supercharger_connectors", "display_name": "Supercharger connectors", "unit": "connectors", "definition": "Supercharger connectors in the operational summary.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 70, "aliases": ["Supercharger connectors"]},
-    {"metric_id": "energy_storage_deployed", "display_name": "Energy storage deployed", "unit": "GWh", "definition": "Energy storage deployed, in GWh, from the quarterly update.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 80, "aliases": ["Energy storage deployed", "Storage deployed"]},
-    {"metric_id": "solar_deployed", "display_name": "Solar deployed", "unit": "MW", "definition": "Solar deployed, in MW, when Tesla publishes it.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 90, "aliases": ["Solar deployed"]},
-    {"metric_id": "optimus", "display_name": "Optimus", "unit": "robots", "definition": "Optimus production or deployment count. Qualitative milestones are not invented as numbers.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 100, "aliases": ["Optimus", "Optimus robots"]},
-    {"metric_id": "production_model_3y", "display_name": "Production, Model 3/Y", "unit": "vehicles", "definition": "Quarterly production for Model 3/Y from the operational summary.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 110, "aliases": ["Production Model 3/Y", "Model 3/Y production"]},
-    {"metric_id": "production_other_models", "display_name": "Production, other models", "unit": "vehicles", "definition": "Quarterly production for models other than Model 3/Y.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 120, "aliases": ["Production other models"]},
-    {"metric_id": "deliveries_model_3y", "display_name": "Deliveries, Model 3/Y", "unit": "vehicles", "definition": "Quarterly deliveries for Model 3/Y from the operational summary.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 130, "aliases": ["Deliveries Model 3/Y"]},
-    {"metric_id": "deliveries_other_models", "display_name": "Deliveries, other models", "unit": "vehicles", "definition": "Quarterly deliveries for models other than Model 3/Y.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 140, "aliases": ["Deliveries other models"]},
-    {"metric_id": "vehicles_operating_lease", "display_name": "Vehicles in operating lease", "unit": "vehicles", "definition": "Vehicles subject to operating leases, from the operational summary.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 150, "aliases": ["Vehicles in operating lease"]},
-    {"metric_id": "inventory_days_supply", "display_name": "Global vehicle inventory", "unit": "days", "definition": "Global vehicle inventory days of supply.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 160, "aliases": ["Days of supply", "Global vehicle inventory"]},
-    {"metric_id": "store_service_locations", "display_name": "Store, delivery and service locations", "unit": "locations", "definition": "Store, delivery and service locations from the operational summary.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 170, "aliases": ["Store and service locations"]},
-    {"metric_id": "mobile_service_fleet", "display_name": "Mobile service fleet", "unit": "vehicles", "definition": "Mobile service fleet size from the operational summary.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 180, "aliases": ["Mobile service fleet"]},
-    {"metric_id": "installed_vehicle_capacity", "display_name": "Installed annual vehicle capacity", "unit": "vehicles", "definition": "Installed annual vehicle capacity. Factory-level splits stay in the source note until approved as their own metrics.", "category": "operating", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 190, "aliases": ["Installed annual vehicle capacity"]},
-    {"metric_id": "operating_cash_flow", "display_name": "Operating cash flow", "unit": "USD", "definition": "Cash from operations in the quarterly financial summary, reconciled to XBRL when both exist.", "category": "fundamentals", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 200, "aliases": ["Operating cash flow"]},
-    {"metric_id": "free_cash_flow", "display_name": "Free cash flow", "unit": "USD", "definition": "Free cash flow in the quarterly financial summary.", "category": "fundamentals", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 210, "aliases": ["Free cash flow"]},
-    {"metric_id": "capex", "display_name": "Capital expenditures", "unit": "USD", "definition": "Capital expenditures in the quarterly financial summary.", "category": "fundamentals", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 220, "aliases": ["Capex", "Capital expenditures"]},
-    {"metric_id": "cash_and_investments", "display_name": "Cash and investments", "unit": "USD", "definition": "Cash, cash equivalents and investments.", "category": "fundamentals", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 230, "aliases": ["Cash and investments"]},
-    {"metric_id": "auto_gross_margin_ex_credits", "display_name": "Automotive gross margin ex-credits", "unit": "ratio", "definition": "Automotive gross margin excluding regulatory credits, as defined by Tesla.", "category": "fundamentals", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 240, "aliases": ["Automotive gross margin ex-credits"]},
-    {"metric_id": "regulatory_credits_revenue", "display_name": "Regulatory credits revenue", "unit": "USD", "definition": "Automotive regulatory credits revenue.", "category": "fundamentals", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 250, "aliases": ["Regulatory credits"]},
-    {"metric_id": "revenue_gaap", "display_name": "Revenue", "unit": "USD", "definition": "Total revenue from the IR summary, reconciled against SEC XBRL revenues. A mismatch is flagged and does not overwrite XBRL.", "category": "fundamentals", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 260, "aliases": ["Revenue", "Total revenue"]},
-    {"metric_id": "guidance_outlook", "display_name": "Guidance and outlook", "unit": "statement", "definition": "Guidance and outlook statements from the shareholder letter. Not shown until approved. Transcripts are out of scope until a license allows them.", "category": "guidance", "status": "proposed", "approved_by": null, "approved_at": null, "panel_order": 300, "aliases": ["Guidance", "Outlook"]}
+    {
+      "metric_id": "fsd_subscriptions",
+      "display_name": "FSD (Supervised) subscriptions",
+      "unit": "subscribers",
+      "definition": "Active FSD subscriptions, reported in millions to 0.01 (about 10,000). Stored in base units. Includes upfront and monthly subscriptions and excludes free trials. Periods before 2025Q1 are not disclosed.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "FSD subscriptions",
+        "FSD (Supervised) subscriptions",
+        "Active FSD Subscriptions",
+        "Active FSD Subscriptions (mil)"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q1",
+        "source": "Q1 2026 Update deck"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "fsd_miles",
+      "display_name": "Cumulative FSD miles",
+      "unit": "miles",
+      "definition": "Cumulative FSD (Supervised) miles are a chart without numeric labels. tesla.com/fsd/safety returns 403 to this collector, so the live counter is unavailable.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "FSD miles",
+        "Cumulative FSD miles"
+      ],
+      "disclosure_status": "chart_only",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update deck chart"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "tesla_semi",
+      "display_name": "Tesla Semi",
+      "unit": "vehicles",
+      "definition": "Narrative only. Semi is inside Other models; the deck gives factory status, not a unit count.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 30,
+      "aliases": [
+        "Tesla Semi",
+        "Semi deliveries",
+        "Semi production"
+      ],
+      "disclosure_status": "narrative",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q1",
+        "source": "Q1 2026 Update deck"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "robotaxi_fleet",
+      "display_name": "Robotaxi fleet",
+      "unit": "vehicles",
+      "definition": "Tesla does not disclose Robotaxi fleet size. Third-party counts stay unverified and are not stored as facts.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 40,
+      "aliases": [
+        "Robotaxi fleet",
+        "Robotaxi vehicles"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update deck"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "robotaxi_paid_miles",
+      "display_name": "Robotaxi paid miles",
+      "unit": "miles",
+      "definition": "Cumulative paid Robotaxi miles are a chart without numeric labels.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 50,
+      "aliases": [
+        "Robotaxi paid miles",
+        "Paid miles"
+      ],
+      "disclosure_status": "chart_only",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update deck chart"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "supercharger_stations",
+      "display_name": "Supercharger stations",
+      "unit": "stations",
+      "definition": "Supercharger stations in the operational summary.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 60,
+      "aliases": [
+        "Supercharger stations"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update operational summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "supercharger_connectors",
+      "display_name": "Supercharger connectors",
+      "unit": "connectors",
+      "definition": "Supercharger connectors in the operational summary.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 70,
+      "aliases": [
+        "Supercharger connectors"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update operational summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "energy_storage_deployed",
+      "display_name": "Energy storage deployed",
+      "unit": "GWh",
+      "definition": "Energy storage deployed, in GWh, from the quarterly update.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 80,
+      "aliases": [
+        "Energy storage deployed",
+        "Storage deployed",
+        "Storage deployed (GWh)"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update operational summary"
+      },
+      "last_seen": "2026Q3"
+    },
+    {
+      "metric_id": "solar_deployed",
+      "display_name": "Solar deployed",
+      "unit": "MW",
+      "definition": "Solar deployed (MW) is no longer in the operational summary. Narrative mentions are not a numeric series.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 90,
+      "aliases": [
+        "Solar deployed"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q1",
+        "source": "Q1 2026 Update narrative"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "optimus",
+      "display_name": "Optimus",
+      "unit": "robots",
+      "definition": "Narrative only. No Optimus unit count is disclosed.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 100,
+      "aliases": [
+        "Optimus",
+        "Optimus robots"
+      ],
+      "disclosure_status": "narrative",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q1",
+        "source": "Q1 2026 Update deck"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "production_model_3y",
+      "display_name": "Production, Model 3/Y",
+      "unit": "vehicles",
+      "definition": "Quarterly production for Model 3/Y from the operational summary.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 110,
+      "aliases": [
+        "Production Model 3/Y",
+        "Model 3/Y production"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly production and deliveries release"
+      },
+      "last_seen": "2026Q3"
+    },
+    {
+      "metric_id": "production_other_models",
+      "display_name": "Production, other models",
+      "unit": "vehicles",
+      "definition": "Quarterly production for models other than Model 3/Y.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 120,
+      "aliases": [
+        "Production other models",
+        "Other models production",
+        "Other Models production"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly production and deliveries release"
+      },
+      "last_seen": "2026Q3"
+    },
+    {
+      "metric_id": "deliveries_model_3y",
+      "display_name": "Deliveries, Model 3/Y",
+      "unit": "vehicles",
+      "definition": "Quarterly deliveries for Model 3/Y from the operational summary.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 130,
+      "aliases": [
+        "Deliveries Model 3/Y",
+        "Model 3/Y deliveries",
+        "Model 3/Y Deliveries"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly production and deliveries release"
+      },
+      "last_seen": "2026Q3"
+    },
+    {
+      "metric_id": "deliveries_other_models",
+      "display_name": "Deliveries, other models",
+      "unit": "vehicles",
+      "definition": "Quarterly deliveries for models other than Model 3/Y.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 140,
+      "aliases": [
+        "Deliveries other models",
+        "Other models deliveries",
+        "Other Models deliveries"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly production and deliveries release"
+      },
+      "last_seen": "2026Q3"
+    },
+    {
+      "metric_id": "vehicles_operating_lease",
+      "display_name": "Vehicles in operating lease",
+      "unit": "vehicles",
+      "definition": "Vehicles subject to operating leases, from the operational summary.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 150,
+      "aliases": [
+        "Vehicles in operating lease",
+        "of which subject to operating lease",
+        "Subject to operating lease"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update operational summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "inventory_days_supply",
+      "display_name": "Global vehicle inventory",
+      "unit": "days",
+      "definition": "Global vehicle inventory days of supply.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 160,
+      "aliases": [
+        "Days of supply",
+        "Global vehicle inventory",
+        "Global vehicle inventory (days of supply)"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update operational summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "store_service_locations",
+      "display_name": "Store, delivery and service locations",
+      "unit": "locations",
+      "definition": "Not in the Q1 or Q2 2026 operational summary. Treated as discontinued until Tesla publishes it again.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 170,
+      "aliases": [
+        "Store and service locations"
+      ],
+      "disclosure_status": "discontinued",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "last_seen": "2025Q4"
+    },
+    {
+      "metric_id": "mobile_service_fleet",
+      "display_name": "Mobile service fleet",
+      "unit": "vehicles",
+      "definition": "Not in the Q1 or Q2 2026 operational summary. Treated as discontinued until Tesla publishes it again.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 180,
+      "aliases": [
+        "Mobile service fleet"
+      ],
+      "disclosure_status": "discontinued",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "last_seen": "2025Q4"
+    },
+    {
+      "metric_id": "installed_vehicle_capacity",
+      "display_name": "Installed annual vehicle capacity",
+      "unit": "vehicles",
+      "definition": "Per-factory lower bounds such as >550,000. Tesla does not publish a single total. Factory rows are separate proposed metrics.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 190,
+      "aliases": [
+        "Installed annual vehicle capacity"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 capacity table"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "operating_cash_flow",
+      "display_name": "Operating cash flow",
+      "unit": "USD",
+      "definition": "Cash from operations in the quarterly financial summary, reconciled to XBRL when both exist.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 200,
+      "aliases": [
+        "Operating cash flow"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly update financial summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "free_cash_flow",
+      "display_name": "Free cash flow",
+      "unit": "USD",
+      "definition": "Free cash flow in the quarterly financial summary.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 210,
+      "aliases": [
+        "Free cash flow"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly update financial summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "capex",
+      "display_name": "Capital expenditures",
+      "unit": "USD",
+      "definition": "Capital expenditures. The deck presents capex including energy system purchases from Q1 2025 and says prior periods were adjusted.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 220,
+      "aliases": [
+        "Capex",
+        "Capital expenditures"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly update financial summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "cash_and_investments",
+      "display_name": "Cash and investments",
+      "unit": "USD",
+      "definition": "Cash, cash equivalents and investments.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 230,
+      "aliases": [
+        "Cash and investments",
+        "Cash, cash equivalents and short-term investments"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly update financial summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "auto_gross_margin_ex_credits",
+      "display_name": "Automotive gross margin ex-credits",
+      "unit": "ratio",
+      "definition": "Automotive gross margin excluding regulatory credits, as defined by Tesla.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 240,
+      "aliases": [
+        "Automotive gross margin ex-credits"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1,
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly update financial summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "regulatory_credits_revenue",
+      "display_name": "Regulatory credits revenue",
+      "unit": "USD",
+      "definition": "Automotive regulatory credits revenue.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 250,
+      "aliases": [
+        "Regulatory credits"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "deck",
+        "xbrl"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "quarterly update financial summary"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "revenue_gaap",
+      "display_name": "Revenue",
+      "unit": "USD",
+      "definition": "Total revenue from the IR summary, reconciled against SEC XBRL revenues. A mismatch is flagged and does not overwrite XBRL.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 260,
+      "aliases": [
+        "Revenue",
+        "Total revenue"
+      ],
+      "disclosure_status": "numeric",
+      "scale": 1000000,
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "SEC companyfacts and the quarterly update"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "guidance_outlook",
+      "display_name": "Guidance and outlook",
+      "unit": "statement",
+      "definition": "Guidance and outlook statements from the shareholder letter. Not shown until approved. Transcripts are out of scope until a license allows them.",
+      "category": "guidance",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 300,
+      "aliases": [
+        "Guidance",
+        "Outlook"
+      ],
+      "disclosure_status": "narrative",
+      "scale": 1,
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 outlook slide"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "total_production",
+      "display_name": "Total production",
+      "unit": "vehicles",
+      "scale": 1,
+      "definition": "Quarterly vehicle production, all models.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 115,
+      "aliases": [
+        "Total production"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q3"
+    },
+    {
+      "metric_id": "total_deliveries",
+      "display_name": "Total deliveries",
+      "unit": "vehicles",
+      "scale": 1,
+      "definition": "Quarterly vehicle deliveries, all models. This is the deliveries series Q1 publishes once the entry is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 135,
+      "aliases": [
+        "Total deliveries",
+        "Total Deliveries"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q3"
+    },
+    {
+      "metric_id": "cumulative_deliveries",
+      "display_name": "Cumulative deliveries",
+      "unit": "vehicles",
+      "scale": 1000000,
+      "definition": "All-time cumulative deliveries, reported in millions. The CEO award definition includes unsupervised Robotaxis placed into commercial operation.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 145,
+      "aliases": [
+        "Cumulative deliveries",
+        "Cumulative deliveries (all-time; mil)"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "operating_lease_vehicle_count",
+      "display_name": "End-of-quarter operating lease count",
+      "unit": "vehicles",
+      "scale": 1,
+      "definition": "Vehicles in the operating-lease fleet at quarter end. Since Q4 2025 this counts new vehicles only, and Q3 2025 was adjusted.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 155,
+      "aliases": [
+        "End-of-quarter operating lease count",
+        "End-of-quarter operating lease count (new vehicles)"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2025Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "automotive_revenue",
+      "display_name": "Automotive revenue",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "Automotive revenue from the financial summary, including regulatory credits when the deck presents them inside automotive.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 262,
+      "aliases": [
+        "Automotive revenue",
+        "Automotive revenues"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "energy_revenue",
+      "display_name": "Energy generation and storage revenue",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "Energy generation and storage revenue.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 263,
+      "aliases": [
+        "Energy revenue",
+        "Energy generation and storage revenue"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "services_revenue",
+      "display_name": "Services and other revenue",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "Services and other revenue.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 264,
+      "aliases": [
+        "Services and other revenue",
+        "Services and other"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "automotive_gross_profit",
+      "display_name": "Automotive gross profit",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "Automotive gross profit from the financial summary.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 265,
+      "aliases": [
+        "Automotive gross profit"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "research_and_development",
+      "display_name": "Research and development",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "Research and development expense. XBRL wins when the tag is present.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 266,
+      "aliases": [
+        "Research and development",
+        "R&D"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "sga",
+      "display_name": "Selling, general and administrative",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "Selling, general and administrative expense. XBRL wins when the tag is present.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 267,
+      "aliases": [
+        "SG&A",
+        "Selling, general and administrative"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "operating_income",
+      "display_name": "Operating income",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "Operating income. XBRL wins when the tag is present.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 268,
+      "aliases": [
+        "Operating income",
+        "Income from operations"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "adjusted_ebitda",
+      "display_name": "Adjusted EBITDA",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "Adjusted EBITDA as defined by Tesla, net of digital-asset gains and losses from Q1 2025. Not a GAAP tag.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 269,
+      "aliases": [
+        "Adjusted EBITDA"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "net_income_gaap",
+      "display_name": "GAAP net income",
+      "unit": "USD",
+      "scale": 1000000,
+      "definition": "GAAP net income. XBRL wins over the deck.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 270,
+      "aliases": [
+        "Net income",
+        "GAAP net income",
+        "Net income attributable to common stockholders"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "eps_diluted",
+      "display_name": "GAAP diluted EPS",
+      "unit": "USD/share",
+      "scale": 1,
+      "definition": "GAAP diluted earnings per share. XBRL wins over the deck.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 271,
+      "aliases": [
+        "GAAP diluted EPS",
+        "Diluted EPS",
+        "EPS diluted"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "deferred_revenue",
+      "display_name": "Deferred revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Customer contract liabilities, including connectivity, FSD access, maintenance, free Supercharging and over-the-air updates. FSD is not broken out on its own. XBRL ContractWithCustomerLiability wins.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 272,
+      "aliases": [
+        "Deferred revenue",
+        "Contract with customer liability"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl",
+        "deck",
+        "press_release"
+      ],
+      "first_seen": {
+        "period": "2025Q4",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "days_sales_outstanding",
+      "display_name": "Days sales outstanding",
+      "unit": "days",
+      "scale": 1,
+      "definition": "Days sales outstanding from the financial summary.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 273,
+      "aliases": [
+        "Days sales outstanding",
+        "DSO"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "days_payable_outstanding",
+      "display_name": "Days payable outstanding",
+      "unit": "days",
+      "scale": 1,
+      "definition": "Days payable outstanding from the financial summary.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 274,
+      "aliases": [
+        "Days payable outstanding",
+        "DPO"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "robotaxi_metros",
+      "display_name": "Robotaxi metros",
+      "unit": "metros",
+      "scale": 1,
+      "definition": "Count of metros where Robotaxi is live, from the coverage table. Narrative phrases are low-confidence and are not auto-approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 45,
+      "aliases": [
+        "Robotaxi metros",
+        "Robotaxi coverage"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "ai_compute_mw",
+      "display_name": "AI training compute",
+      "unit": "MW",
+      "scale": 1,
+      "definition": "AI training compute. Q2 2026 reports Cortex in MW; Q1 2026 used H100e, so the unit changed. Figures are per-cluster lower bounds.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 195,
+      "aliases": [
+        "AI training compute",
+        "Cortex"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q1",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "energy_capacity",
+      "display_name": "Energy storage capacity",
+      "unit": "GWh",
+      "scale": 1,
+      "definition": "Installed energy-storage factory capacity. Tesla publishes per-site figures, including lower bounds, not one total.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 85,
+      "aliases": [
+        "Energy capacity",
+        "Megapack capacity",
+        "Installed energy capacity"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "deck"
+      ],
+      "first_seen": {
+        "period": "2026Q2",
+        "source": "Q2 2026 Update or the quarterly deliveries release"
+      },
+      "last_seen": "2026Q2"
+    }
+  ],
+  "ir_sources": [
+    {
+      "id": "tesla-ir-pdf",
+      "robots_url": "https://ir.tesla.com/robots.txt",
+      "urls": [],
+      "note": "Fallback only, and only for deck PDFs. EDGAR EX-99.1 is primary. HTML pages and www.tesla.com are refused. Leave urls empty to stay on EDGAR."
+    }
+  ],
+  "blocked_hosts": [
+    "www.tesla.com",
+    "tesla.com"
   ]
 }

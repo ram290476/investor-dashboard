@@ -57,7 +57,26 @@ _runs: list[dict[str, Any]] = []
 JOB_EVENT_SOURCE = f"{SERVICE}.jobs"
 _events = None
 # Keys a handler return value may add to the Job Finished detail. rows_stored is published as rows_written.
-_EVENT_FIELDS = ("batches", "rows_written", "mode", "dropped", "over_cap", "status", "reason")
+_EVENT_FIELDS = (
+    "batches",
+    "rows_written",
+    "mode",
+    "dropped",
+    "over_cap",
+    "status",
+    "reason",
+    # Company IR chain: collect hands manifests to extract, extract hands tickers to serve.
+    "collected",
+    "documents",
+    "skipped",
+    "tickers",
+    "manifests",
+    "extracted",
+    "mismatches",
+    "served",
+    "run_status",
+    "filing",
+)
 
 
 def _finished_detail(result: Any) -> dict[str, Any]:

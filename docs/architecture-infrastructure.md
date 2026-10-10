@@ -153,7 +153,7 @@ Monthly series hold their last released value until the next release. Output goe
 
 - **Gross margin:** total GAAP gross margin = GrossProfit ÷ Revenues from SEC XBRL company facts (DS-11). release_date is the SEC filing date. Q4 = full year minus Q1–Q3, because Q4 isn't filed on its own.
 
-- **Deliveries and FSD subscribers:** not in XBRL, so they come from a reviewed manual file. scripts/add_fundamental.py validates each row and appends it to manual/fundamentals/fundamentals_manual.csv. A later row for the same quarter replaces the earlier one.
+- **Deliveries and FSD subscribers:** not in XBRL. Once `total_deliveries` (or the Model 3/Y and other-models split) and `fsd_subscriptions` are approved in the company catalog, Q1 takes those curated rows and they replace the manual file for the same quarter. Until then they come from a reviewed manual file. scripts/add_fundamental.py validates each row and appends it to manual/fundamentals/fundamentals_manual.csv. A later row for the same quarter replaces the earlier one. Example: Q3 2026 deliveries were 486,532 on 2026-10-02. 497,099 is Q3 2025. A missing manual file is logged.
 
 - **Schedule:** Monday 08:30 ET as a safety net, plus a one-off run the day after earnings, scheduled by D1.
 
@@ -165,7 +165,7 @@ Monthly series hold their last released value until the next release. Output goe
 |----|----|----|----|
 | trend-metrics | After D4 or M1 succeeds | curated prices and macro | serving/trend_metrics/ |
 | q1-fundamentals | Mon 08:30 + day after earnings | SEC XBRL (DS-11), manual file (DS-12) | curated/ and serving/fundamentals_quarterly.json |
-| q2-company-ir-collect | Weekdays 07:15. Fetches on Monday (weekly baseline) and on a day inside an earnings window (T-3 through T+5). An 8-K EX-99.1 for a watchlist ticker triggers extraction. | SEC EDGAR and company IR pages. robots.txt is honored. HTTP 403 and 429 are not retried. | raw/company_ir/\<ticker\>/\<period\>/ |
+| q2-company-ir-collect | Weekdays 07:15 ET. Fetches on Monday (weekly baseline), inside an earnings window (T-3 through T+5), and when H3 reports a new 8-K Item 2.02. | SEC EDGAR submissions, EX-99.1, 10-Q/10-K and companyfacts. ir.tesla.com PDFs are a fallback after robots.txt. tesla.com is not fetched. HTTP 403 and 429 are not retried. | raw/company_ir/\<ticker\>/\<period\>/ |
 | q2-company-ir-extract | After collect, and on an EX-99.1 trigger | Raw IR documents. Unchanged documents skip the LLM (hash cache). | curated/company_metrics/ |
 | q2-company-ir-serve | After extract | Approved catalog rows only. Partial or failed runs keep the previous serving object and emit FailedRuns. | serving/stock/\<ticker\>.json |
 | short-interest | 18:30 Mon–Fri; stores only new settlement dates, so data lands twice a month on FINRA's publication days | FINRA (DS-91, OAuth keys in SSM) | curated/short_interest/ |

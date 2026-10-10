@@ -666,7 +666,7 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 * Fundamentals infer fiscal quarters from the annual duration fact's end month, using the
   fiscal-year end year as the label. Changing fiscal calendars and 52/53-week years crossing
   month boundaries still require a reviewed fiscal-calendar mapping. Public float is a sparse,
-  usually annual USD series; deliveries/FSD subscribers remain reviewed manual observations.
+  usually annual USD series. Deliveries and FSD subscribers stay reviewed manual observations until the matching company-metrics catalog entries are approved, and a missing manual file is logged.
 * The watchlist limit is 25 per user (separate from the existing 25-ticker cross-user collector
   cap). Legacy over-limit lists are never trimmed: display/chart/pin/reorder/removal saves work,
   but new symbols are blocked until capacity is available. Each chip draws that ticker's last
