@@ -16,6 +16,7 @@ import {
 } from "./stock-page.js";
 
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
+const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 
 test("proposed metrics are omitted and missing quarters say not reported", () => {
   const payload = {
@@ -116,11 +117,33 @@ test("stock tabs move by keyboard and calls stay unlicensed", () => {
   assert.equal(gap[1].value, null);
 });
 
-test("stock page layout is three columns at desktop and one column on a phone", () => {
-  assert.match(styles, /\.stock-metric-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.stock-metric-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+test("stock page panels are two-up on desktop and one-up below 1024px", () => {
+  assert.match(styles, /\.stock-metric-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /@media \(max-width: 1023px\)[\s\S]*?\.stock-metric-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(styles, /\.stock-chart\s*\{[^}]*width:\s*100%/);
+  assert.match(styles, /\.stock-bar\s*\{[^}]*min-width:\s*0/);
+  assert.match(styles, /\.stock-axis\s*\{[^}]*justify-content:\s*space-between/);
   assert.match(styles, /\.stock-metric[\s\S]*var\(--/);
   assert.doesNotMatch(styles, /\.stock-metric[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
+  assert.match(app, /class="stock-chart"|node\("div", "stock-chart"\)/);
+  assert.match(app, /node\("div", "stock-axis"\)/);
+});
+
+test("company header puts the name and price on the left and a dashboard link on the right", () => {
+  const header = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
+  const copyAt = header.indexOf('node("div", "stock-heading-copy")');
+  const linkAt = header.indexOf('node("a", "stock-dashboard-link", "Back to dashboard")');
+  assert.ok(copyAt > 0 && linkAt > copyAt);
+  assert.match(header, /back\.href = "\/"/);
+  assert.match(header, /heading\.append\(copy, back\)/);
+  assert.match(header, /navigateToDashboard\(\)/);
+  const linkCss = styles.slice(styles.indexOf(".stock-dashboard-link {"), styles.indexOf(".stock-price {"));
+  assert.match(linkCss, /margin-left:\s*auto/);
+  assert.match(linkCss, /min-height:\s*44px/);
+  assert.match(linkCss, /var\(--/);
+  assert.doesNotMatch(linkCss, /#[0-9a-fA-F]{3,8}/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.stock-dashboard-link\s*\{[^}]*align-self:\s*flex-end/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.stock-heading-copy\s*\{[^}]*flex-basis:\s*100%/);
 });
 
 test("stock page text and up/down colors stay AA on all six themes", () => {
