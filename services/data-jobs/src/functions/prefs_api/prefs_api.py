@@ -328,16 +328,26 @@ def publish_ticker_added(tickers: list[str]) -> None:
     )
 
 
+def _metric_visible(metric: dict) -> bool:
+    state = metric.get("approval_state") or metric.get("status")
+    if state == "rejected":
+        return False
+    if metric.get("approved") is True and state != "proposed":
+        return True
+    return state == "proposed"
+
+
 def _public_stock(document: dict | None, ticker: str) -> dict:
-    """Serve approved company metrics only. A missing object is an empty page, not a fabricated one."""
+    """Serve approved metrics first, and proposed metrics with their status. Rejected metrics stay out."""
     source = document if isinstance(document, dict) else {}
     metrics = []
     for metric in source.get("metrics") or []:
-        if not isinstance(metric, dict) or metric.get("approved") is not True:
-            continue
-        if metric.get("approval_state") in {"proposed", "rejected"} or metric.get("status") in {"proposed", "rejected"}:
+        if not isinstance(metric, dict) or not _metric_visible(metric):
             continue
         metrics.append(metric)
+    metrics.sort(key=lambda metric: (
+        0 if metric.get("approved") is True and metric.get("approval_state") != "proposed" else 1
+    ))
     return {
         "ticker": ticker.upper(),
         "generated_at": source.get("generated_at"),

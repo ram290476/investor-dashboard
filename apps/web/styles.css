@@ -1559,6 +1559,13 @@ body.modal-open {
   box-shadow: 0 30px 80px var(--shadow-dialog);
 }
 
+.refresh-dialog {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(1120px, 100%);
+  max-height: min(920px, calc(100vh - 32px));
+  max-height: min(920px, calc(100dvh - 32px));
+}
+
 .settings-head {
   display: flex;
   align-items: center;
@@ -2378,6 +2385,30 @@ input::placeholder {
   overflow-wrap: anywhere;
 }
 
+.panel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.panel-toolbar .panel-mode,
+.panel-toolbar .hidden-panels {
+  margin: 0;
+}
+
+.panel-toolbar .hidden-panels {
+  margin-left: auto;
+}
+
+.panel-toolbar .hidden-panels-menu {
+  position: absolute;
+  right: 0;
+  z-index: 4;
+  min-width: min(280px, 100%);
+}
+
 .panel-mode {
   display: flex;
   flex-wrap: wrap;
@@ -2386,15 +2417,18 @@ input::placeholder {
 }
 
 .panel-mode-option {
-  min-height: 44px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  box-sizing: border-box;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
   background: transparent;
   color: var(--secondary);
   font: inherit;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
 }
 
 .panel-mode-option[aria-pressed="true"] {
@@ -2415,15 +2449,18 @@ input::placeholder {
 }
 
 .hidden-panels-toggle {
-  min-height: 44px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
+  box-sizing: border-box;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--control-line);
   border-radius: 8px;
   background: transparent;
   color: var(--secondary);
   font: inherit;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
 }
 
 .hidden-panels-menu {
@@ -3015,6 +3052,16 @@ a.catalyst-edgar-link:hover {
     display: block;
   }
 
+  .dashboard-grid[data-mobile-view="chart"] .panel-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .dashboard-grid[data-mobile-view="chart"] .panel-toolbar .hidden-panels {
+    margin-left: auto;
+  }
+
   .dashboard-grid[data-mobile-view="chart"] .macro-panel-grid,
   .dashboard-grid[data-mobile-view="more"] .macro-panel-grid {
     display: none;
@@ -3420,9 +3467,115 @@ a.catalyst-edgar-link:hover {
   color: var(--text);
 }
 
+.stock-metric-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .stock-metric-title {
   margin: 0;
   font-size: 16px;
+}
+
+.stock-metric-pending {
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+
+.review-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.review-badge .dot {
+  background: var(--amber);
+}
+
+.stock-review-heading {
+  margin: 8px 0 0;
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stock-kpi-value {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stock-text,
+.stock-source,
+.stock-capex-context,
+.stock-revision {
+  margin: 0;
+  color: var(--secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.stock-revision {
+  color: var(--amber);
+}
+
+.stock-source-link {
+  color: var(--blue);
+}
+
+.stock-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.stock-table th,
+.stock-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  color: var(--text);
+}
+
+.stock-bar-revised {
+  background: var(--amber);
+}
+
+.metric-review {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.metric-review-option {
+  box-sizing: border-box;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.metric-review-option[aria-pressed="true"] {
+  border-color: var(--blue);
+  background: var(--selected);
+  color: var(--text);
 }
 
 .stock-metric-unavailable {

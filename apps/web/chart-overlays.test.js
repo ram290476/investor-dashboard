@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   chartSettingsFor,
   isMarketOverlay,
+  mergeCompanyFundamentals,
   overlayDefinition,
   overlayGroups,
   OVERLAYS,
@@ -46,6 +47,34 @@ test("sentiment overlays hide without data and use only the selected ticker's hi
     tickerData: { news: { sentiment_history: [{ date: "2026-10-01", value: -0.2 }] } },
   });
   assert.deepEqual(values, [-0.2, null]);
+});
+
+test("proposed company series join Fundamentals and stay labeled pending review", () => {
+  assert.equal(OVERLAYS.filter((overlay) => overlay.kind === "fundamental").length, 7);
+  const merged = mergeCompanyFundamentals(
+    { fundamentals: [{ series_id: "revenue_gaap", date: "2026-01-01", value: 1, unit: "USD" }] },
+    [{
+      metric_id: "capex",
+      display_name: "Capital expenditures",
+      unit: "USD",
+      approval_state: "proposed",
+      series: [
+        { fiscal_period: "2025Q4", value: 2000, reported: true, period_end: "2025-12-31" },
+        { fiscal_period: "2026Q1", value: 2493, reported: true, period_end: "2026-03-31" },
+      ],
+    }],
+  );
+  assert.equal(merged.fundamentals.some((row) => row.series_id === "revenue_gaap"), true);
+  assert.equal(merged.fundamentals.filter((row) => row.series_id === "capex").every((row) => row.approval_state === "proposed"), true);
+  const bars = [{ date: "2026-04-01", close: 100 }];
+  const groups = overlayGroups({ ticker: "TSLA", price_history: bars }, merged, {});
+  const capex = groups.find((group) => group.id === "Fundamentals").overlays.find((overlay) => overlay.id === "FUNDAMENTAL:capex");
+  assert.match(capex.label, /Pending review/);
+  assert.equal(overlayDefinition("FUNDAMENTAL:capex").unit, "USD");
+  assert.deepEqual(
+    chartSettingsFor({ chart_settings: { TSLA: { overlays: ["FUNDAMENTAL:capex", "nope"], lanes: ["VOL"] } } }, "TSLA").overlays,
+    ["FUNDAMENTAL:capex"],
+  );
 });
 
 test("empty fundamentals groups are hidden while all seven definitions remain supported", () => {

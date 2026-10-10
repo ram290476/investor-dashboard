@@ -11,6 +11,8 @@ import {
   freshnessBadge,
   monthDayLabel,
   nextStockTab,
+  panelType,
+  pendingMetrics,
   stockFreshnessText,
   safeHttpUrl,
   stockPanels,
@@ -20,7 +22,7 @@ import {
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 
-test("proposed metrics are omitted and missing quarters say not reported", () => {
+test("proposed metrics stay labeled pending and missing quarters say not reported", () => {
   const payload = {
     metrics: [
       { metric_id: "optimus", approved: false, approval_state: "proposed", display_name: "Optimus", latest: { value: 9 } },
@@ -49,9 +51,16 @@ test("proposed metrics are omitted and missing quarters say not reported", () =>
     ],
   };
   assert.deepEqual(approvedMetrics(payload).map((metric) => metric.metric_id), ["tesla_semi"]);
+  assert.deepEqual(pendingMetrics(payload).map((metric) => metric.metric_id), ["optimus"]);
   const panels = stockPanels(payload, { fundamentals: [] });
   const card = panels.operating[0];
   assert.equal(card.name, "Tesla Semi");
+  assert.equal(card.pending, false);
+  assert.equal(panels.operating[1].id, "optimus");
+  assert.equal(panels.operating[1].pending, true);
+  assert.equal(panels.operating[1].approval, "proposed");
+  const approvedOnly = stockPanels(payload, { fundamentals: [] }, { review: "approved" });
+  assert.equal(approvedOnly.operating.some((item) => item.id === "optimus"), false);
   assert.equal(card.series.find((point) => point.fiscal_period === "2025Q2").reported, false);
   assert.equal(formatMetricValue(null, "vehicles"), "not reported");
   assert.equal(card.qoq, "+100.0%");
@@ -59,6 +68,113 @@ test("proposed metrics are omitted and missing quarters say not reported", () =>
   assert.equal(card.sourceUrl, "https://ir.example/update");
   assert.equal(safeHttpUrl("javascript:alert(1)"), "");
   assert.equal(panels.fundamentalsSource, "none");
+});
+
+test("panel type follows the registry and the shape of collected values", () => {
+  assert.equal(panelType({ panel_type: "kpi", series: [{ value: 1, reported: true }, { value: 2, reported: true }] }), "kpi");
+  assert.equal(panelType({ rows: [{ segment: "Auto", value: 1 }] }), "table");
+  assert.equal(panelType({ text: "Factory note" }), "text");
+  assert.equal(panelType({ narrative: "Starlink note", series: [{ value: 1, reported: true }] }), "text");
+  assert.equal(panelType({ latest: { value: 4, reported: true }, series: [] }), "kpi");
+  assert.equal(panelType({
+    series: [
+      { fiscal_period: "2025Q1", value: 1, reported: true },
+      { fiscal_period: "2025Q2", value: 2, reported: true },
+    ],
+  }), "chart");
+  const table = stockPanels({
+    metrics: [{
+      metric_id: "segments",
+      approved: false,
+      approval_state: "proposed",
+      display_name: "Segments",
+      category: "operating",
+      panel_type: "table",
+      rows: [{ name: "Automotive", value: 1 }],
+    }],
+  }, null);
+  assert.equal(table.operating[0].panelType, "table");
+  assert.deepEqual(table.operating[0].rows, [{ name: "Automotive", value: 1 }]);
+  assert.equal(table.operating[0].pending, true);
+  const text = stockPanels({
+    metrics: [{
+      metric_id: "factories",
+      approved: true,
+      approval_state: "approved",
+      display_name: "Factories",
+      category: "operating",
+      panel_type: "text",
+      text: "Gigafactory note",
+    }],
+  }, null);
+  assert.equal(text.operating[0].panelType, "text");
+  assert.equal(text.operating[0].text, "Gigafactory note");
+  assert.equal(text.operating[0].pending, false);
+});
+
+test("collected XBRL metrics and CapEx render as pending charts with revision context", () => {
+  const ids = [
+    "revenue_gaap",
+    "net_income_gaap",
+    "operating_income",
+    "research_and_development",
+    "sga",
+    "eps_diluted",
+    "deferred_revenue",
+    "capex",
+    "operating_cash_flow",
+    "cash_and_investments",
+  ];
+  const names = {
+    capex: "Capital expenditures",
+    operating_cash_flow: "Operating cash flow",
+    free_cash_flow: "Free cash flow",
+  };
+  const series = [
+    { fiscal_period: "2024Q4", value: 8, reported: true },
+    { fiscal_period: "2025Q1", value: 9, reported: true },
+    { fiscal_period: "2025Q2", value: 10, reported: true },
+  ];
+  const metrics = [...ids, "free_cash_flow"].map((id) => ({
+    metric_id: id,
+    approved: false,
+    approval_state: "proposed",
+    display_name: names[id] || id,
+    unit: "USD",
+    category: "fundamentals",
+    latest: { fiscal_period: "2025Q2", value: 10, reported: true },
+    series,
+    revised_from: id === "capex" ? "2025Q1" : "",
+    revision_note: id === "capex" ? "Capex uses a revised definition from 2025Q1." : "",
+    provenance: { source_kind: "xbrl", source_url: "https://www.sec.gov/example", confidence: 0.95, approval_state: "proposed" },
+  }));
+  const payload = { metrics, freshness_label: "Pending review", run_status: "ok" };
+  const panels = stockPanels(payload, { fundamentals: [] });
+  assert.equal(panels.fundamentalsSource, "ir");
+  assert.equal(panels.fundamentals[0].id, "capex");
+  for (const id of ids) {
+    const card = panels.fundamentals.find((item) => item.id === id);
+    assert.equal(card.panelType, "chart", id);
+    assert.equal(card.pending, true, id);
+  }
+  const capex = panels.fundamentals[0];
+  assert.equal(capex.name, "CapEx");
+  assert.equal(capex.detailName, "Capital expenditures");
+  assert.equal(capex.series.find((point) => point.fiscal_period === "2024Q4").revised, false);
+  assert.equal(capex.series.find((point) => point.fiscal_period === "2025Q1").revised, true);
+  assert.match(capex.revisionNote, /2025Q1/);
+  assert.deepEqual(capex.context.map((item) => item.name), ["Operating cash flow", "Free cash flow"]);
+  assert.equal(capex.context.every((item) => item.pending), true);
+  const badge = freshnessBadge(payload, "ready");
+  assert.equal(badge.tone, "pending");
+  assert.equal(badge.text, "Pending review");
+  assert.equal(freshnessBadge(payload, "ready", "TSLA", "approved").text, "No approved company metrics");
+  const hidden = stockPanels(payload, { fundamentals: [] }, { review: "approved" });
+  assert.equal(hidden.pendingCount, 0);
+  assert.equal(hidden.fundamentals.length, 0);
+  assert.match(app, /review-badge/);
+  assert.match(app, /stock-metric-capex/);
+  assert.match(app, /Pending review/);
 });
 
 test("company metric errors stay distinct from an empty catalog", () => {

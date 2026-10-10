@@ -1,8 +1,9 @@
 """Company IR collection, extraction, catalog gating and per-ticker serving JSON.
 
 Raw documents land at raw/company_ir/<ticker>/<period>/<sha256>.<ext> with a manifest.
-Curated rows use the company_metrics Parquet schema. Only catalog entries Ram has
-approved are served. Proposed metrics are stored and omitted from serving JSON.
+Curated rows use the company_metrics Parquet schema. Approved metrics are served as
+primary. Proposed metrics are served too, with status, confidence and source, so the
+UI can label them Pending review. Rejected metrics stay out of serving JSON.
 
 Live crawling, LLM calls and Terraform apply stay outside this module's tests.
 LLM credentials are a Secrets Manager / SSM id in the environment, never a key literal.
@@ -881,6 +882,45 @@ def _fill_gaps(points: list[dict]) -> list[dict]:
     return filled
 
 
+def _row_servable(row: dict, entry: dict | None) -> bool:
+    """Approved catalog rows must be official. Proposed rows are served except LLM and news."""
+    if entry is None:
+        return False
+    status = entry.get("status") or "proposed"
+    if status not in {"approved", "proposed"}:
+        return False
+    if row.get("method") == "llm" or row.get("source_kind") in {"llm", "news"}:
+        return False
+    if status == "approved" and row.get("approved") is not True:
+        return False
+    return True
+
+
+def _revision_meta(entry: dict) -> tuple[str | None, str | None]:
+    revised_from = entry.get("revised_from") or None
+    note = entry.get("revision_note") or None
+    if revised_from or note:
+        return revised_from, note
+    if entry.get("metric_id") != "capex":
+        return None, None
+    definition = str(entry.get("definition") or "").lower()
+    if "prior periods were adjusted" in definition or "q1 2025" in definition:
+        return (
+            "2025Q1",
+            "Capex uses a revised definition from 2025Q1. Earlier quarters keep the previous measure.",
+        )
+    return None, None
+
+
+def _metric_public(metric: dict) -> bool:
+    state = metric.get("approval_state") or metric.get("status")
+    if state == "rejected":
+        return False
+    if metric.get("approved") is True and state != "proposed":
+        return True
+    return state == "proposed"
+
+
 def _change(latest: dict | None, prior: dict | None) -> float | None:
     if not latest or not prior:
         return None
@@ -899,7 +939,7 @@ def build_serving(
     previous: dict | None = None,
     mismatches: list[dict] | None = None,
 ) -> dict:
-    """Approved metrics only. A partial or failed run keeps the previous good payload."""
+    """Approved and proposed metrics. A partial or failed run keeps the previous good payload."""
     if run.get("status") in {"partial", "failed"} and previous and previous.get("metrics"):
         kept = json.loads(json.dumps(previous))
         kept["run_status"] = run["status"]
@@ -914,17 +954,18 @@ def build_serving(
     }
     by_metric: dict[str, list[dict]] = {}
     for row in rows:
-        if row.get("approved") is not True:
-            continue
         entry = catalog_entry(catalog, row["metric_id"])
-        if entry is None or entry.get("status") != "approved":
+        if not _row_servable(row, entry):
             continue
         by_metric.setdefault(row["metric_id"], []).append(row)
 
     metrics = []
     ordered = sorted(
         by_metric.items(),
-        key=lambda item: (catalog_entry(catalog, item[0]) or {}).get("panel_order", 0),
+        key=lambda item: (
+            0 if (catalog_entry(catalog, item[0]) or {}).get("status") == "approved" else 1,
+            (catalog_entry(catalog, item[0]) or {}).get("panel_order", 0),
+        ),
     )
     for metric_id, observations in ordered:
         entry = catalog_entry(catalog, metric_id)
@@ -946,13 +987,20 @@ def build_serving(
         xbrl = mismatch_index.get((metric_id, latest["fiscal_period"])) if latest else None
         if xbrl is None and latest:
             xbrl = {"status": "uncompared", "delta": None}
-        metrics.append({
+        approval = entry.get("status") or "proposed"
+        revised_from, revision_note = _revision_meta(entry)
+        if revised_from:
+            start = _quarter_index(revised_from)
+            for point in series:
+                point["revised"] = _quarter_index(point["fiscal_period"]) >= start and start != (0, 0)
+        metric = {
             "metric_id": metric_id,
             "display_name": entry.get("display_name"),
             "unit": entry.get("unit"),
             "category": entry.get("category"),
-            "approved": True,
-            "approval_state": "approved",
+            "approved": approval == "approved",
+            "approval_state": approval,
+            "status": approval,
             "latest": latest,
             "qoq": _change(latest, prior_q),
             "yoy": _change(latest, prior_y),
@@ -960,21 +1008,46 @@ def build_serving(
             "provenance": {
                 "source_url": latest_row.get("source_url"),
                 "source_title": latest_row.get("source_title") or entry.get("display_name"),
+                "source_kind": latest_row.get("source_kind"),
                 "source_doc_hash": latest_row.get("source_doc_hash"),
                 "published_date": latest_row.get("published_date"),
                 "extracted_at": generated_at,
                 "confidence": latest_row.get("confidence"),
-                "approval_state": "approved",
+                "approval_state": approval,
             },
             "xbrl": xbrl,
-        })
+        }
+        if entry.get("panel_type"):
+            metric["panel_type"] = entry["panel_type"]
+        if entry.get("disclosure_status"):
+            metric["disclosure_status"] = entry["disclosure_status"]
+        if entry.get("definition"):
+            metric["definition"] = entry["definition"]
+        if entry.get("rows"):
+            metric["rows"] = entry["rows"]
+        if entry.get("text"):
+            metric["text"] = entry["text"]
+        if revised_from:
+            metric["revised_from"] = revised_from
+            metric["revision_note"] = revision_note
+        metrics.append(metric)
+    approved_count = sum(1 for item in metrics if item["approved"])
+    proposed_count = len(metrics) - approved_count
+    if approved_count and proposed_count:
+        freshness = "IR data approved · pending review included"
+    elif approved_count:
+        freshness = "IR data approved"
+    elif proposed_count:
+        freshness = "Pending review"
+    else:
+        freshness = "No approved company metrics"
     status = run.get("status", "ok")
     return {
         "ticker": ticker.upper(),
         "generated_at": generated_at,
         "run_status": status,
         "stale": status != "ok",
-        "freshness_label": "IR data approved" if metrics else "No approved company metrics",
+        "freshness_label": freshness,
         "discovered": bool(metrics),
         "metrics": metrics,
         "unavailable": [],
@@ -983,7 +1056,7 @@ def build_serving(
 
 
 def public_stock_document(document: dict | None, ticker: str) -> dict:
-    """Last gate before the API. Proposed or unapproved metrics are dropped."""
+    """Last gate before the API. Proposed metrics stay, labeled by status. Rejected metrics are dropped."""
     if not document:
         return {
             "ticker": ticker.upper(),
@@ -996,15 +1069,10 @@ def public_stock_document(document: dict | None, ticker: str) -> dict:
             "unavailable": [],
             "mismatches": [],
         }
-    metrics = []
-    for metric in document.get("metrics") or []:
-        if metric.get("approved") is not True:
-            continue
-        if metric.get("approval_state") in {"proposed", "rejected"}:
-            continue
-        if metric.get("status") in {"proposed", "rejected"}:
-            continue
-        metrics.append(metric)
+    metrics = [metric for metric in document.get("metrics") or [] if _metric_public(metric)]
+    metrics.sort(key=lambda metric: (
+        0 if metric.get("approved") is True and metric.get("approval_state") != "proposed" else 1
+    ))
     published = dict(document)
     published["ticker"] = ticker.upper()
     published["metrics"] = metrics
@@ -2057,7 +2125,7 @@ def _load_observations(rows: list[dict]) -> list[dict]:
 
 
 def run_serve(event: dict | None, *, read_json, write_json, now: str | None = None) -> dict:
-    """Publish approved metrics. A skipped upstream run does not replace the previous document."""
+    """Publish approved and proposed metrics. A skipped upstream run does not replace the previous document."""
     flat = unwrap_job_event(event)
     if flat.get("status") == "skipped" or flat.get("run_status") == "skipped":
         return {"status": "skipped", "reason": "upstream skipped", "served": 0, "tickers": [], "run_status": "skipped"}

@@ -480,9 +480,16 @@ def test_extract_and_serve_round_trip_filters_proposed_and_keeps_last_good(tmp_p
         company_ir.load_catalog = original
     assert served["served"] == 1
     document = store[ir.serving_stock_key("TSLA")]
-    assert [item["metric_id"] for item in document["metrics"]] == ["total_deliveries"]
-    assert document["metrics"][0]["latest"]["value"] == 486_532
-    assert document["metrics"][0]["provenance"]["source_url"].startswith("https://www.sec.gov/")
+    approved = [item for item in document["metrics"] if item["approval_state"] == "approved"]
+    proposed = [item for item in document["metrics"] if item["approval_state"] == "proposed"]
+    assert [item["metric_id"] for item in approved] == ["total_deliveries"]
+    assert approved[0]["latest"]["value"] == 486_532
+    assert approved[0]["provenance"]["source_url"].startswith("https://www.sec.gov/")
+    assert proposed
+    assert all(item["approved"] is False for item in proposed)
+    assert all(item["provenance"]["confidence"] is not None for item in document["metrics"])
+    assert all(str(item["provenance"]["source_url"]).startswith("https://") for item in document["metrics"])
+    assert document["metrics"][0]["metric_id"] == "total_deliveries"
 
     partial = ir.run_serve(
         {"tickers": ["TSLA"], "run_status": "partial", "status": "partial"},

@@ -1,6 +1,6 @@
-// Account menu and the tabbed Account settings dialog (issue #36). Every user setting lives here:
-// My tickers (add, pin, reorder, remove), Theme & display, Profile & time zone, Data refresh.
-// Changes apply at once and autosave through PUT /prefs, one request at a time.
+// Account menu, the Settings pop-up, and the separate Data refresh pop-up.
+// Settings holds My tickers, Theme & display, and Profile & time zone.
+// Data refresh is its own larger pop-up. Changes autosave through PUT /prefs.
 
 import { PERIODS, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
 import { sparkline } from "./sparkline.js";
@@ -91,8 +91,13 @@ export function createAccountSettings(ctx) {
   let addDraft = "";
   let addError = "";
   let dragTicker = null;
+  let refreshBackdrop = null;
+  let refreshDialog = null;
+  let refreshPanel = null;
+  let refreshLive = null;
+  let openKind = null;
 
-  const isOpen = () => Boolean(backdrop && !backdrop.hidden);
+  const isOpen = () => openKind !== null;
 
   function announce(message) {
     if (!live) return;
@@ -247,7 +252,8 @@ export function createAccountSettings(ctx) {
       return;
     }
     if (event.key !== "Tab") return;
-    const items = [...dialog.querySelectorAll(FOCUSABLE)].filter((item) => !item.closest("[hidden]"));
+    const host = event.currentTarget;
+    const items = [...host.querySelectorAll(FOCUSABLE)].filter((item) => !item.closest("[hidden]"));
     if (!items.length) return;
     const first = items[0];
     const last = items.at(-1);
@@ -286,8 +292,66 @@ export function createAccountSettings(ctx) {
     else if (right > viewRight) tablist.scrollLeft = right - tablist.clientWidth;
   }
 
-  function open(tabId = "tickers", from = null) {
+  function holdModal() {
+    document.body.classList.add("modal-open");
+    document.querySelector("#app")?.setAttribute("inert", "");
+  }
+
+  function releaseModal(restore) {
+    document.body.classList.remove("modal-open");
+    document.querySelector("#app")?.removeAttribute("inert");
+    if (parseSettingsHash(location.hash)) history.replaceState(history.state, "", location.pathname + location.search);
+    if (restore) document.querySelector(`[data-opener="${opener}"]`)?.focus();
+  }
+
+  function suspend() {
+    if (openKind === "settings" && backdrop) {
+      flush();
+      hideToast();
+      backdrop.hidden = true;
+    }
+    if (openKind === "refresh" && refreshBackdrop) refreshBackdrop.hidden = true;
+    openKind = null;
+  }
+
+  function buildRefresh() {
+    refreshBackdrop = el("div", "settings-backdrop");
+    refreshBackdrop.hidden = true;
+    refreshBackdrop.addEventListener("mousedown", (event) => {
+      if (event.target !== refreshBackdrop) return;
+      event.preventDefault();
+      close();
+    });
+    refreshDialog = el("div", "settings-dialog refresh-dialog");
+    refreshDialog.setAttribute("role", "dialog");
+    refreshDialog.setAttribute("aria-modal", "true");
+    refreshDialog.setAttribute("aria-labelledby", "refresh-title");
+    refreshDialog.addEventListener("keydown", onDialogKeydown);
+
+    const head = el("div", "settings-head");
+    const title = el("h2", "", "Data refresh");
+    title.id = "refresh-title";
+    const closeButton = button("✕", "settings-close", close);
+    closeButton.setAttribute("aria-label", "Close data refresh");
+    head.append(title, closeButton);
+
+    refreshPanel = el("div", "settings-panel");
+    refreshPanel.id = "refresh-panel";
+    refreshLive = el("p", "visually-hidden");
+    refreshLive.setAttribute("aria-live", "polite");
+    refreshDialog.append(head, refreshPanel, refreshLive);
+    refreshBackdrop.append(refreshDialog);
+    document.body.append(refreshBackdrop);
+  }
+
+  function renderRefreshPanel() {
+    if (!refreshPanel) return;
+    refreshPanel.replaceChildren(...renderRefreshTab());
+  }
+
+  function openSettings(tabId, from) {
     if (!session.prefs) return;
+    if (openKind === "refresh") suspend();
     if (!backdrop) build();
     opener = from || "account";
     confirmed = copyPrefs(session.prefs);
@@ -297,21 +361,35 @@ export function createAccountSettings(ctx) {
     }
     setSaveNote("");
     backdrop.hidden = false;
-    document.body.classList.add("modal-open");
-    document.querySelector("#app")?.setAttribute("inert", "");
+    holdModal();
+    openKind = "settings";
     selectTab(tabId);
     tabButtons.find((tabButton) => tabButton.dataset.tab === activeTab)?.focus();
   }
 
+  function openRefresh(from) {
+    if (!session.prefs) return;
+    if (openKind === "settings") suspend();
+    if (!refreshBackdrop) buildRefresh();
+    opener = from || "account";
+    refreshBackdrop.hidden = false;
+    holdModal();
+    openKind = "refresh";
+    history.replaceState(history.state, "", settingsHash("refresh"));
+    renderRefreshPanel();
+    refreshDialog.querySelector(".settings-close")?.focus();
+  }
+
+  function open(tabId = "tickers", from = null) {
+    if (tabId === "refresh") openRefresh(from);
+    else openSettings(tabId, from);
+  }
+
   function close() {
     if (!isOpen()) return;
-    flush();
-    hideToast();
-    backdrop.hidden = true;
-    document.body.classList.remove("modal-open");
-    document.querySelector("#app")?.removeAttribute("inert");
-    if (parseSettingsHash(location.hash)) history.replaceState(history.state, "", location.pathname + location.search);
-    document.querySelector(`[data-opener="${opener}"]`)?.focus();
+    const kind = openKind;
+    suspend();
+    if (kind === "settings" || kind === "refresh") releaseModal(true);
   }
 
   // Re-render the active tab and keep focus on the same control when it still exists.
@@ -323,7 +401,6 @@ export function createAccountSettings(ctx) {
     if (activeTab === "tickers") panel.append(...renderTickersTab());
     if (activeTab === "theme") panel.append(...renderThemeTab());
     if (activeTab === "profile") panel.append(...renderProfileTab());
-    if (activeTab === "refresh") panel.append(...renderRefreshTab());
     if (focusKey) {
       const target = panel.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
       (target && !target.disabled ? target : panel).focus();
@@ -826,7 +903,6 @@ export function createAccountSettings(ctx) {
       ["My tickers", "add · pin · reorder", () => open("tickers", "account")],
       ["Theme & display", "colors · chart period", () => open("theme", "account")],
       ["Profile & time zone", `email · ${timeZoneLabel(session.prefs.display.time_zone)}`, () => open("profile", "account")],
-      ["All refresh jobs", "job schedule · status", () => open("refresh", "account")],
       ["Sign out", "", ctx.signOut],
     ].map(([label, hint, run]) => {
       const item = el("button", "menu-item");
@@ -901,13 +977,22 @@ export function createAccountSettings(ctx) {
     renderAccountButton,
     // The dashboard re-rendered (new data); refresh prices and history chips in the open tab.
     refresh() {
-      if (isOpen()) renderPanel();
+      if (openKind === "settings") renderPanel();
+      if (openKind === "refresh") renderRefreshPanel();
     },
     openFromHash() {
       const tab = parseSettingsHash(location.hash);
-      if (tab && !isOpen()) open(tab, "account");
-      else if (tab && isOpen() && tab !== activeTab) selectTab(tab);
-      else if (!tab && isOpen()) close();
+      if (!tab) {
+        if (isOpen()) close();
+        return;
+      }
+      if (tab === "refresh") {
+        if (openKind !== "refresh") open("refresh", "account");
+        return;
+      }
+      if (openKind === "refresh") suspend();
+      if (openKind !== "settings") open(tab, "account");
+      else if (tab !== activeTab) selectTab(tab);
     },
   };
 }

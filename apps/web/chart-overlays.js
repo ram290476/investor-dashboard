@@ -47,6 +47,70 @@ export const OVERLAYS = [
 
 const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", "Policy & geo", "Fundamentals", "Sentiment"];
 const overlayById = new Map(OVERLAYS.map((overlay) => [overlay.id, overlay]));
+const dynamicById = new Map();
+
+function selectableOverlay(id) {
+  return overlayById.has(id) || /^FUNDAMENTAL:[A-Za-z0-9_]+$/.test(String(id || ""));
+}
+
+function pendingFundamental(rows) {
+  return rows.length > 0 && rows.every((row) => row.approval_state === "proposed" || row.status === "proposed");
+}
+
+function rememberFundamentals(chartData) {
+  dynamicById.clear();
+  const rowsById = new Map();
+  for (const row of chartData?.fundamentals || []) {
+    if (!row?.series_id || !isNumericValue(row.value)) continue;
+    const list = rowsById.get(row.series_id) || [];
+    list.push(row);
+    rowsById.set(row.series_id, list);
+  }
+  for (const [seriesId, rows] of rowsById) {
+    const id = `FUNDAMENTAL:${seriesId}`;
+    const base = overlayById.get(id);
+    const pending = pendingFundamental(rows);
+    const name = rows.find((row) => row.display_name)?.display_name || base?.label || seriesId.replaceAll("_", " ");
+    const label = pending && !name.includes("Pending review") ? `${name} · Pending review` : (base?.label || name);
+    if (base && label === base.label) continue;
+    dynamicById.set(id, {
+      ...(base || {
+        id,
+        group: "Fundamentals",
+        kind: "fundamental",
+        color: OVERLAYS.length + dynamicById.size,
+      }),
+      label: pending ? (name.includes("Pending review") ? name : `${name} · Pending review`) : (base?.label || name),
+      unit: rows.find((row) => row.unit)?.unit || "",
+    });
+  }
+}
+
+export function mergeCompanyFundamentals(chartData, metrics) {
+  const extra = [];
+  for (const metric of metrics || []) {
+    const pending = metric?.approval_state === "proposed" || metric?.status === "proposed" || metric?.pending === true;
+    for (const point of metric?.series || []) {
+      if (!point || point.reported === false || !isNumericValue(point.value)) continue;
+      const date = point.period_end || point.date;
+      if (!date) continue;
+      extra.push({
+        series_id: metric.metric_id,
+        display_name: metric.display_name || metric.metric_id,
+        date,
+        value: Number(point.value),
+        unit: metric.unit || "",
+        fiscal_quarter: point.fiscal_period,
+        source_id: metric.provenance?.source_title || metric.provenance?.source_kind || "Company metrics",
+        approval_state: pending ? "proposed" : "approved",
+      });
+    }
+  }
+  if (!extra.length) return chartData;
+  const covered = new Set(extra.map((row) => row.series_id));
+  const base = (chartData?.fundamentals || []).filter((row) => !covered.has(row.series_id));
+  return { ...(chartData || {}), fundamentals: [...base, ...extra] };
+}
 
 function dateKey(bar) {
   return String(bar?.date || bar?.ts || "").slice(0, 10);
@@ -60,18 +124,27 @@ export function chartSettingsFor(prefs, ticker) {
   const saved = prefs?.chart_settings?.[ticker];
   if (!saved) return { overlays: [...DEFAULT_CHART_SETTINGS.overlays], lanes: [...DEFAULT_CHART_SETTINGS.lanes] };
   return {
-    overlays: Array.isArray(saved.overlays) ? saved.overlays.filter((id) => overlayById.has(id)).slice(0, 5) : [],
+    overlays: Array.isArray(saved.overlays) ? saved.overlays.filter((id) => selectableOverlay(id)).slice(0, 5) : [],
     lanes: Array.isArray(saved.lanes) ? saved.lanes.filter((id) => CHART_LANES.some((lane) => lane.id === id)) : [],
   };
 }
 
 export function overlayGroups(tickerData, chartData, dashboard, bars = validBars(tickerData?.price_history)) {
+  rememberFundamentals(chartData);
+  const context = { bars, tickerData, chartData, dashboard };
   return GROUP_ORDER.map((label) => ({
     id: label,
     label,
-    overlays: OVERLAYS.filter(overlay => overlay.group === label
-      && valuesForOverlay(overlay.id, { bars, tickerData, chartData, dashboard }).some(isNumericValue))
-      .map(overlay => ({ ...overlay, available: true })),
+    overlays: [
+      ...OVERLAYS.filter(overlay => overlay.group === label
+        && valuesForOverlay(overlay.id, context).some(isNumericValue))
+        .map(overlay => ({ ...(dynamicById.get(overlay.id) || overlay), available: true })),
+      ...(label === "Fundamentals"
+        ? [...dynamicById.values()].filter((overlay) => !overlayById.has(overlay.id)
+          && valuesForOverlay(overlay.id, context).some(isNumericValue))
+          .map((overlay) => ({ ...overlay, available: true }))
+        : []),
+    ],
   })).filter((group) => group.overlays.length);
 }
 
@@ -162,7 +235,13 @@ function marketValues(overlay, dashboard, bars) {
 
 export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard }) {
   const overlay = overlayById.get(id);
-  if (!overlay) return bars.map(() => null);
+  if (!overlay) {
+    if (String(id || "").startsWith("FUNDAMENTAL:")) {
+      const metric = id.slice("FUNDAMENTAL:".length);
+      return alignedValues((chartData?.fundamentals || []).filter((row) => row.series_id === metric), bars);
+    }
+    return bars.map(() => null);
+  }
   if (overlay.kind === "market") return marketValues(overlay, dashboard, bars);
   if (overlay.kind === "average") return movingAverage(tickerData?.price_history || [], overlay.window, bars);
   if (overlay.kind === "macro") return alignedValues(chartData?.macro_series?.[overlay.id], bars);
@@ -188,11 +267,11 @@ const OVERLAY_UNITS = {
 };
 
 export function overlayUnit(id) {
-  return OVERLAY_UNITS[id] || "";
+  return OVERLAY_UNITS[id] || dynamicById.get(id)?.unit || "";
 }
 
 export function overlayDefinition(id) {
-  return overlayById.get(id) || null;
+  return dynamicById.get(id) || overlayById.get(id) || null;
 }
 
 export function fundamentalObservation(id, chartData, through) {
