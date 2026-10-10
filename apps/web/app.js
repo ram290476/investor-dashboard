@@ -14,9 +14,10 @@ import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-s
 import { applyTheme, overlayColor } from "./theme.js";
 import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import {
-  CATALYST_CATEGORIES, calendarPanelModel, calendarSummary, catalystCategoriesInWindow, catalystRowView,
-  catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage, markerIndex,
-  movingAverageRows, sensitivityRows, sortedDrivers, upcomingEmptyMessage,
+  CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
+  catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
+  markerIndex, movingAverageRows, newsEmptyMessage, newsGroups, newsHeader, newsRowView, newsSummary,
+  sensitivityRows, sortedDrivers, upcomingEmptyMessage,
 } from "./roadmap.js";
 import { legendItems, overlayCorrelation, seriesLineStyle } from "./chart-legend.js";
 import { sparkline, sparklineModel, sparklineSummary } from "./sparkline.js";
@@ -95,6 +96,7 @@ const session = {
   catalystCategories: CATALYST_CATEGORIES.map(category => category.id),
   focusCatalyst: null,
   showOtherEvents: false,
+  newsExpanded: {},
   driverSort: "effect",
   // Inner disclosures that are not bottom drawers (all drivers, release calendar).
   innerDrawers: new Set(),
@@ -2080,33 +2082,56 @@ function renderContracts(tickerData) {
   return panel;
 }
 
-function renderCatalystRow(event, tickerData, { calendarId = false, link = false } = {}) {
+function renderCatalystRow(event, tickerData, { calendarId = false, link = false, variant = "catalyst" } = {}) {
+  const news = variant === "news";
   const category = CATALYST_CATEGORIES.find((item) => item.id === event.category) || CATALYST_CATEGORIES.at(-1);
   const daily = validBars(tickerData?.price_history || []);
   const chartBars = selectedChartBars(tickerData);
-  const view = catalystRowView(event, { bars: daily, timeZone: displayZone(), now: new Date() });
-  const button = document.createElement("button");
-  button.type = "button";
+  const view = news
+    ? newsRowView(event, { bars: daily, timeZone: displayZone(), now: new Date() })
+    : catalystRowView(event, { bars: daily, timeZone: displayZone(), now: new Date() });
+  const button = news ? document.createElement("a") : document.createElement("button");
+  if (!news) button.type = "button";
   button.className = "catalyst-recent-row";
+  if (news) button.classList.add("catalyst-recent-row--news");
   if (calendarId && event.id) button.id = `calendar-${event.id}`;
   const date = node("time", "catalyst-recent-date", view.dateText);
   date.dateTime = view.dateTime;
-  date.title = view.dateTitle;
+  date.title = news && view.timeTitle ? view.timeTitle : view.dateTitle;
   const title = node("span", "catalyst-recent-title");
   const dot = node("span", "catalyst-dot");
-  const color = overlayColor(category.slot, session.prefs.display.theme);
+  const color = news ? `var(--${view.dotToken})` : overlayColor(category.slot, session.prefs.display.theme);
   dot.style.setProperty("--catalyst-color", color);
   dot.dataset.catalystColor = color;
-  dot.title = category.label;
+  const label = news ? view.sentimentLabel : category.label;
+  dot.title = label;
   dot.setAttribute("aria-hidden", "true");
   const name = node("span", "catalyst-recent-name", view.name);
   name.title = view.name;
-  title.append(dot, node("span", "visually-hidden", category.label), name);
+  title.append(dot, node("span", "visually-hidden", label), name);
+  if (news && view.publisher) {
+    const publisher = node("span", "catalyst-recent-publisher", view.publisher);
+    publisher.title = view.publisher;
+    title.append(publisher);
+  }
   const move = node("span", `catalyst-recent-move mono ${view.tone}`, view.trailingText);
   move.setAttribute("aria-label", view.trailingLabel);
-  button.append(date, title, move);
+  button.append(date, title);
+  if (news) button.append(node("span", `catalyst-recent-score mono ${view.scoreTone}`, view.scoreText));
+  button.append(move);
   button.title = view.tooltip;
-  button.setAttribute("aria-label", `${view.dateText}, ${category.label}, ${view.name}, ${view.trailingLabel}`);
+  button.setAttribute("aria-label", news
+    ? `${view.dateText}, ${label}, ${view.name}${view.publisher ? `, ${view.publisher}` : ""}, ${view.scoreText}, ${view.trailingLabel}`
+    : `${view.dateText}, ${category.label}, ${view.name}, ${view.trailingLabel}`);
+  if (news) {
+    const article = /^https?:\/\//i.test(String(event.url || "")) ? event.url : "";
+    if (article) {
+      button.href = article;
+      button.target = "_blank";
+      button.rel = "noopener noreferrer";
+    }
+    return button;
+  }
   const inRange = markerIndex(event, chartBars) >= 0;
   if (!view.upcoming && !inRange) {
     button.disabled = true;
@@ -2564,16 +2589,44 @@ function renderCatalystCalendar(tickerData) {
 }
 
 function newsDrawerSummary(tickerData) {
-  const score = isNumericValue(tickerData?.news?.sentiment_7d) ? Number(tickerData.news.sentiment_7d) : null;
-  if (score == null) return "Headlines and 7-day sentiment";
-  return `7-day sentiment ${score > 0 ? "+" : ""}${score.toFixed(2)}`;
+  return newsSummary(tickerData?.news, { state: !tickerData?.news ? session.dashboardState : "ready" });
+}
+
+function renderNewsHeadlineGroups(body, tickerData, headlines) {
+  const groups = newsGroups(headlines, {
+    ticker: session.selected, now: new Date(), timeZone: displayZone(),
+  });
+  if (!groups.length) {
+    body.append(node("p", "data-state", newsEmptyMessage(session.selected, [])));
+    return;
+  }
+  groups.forEach((group) => {
+    const key = `${session.selected}|${group.name}`;
+    const expanded = Boolean(session.newsExpanded?.[key]);
+    const shown = expanded ? group.rows : group.rows.slice(0, NEWS_ROW_LIMIT);
+    const section = renderCatalystSection(
+      `${group.name} · ${group.rows.length}`,
+      shown,
+      tickerData,
+      "",
+      { variant: "news" },
+    );
+    const hidden = group.rows.length - shown.length;
+    if (hidden > 0) {
+      section.append(action(`Show ${hidden} more`, "overlay-chip", () => {
+        session.newsExpanded = { ...session.newsExpanded, [key]: true };
+        renderDashboard();
+      }));
+    }
+    body.append(section);
+  });
 }
 
 function renderNews(tickerData) {
   return renderDrawer({
     id: "news",
     title: "News & sentiment",
-    subtitle: "Headlines from the last 48 hours",
+    subtitle: `${session.selected} headlines · last 7 days`,
     summary: newsDrawerSummary(tickerData),
     mobilePanel: "more",
     keys: drawerKeys("news"),
@@ -2591,16 +2644,24 @@ function renderNews(tickerData) {
     body.append(node("p", "data-state", "News has not been collected yet."));
     return;
   }
-  const score = isNumericValue(news.sentiment_7d) ? Number(news.sentiment_7d) : null;
+  const header = newsHeader(news, { timeZone: displayZone(), now: new Date() });
   const summary = node("p", "news-score");
-  summary.append(document.createTextNode("7-day sentiment "));
-  summary.append(node("span", `mono ${polarity(score)}`, score == null ? "—" : `${score > 0 ? "+" : ""}${score.toFixed(2)}`));
+  summary.append(node("span", `mono ${header.scoreTone}`, header.scoreText));
+  summary.append(document.createTextNode(` 7-day sentiment · ${header.count} headline${header.count === 1 ? "" : "s"}`));
+  if (header.change) {
+    summary.append(document.createTextNode(" · "));
+    summary.append(node("span", `mono ${header.change.tone}`, header.change.text));
+    summary.append(document.createTextNode(" vs prior week"));
+  }
   body.append(summary);
-  const sentiment = news.sentiment_history || [];
-  body.append(signalSparkline(sentiment, "var(--series-3)", `${session.selected} rolling seven-day news sentiment`));
-  body.append(node("p", "signal-note", sentiment.length
-    ? `${sentiment.length} stored sentiment observations · through ${sentiment.at(-1).date}. Scores mix provider sentiment and a headline lexicon fallback.`
-    : "Rolling sentiment history has not been published yet."));
+  const sentiment = Array.isArray(news.sentiment_history) ? news.sentiment_history : [];
+  if (!sentiment.length) body.append(node("span", "signal-note", "History unavailable"));
+  else if (sentiment.filter((point) => isNumericValue(point.value)).length < 2) {
+    body.append(node("span", "signal-note", "One stored sentiment observation."));
+  } else {
+    body.append(signalSparkline(sentiment, "var(--series-3)", `${session.selected} rolling seven-day news sentiment`));
+  }
+  body.append(node("p", "signal-note", header.sourceNote));
   const chartSettings = chartSettingsFor(session.prefs, session.selected);
   const overlaySelected = chartSettings.overlays.includes("NEWS:SENTIMENT");
   const toggle = action(overlaySelected ? "Remove sentiment from chart" : "Overlay sentiment on chart", "overlay-chip", () => {
@@ -2613,29 +2674,7 @@ function renderNews(tickerData) {
   toggle.disabled = !overlaySelected && !sentiment.some(point => isNumericValue(point.value));
   toggle.setAttribute("aria-pressed", String(overlaySelected));
   body.append(toggle);
-  const headlines = Array.isArray(news.headlines) ? news.headlines.slice(0, 10) : [];
-  if (!headlines.length) {
-    body.append(node("p", "data-state", "No headlines in the last 48 hours."));
-    return;
-  }
-  const list = node("ul", "news-list");
-  headlines.forEach((item) => {
-    const row = node("li", "news-item");
-    const link = node("a", "news-title", item.title || "Untitled");
-    link.href = item.url || "#";
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    row.append(link);
-    const meta = node("p", "news-meta");
-    meta.append(document.createTextNode(`${item.publisher || "Source"} · ${item.published_at || ""}`));
-    if (item.label) {
-      const tone = item.label === "bullish" ? "positive" : item.label === "bearish" ? "negative" : "neutral";
-      meta.append(node("span", `news-label ${tone}`, item.label));
-    }
-    row.append(meta);
-    list.append(row);
-  });
-  body.append(list);
+  renderNewsHeadlineGroups(body, tickerData, news.headlines);
   });
 }
 

@@ -70,6 +70,14 @@ _RSS = (
     ("robotaxi", "Robotaxi OR Cybercab", ["TSLA"], ["robotaxi"]),
     ("geopolitics", "tariff OR sanctions OR Taiwan", [], ["geopolitics"]),
 )
+# RSS queries that tag a ticker even when the story is about the topic, not the company.
+TOPIC_QUERY_TOPICS = frozenset({"robotaxi"})
+COMPANY_TOPICS = frozenset({"tesla", "launch", "company"})
+COMPANY_ALIASES = {
+    "TSLA": ("tesla", "tsla"),
+    "SPCX": ("spacex", "starlink", "starship", "spcx"),
+}
+_TAG = re.compile(r"<[^>]+>")
 
 
 def is_market_day(day: date) -> bool:
@@ -105,6 +113,36 @@ def dedupe_articles(rows: list[dict]) -> list[dict]:
         seen.add(digest)
         kept.append({**row, "url_hash": digest, "url": canonical_url(row.get("url") or "")})
     return kept
+
+
+def plain_text(value: object) -> str:
+    return " ".join(_TAG.sub(" ", str(value or "")).split())
+
+
+def strip_publisher_suffix(title: str, publisher: str) -> str:
+    """Google News RSS titles end in ' - {publisher}'. The publisher is stored on its own."""
+    text = plain_text(title)
+    source = plain_text(publisher)
+    suffix = f" - {source}"
+    if source and text.lower().endswith(suffix.lower()):
+        return text[: -len(suffix)].rstrip()
+    return text
+
+
+def mentions_company(text: str, ticker: str) -> bool:
+    haystack = f" {re.sub(r'[^a-z0-9]+', ' ', plain_text(text).lower())} "
+    aliases = COMPANY_ALIASES.get(str(ticker or "").upper(), (str(ticker or "").lower(),))
+    return any(alias and f" {alias} " in haystack for alias in aliases)
+
+
+def headline_relevance(row: dict, ticker: str) -> str:
+    """Topic-only queries keep the ticker tag only when the company is actually mentioned."""
+    topics = {str(topic).lower() for topic in (row.get("topics") or [])}
+    topic_only = bool(topics & TOPIC_QUERY_TOPICS) and not bool(topics & COMPANY_TOPICS)
+    if not topic_only:
+        return "ticker"
+    blob = " ".join(str(row.get(key) or "") for key in ("title", "snippet", "summary"))
+    return "ticker" if mentions_company(blob, ticker) else "sector"
 
 
 def label_for(score: float | None) -> str:
@@ -294,13 +332,13 @@ def parse_rss(xml_text: str, source: str, tickers: list[str], topics: list[str],
         url = (href or text or "").strip()
         if not url:
             continue
-        title = (item.findtext("title") or "").strip()
         pub = item.findtext("pubDate") or ""
         try:
             published = parsedate_to_datetime(pub)
         except (TypeError, ValueError):
             published = datetime.now(UTC)
         source_name = item.findtext("source") or source
+        title = strip_publisher_suffix(item.findtext("title") or "", source_name)
         row = _blank(url, title, source, source_name, _iso(published), tickers, topics)
         row["summary"] = re.sub(r"<[^>]+>", " ", item.findtext("description") or "")
         row["ingested_at"] = ingested_at
@@ -378,7 +416,11 @@ def curated_row(row: dict) -> dict:
         "relevance",
         "ingested_at",
     )
-    return {key: row.get(key) for key in keys}
+    curated = {key: row.get(key) for key in keys}
+    source = str(row.get("source") or "")
+    # RSS descriptions repeat the headline. Provider summaries are the tooltip snippet.
+    curated["snippet"] = "" if source.startswith("google-") else plain_text(row.get("summary") or "")
+    return curated
 
 
 def partition_articles(rows: list[dict], run_id: str) -> dict[str, list[dict]]:

@@ -11,7 +11,7 @@ from yield_curve import CURVE_SERIES_IDS, build_rates
 
 MAX_PRICE_ROWS = 1260
 SCHEMA_VERSION = 3
-HEADLINE_LIMIT = 10
+HEADLINE_LIMIT = 30
 ET = ZoneInfo("America/New_York")
 CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
 # DS-05 is Yahoo consolidated volume. DS-02 is Alpaca's free IEX feed.
@@ -22,9 +22,18 @@ def number(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else None
 
 
+def _headline_score(row: dict) -> tuple[float | None, str | None]:
+    score = number(row.get("sentiment_score"))
+    if score is None:
+        return None, None
+    if number(row.get("provider_sentiment")) is not None:
+        return score, "provider"
+    return score, "lexicon"
+
+
 def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: datetime) -> dict:
-    """Last 48 hours of headlines and observed seven-calendar-day sentiment history."""
-    from news_sentiment import rolling_mean
+    """Last 7 days of headlines and observed seven-calendar-day sentiment history."""
+    from news_sentiment import headline_relevance, plain_text, rolling_mean, strip_publisher_suffix
 
     today = now.astimezone(UTC).date()
     daily_by_date: dict[str, dict] = {}
@@ -39,8 +48,10 @@ def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: d
         if day <= today:
             daily_by_date[day.isoformat()] = {**row, "date": day.isoformat(), "mean_sentiment": value}
     daily_rows = list(daily_by_date.values())
-    cutoff = now.astimezone(UTC) - timedelta(hours=48)
-    headlines = []
+    cutoff = now.astimezone(UTC) - timedelta(days=7)
+    company: list[dict] = []
+    sector: list[dict] = []
+    count_7d = 0
     seen: set[str] = set()
     ordered = sorted(articles, key=lambda row: str(row.get("published_at") or ""), reverse=True)
     for row in ordered:
@@ -60,20 +71,36 @@ def build_news(ticker: str, daily_rows: list[dict], articles: list[dict], now: d
         if not digest or digest in seen:
             continue
         seen.add(digest)
-        headlines.append(
-            {
-                "title": row.get("title") or "",
-                "url": row.get("url") or "",
-                "publisher": row.get("publisher") or "",
-                "published_at": published,
-                "label": row.get("sentiment_label") or "neutral",
-            }
-        )
-        if len(headlines) == HEADLINE_LIMIT:
-            break
+        publisher = str(row.get("publisher") or "")
+        score, score_source = _headline_score(row)
+        relevance = headline_relevance(row, ticker)
+        headline = {
+            "title": strip_publisher_suffix(str(row.get("title") or ""), publisher),
+            "url": row.get("url") or "",
+            "publisher": publisher,
+            "published_at": published,
+            "date_precision": "minute",
+            "score": score,
+            "score_source": score_source,
+            "label": row.get("sentiment_label") or "neutral",
+            "relevance": relevance,
+        }
+        snippet = plain_text(row.get("snippet") or "")
+        if snippet:
+            headline["snippet"] = snippet
+        if relevance == "sector":
+            if len(sector) < HEADLINE_LIMIT:
+                sector.append(headline)
+            continue
+        count_7d += 1
+        if len(company) < HEADLINE_LIMIT:
+            company.append(headline)
+    headlines = company + sector
     return {
-        "as_of": headlines[0]["published_at"] if headlines else None,
+        "as_of": company[0]["published_at"] if company else None,
         "sentiment_7d": rolling_mean(daily_rows, today),
+        "sentiment_7d_prior": rolling_mean(daily_rows, today - timedelta(days=7)),
+        "count_7d": count_7d,
         "sentiment_history": [
             {
                 "date": day,
