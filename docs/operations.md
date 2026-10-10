@@ -399,6 +399,12 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
 | `kalshi-fomc` | Not scheduled | Collector and status-feed id `KALSHI` exist. Live fetches stay off until the Kalshi terms are accepted. No next run is advertised. |
 
+### Header market status
+
+`dashboard_build` adds `market` to `serving/dashboard.json` from the same NYSE holiday calendar the hourly collector uses. Regular hours are 09:30–16:00 ET. Early-close days end at 13:00 ET (July 3 when July 4 is a weekday, the Friday after Thanksgiving, and December 24, unless that day is itself a full holiday). Weekends and NYSE holidays are `closed`. Before the open on a session day the status is `pre`; after the close it is `post`. This is computed while the snapshot is built. There is no extra schedule and no Terraform change.
+
+The page keeps a one-minute timer, and it also wakes at `next_open` or `next_close`, and writes the new words into the existing badge. It does not rebuild the dashboard. Whether the calendar should instead live only in the browser is still an open question.
+
 ### Rates and yields sources
 
 The Rates & yields drawer reads one shared `rates` object on `serving/dashboard.json`. It is not per ticker. Missing blocks stay null. They are not filled with zeros or design samples.
@@ -640,9 +646,19 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
   Both actions affect only the selected ticker. Catalyst Clear all remains session-only;
   choosing a calendar event re-enables its category. Large Fundamentals groups have no
   bulk-add button, and Market bulk-add selects at most five.
-* The signed-in header reads **Signed In**; its accessible name includes the account.
-  The menu is still named Account and the settings dialog Account settings. The text stays
-  hidden at phone widths, where the account icon remains accessible.
+* The signed-in header reads **Signed In**, with the refresh summary on a second line
+  (`N jobs ok`, plus `M need attention` when collectors are partial or failed). The words
+  are the status cue; color follows the same tone. Its accessible name includes the account
+  and that summary. The menu is still named Account and the settings dialog Account settings.
+  The label and the job line stay hidden at phone widths, where the account icon and its
+  dot remain. **Private workspace** is in the account menu. Ram has not decided whether
+  those words should stay.
+* The header market badge reads the `market` block on `serving/dashboard.json` (`open`,
+  `closed`, `pre`, `post`, plus `next_open`, `next_close`, and `as_of`). The browser
+  formats the next open or close in the signed-in time zone and updates that text when
+  the clock crosses a boundary, without redrawing the page. A missing block says the
+  status is unavailable. Ram has not decided whether this stays a served block or moves
+  to a browser-only calendar; the second calendar was not added. It is not a new job.
 * Overlay colors use the active theme's six series tokens. Extra stable slots blend adjacent
   series tokens in 13% increments per cycle and retain at least 3:1 chart contrast. Shadows
   and the settings backdrop use light/dark theme tokens.

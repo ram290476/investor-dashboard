@@ -11,6 +11,7 @@ known-first-party = [
   "trend_metrics", "fundamentals", "prefs_api", "key_rotation_check", "short_interest", "options_daily", "backfill",
   "price_reconcile", "news_sentiment", "hourly_prices", "daily_prices", "regulatory_feeds", "gov_contracts",
   "release_day", "release_links", "macro_daily", "dashboard_build", "company_ir", "yield_curve", "kalshi_fomc",
+  "market_session",
 ]
 
 [tool.pytest.ini_options]

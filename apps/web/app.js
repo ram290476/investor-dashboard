@@ -31,6 +31,7 @@ import {
   STOCK_TABS,
 } from "./stock-page.js";
 import { curveView, fomcView, policyPathView } from "./rates-panel.js";
+import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
   OVERLAYS,
@@ -2399,26 +2400,87 @@ function renderAboutData() {
   return panel;
 }
 
+let marketTimer = 0;
+
+function clearMarketTimer() {
+  if (!marketTimer) return;
+  clearTimeout(marketTimer);
+  marketTimer = 0;
+}
+
+function paintHeaderClock() {
+  const zone = session.prefs?.display?.time_zone || "UTC";
+  const now = new Date();
+  const view = marketLabel(session.dashboard?.market, now, zone);
+  const badge = root.querySelector("[data-market-status]");
+  const date = root.querySelector("[data-header-date]");
+  if (!badge && !date) {
+    clearMarketTimer();
+    return;
+  }
+  if (badge) {
+    badge.dataset.marketStatus = view.status;
+    badge.setAttribute("aria-label", view.text);
+    const dot = badge.querySelector(".dot");
+    if (dot) dot.className = `dot${view.dot ? ` ${view.dot}` : ""}`;
+    const full = badge.querySelector(".market-label");
+    const compact = badge.querySelector(".market-compact");
+    if (full && full.textContent !== view.text) full.textContent = view.text;
+    if (compact && compact.textContent !== view.compact) compact.textContent = view.compact;
+  }
+  if (date) {
+    const text = headerDate(now, zone);
+    if (date.textContent !== text) date.textContent = text;
+    date.dateTime = now.toISOString();
+  }
+  armMarketTimer(view.boundary);
+}
+
+function armMarketTimer(boundary) {
+  clearMarketTimer();
+  marketTimer = setTimeout(paintHeaderClock, clockDelay(boundary, Date.now()));
+}
+
 function renderAppHeader() {
+  const zone = session.prefs?.display?.time_zone || "UTC";
+  const now = new Date();
+  const view = marketLabel(session.dashboard?.market, now, zone);
   const header = node("header", "app-header");
   const brand = node("div", "brand-line");
   brand.append(node("h1", "", "Investor Dashboard"));
   const market = node("span", "market-badge");
-  market.append(node("span", "dot ok"), document.createTextNode(" Private workspace"));
+  market.dataset.marketStatus = view.status;
+  market.setAttribute("role", "status");
+  market.setAttribute("aria-label", view.text);
+  const dot = node("span", `dot${view.dot ? ` ${view.dot}` : ""}`);
+  dot.setAttribute("aria-hidden", "true");
+  market.append(dot, node("span", "market-label", view.text), node("span", "market-compact", view.compact));
   brand.append(market);
   header.append(brand);
   const actions = node("div", "header-actions");
-  const lastRefresh = session.dashboard?.generated_at
-    ? `Data ${formatTime(session.dashboard.generated_at, session.prefs.display.time_zone)}`
-    : "Refresh data";
-  const schedule = action(lastRefresh, "", () => settings.open("refresh", "header-refresh"));
+  const when = session.dashboard?.generated_at
+    ? formatTime(session.dashboard.generated_at, zone)
+    : "";
+  const lastRefresh = when ? `Data ${when}` : "Refresh data";
+  const schedule = node("button", "");
+  schedule.type = "button";
+  schedule.append(node("span", "schedule-word", "Data"));
+  if (when) {
+    schedule.append(document.createTextNode(" "));
+    schedule.append(node("span", "schedule-when", when));
+  }
+  schedule.addEventListener("click", () => settings.open("refresh", "header-refresh"));
   schedule.dataset.opener = "header-refresh";
   schedule.setAttribute("aria-label", `${lastRefresh}; open collection schedules and data refresh status`);
   const refresh = action("↻", "", () => refreshData(true));
   refresh.setAttribute("aria-label", "Refresh dashboard data");
   refresh.dataset.refresh = "data";
-  actions.append(schedule, refresh, settings.renderAccountButton());
+  const date = node("time", "header-date", headerDate(now, zone));
+  date.dataset.headerDate = "date";
+  date.dateTime = now.toISOString();
+  actions.append(date, schedule, refresh, settings.renderAccountButton());
   header.append(actions);
+  armMarketTimer(view.boundary);
   return header;
 }
 

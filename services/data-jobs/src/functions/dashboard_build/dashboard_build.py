@@ -6,6 +6,7 @@ import math
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from market_session import market_block
 from yield_curve import CURVE_SERIES_IDS, build_rates
 
 MAX_PRICE_ROWS = 1260
@@ -501,6 +502,7 @@ def build_snapshot(
         ),
         "status": status,
         "rates": build_rates(rates_observations, rates_fomc, rates_attempts),
+        "market": market_block(clock),
     }
 
 

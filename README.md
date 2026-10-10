@@ -28,7 +28,9 @@ The dashboard works in desktop and mobile browsers. On a wide screen the price c
 <img src="docs/design-roadmap/issue-76/industrial-dark-390.png" alt="Dashboard on a phone, Chart tab" width="300">
 
 ### Account menu and settings
-The **Signed In** button at the top right (an icon only, on phones) opens the account menu. It shows your sign-in email, a data-refresh status line and **Sign out**. Its items open the **Account settings** dialog on one of four tabs:
+The header shows the NYSE session (open, pre-market, after-hours, or closed) and the next open or close in your time zone. The date, such as Fri Oct 9 · PT, sits in front of the **Data** button. On a phone the status shortens to Open, Closed, Pre, or Post, and the date is hidden. If the snapshot has no market block, the header says the status is unavailable instead of guessing.
+
+The **Signed In** button at the top right (an icon only, on phones) opens the account menu. Under the label, a second line shows how many collection jobs are ok and how many need attention. On a phone that line is hidden; the dot on the icon stays, and the button name still includes the same words. The menu shows your sign-in email, **Private workspace**, a data-refresh status line and **Sign out**. Its items open the **Account settings** dialog on one of four tabs:
 
 - **My tickers**: add, remove, reorder and pin tickers (up to 25 tickers, 6 pinned). Pinned tickers come first in the ticker bar.
 - **Theme & display**: pick one of six color themes (Industrial Dark, Terminal Amber, Charting Navy, Clean Light, Colorblind High Contrast, Midnight Slate), the up/down color palette, and the default chart period.

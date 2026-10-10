@@ -473,3 +473,13 @@ def test_intraday_is_today_only_and_short_interest_is_the_latest_settlement():
         "days_to_cover": 1.1,
         "pct_change": -0.1,
     }
+
+
+def test_snapshot_includes_the_nyse_session_for_its_clock():
+    snapshot = dashboard_build.build_snapshot(
+        ["TSLA"], {}, {}, [], None, generated_at="2026-10-10T16:00:00+00:00",
+    )
+    assert snapshot["market"]["status"] == "closed"
+    assert snapshot["market"]["next_open"] == "2026-10-12T13:30:00+00:00"
+    assert snapshot["market"]["next_close"] == "2026-10-12T20:00:00+00:00"
+    assert snapshot["market"]["as_of"] == "2026-10-10T16:00:00+00:00"

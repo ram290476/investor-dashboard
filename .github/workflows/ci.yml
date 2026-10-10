@@ -78,6 +78,7 @@ jobs:
           node --check apps/web/routes.js
           node --check apps/web/stock-page.js
           node --check apps/web/rates-panel.js
+          node --check apps/web/market-status.js
 
       - name: Test chart periods, overlays, trend state, API responses and preferences
         run: node --test apps/web/*.test.js
