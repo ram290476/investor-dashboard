@@ -5,7 +5,7 @@ import {
   ageLabel, calendarPanelModel, calendarSummary, catalystCategory, catalystCategoriesInWindow, catalystDateLabel,
   catalystMove, catalystMoveLabel, catalystRowView, catalystRows, countdownLabel, edgarCompanyUrl, edgarIndexUrl,
   filingDisplayTitle, filingPanelModel, filingsEmptyMessage, formatSentimentScore, markerIndex, movingAverageRows,
-  newsClockTitle, newsEmptyMessage, newsGroupName, newsGroups, newsHeader, newsRowView, newsSummary, sensitivityRows,
+  catalystSensitivityRows, newsClockTitle, newsEmptyMessage, newsGroupName, newsGroups, newsHeader, newsRowView, newsSummary, sensitivityRows,
   sentimentTone, sortedDrivers, stripPublisher,
 } from "./roadmap.js";
 
@@ -366,4 +366,32 @@ test("moving averages require full history and sensitivity requires twelve paire
     { n_releases: 12, correlation_surprise: null },
     { n_releases: 20, correlation_surprise: -0.5 },
   ] } }), [{ n_releases: 20, correlation_surprise: -0.5 }]);
+});
+
+test("catalyst sensitivity averages absolute one-day moves and marks the late trend", () => {
+  const bars = [
+    { date: "2026-10-01", close: 100 },
+    { date: "2026-10-02", close: 101 },
+    { date: "2026-10-03", close: 102.01 },
+    { date: "2026-10-06", close: 122.412 },
+  ];
+  const events = [
+    { date: "2026-10-02", category: "filings", type: "filing", title: "A" },
+    { date: "2026-10-03", category: "filings", type: "filing", title: "B" },
+    { date: "2026-10-06", category: "filings", type: "filing", title: "C" },
+  ];
+  const rows = catalystSensitivityRows(events, bars);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "filings");
+  assert.equal(rows[0].label, "Filings");
+  assert.equal(rows[0].n, 3);
+  assert.equal(rows[0].trend, "intensifying");
+  assert.equal(rows[0].trendLabel, "▲ intensifying");
+  assert.equal(rows[0].width, 1);
+  assert.ok(rows[0].average > 0.05);
+  const quiet = catalystSensitivityRows([
+    { date: "2026-10-02", category: "space", type: "launch", title: "One" },
+  ], bars);
+  assert.equal(quiet[0].trendLabel, "one event");
+  assert.deepEqual(catalystSensitivityRows([], bars), []);
 });
