@@ -212,6 +212,7 @@ data "aws_iam_policy_document" "api" {
     actions = ["s3:GetObject"]
     resources = [
       "${var.lake_bucket_arn}/serving/dashboard.json",
+      "${var.lake_bucket_arn}/serving/dashboard.json.gz",
       "${var.lake_bucket_arn}/serving/status.json",
       "${var.lake_bucket_arn}/serving/chart_data/*",
       "${var.lake_bucket_arn}/serving/stock/*",

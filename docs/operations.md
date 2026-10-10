@@ -395,9 +395,19 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | `macro-daily` | Weekdays 07:00 ET | FRED history/revisions, including the 11 constant-maturity Treasury tenors (`DGS1MO` through `DGS30`); federal holidays skipped. |
 | `release-day` | Weekdays 06:35 ET and release-morning one-offs | Bootstraps the calendar and stores release history. D4, RECONCILE and non-idle BACKFILL events rebuild ticker links without provider calls. |
 | `trend-metrics` | D1, D4, M1, RECONCILE and non-idle BACKFILL events | Publishes shared series metrics plus per-ticker correlation/effect history. |
-| `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill and reconcile events | Publishes `serving/dashboard.json`. |
+| `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill and reconcile events | Publishes `serving/dashboard.json` and `serving/chart_data/<T>.json`, each with a gzip sibling, and records the dashboard document size. |
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
 | `kalshi-fomc` | Not scheduled | Collector and status-feed id `KALSHI` exist. Live fetches stay off until the Kalshi terms are accepted. No next run is advertised. |
+
+### Serving encoding and size limits
+
+CloudFront compresses the static site (`index.html`, `app.js`, `styles.css`). It does not compress the API. `GET /dashboard`, `GET /chart/{ticker}` and `GET /status` come from the HTTP API and the prefs Lambda. HTTP APIs have no built-in response compression.
+
+When the request `Accept-Encoding` includes `gzip` (q greater than zero) and the JSON body is larger than 1 KB, the Lambda returns that body gzip-compressed (level 6) with `Content-Encoding: gzip`, `Vary: Accept-Encoding` and `isBase64Encoded: true`. Clients that do not accept gzip, and bodies of 1 KB or smaller, still get plain JSON. The existing `Content-Type`, `Cache-Control: no-store`, `X-Content-Type-Options` and `Strict-Transport-Security` headers are unchanged. API Gateway CORS is unchanged. Browsers send `Accept-Encoding: gzip` and `fetch` decompresses the body, so the web app does not decode gzip itself.
+
+`dashboard_build` writes `serving/dashboard.json.gz` and `serving/chart_data/<T>.json.gz` next to the plain files (gzip level 6, timestamp omitted). The API returns those bytes when they decompress to the document it is about to send, and it caches gzip bytes in the warm Lambda keyed by S3 ETag. `/dashboard` also inlines the latest `serving/status.json`, so its cache key includes that object's ETag. If the inlined status changes the bytes, the precompressed dashboard object is not used and the assembled JSON is compressed instead. `/status` is compressed in the Lambda when it is over 1 KB; the status feed does not write a sibling.
+
+The synchronous Lambda response limit is 6 MiB (6,291,456 bytes), measured on the proxy JSON. A gzip body counts in its base64 form, about a third larger than the bytes on the wire. If that payload would exceed the limit, the route returns HTTP 503 `RESPONSE_TOO_LARGE` instead of a truncated 500 or 502. `dashboard_build` emits `DashboardRawBytes` and `DashboardGzipBytes` in the `InvestorDashboard` namespace with the same `service` dimension as the other job metrics. Alarm `invdash-dashboard-payload-size` fires when the maximum raw dashboard document in a six-hour window is over 4 MiB (4,194,304 bytes). At about 150 KB per ticker, the 25-ticker cap is near 3.7 MB raw before per-stock fields add more. Splitting the snapshot per ticker is not part of this limit guard.
 
 ### Header market status
 
@@ -616,7 +626,7 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 | Backfill has not advanced | Inspect checkpoint and Lambda logs; check Yahoo status/rate limits and function timeout. Retry the same event; keep state. |
 | API rate limiting / throttles | Review `429`, `Retry-After`, retry logs and per-provider schedules. Reduce batch/work-per-run settings or space runs; do not raise concurrency blindly. |
 | Missing or stale prices | Check D4 Lambda state, Alpaca SSM credentials, schedule timezone, source failures and the S3 `ticker=<T>/year=<YYYY>` partitions; then run the collector manually. |
-| Dashboard API returns 503 | The dashboard build has not published `serving/dashboard.json`, or status is missing. Check build permissions/logs, upstream events and S3 serving keys. |
+| Dashboard API returns 503 | `DASHBOARD_NOT_READY`: the build has not published `serving/dashboard.json`. Check build permissions/logs, upstream events and S3 serving keys. `RESPONSE_TOO_LARGE`: the document would exceed the 6 MiB Lambda response limit. Check `DashboardRawBytes` and alarm `invdash-dashboard-payload-size` (raw over 4 MiB). |
 | Preferences API returns 409 | Another tab updated the version; reload `/prefs` and retry. A 401 means sign-in expired; sign in again. |
 | API returns 5xx | Review API Gateway access logs and `invdash-prefs-api` Lambda logs; verify scoped DynamoDB role, KMS decrypt and S3 read permissions. |
 | Site does not load or sign-in loops | Check `config.json`, callback/logout URLs, CORS origin, Cognito domain/client, CloudFront status and browser network errors. Invalidate after config changes. |

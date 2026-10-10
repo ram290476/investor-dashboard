@@ -17,6 +17,7 @@ objects.
 
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import os
@@ -84,6 +85,34 @@ def write_json(obj, key: str, bucket: str | None = None, cache_seconds: int = 60
         CacheControl=f"max-age={cache_seconds}",
     )
     return key
+
+
+def write_json_and_gzip(obj, key: str, bucket: str | None = None, cache_seconds: int = 60) -> dict[str, int]:
+    """Write compact JSON and a deterministic gzip sibling at ``<key>.gz``.
+
+    Level 6 and mtime 0 match the prefs API, so that function can return the sibling without
+    compressing again. The ``.gz`` object has no Content-Encoding metadata; the API sets that
+    header itself when the client accepts gzip.
+    """
+    raw = json.dumps(obj, separators=(",", ":"), default=str).encode()
+    compressed = gzip.compress(raw, compresslevel=6, mtime=0)
+    client = s3()
+    target = bucket or LAKE_BUCKET
+    client.put_object(
+        Bucket=target,
+        Key=key,
+        Body=raw,
+        ContentType="application/json",
+        CacheControl=f"max-age={cache_seconds}",
+    )
+    client.put_object(
+        Bucket=target,
+        Key=f"{key}.gz",
+        Body=compressed,
+        ContentType="application/gzip",
+        CacheControl=f"max-age={cache_seconds}",
+    )
+    return {"raw_bytes": len(raw), "gzip_bytes": len(compressed)}
 
 
 def read_parquet_prefix(prefix: str, bucket: str | None = None) -> pl.DataFrame:

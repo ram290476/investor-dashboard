@@ -1,3 +1,5 @@
+import base64
+import gzip
 import json
 
 import boto3
@@ -79,13 +81,20 @@ def test_legacy_over_limit_watchlists_remain_editable_without_growth(api, change
         assert "Remove 6" in json.loads(response["body"])["error"]
 
 
+def _stored(document: dict, etag: str = '"etag"') -> tuple[bytes, str, dict]:
+    raw = json.dumps(document, separators=(",", ":"), default=str).encode()
+    return raw, etag, document
+
+
 def test_authenticated_dashboard_and_status_routes(api, monkeypatch):
     mod, _ = api
     documents = {
         "serving/dashboard.json": {"schema_version": 1, "tickers": {"TSLA": {"price_history": []}}},
         "serving/status.json": {"jobs": [{"job": "D4", "status": "ok"}]},
     }
-    monkeypatch.setattr(mod, "_read_serving_json", lambda key: documents.get(key))
+    monkeypatch.setattr(
+        mod, "_read_serving_document", lambda key: _stored(documents[key], f'"{key}"') if key in documents else None
+    )
 
     dashboard_event = _event("GET")
     dashboard_event["rawPath"] = "/dashboard"
@@ -103,7 +112,12 @@ def test_chart_route_only_reads_a_ticker_in_the_callers_watchlist(api, monkeypat
     mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
     reads = []
     chart_data = {"ticker": "TSLA", "macro_pressure": [{"date": "2026-10-01", "value": 0.2}]}
-    monkeypatch.setattr(mod, "_read_serving_json", lambda key: reads.append(key) or chart_data)
+
+    def read(key):
+        reads.append(key)
+        return _stored(chart_data, '"chart"')
+
+    monkeypatch.setattr(mod, "_read_serving_document", read)
 
     event = _event("GET")
     event["rawPath"] = "/chart/TSLA"
@@ -153,7 +167,7 @@ def test_stock_route_hides_proposed_metrics_and_stays_on_the_watchlist(api, monk
 
 def test_dashboard_route_reports_not_ready_instead_of_fake_data(api, monkeypatch):
     mod, _ = api
-    monkeypatch.setattr(mod, "_read_serving_json", lambda _key: None)
+    monkeypatch.setattr(mod, "_read_serving_document", lambda _key: None)
     event = _event("GET")
     event["rawPath"] = "/dashboard"
 
@@ -504,3 +518,204 @@ def test_validation(api, body, msg):
     mod, _ = api
     r = mod.handler(_event("PUT", body={"version": 0, **body}), None)
     assert r["statusCode"] == 400 and msg in json.loads(r["body"])["error"]
+
+
+SECURITY_HEADERS = {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+}
+
+
+def _gzip_event(path: str, encoding: str | None = "gzip"):
+    event = _event("GET")
+    event["rawPath"] = path
+    if encoding is not None:
+        event["headers"] = {"accept-encoding": encoding}
+    return event
+
+
+def _decode(response: dict) -> dict:
+    body = response["body"]
+    if response.get("isBase64Encoded"):
+        body = gzip.decompress(base64.b64decode(body)).decode()
+    return json.loads(body)
+
+
+def _assert_security(headers: dict) -> None:
+    for key, value in SECURITY_HEADERS.items():
+        assert headers[key] == value
+    assert not any(str(key).lower().startswith("access-control") for key in headers)
+
+
+def _history_document(bars: int = 400) -> dict:
+    return {
+        "schema_version": 3,
+        "tickers": {
+            f"T{ticker}": {
+                "price_history": [
+                    {
+                        "date": f"2024-{(index % 12) + 1:02d}-{(index % 28) + 1:02d}",
+                        "close": 100.0 + index,
+                        "close_raw": 99.0 + index,
+                        "adj_close": 100.0 + index,
+                        "volume": 1_000_000 + index,
+                        "headline": f"Session note {index} for ticker {ticker}",
+                    }
+                    for index in range(bars)
+                ]
+            }
+            for ticker in range(7)
+        },
+    }
+
+
+def test_dashboard_chart_and_status_gzip_when_the_client_accepts_it(api, monkeypatch):
+    mod, _ = api
+    dashboard = _history_document()
+    status = {"jobs": [{"job": "D4", "status": "ok", "detail": "x" * 1200}]}
+    chart = {"ticker": "TSLA", "points": [{"date": f"2024-01-{(i % 28) + 1:02d}", "value": i} for i in range(80)]}
+    documents = {
+        "serving/dashboard.json": dashboard,
+        "serving/status.json": status,
+        "serving/chart_data/TSLA.json": chart,
+    }
+    monkeypatch.setattr(
+        mod, "_read_serving_document", lambda key: _stored(documents[key], f'"{key}"') if key in documents else None
+    )
+    mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
+
+    plain = mod.handler(_gzip_event("/dashboard", encoding=None), None)
+    assert plain.get("isBase64Encoded") is not True
+    assert "Content-Encoding" not in plain["headers"]
+    assert plain["headers"]["Vary"] == "Accept-Encoding"
+    _assert_security(plain["headers"])
+    plain_body = json.loads(plain["body"])
+    assert plain_body["tickers"]["T0"]["price_history"]
+    assert plain_body["status"]["jobs"][0]["job"] == "D4"
+
+    compressed = mod.handler(_gzip_event("/dashboard"), None)
+    assert compressed["headers"]["Content-Encoding"] == "gzip"
+    assert compressed["headers"]["Vary"] == "Accept-Encoding"
+    assert compressed["isBase64Encoded"] is True
+    _assert_security(compressed["headers"])
+    transfer = len(base64.b64decode(compressed["body"]))
+    raw_size = len(plain["body"].encode())
+    assert transfer <= raw_size * 0.25
+    assert _decode(compressed) == plain_body
+
+    for path in ("/status", "/chart/TSLA"):
+        small_plain = mod.handler(_gzip_event(path, encoding=None), None)
+        small_gzip = mod.handler(_gzip_event(path), None)
+        assert len(small_plain["body"].encode()) > 1024
+        assert small_gzip["headers"]["Content-Encoding"] == "gzip"
+        assert small_gzip["headers"]["Vary"] == "Accept-Encoding"
+        assert small_gzip["isBase64Encoded"] is True
+        _assert_security(small_gzip["headers"])
+        assert _decode(small_gzip) == json.loads(small_plain["body"])
+
+
+def test_gzip_is_skipped_under_1kb_and_when_the_client_refuses_it(api, monkeypatch):
+    mod, _ = api
+    status = {"jobs": [{"job": "D4", "status": "ok"}]}
+    def read_status(key):
+        return _stored(status) if key == "serving/status.json" else None
+
+    monkeypatch.setattr(mod, "_read_serving_document", read_status)
+    assert len(json.dumps(status, separators=(",", ":")).encode()) <= 1024
+
+    for encoding in ("gzip", "gzip;q=0", "br", "identity", None):
+        response = mod.handler(_gzip_event("/status", encoding=encoding), None)
+        assert response["statusCode"] == 200
+        assert response.get("isBase64Encoded") is not True
+        assert "Content-Encoding" not in response["headers"]
+        assert "Vary" not in response["headers"]
+        assert json.loads(response["body"]) == status
+        _assert_security(response["headers"])
+
+
+def test_warm_cache_and_precompressed_sibling_skip_recompression(api, monkeypatch):
+    mod, _ = api
+    chart = {"ticker": "TSLA", "points": [{"i": index, "note": "bar"} for index in range(80)]}
+    stored = _stored(chart, '"chart-1"')
+    calls = []
+    real_compress = gzip.compress
+
+    def spy(data, **kwargs):
+        calls.append(len(data))
+        return real_compress(data, **kwargs)
+
+    monkeypatch.setattr(mod.gzip, "compress", spy)
+    monkeypatch.setattr(mod, "_read_serving_document", lambda key: stored if key.endswith("TSLA.json") else None)
+    monkeypatch.setattr(mod, "_read_gzip_sibling", lambda key: None)
+    mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
+
+    first = mod.handler(_gzip_event("/chart/TSLA"), None)
+    second = mod.handler(_gzip_event("/chart/TSLA"), None)
+    assert calls == [len(stored[0])]
+    assert first["body"] == second["body"]
+    assert _decode(first) == chart
+
+    sibling = real_compress(stored[0], compresslevel=6, mtime=0)
+    calls.clear()
+    mod._GZIP_CACHE.clear()
+    monkeypatch.setattr(mod, "_read_gzip_sibling", lambda key: sibling)
+    served = mod.handler(_gzip_event("/chart/TSLA"), None)
+    assert calls == []
+    assert base64.b64decode(served["body"]) == sibling
+    assert _decode(served) == chart
+
+
+def test_response_over_the_lambda_limit_is_refused(api, monkeypatch):
+    mod, _ = api
+    document = _history_document(bars=40)
+    def read_dashboard(key):
+        return _stored(document) if key.endswith("dashboard.json") else None
+
+    monkeypatch.setattr(mod, "_read_serving_document", read_dashboard)
+    monkeypatch.setattr(mod, "LAMBDA_RESPONSE_LIMIT", 800)
+
+    refused = mod.handler(_gzip_event("/dashboard", encoding=None), None)
+    assert refused["statusCode"] == 503
+    assert json.loads(refused["body"])["code"] == "RESPONSE_TOO_LARGE"
+    assert len(refused["body"]) < 200
+    _assert_security(refused["headers"])
+
+    monkeypatch.setattr(mod, "LAMBDA_RESPONSE_LIMIT", 120)
+    still_refused = mod.handler(_gzip_event("/dashboard"), None)
+    assert still_refused["statusCode"] == 503
+    assert json.loads(still_refused["body"])["code"] == "RESPONSE_TOO_LARGE"
+    assert "isBase64Encoded" not in still_refused
+    assert len(still_refused["body"]) < 200
+
+    monkeypatch.setattr(mod, "LAMBDA_RESPONSE_LIMIT", 6 * 1024 * 1024)
+    allowed = mod.handler(_gzip_event("/dashboard"), None)
+    assert allowed["statusCode"] == 200
+    assert allowed["headers"]["Content-Encoding"] == "gzip"
+    assert len(base64.b64decode(allowed["body"])) < len(json.dumps(_decode(allowed)).encode())
+
+
+def test_precompressed_dashboard_sibling_matches_the_build(api, monkeypatch):
+    mod, _ = api
+    import lake
+
+    status = {"jobs": [{"job": "D4", "status": "ok"}]}
+    snapshot = {"schema_version": 3, "pad": "a" * 2000, "status": status, "tickers": {"TSLA": {"price_history": []}}}
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="lake")
+    monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+    monkeypatch.setattr(lake, "_s3", s3)
+    monkeypatch.setattr(mod, "LAKE_BUCKET", "lake")
+    monkeypatch.setattr(mod, "_s3", s3)
+    lake.write_json(status, "serving/status.json")
+    size = lake.write_json_and_gzip(snapshot, "serving/dashboard.json")
+    calls = []
+    monkeypatch.setattr(mod.gzip, "compress", lambda *args, **kwargs: calls.append(1))
+
+    response = mod.handler(_gzip_event("/dashboard"), None)
+    assert calls == []
+    assert response["headers"]["Content-Encoding"] == "gzip"
+    assert len(base64.b64decode(response["body"])) == size["gzip_bytes"]
+    assert _decode(response)["status"] == status
+    assert _decode(response)["schema_version"] == 3

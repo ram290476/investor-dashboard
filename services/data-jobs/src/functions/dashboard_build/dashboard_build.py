@@ -506,8 +506,38 @@ def build_snapshot(
     }
 
 
+def publish_serving_documents(snapshot: dict, charts: dict[str, dict]) -> dict[str, int]:
+    """Write the dashboard and chart documents plus gzip siblings, and record the dashboard size."""
+    from lake import write_json_and_gzip
+
+    for ticker, document in charts.items():
+        write_json_and_gzip(document, f"serving/chart_data/{ticker}.json", cache_seconds=30)
+    size = write_json_and_gzip(snapshot, "serving/dashboard.json", cache_seconds=30)
+    _emit_dashboard_size(size["raw_bytes"], size["gzip_bytes"])
+    return size
+
+
+def _emit_dashboard_size(raw_bytes: int, gzip_bytes: int) -> None:
+    """CloudWatch pair the 4 MiB payload alarm reads. Same service dimension as the other job metrics."""
+    from aws_lambda_powertools.metrics import MetricUnit
+
+    from observability import logger, metrics
+
+    metrics.add_metric(name="DashboardRawBytes", unit=MetricUnit.Bytes, value=raw_bytes)
+    metrics.add_metric(name="DashboardGzipBytes", unit=MetricUnit.Bytes, value=gzip_bytes)
+    logger.info(
+        "dashboard_document_size",
+        extra={
+            "raw_bytes": raw_bytes,
+            "gzip_bytes": gzip_bytes,
+            "alarm_bytes": 4 * 1024 * 1024,
+            "lambda_response_limit_bytes": 6 * 1024 * 1024,
+        },
+    )
+
+
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
-    from lake import read_json, read_parquet_prefix, read_prices, write_json
+    from lake import read_json, read_parquet_prefix, read_prices
     from observability import job_handler, logger
     from universe import collection_universe, user_ticker_union
 
@@ -587,6 +617,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             rates_fomc=read_json("serving/rates/fomc.json"),
             rates_attempts=read_json("serving/rates/attempts.json"),
         )
+        charts: dict[str, dict] = {}
         for ticker in tickers:
             chart_document = build_chart_data(
                 ticker=ticker,
@@ -597,8 +628,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 price_rows=price_data.get(ticker, []),
                 generated_at=snapshot["generated_at"],
             )
-            write_json(chart_document, f"serving/chart_data/{ticker}.json", cache_seconds=30)
-        write_json(snapshot, "serving/dashboard.json", cache_seconds=30)
+            charts[ticker] = chart_document
+        size = publish_serving_documents(snapshot, charts)
         logger.info(
             "dashboard_snapshot_published",
             extra={
@@ -606,6 +637,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 "tickers_with_prices": sum(bool(row["price_history"]) for row in snapshot["tickers"].values()),
                 "fundamentals": len(snapshot["fundamentals"]),
                 "generated_at": snapshot["generated_at"],
+                "raw_bytes": size["raw_bytes"],
+                "gzip_bytes": size["gzip_bytes"],
             },
         )
         return {

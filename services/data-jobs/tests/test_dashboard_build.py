@@ -1,4 +1,9 @@
+import gzip
+import json
+
+import boto3
 import pytest
+from moto import mock_aws
 
 import dashboard_build
 
@@ -483,3 +488,29 @@ def test_snapshot_includes_the_nyse_session_for_its_clock():
     assert snapshot["market"]["next_open"] == "2026-10-12T13:30:00+00:00"
     assert snapshot["market"]["next_close"] == "2026-10-12T20:00:00+00:00"
     assert snapshot["market"]["as_of"] == "2026-10-10T16:00:00+00:00"
+
+
+def test_publish_writes_gzip_siblings_and_size_metrics(monkeypatch):
+    import lake
+    import observability
+
+    recorded = []
+    monkeypatch.setattr(observability.metrics, "add_metric", lambda **kwargs: recorded.append(kwargs))
+    snapshot = {"schema_version": 3, "tickers": {"TSLA": {"price_history": [{"date": "2026-10-01", "close": 1.0}]}}}
+    chart = {"ticker": "TSLA", "macro_pressure": [{"date": "2026-10-01", "value": 0.2}]}
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", s3)
+        size = dashboard_build.publish_serving_documents(snapshot, {"TSLA": chart})
+        raw = s3.get_object(Bucket="lake", Key="serving/dashboard.json")["Body"].read()
+        compressed = s3.get_object(Bucket="lake", Key="serving/dashboard.json.gz")["Body"].read()
+        chart_gz = s3.get_object(Bucket="lake", Key="serving/chart_data/TSLA.json.gz")["Body"].read()
+    assert gzip.decompress(compressed) == raw
+    assert json.loads(gzip.decompress(chart_gz))["ticker"] == "TSLA"
+    assert size == {"raw_bytes": len(raw), "gzip_bytes": len(compressed)}
+    assert [item["name"] for item in recorded] == ["DashboardRawBytes", "DashboardGzipBytes"]
+    assert recorded[0]["value"] == len(raw)
+    assert recorded[1]["value"] == len(compressed)
+    assert compressed == gzip.compress(raw, compresslevel=6, mtime=0)
