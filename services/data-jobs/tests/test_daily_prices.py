@@ -25,6 +25,8 @@ def test_normalize_daily_bars_to_utc_calendar_date():
             "date": date(2026, 10, 5),
             "close": 450.25,
             "volume": 1234,
+            "volume_iex": 1234,
+            "volume_source": "DS-02",
             "source_id": "DS-02",
         }
     ]
@@ -59,6 +61,8 @@ def test_combine_daily_bars_maps_each_adjustment_to_its_column():
             "close_raw": 300.0,
             "adj_close": 148.5,
             "volume": 7,
+            "volume_iex": 7,
+            "volume_source": "DS-02",
             "source_id": "DS-02",
         }
     ]

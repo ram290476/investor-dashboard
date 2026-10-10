@@ -4,6 +4,7 @@ import json
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 
@@ -26,7 +27,13 @@ def api(monkeypatch):
 
         importlib.reload(prefs_api)
         sent = []
-        monkeypatch.setattr(prefs_api, "publish_ticker_added", lambda t: sent.extend(t))
+        original_publish = prefs_api.publish_ticker_added
+
+        def _record(tickers):
+            sent.extend(tickers)
+
+        _record.original = original_publish
+        monkeypatch.setattr(prefs_api, "publish_ticker_added", _record)
         yield prefs_api, sent
 
 
@@ -719,3 +726,266 @@ def test_precompressed_dashboard_sibling_matches_the_build(api, monkeypatch):
     assert len(base64.b64decode(response["body"])) == size["gzip_bytes"]
     assert _decode(response)["status"] == status
     assert _decode(response)["schema_version"] == 3
+SECRET = "super-secret-token"
+_LOG_KEYS = {"event", "route", "method", "error_class", "code"}
+
+
+def _client_error(code, operation, message="upstream failed"):
+    return ClientError(
+        {"Error": {"Code": code, "Message": message}, "ResponseMetadata": {"RequestId": SECRET}},
+        operation,
+    )
+
+
+class _Body:
+    def __init__(self, payload: bytes):
+        self.payload = payload
+
+    def read(self):
+        return self.payload
+
+
+def _route_event(method, path, body=None, sub="user-a"):
+    event = _event(method, sub, body)
+    event["rawPath"] = path
+    return event
+
+
+def _log_lines(capsys):
+    text = capsys.readouterr().out.strip()
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def _assert_log(entry, event_name, code, error_class, route):
+    raw = json.dumps(entry)
+    assert set(entry) == _LOG_KEYS
+    assert entry == {
+        "event": event_name,
+        "route": route,
+        "method": route.split()[0],
+        "error_class": error_class,
+        "code": code,
+    }
+    assert f'"event": "{event_name}"' in raw
+    assert f'"code": "{code}"' in raw
+    assert SECRET not in raw
+    assert "SecretAccessKey" not in raw
+    assert "SessionToken" not in raw
+
+
+def _assert_error(response, status, code):
+    assert response["statusCode"] == status
+    assert response["headers"]["Content-Type"] == "application/json"
+    body = json.loads(response["body"])
+    assert body["code"] == code
+    assert body["error"]
+    assert SECRET not in response["body"]
+    return body
+
+
+def _patch_sts(monkeypatch, mod, aws_code):
+    def assume_role(**_kwargs):
+        raise _client_error(aws_code, "AssumeRole", f"SessionToken={SECRET}")
+
+    monkeypatch.setattr(mod._sts, "assume_role", assume_role)
+
+
+def _patch_get_object(monkeypatch, mod, get_object):
+    monkeypatch.setattr(mod, "LAKE_BUCKET", "lake-bucket")
+    monkeypatch.setattr(mod._s3, "get_object", get_object)
+
+
+def _patch_table(monkeypatch, mod, **methods):
+    original = mod._table_for
+
+    def table_for(sub):
+        table = original(sub)
+        for name, fn in methods.items():
+            setattr(table, name, fn)
+        return table
+
+    monkeypatch.setattr(mod, "_table_for", table_for)
+
+
+@pytest.mark.parametrize(
+    "method,path,route",
+    [
+        ("GET", "/prefs", "GET /prefs"),
+        ("PUT", "/prefs", "PUT /prefs"),
+        ("GET", "/chart/TSLA", "GET /chart/{ticker}"),
+        ("GET", "/stock/TSLA", "GET /stock/{ticker}"),
+    ],
+)
+@pytest.mark.parametrize("aws_code,status", [("Throttling", 503), ("AccessDenied", 502)])
+def test_sts_failures_return_json_and_omit_secrets(api, monkeypatch, capsys, method, path, route, aws_code, status):
+    mod, _ = api
+    _patch_sts(monkeypatch, mod, aws_code)
+    event = _route_event(method, path, {"tickers": ["TSLA"], "version": 0, "access_token": SECRET})
+    body = _assert_error(mod.handler(event, None), status, "STS_UNAVAILABLE")
+    assert body["error"] == mod._ERROR_MESSAGES["STS_UNAVAILABLE"]
+    logs = _log_lines(capsys)
+    assert len(logs) == 1
+    _assert_log(logs[0], "prefs_api_error", "STS_UNAVAILABLE", "ClientError", route)
+
+
+@pytest.mark.parametrize(
+    "path,route,aws_code,status",
+    [
+        ("/dashboard", "GET /dashboard", "SlowDown", 503),
+        ("/dashboard", "GET /dashboard", "AccessDenied", 502),
+        ("/dashboard", "GET /dashboard", "KMS.AccessDeniedException", 502),
+        ("/status", "GET /status", "KMS.DisabledException", 502),
+        ("/chart/TSLA", "GET /chart/{ticker}", "SlowDown", 503),
+        ("/stock/TSLA", "GET /stock/{ticker}", "KMS.AccessDeniedException", 502),
+    ],
+)
+def test_s3_and_kms_read_failures_return_serving_read_failed(api, monkeypatch, capsys, path, route, aws_code, status):
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error(aws_code, "GetObject", f"SecretAccessKey={SECRET}")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    body = _assert_error(mod.handler(_route_event("GET", path), None), status, "SERVING_READ_FAILED")
+    assert body["error"] == "Dashboard data is being rebuilt; try again in a minute."
+    logs = _log_lines(capsys)
+    assert len(logs) == 1
+    _assert_log(logs[0], "prefs_api_error", "SERVING_READ_FAILED", "ClientError", route)
+
+
+@pytest.mark.parametrize(
+    "aws_code,status",
+    [("ProvisionedThroughputExceededException", 503), ("AccessDeniedException", 502)],
+)
+def test_dynamodb_get_failures_return_prefs_store_unavailable(api, monkeypatch, capsys, aws_code, status):
+    mod, _ = api
+
+    def get_item(**_kwargs):
+        raise _client_error(aws_code, "GetItem", f"SessionToken={SECRET}")
+
+    _patch_table(monkeypatch, mod, get_item=get_item)
+    body = _assert_error(mod.handler(_event("GET"), None), status, "PREFS_STORE_UNAVAILABLE")
+    assert body["error"] == mod._ERROR_MESSAGES["PREFS_STORE_UNAVAILABLE"]
+    _assert_log(_log_lines(capsys)[0], "prefs_api_error", "PREFS_STORE_UNAVAILABLE", "ClientError", "GET /prefs")
+
+
+def test_dynamodb_put_failure_does_not_save(api, monkeypatch, capsys):
+    mod, _ = api
+
+    def put_item(**kwargs):
+        raise _client_error("InternalServerError", "PutItem", json.dumps(kwargs))
+
+    _patch_table(monkeypatch, mod, put_item=put_item)
+    event = _event("PUT", body={"tickers": ["TSLA", "RIVN"], "pinned": [], "version": 0, "access_token": SECRET})
+    _assert_error(mod.handler(event, None), 503, "PREFS_STORE_UNAVAILABLE")
+    stored = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert stored["tickers"] == ["TSLA", "SPCX"]
+    _assert_log(_log_lines(capsys)[0], "prefs_api_error", "PREFS_STORE_UNAVAILABLE", "ClientError", "PUT /prefs")
+
+
+@pytest.mark.parametrize(
+    "path,payload,error_class",
+    [
+        ("/dashboard", b'{"token":"super-secret-token"', "JSONDecodeError"),
+        ("/status", b'"super-secret-token"', "ValueError"),
+        ("/chart/TSLA", b"[]", "ValueError"),
+        ("/stock/TSLA", b"not-json super-secret-token", "JSONDecodeError"),
+    ],
+)
+def test_invalid_serving_json_returns_503(api, monkeypatch, capsys, path, payload, error_class):
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        return {"Body": _Body(payload)}
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    body = _assert_error(mod.handler(_route_event("GET", path), None), 503, "SERVING_DOCUMENT_INVALID")
+    assert body["error"] == "Dashboard data is being rebuilt; try again in a minute."
+    route = {"/dashboard": "GET /dashboard", "/status": "GET /status", "/chart/TSLA": "GET /chart/{ticker}",
+             "/stock/TSLA": "GET /stock/{ticker}"}[path]
+    _assert_log(_log_lines(capsys)[0], "prefs_api_error", "SERVING_DOCUMENT_INVALID", error_class, route)
+
+
+def test_missing_serving_object_stays_not_ready(api, monkeypatch, capsys):
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error("NoSuchKey", "GetObject", SECRET)
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    body = _assert_error(mod.handler(_route_event("GET", "/dashboard"), None), 503, "DASHBOARD_NOT_READY")
+    assert "published" in body["error"]
+    assert _log_lines(capsys) == []
+
+
+def test_unexpected_errors_return_internal_json(api, monkeypatch, capsys):
+    mod, _ = api
+
+    def table_for(_sub):
+        raise RuntimeError(f"SessionToken={SECRET}")
+
+    monkeypatch.setattr(mod, "_table_for", table_for)
+    body = _assert_error(mod.handler(_event("GET"), None), 500, "INTERNAL")
+    assert body["error"] == mod._ERROR_MESSAGES["INTERNAL"]
+    _assert_log(_log_lines(capsys)[0], "prefs_api_error", "INTERNAL", "RuntimeError", "GET /prefs")
+
+
+def test_unconfigured_lake_bucket_returns_internal_json(api, capsys):
+    mod, _ = api
+    body = _assert_error(mod.handler(_route_event("GET", "/dashboard"), None), 500, "INTERNAL")
+    assert body["error"] == mod._ERROR_MESSAGES["INTERNAL"]
+    entry = _log_lines(capsys)[0]
+    _assert_log(entry, "prefs_api_error", "INTERNAL", "RuntimeError", "GET /dashboard")
+    assert "LAKE_BUCKET" not in json.dumps(entry)
+
+
+@pytest.mark.parametrize("event", [None, [], "nope", {"requestContext": ["not-a-map"]}])
+def test_handler_does_not_raise_on_a_bad_event(api, event):
+    mod, _ = api
+    response = mod.handler(event, None)
+    assert response["statusCode"] == 401
+    assert json.loads(response["body"])["error"] == "Not signed in"
+
+
+def test_invalid_prefs_body_stays_400_and_is_not_logged(api, capsys):
+    mod, _ = api
+    event = _event("PUT")
+    event["body"] = '{"access_token": "super-secret-token"'
+    response = mod.handler(event, None)
+    assert response["statusCode"] == 400
+    assert _log_lines(capsys) == []
+
+
+def test_put_reports_backfill_queued_when_publish_succeeds(api):
+    mod, sent = api
+    response = mod.handler(_event("PUT", body={"tickers": ["TSLA", "RIVN"], "pinned": [], "version": 0}), None)
+    saved = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert saved["backfill_queued"] is True
+    assert saved["tickers"] == ["TSLA", "RIVN"]
+    assert sent == ["RIVN"]
+
+
+def test_put_keeps_saved_prefs_when_eventbridge_publish_fails(api, monkeypatch, capsys):
+    mod, _ = api
+    monkeypatch.setattr(mod, "publish_ticker_added", mod.publish_ticker_added.original)
+
+    def put_events(**kwargs):
+        detail = kwargs["Entries"][0]["Detail"]
+        raise _client_error("InternalFailure", "PutEvents", f"{detail} SessionToken={SECRET}")
+
+    monkeypatch.setattr(mod._events, "put_events", put_events)
+    event = _event("PUT", body={"tickers": ["TSLA", "RIVN"], "pinned": [], "version": 0, "access_token": SECRET})
+    response = mod.handler(event, None)
+    assert response["statusCode"] == 200
+    saved = json.loads(response["body"])
+    assert saved["tickers"] == ["TSLA", "RIVN"]
+    assert saved["version"] == 1
+    assert saved["backfill_queued"] is False
+    stored = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert stored["tickers"] == ["TSLA", "RIVN"]
+    assert "backfill_queued" not in stored
+    logs = _log_lines(capsys)
+    assert len(logs) == 1
+    _assert_log(logs[0], "ticker_added_publish_failed", "TICKER_ADDED_PUBLISH_FAILED", "ClientError", "PUT /prefs")
+    assert "RIVN" not in json.dumps(logs[0])

@@ -107,6 +107,7 @@ def test_yahoo_parse_chart():
     }
     rows = yahoo.parse_chart(payload, "TSLA")
     assert len(rows) == 1 and rows[0]["date"] == date(2025, 10, 2)
+    assert rows[0]["volume"] == 1 and rows[0]["volume_source"] == "DS-05" and rows[0]["volume_iex"] is None
     with pytest.raises(ValueError):
         yahoo.parse_chart({"chart": {"result": None, "error": {"code": "Not Found"}}}, "ZZZZ")
 

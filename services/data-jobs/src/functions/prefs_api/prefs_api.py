@@ -91,6 +91,7 @@ _sts = boto3.client("sts")
 _events = boto3.client("events")
 _s3 = boto3.client("s3")
 _session_cache: dict[str, tuple[float, object]] = {}
+
 # Warm-container cache of gzip bytes, keyed by S3 ETag (dashboard also includes the status ETag).
 _GZIP_CACHE: dict[str, bytes] = {}
 _GZIP_CACHE_MAX = 32
@@ -107,9 +108,12 @@ SECURITY_HEADERS = {
 }
 logger = logging.getLogger(__name__)
 
-
 class ValidationError(ValueError):
     pass
+
+
+class ServingDocumentError(Exception):
+    """A serving object was not a JSON object. The message never includes the document."""
 
 
 def normalize_panels(raw) -> dict:
@@ -250,6 +254,103 @@ def _table_for(sub: str):
     return table
 
 
+def _public_display(item: dict) -> dict:
+    display = {"theme": DEFAULTS["display"]["theme"], **dict(item.get("display") or {})}
+    raw_panels = display.get("panels")
+    if isinstance(raw_panels, dict):
+        display["panels"] = {
+            str(key): value
+            for key, value in raw_panels.items()
+            if str(key) in PANEL_IDS and value in PANEL_STATES
+        }
+    else:
+        display.pop("panels", None)
+    mode = display.get("panel_mode")
+    if mode in PANEL_MODES:
+        display["panel_mode"] = mode
+    else:
+        display.pop("panel_mode", None)
+    return display
+
+
+def _public(item: dict) -> dict:
+    chart_settings = item.get("chart_settings", {})
+    return {
+        "tickers": list(item.get("tickers", [])),
+        "pinned": list(item.get("pinned", [])),
+        "display": _public_display(item),
+        "chart_settings": {
+            ticker: {"overlays": list(settings.get("overlays", [])), "lanes": list(settings.get("lanes", []))}
+            for ticker, settings in chart_settings.items()
+            if isinstance(settings, dict)
+        },
+        "version": int(item.get("version", 0)),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def get_prefs(table, sub: str) -> dict:
+    item = table.get_item(Key={"user_sub": sub}, ConsistentRead=True).get("Item")
+    return _public(item) if item else {**DEFAULTS, "updated_at": None}
+
+
+def put_prefs(table, sub: str, prefs: dict) -> tuple[dict, list[str]]:
+    """Write with optimistic concurrency. Returns (saved prefs, tickers new to this user)."""
+    before = get_prefs(table, sub)
+    prefs = validate(prefs, before["tickers"])
+    new_version = prefs["version"] + 1
+    item = {
+        "user_sub": sub,
+        "tickers": prefs["tickers"],
+        "pinned": prefs["pinned"],
+        "display": prefs["display"],
+        "chart_settings": prefs["chart_settings"],
+        "version": new_version,
+        "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    cond = "attribute_not_exists(user_sub)" if prefs["version"] == 0 else "version = :v"
+    kwargs = {"Item": item, "ConditionExpression": cond}
+    if prefs["version"]:
+        kwargs["ExpressionAttributeValues"] = {":v": prefs["version"]}
+    table.put_item(**kwargs)
+    added = [t for t in prefs["tickers"] if t not in before["tickers"]]
+    return _public(item), added
+
+
+def publish_ticker_added(tickers: list[str]) -> None:
+    if not tickers:
+        return
+    _events.put_events(
+        Entries=[
+            {"Source": EVENT_SOURCE, "DetailType": "TickerAdded", "Detail": json.dumps({"ticker": t})}
+            for t in tickers[:10]
+        ]
+    )
+
+
+def _public_stock(document: dict | None, ticker: str) -> dict:
+    """Serve approved company metrics only. A missing object is an empty page, not a fabricated one."""
+    source = document if isinstance(document, dict) else {}
+    metrics = []
+    for metric in source.get("metrics") or []:
+        if not isinstance(metric, dict) or metric.get("approved") is not True:
+            continue
+        if metric.get("approval_state") in {"proposed", "rejected"} or metric.get("status") in {"proposed", "rejected"}:
+            continue
+        metrics.append(metric)
+    return {
+        "ticker": ticker.upper(),
+        "generated_at": source.get("generated_at"),
+        "run_status": source.get("run_status") or "ok",
+        "stale": bool(source.get("stale")),
+        "freshness_label": source.get("freshness_label") or "No company-specific metrics discovered",
+        "discovered": bool(metrics),
+        "metrics": metrics,
+        "unavailable": source.get("unavailable") or [],
+        "mismatches": source.get("mismatches") or [],
+    }
+
+
 def _accepts_gzip(event: dict | None) -> bool:
     """True when Accept-Encoding lists gzip with q greater than zero. HTTP API lowercases names."""
     if not event:
@@ -356,105 +457,103 @@ def _etag_token(etag: str, raw: bytes | None = None) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _public_display(item: dict) -> dict:
-    display = {"theme": DEFAULTS["display"]["theme"], **dict(item.get("display") or {})}
-    raw_panels = display.get("panels")
-    if isinstance(raw_panels, dict):
-        display["panels"] = {
-            str(key): value
-            for key, value in raw_panels.items()
-            if str(key) in PANEL_IDS and value in PANEL_STATES
-        }
+_ERROR_MESSAGES = {
+    "STS_UNAVAILABLE": "The sign-in check is temporarily unavailable. Try again in a minute.",
+    "SERVING_READ_FAILED": "Dashboard data is being rebuilt; try again in a minute.",
+    "PREFS_STORE_UNAVAILABLE": "Preferences could not be reached. Try again in a minute.",
+    "SERVING_DOCUMENT_INVALID": "Dashboard data is being rebuilt; try again in a minute.",
+    "INTERNAL": "Something went wrong. Try again in a minute.",
+}
+_TRANSIENT_AWS_CODES = frozenset({
+    "Throttling",
+    "ThrottlingException",
+    "TooManyRequestsException",
+    "SlowDown",
+    "ServiceUnavailable",
+    "RequestTimeout",
+    "RequestTimeoutException",
+    "ProvisionedThroughputExceededException",
+    "RequestLimitExceeded",
+    "InternalServerError",
+    "InternalError",
+    "InternalFailure",
+})
+_STS_OPERATIONS = frozenset({"AssumeRole", "AssumeRoleWithWebIdentity"})
+_SERVING_OPERATIONS = frozenset({"GetObject", "HeadObject"})
+_PREFS_OPERATIONS = frozenset({"GetItem", "PutItem", "UpdateItem", "DeleteItem", "Query", "BatchGetItem"})
+_HTTP_METHODS = frozenset({"GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OPTIONS"})
+_KNOWN_PATHS = frozenset({"/prefs", "/dashboard", "/status"})
+
+
+def _error_class(exc: BaseException) -> str:
+    cause = exc.__cause__
+    return type(cause).__name__ if cause is not None else type(exc).__name__
+
+
+def _log_event(event_name: str, route: str, method: str, exc: BaseException, code: str) -> None:
+    """Structured CloudWatch line. Fixed keys only: no body, token, or exception text."""
+    print(json.dumps({
+        "event": event_name,
+        "route": route,
+        "method": method,
+        "error_class": _error_class(exc),
+        "code": code,
+    }))
+
+
+def _safe_method(method: object) -> str:
+    if not isinstance(method, str):
+        return "UNKNOWN"
+    method = method.upper()
+    return method if method in _HTTP_METHODS else "UNKNOWN"
+
+
+def _route_label(method: str, path: object) -> str:
+    if not isinstance(path, str):
+        return f"{method} /unknown"
+    if path.startswith("/chart/"):
+        return f"{method} /chart/{{ticker}}"
+    if path.startswith("/stock/"):
+        return f"{method} /stock/{{ticker}}"
+    if path in _KNOWN_PATHS:
+        return f"{method} {path}"
+    return f"{method} /unknown"
+
+
+def _aws_error_code(exc: ClientError) -> str:
+    error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
+    return str(error.get("Code", "")) if isinstance(error, dict) else ""
+
+
+def _client_failure(exc: ClientError) -> tuple[int, str]:
+    operation = getattr(exc, "operation_name", "") or ""
+    aws_code = _aws_error_code(exc)
+    if operation in _STS_OPERATIONS:
+        code = "STS_UNAVAILABLE"
+    elif operation in _SERVING_OPERATIONS or aws_code.startswith("KMS"):
+        code = "SERVING_READ_FAILED"
+    elif operation in _PREFS_OPERATIONS:
+        code = "PREFS_STORE_UNAVAILABLE"
     else:
-        display.pop("panels", None)
-    mode = display.get("panel_mode")
-    if mode in PANEL_MODES:
-        display["panel_mode"] = mode
-    else:
-        display.pop("panel_mode", None)
-    return display
+        return 500, "INTERNAL"
+    status = 503 if aws_code.split(".")[-1] in _TRANSIENT_AWS_CODES else 502
+    return status, code
 
 
-def _public(item: dict) -> dict:
-    chart_settings = item.get("chart_settings", {})
-    return {
-        "tickers": list(item.get("tickers", [])),
-        "pinned": list(item.get("pinned", [])),
-        "display": _public_display(item),
-        "chart_settings": {
-            ticker: {"overlays": list(settings.get("overlays", [])), "lanes": list(settings.get("lanes", []))}
-            for ticker, settings in chart_settings.items()
-            if isinstance(settings, dict)
-        },
-        "version": int(item.get("version", 0)),
-        "updated_at": item.get("updated_at"),
-    }
+def _failure_response(status: int, code: str) -> dict:
+    return _response(status, {"error": _ERROR_MESSAGES[code], "code": code})
 
 
-def get_prefs(table, sub: str) -> dict:
-    item = table.get_item(Key={"user_sub": sub}, ConsistentRead=True).get("Item")
-    return _public(item) if item else {**DEFAULTS, "updated_at": None}
-
-
-def put_prefs(table, sub: str, prefs: dict) -> tuple[dict, list[str]]:
-    """Write with optimistic concurrency. Returns (saved prefs, tickers new to this user)."""
-    before = get_prefs(table, sub)
-    prefs = validate(prefs, before["tickers"])
-    new_version = prefs["version"] + 1
-    item = {
-        "user_sub": sub,
-        "tickers": prefs["tickers"],
-        "pinned": prefs["pinned"],
-        "display": prefs["display"],
-        "chart_settings": prefs["chart_settings"],
-        "version": new_version,
-        "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-    }
-    cond = "attribute_not_exists(user_sub)" if prefs["version"] == 0 else "version = :v"
-    kwargs = {"Item": item, "ConditionExpression": cond}
-    if prefs["version"]:
-        kwargs["ExpressionAttributeValues"] = {":v": prefs["version"]}
-    table.put_item(**kwargs)
-    added = [t for t in prefs["tickers"] if t not in before["tickers"]]
-    return _public(item), added
-
-
-def publish_ticker_added(tickers: list[str]) -> None:
-    if not tickers:
-        return
-    _events.put_events(
-        Entries=[
-            {"Source": EVENT_SOURCE, "DetailType": "TickerAdded", "Detail": json.dumps({"ticker": t})}
-            for t in tickers[:10]
-        ]
-    )
-
-
-def _public_stock(document: dict | None, ticker: str) -> dict:
-    """Serve approved company metrics only. A missing object is an empty page, not a fabricated one."""
-    source = document if isinstance(document, dict) else {}
-    metrics = []
-    for metric in source.get("metrics") or []:
-        if not isinstance(metric, dict) or metric.get("approved") is not True:
-            continue
-        if metric.get("approval_state") in {"proposed", "rejected"} or metric.get("status") in {"proposed", "rejected"}:
-            continue
-        metrics.append(metric)
-    return {
-        "ticker": ticker.upper(),
-        "generated_at": source.get("generated_at"),
-        "run_status": source.get("run_status") or "ok",
-        "stale": bool(source.get("stale")),
-        "freshness_label": source.get("freshness_label") or "No company-specific metrics discovered",
-        "discovered": bool(metrics),
-        "metrics": metrics,
-        "unavailable": source.get("unavailable") or [],
-        "mismatches": source.get("mismatches") or [],
-    }
-
-
-def _missing_object(exc: ClientError) -> bool:
-    return exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}
+def _queue_backfill(added: list[str], route: str, method: str) -> bool:
+    """Publish TickerAdded after a successful save. A publish failure does not undo the save."""
+    if not added:
+        return True
+    try:
+        publish_ticker_added(added)
+    except ClientError as exc:
+        _log_event("ticker_added_publish_failed", route, method, exc, "TICKER_ADDED_PUBLISH_FAILED")
+        return False
+    return True
 
 
 def _read_serving_document(key: str) -> tuple[bytes, str, dict] | None:
@@ -464,17 +563,18 @@ def _read_serving_document(key: str) -> tuple[bytes, str, dict] | None:
     try:
         obj = _s3.get_object(Bucket=LAKE_BUCKET, Key=key)
     except ClientError as exc:
-        if _missing_object(exc):
+        if _aws_error_code(exc) in {"NoSuchKey", "404"}:
             return None
         raise
     body = obj["Body"].read()
     try:
         document = json.loads(body)
-    except json.JSONDecodeError:
-        logger.exception("serving_document_invalid_json", extra={"key": key})
-        raise
+    except json.JSONDecodeError as exc:
+        raise ServingDocumentError("serving document is not valid JSON") from exc
     if not isinstance(document, dict):
-        raise ValueError(f"Serving document {key} must be a JSON object")
+        raise ServingDocumentError("serving document must be a JSON object") from ValueError(
+            "serving document must be a JSON object"
+        )
     return body, str(obj.get("ETag") or ""), document
 
 
@@ -485,8 +585,8 @@ def _read_gzip_sibling(key: str) -> bytes | None:
     try:
         return _s3.get_object(Bucket=LAKE_BUCKET, Key=f"{key}.gz")["Body"].read()
     except ClientError as exc:
-        code = exc.response.get("Error", {}).get("Code")
-        if not _missing_object(exc):
+        code = _aws_error_code(exc)
+        if code not in {"NoSuchKey", "404"}:
             logger.warning("serving_gzip_unavailable", extra={"key": key, "code": code})
         return None
 
@@ -496,16 +596,30 @@ def _read_serving_json(key: str) -> dict | None:
     return None if loaded is None else loaded[2]
 
 
-def handler(event, context):
+def _request_parts(event: dict) -> tuple[str | None, str, str, str]:
+    context = event.get("requestContext")
+    context = context if isinstance(context, dict) else {}
+    authorizer = context.get("authorizer")
+    authorizer = authorizer if isinstance(authorizer, dict) else {}
+    jwt = authorizer.get("jwt")
+    jwt = jwt if isinstance(jwt, dict) else {}
+    claims = jwt.get("claims")
+    sub = claims.get("sub") if isinstance(claims, dict) else None
+    if not isinstance(sub, str) or not sub:
+        return None, "GET", "/prefs", "UNKNOWN"
+    http = context.get("http")
+    http = http if isinstance(http, dict) else {}
+    raw_method = http.get("method", "GET")
+    method = raw_method if isinstance(raw_method, str) else "GET"
+    raw_path = event.get("rawPath") or http.get("path") or "/prefs"
+    path = raw_path if isinstance(raw_path, str) else "/prefs"
+    return sub, method, path, _route_label(_safe_method(method), path)
+
+
+def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
     def respond(status: int, body: dict, **kwargs) -> dict:
         return _response(status, body, event, **kwargs)
 
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
-    sub = claims.get("sub")
-    if not sub:
-        return respond(401, {"error": "Not signed in"})
-    method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
-    path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path", "/prefs")
     if method == "GET" and path == "/dashboard":
         loaded = _read_serving_document("serving/dashboard.json")
         if loaded is None:
@@ -542,69 +656,79 @@ def handler(event, context):
         if not match:
             return respond(404, {"error": "Chart data not found"})
         ticker = match.group(1).upper()
-        try:
-            prefs = get_prefs(_table_for(sub), sub)
-            if ticker not in prefs["tickers"]:
-                return respond(403, {"error": "Ticker is not in your watchlist"})
-            chart_key = f"serving/chart_data/{ticker}.json"
-            loaded = _read_serving_document(chart_key)
-            if loaded is None:
-                return respond(503, {"error": "Chart data has not been published yet", "code": "CHART_NOT_READY"})
-            raw_bytes, etag, chart = loaded
-            return respond(
-                200,
-                chart,
-                raw=raw_bytes,
-                gzip_key=chart_key,
-                cache_key=f"chart:{ticker}:{_etag_token(etag, raw_bytes)}",
-            )
-        except ClientError:
-            print(json.dumps({"event": "chart_data_error", "ticker": ticker}))
-            return respond(500, {"error": "Could not load chart data"})
+        prefs = get_prefs(_table_for(sub), sub)
+        if ticker not in prefs["tickers"]:
+            return respond(403, {"error": "Ticker is not in your watchlist"})
+        chart_key = f"serving/chart_data/{ticker}.json"
+        loaded = _read_serving_document(chart_key)
+        if loaded is None:
+            return respond(503, {"error": "Chart data has not been published yet", "code": "CHART_NOT_READY"})
+        raw_bytes, etag, chart = loaded
+        return respond(
+            200,
+            chart,
+            raw=raw_bytes,
+            gzip_key=chart_key,
+            cache_key=f"chart:{ticker}:{_etag_token(etag, raw_bytes)}",
+        )
     if method == "GET" and path.startswith("/stock/"):
         match = re.fullmatch(r"/stock/([A-Za-z][A-Za-z0-9.\-]{0,9})", path)
         if not match:
             return respond(404, {"error": "Company page not found"})
         ticker = match.group(1).upper()
-        try:
-            prefs = get_prefs(_table_for(sub), sub)
-            if ticker not in prefs["tickers"]:
-                return respond(403, {"error": "Ticker is not in your watchlist"})
-            document = _read_serving_json(f"serving/stock/{ticker}.json")
-            return respond(200, _public_stock(document, ticker))
-        except ClientError:
-            print(json.dumps({"event": "stock_page_error", "ticker": ticker}))
-            return respond(500, {"error": "Could not load the company page"})
+        prefs = get_prefs(_table_for(sub), sub)
+        if ticker not in prefs["tickers"]:
+            return respond(403, {"error": "Ticker is not in your watchlist"})
+        document = _read_serving_json(f"serving/stock/{ticker}.json")
+        return respond(200, _public_stock(document, ticker))
 
     table = _table_for(sub)
+    if method == "GET":
+        return respond(200, get_prefs(table, sub))
+    if method == "PUT":
+        try:
+            body = json.loads(event.get("body") or "{}")
+            stored = get_prefs(table, sub)
+            prefs = validate(body, stored["tickers"])
+            incoming = body.get("display") if isinstance(body.get("display"), dict) else {}
+            if "panels" not in incoming:
+                prefs["display"]["panels"] = dict(stored["display"].get("panels") or {})
+            if "panel_mode" not in incoming and stored["display"].get("panel_mode") in PANEL_MODES:
+                prefs["display"]["panel_mode"] = stored["display"]["panel_mode"]
+            if "chart_settings" not in body:
+                prefs["chart_settings"] = stored["chart_settings"]
+        except (ValidationError, json.JSONDecodeError) as exc:
+            return respond(400, {"error": str(exc)})
+        try:
+            saved, added = put_prefs(table, sub, prefs)
+        except ValidationError as exc:
+            return respond(400, {"error": str(exc)})
+        except ClientError as exc:
+            if _aws_error_code(exc) == "ConditionalCheckFailedException":
+                return respond(409, {"error": "Preferences changed in another tab; reload and try again"})
+            raise
+        saved["backfill_queued"] = _queue_backfill(added, route, _safe_method(method))
+        return respond(200, saved)
+    return respond(405, {"error": f"{method} not allowed"})
+
+
+def handler(event, context):
+    method = "GET"
+    route = "UNKNOWN"
     try:
-        if method == "GET":
-            return respond(200, get_prefs(table, sub))
-        if method == "PUT":
-            try:
-                body = json.loads(event.get("body") or "{}")
-                stored = get_prefs(table, sub)
-                prefs = validate(body, stored["tickers"])
-                incoming = body.get("display") if isinstance(body.get("display"), dict) else {}
-                if "panels" not in incoming:
-                    prefs["display"]["panels"] = dict(stored["display"].get("panels") or {})
-                if "panel_mode" not in incoming and stored["display"].get("panel_mode") in PANEL_MODES:
-                    prefs["display"]["panel_mode"] = stored["display"]["panel_mode"]
-                if "chart_settings" not in body:
-                    prefs["chart_settings"] = stored["chart_settings"]
-            except (ValidationError, json.JSONDecodeError) as exc:
-                return respond(400, {"error": str(exc)})
-            try:
-                saved, added = put_prefs(table, sub, prefs)
-            except ValidationError as exc:
-                return respond(400, {"error": str(exc)})
-            except ClientError as exc:
-                if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                    return respond(409, {"error": "Preferences changed in another tab; reload and try again"})
-                raise
-            publish_ticker_added(added)
-            return respond(200, saved)
-        return respond(405, {"error": f"{method} not allowed"})
-    except ClientError:
-        print(json.dumps({"event": "prefs_error", "method": method}))
-        return respond(500, {"error": "Could not reach preferences store"})
+        if not isinstance(event, dict):
+            return _response(401, {"error": "Not signed in"})
+        sub, method, path, route = _request_parts(event)
+        if not sub:
+            return _response(401, {"error": "Not signed in"})
+        return _dispatch(event, sub, method, path, route)
+    except ClientError as exc:
+        status, code = _client_failure(exc)
+        _log_event("prefs_api_error", route, _safe_method(method), exc, code)
+        return _failure_response(status, code)
+    except ServingDocumentError as exc:
+        _log_event("prefs_api_error", route, _safe_method(method), exc, "SERVING_DOCUMENT_INVALID")
+        return _failure_response(503, "SERVING_DOCUMENT_INVALID")
+    except Exception as exc:  # noqa: BLE001 - API Gateway must receive JSON, never an uncaught error
+        _log_event("prefs_api_error", route, _safe_method(method), exc, "INTERNAL")
+        return _failure_response(500, "INTERNAL")

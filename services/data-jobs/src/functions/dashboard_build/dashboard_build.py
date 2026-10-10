@@ -14,6 +14,8 @@ SCHEMA_VERSION = 3
 HEADLINE_LIMIT = 10
 ET = ZoneInfo("America/New_York")
 CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
+# DS-05 is Yahoo consolidated volume. DS-02 is Alpaca's free IEX feed.
+VOLUME_SOURCES = frozenset({"DS-02", "DS-05"})
 
 
 def number(value: object) -> float | None:
@@ -404,6 +406,30 @@ def build_chart_data(
     }
 
 
+def volume_source_of(row: dict) -> str | None:
+    """Stored volume_source, or source_id for a row written before that column existed."""
+    explicit = row.get("volume_source")
+    if explicit in VOLUME_SOURCES:
+        return str(explicit)
+    price_source = row.get("source_id")
+    if price_source in VOLUME_SOURCES:
+        return str(price_source)
+    return None
+
+
+def volume_source_changes(history: list[dict]) -> list[dict]:
+    """Dates in a served series where volume_source differs from the previous bar."""
+    changes = []
+    previous = None
+    for row in history:
+        source = row.get("volume_source")
+        if previous is not None and source is not None and source != previous:
+            changes.append({"date": row["date"], "from": previous, "to": source})
+        if source is not None:
+            previous = source
+    return changes
+
+
 def build_snapshot(
     tickers: list[str],
     prices: dict[str, list[dict]],
@@ -438,12 +464,19 @@ def build_snapshot(
             day = str(row.get("date", ""))
             close = row.get("close")
             if day and isinstance(close, (int, float)):
+                source = volume_source_of(row)
+                iex = row.get("volume_iex")
+                # A legacy IEX row stored the print in volume and had no volume_iex column.
+                if iex is None and source == "DS-02":
+                    iex = row.get("volume")
                 unique[day] = {
                     "date": day,
                     "close": float(close),  # split-adjusted
                     "close_raw": row.get("close_raw"),  # actual traded close; null on older rows
                     "adj_close": row.get("adj_close"),  # split- and dividend-adjusted; charts use this
                     "volume": row.get("volume"),
+                    "volume_source": source,
+                    "volume_iex": iex,
                 }
         history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
         bundle = None if news is None else news.get(ticker) or {}
@@ -470,6 +503,7 @@ def build_snapshot(
         instruments[ticker] = {
             "ticker": ticker,
             "price_history": history,
+            "volume_source_changes": volume_source_changes(history),
             "trend": trends.get(ticker),
             "release_links": None if release_links is None else build_release_links(ticker, release_links),
             "news": None

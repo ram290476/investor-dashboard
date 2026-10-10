@@ -393,6 +393,69 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
   ok_actions          = [var.ops_topic_arn]
 }
 
+# Per-code visibility for prefs_api structured errors. _log_event() in prefs_api.py
+# prints one JSON object per line, so match it with a JSON metric filter on the
+# "event" and "code" keys. (A quoted-term pattern such as `"event": "x"` is rejected
+# by PutMetricFilter: the bare colon is not valid filter syntax.)
+locals {
+  prefs_api_error_alarms = {
+    STS_UNAVAILABLE = {
+      event       = "prefs_api_error"
+      description = "Site API could not assume the preferences role (STS)"
+    }
+    SERVING_READ_FAILED = {
+      event       = "prefs_api_error"
+      description = "Site API could not read a serving object (S3 or KMS)"
+    }
+    PREFS_STORE_UNAVAILABLE = {
+      event       = "prefs_api_error"
+      description = "Site API could not reach the preferences table"
+    }
+    SERVING_DOCUMENT_INVALID = {
+      event       = "prefs_api_error"
+      description = "Site API read a serving document that was not valid JSON"
+    }
+    INTERNAL = {
+      event       = "prefs_api_error"
+      description = "Site API hit an unexpected error"
+    }
+    TICKER_ADDED_PUBLISH_FAILED = {
+      event       = "ticker_added_publish_failed"
+      description = "Site API saved preferences but could not publish TickerAdded"
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "prefs_api_error" {
+  for_each       = local.prefs_api_error_alarms
+  name           = "${var.name}-prefs-api-${lower(replace(each.key, "_", "-"))}"
+  log_group_name = aws_cloudwatch_log_group.api_fn.name
+  pattern        = "{ ($.event = \"${each.value.event}\") && ($.code = \"${each.key}\") }"
+
+  metric_transformation {
+    name      = each.key
+    namespace = "${var.name}/prefs-api"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "prefs_api_error" {
+  for_each            = local.prefs_api_error_alarms
+  alarm_name          = "${var.name}-prefs-api-${lower(replace(each.key, "_", "-"))}"
+  alarm_description   = each.value.description
+  namespace           = "${var.name}/prefs-api"
+  metric_name         = each.key
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.ops_topic_arn]
+  ok_actions          = [var.ops_topic_arn]
+}
+
 # ---------------------------------------------------------------------------
 # Collectors' read access: Scan returning only user_sub and tickers, so jobs can
 # build the ticker union without seeing anyone's display settings.
