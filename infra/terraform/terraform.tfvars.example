@@ -18,3 +18,9 @@ monthly_budget_usd = 40
 # site_logout_urls   = ["https://dXXXXXXXXXXXX.cloudfront.net/"]
 # jobs_image_uri     = "<account>.dkr.ecr.us-west-1.amazonaws.com/invdash/jobs:<git-sha>"
 # sec_user_agent     = "investor-dashboard you@example.com"
+
+# Custom domain. Leave unset until the GoDaddy steps in docs/operations.md are done.
+# Empty keeps today's CloudFront certificate, Cognito URLs and CORS. No Route 53 records.
+# site_domain = "investor.vellamsetti.com"
+# Issue #103. Must stay false; the cloudfront.net to custom-domain redirect is not implemented.
+# redirect_cloudfront_to_custom_domain = false

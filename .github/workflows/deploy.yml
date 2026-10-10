@@ -163,6 +163,10 @@ jobs:
           fi
           terraform apply -input=false -auto-approve -var="jobs_image_uri=${JOBS_IMAGE_URI}"
           terraform output -json site_runtime_config > ../../apps/web/config.json
+          echo "Published sign-in origin (custom domain when site_domain is set):"
+          jq '{callbackUrl, logoutUrl}' ../../apps/web/config.json
+          echo "ACM DNS validation CNAMEs for GoDaddy (empty when site_domain is empty):"
+          terraform output -json acm_dns_validation_records
           site_output="$(terraform output -json site)"
           echo "SITE_BUCKET=$(jq -r '.bucket_name' <<< "$site_output")" >> "$GITHUB_ENV"
           echo "CLOUDFRONT_DISTRIBUTION_ID=$(jq -r '.distribution_id' <<< "$site_output")" >> "$GITHUB_ENV"
