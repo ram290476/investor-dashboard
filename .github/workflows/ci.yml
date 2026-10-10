@@ -91,6 +91,8 @@ jobs:
           terraform fmt -check -recursive
           terraform init -backend=false
           terraform validate
+          terraform -chdir=tests/site_domain init -backend=false -input=false
+          terraform -chdir=tests/site_domain test
 
       - name: Build the Lambda image for its deployment architecture
         run: |

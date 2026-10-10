@@ -8,7 +8,7 @@ FedRAMP authorization; see the scope note below.
 See the [deployment and operations guide](../../docs/operations.md) for the UI, API, historical
 backfill, scheduled refreshes, CI/CD setup, monitoring and troubleshooting.
 
-Everything deploys to `us-west-1` by default (DR copy in `us-west-2`); the `us_east_1` module adds the few pieces AWS only offers in us-east-1.
+Everything deploys to `us-west-1` by default (DR copy in `us-west-2`); the `us_east_1` module adds the few pieces AWS only offers in us-east-1. When `site_domain` is set, the site module also requests the CloudFront ACM certificate in us-east-1. It does not create DNS records.
 
 Expected cost: **about $22-36 a month** in year 1 (see the cost table in the [architecture doc](../../docs/architecture-infrastructure.md#cost-estimate)). Use the
 30-day GuardDuty and Security Hub trials and the 15-day Inspector trial to see your real numbers.
@@ -26,7 +26,7 @@ Expected cost: **about $22-36 a month** in year 1 (see the cost table in the [ar
 | `observability` | KMS-encrypted log groups (400-day retention); saved Logs Insights queries; alarms incl. SLO burn rates; ops and SLO dashboards; optional external Synthetics canary; monthly budget | AU-4, AU-6, SI-4, CP-2, SA-9 |
 | `api_keys` | 12 provider credentials as SSM SecureStrings (data key), each tagged with its rotation period; daily check (8:00 PT) that emails reminders 14, 7, 3, 1 and 0 days before a key is due, daily when overdue | IA-5, IA-5(h), SC-28 |
 | `site_auth` | Invite-only Cognito user pool (Plus tier, MFA off / password-only for now, 15-char passwords), public PKCE web client with 1-hour tokens, 12-hour refresh and a 15-minute sign-in session, hosted sign-in domain | IA-2(1), IA-2(2), IA-5, AC-7, AC-12 |
-| `site` | Private, versioned S3 static-site bucket; CloudFront Origin Access Control, HTTPS, SPA routing and security headers | SC-8, SC-28 |
+| `site` | Private, versioned S3 static-site bucket; CloudFront Origin Access Control, HTTPS, SPA routing and security headers. Optional `site_domain`: us-east-1 ACM certificate (DNS validation CNAME is an output), CloudFront alias and TLS 1.2. No Route 53 records. `redirect_cloudfront_to_custom_domain` stays false (issue #103) | SC-8, SC-28 |
 | `user_prefs` | DynamoDB `user_prefs` table; site API `GET/PUT /prefs`, authenticated `GET /dashboard`, `/status`, and watchlist-scoped `/chart/{ticker}` and `/stock/{ticker}`; Cognito JWT authorizer; per-user isolation via session-tagged role and `dynamodb:LeadingKeys`; chart S3 reads scoped to `serving/chart_data/` and `serving/stock/`; 5xx alarm | AC-3, AC-6, SC-28, CP-9 |
 | `jobs` | Container-image job Lambdas with per-job roles, schedules and event triggers: daily prices, split/dividend reconcile, trends, fundamentals, short interest, options, five-year backfill, dashboard build and status feed; failures go to the dead-letter queue. Created once `jobs_image_uri` is set | AC-6, SI-11, CP-10 |
 | `workload_boundary` | `invdash-workload-boundary` permissions boundary set on every IAM role in the stack: no IAM writes, no role assumption except the prefs API hop, explicit denies on the deploy role, OIDC provider, the boundary itself, IAM users/keys and boundary changes | AC-6, AC-6(10) |

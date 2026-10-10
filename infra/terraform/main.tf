@@ -140,17 +140,33 @@ module "api_keys" {
 module "site_auth" {
   source = "./modules/site_auth"
 
-  name             = local.name
-  callback_urls    = distinct(concat(var.site_callback_urls, ["${module.site_hosting.url}/auth/callback"]))
-  logout_urls      = distinct(concat(var.site_logout_urls, ["${module.site_hosting.url}/"]))
+  name = local.name
+  callback_urls = distinct(concat(
+    var.site_callback_urls,
+    compact([
+      "${module.site_hosting.url}/auth/callback",
+      var.site_domain == "" ? "" : "https://${var.site_domain}/auth/callback",
+    ]),
+  ))
+  logout_urls = distinct(concat(
+    var.site_logout_urls,
+    compact([
+      "${module.site_hosting.url}/",
+      var.site_domain == "" ? "" : "https://${var.site_domain}/",
+    ]),
+  ))
   branding_version = var.cognito_login_branding_version
 }
 
 module "site_hosting" {
   source = "./modules/site"
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
 
-  name   = local.name
-  region = var.region
+  name        = local.name
+  region      = var.region
+  site_domain = var.site_domain
 }
 
 # Per-user preferences (DynamoDB) and the site API (HTTP API + JWT authorizer), with
@@ -161,13 +177,19 @@ module "user_prefs" {
 
   permissions_boundary_arn = module.workload_boundary.arn
 
-  name                 = local.name
-  data_key_arn         = module.kms.data_key_arn
-  audit_key_arn        = module.kms.audit_key_arn
-  log_retention_days   = var.log_retention_days
-  cognito_issuer_url   = module.site_auth.issuer_url
-  cognito_client_id    = module.site_auth.client_id
-  site_origins         = distinct(concat(var.site_origins, [module.site_hosting.url]))
+  name               = local.name
+  data_key_arn       = module.kms.data_key_arn
+  audit_key_arn      = module.kms.audit_key_arn
+  log_retention_days = var.log_retention_days
+  cognito_issuer_url = module.site_auth.issuer_url
+  cognito_client_id  = module.site_auth.client_id
+  site_origins = distinct(concat(
+    var.site_origins,
+    compact([
+      module.site_hosting.url,
+      var.site_domain == "" ? "" : "https://${var.site_domain}",
+    ]),
+  ))
   lake_bucket_name     = module.data_lake.lake_bucket_name
   lake_bucket_arn      = module.data_lake.lake_bucket_arn
   ops_topic_arn        = module.alerting.ops_topic_arn

@@ -83,19 +83,26 @@ output "site" {
   description = "Private S3/CloudFront static dashboard hosting."
   value = {
     url             = module.site_hosting.url
+    public_url      = module.site_hosting.public_url
+    domain_name     = module.site_hosting.domain_name
     bucket_name     = module.site_hosting.bucket_name
     distribution_id = module.site_hosting.distribution_id
   }
 }
 
+output "acm_dns_validation_records" {
+  description = "GoDaddy CNAME records that prove control of site_domain to ACM. Empty when site_domain is empty. Terraform does not create DNS records."
+  value       = module.site_hosting.acm_dns_validation_records
+}
+
 output "site_runtime_config" {
-  description = "Write this JSON object to apps/web/config.json before publishing the static site."
+  description = "Write this JSON object to apps/web/config.json before publishing the static site. callbackUrl and logoutUrl use the custom domain when site_domain is set; Cognito still allows the CloudFront URLs."
   value = {
     apiBaseUrl    = module.user_prefs.api_endpoint
     cognitoDomain = module.site_auth.hosted_ui_url
     clientId      = module.site_auth.client_id
-    callbackUrl   = "${module.site_hosting.url}/auth/callback"
-    logoutUrl     = "${module.site_hosting.url}/"
+    callbackUrl   = "${module.site_hosting.public_url}/auth/callback"
+    logoutUrl     = "${module.site_hosting.public_url}/"
   }
 }
 
