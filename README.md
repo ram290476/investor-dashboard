@@ -36,7 +36,7 @@ The **Signed In** button at the top right (an icon only, on phones) opens the ac
 - **Data refresh**: each data collection job with its last run, next run and status.
 
 ### Picking a ticker
-The ticker bar under the header lists your watchlist (up to 25 tickers), with pinned tickers first, each showing its last price and daily change. Select a ticker to load its chart and panels. TSLA and SPCX also have a research-page link beside the ticker; those pages bring the existing price, company, news, filing and (where available) contract panels together. Research routes (`/ticker/TSLA` and `/ticker/SPCX`) support direct links and refresh, and returning to the dashboard restores its previous ticker selection. Other tickers continue to use the dashboard. When the list is wider than the screen, the bar scrolls sideways with a trackpad, mouse wheel, the ‹ › arrow buttons, keyboard or touch, and it keeps the selected ticker in view. The **+ Add / pin** button stays fixed at the end of the bar and opens My tickers.
+The ticker bar under the header lists your watchlist (up to 25 tickers), with pinned tickers first, each showing its last price and daily change. Select a ticker to load its chart and panels. The selected ticker has an **Open TSLA page →** link (click, Enter, or long-press). Enter or a long-press on any ticker opens that page too. The page address is `#stock/TSLA` (also `/stock/<TICKER>`), so it can be bookmarked without a new CloudFront path. Back returns to the dashboard and keeps the ticker you had selected. TSLA and SPCX also have a research-page link beside the ticker; those pages bring the existing price, company, news, filing and (where available) contract panels together. Research routes (`/ticker/TSLA` and `/ticker/SPCX`) support direct links and refresh, and returning to the dashboard restores its previous ticker selection. When the list is wider than the screen, the bar scrolls sideways with a trackpad, mouse wheel, the ‹ › arrow buttons, keyboard or touch, and it keeps the selected ticker in view. The **+ Add / pin** button stays fixed at the end of the bar and opens My tickers.
 
 ### Price chart and periods
 The main chart shows the selected ticker's price. Period chips **1D, 1W, 1M, 3M, YTD, 1Y, 3Y, 5Y** set the chart window, and each shows the return for that period. 1D uses hourly bars when they're available; chips for periods without enough history are disabled. A trend pill under the price (for example "Uptrend · 5d") compares the price with its 20- and 50-day averages.
@@ -73,9 +73,11 @@ All correlations describe historical association, not causation or a forecast.
 
 Company context uses only curated events, released fundamentals and federal-award records already present in the serving data. Tesla-reported values show their source ID and release date; SpaceX launches and awards show their source and observation date. Robotaxi fleet size, state permit counts, regional FSD approvals, active-satellite counts and launch cadence remain explicitly unavailable until verified structured observations are collected. An absent or stale awards rollup is not presented as zero.
 
+### Per-stock pages
+Every watchlist ticker has a company page. The header shows the ticker, name, price, day change, last update and a freshness badge. A compact price chart sits under it. Approved company metrics are one panel each, with the series, latest value, quarter-over-quarter and year-over-year change, and provenance (source link, published date, confidence). A quarter the company did not report says **not reported**. Metrics Ram has not approved are stored and are not shown. A partial collection keeps the previous approved values and shows a partial badge. On a phone the page uses Overview, KPIs, Fundamentals and Calls. Calls stay empty until a transcript source is licensed. The page uses the same six themes and up/down palette as the rest of the dashboard.
+
 ### Coming soon
 - More panels below the chart with additional trends.
-- Dedicated pages for individual stocks, with depth depending on each stock's importance.
 
 ## Developer guide
 

@@ -81,11 +81,12 @@ Tables are grouped by how often they change, and that sets their file layout: ho
 | risk_indices | Weekly | index, obs_date | value | none | W1, D1 |
 | releases | On release | series_id, ref_period | actual, nowcast, surprise, release_ts | none | M1 |
 | fundamentals_quarterly | Quarterly | ticker, metric, fiscal_quarter | release_date, measurement_date, value, unit, source_id; metrics include public_float_usd (SEC DEI, USD), shares_outstanding (SEC DEI), gross_margin_gaap, revenue_gaap, gross_profit_gaap, deliveries, fsd_subscribers | none | q1_fundamentals (DS-11 XBRL, DS-12 manual) |
+| company_metrics | Quarterly | ticker, metric_id, fiscal_period | period_end, value, unit, source_url, source_doc_hash, extracted_at, confidence, approved. Proposed catalog entries are stored and not served. Raw documents stay at raw/company_ir/\<ticker\>/\<period\>/ with a manifest (source_url, fetched_at, sha256). | ticker | q2_company_ir (EDGAR EX-99.1, company IR). Catalog: curated/company_metrics/catalog/\<ticker\>.json |
 | calendar_days | Monthly | calendar, date | is_open, close_time | none | C1, A1 |
 | ingestion_runs | Every run | run_id | job, source_id, status, rows, error, duration_ms | year/month | all jobs |
 | user_prefs (DynamoDB) | On change | user_sub | tickers\[\], pinned\[\] (max 6), display.time_zone, display.updown_palette, display.chart_period, version, updated_at | n/a | prefs API |
 
-**Serving layer** — the compact `serving/dashboard.json` snapshot plus per-ticker `serving/chart_data/<T>.json` histories for macro overlays, macro pressure, short interest, options, and quarterly fundamentals. `GET /chart/{ticker}` serves only a ticker in the caller's watchlist.
+**Serving layer** — the compact `serving/dashboard.json` snapshot plus per-ticker `serving/chart_data/<T>.json` histories for macro overlays, macro pressure, short interest, options, and quarterly fundamentals. `serving/stock/<T>.json` is the approved-metric payload for the per-stock page (series, latest value, QoQ/YoY, provenance, run status). `GET /chart/{ticker}` and `GET /stock/{ticker}` serve only a ticker in the caller's watchlist. Proposed company metrics are omitted.
 
 - Macro series use one long table (series_id, obs_date, value) so a new FRED or BLS series needs no schema change.
 
@@ -164,6 +165,9 @@ Monthly series hold their last released value until the next release. Output goe
 |----|----|----|----|
 | trend-metrics | After D4 or M1 succeeds | curated prices and macro | serving/trend_metrics/ |
 | q1-fundamentals | Mon 08:30 + day after earnings | SEC XBRL (DS-11), manual file (DS-12) | curated/ and serving/fundamentals_quarterly.json |
+| q2-company-ir-collect | Weekdays 07:15. Fetches on Monday (weekly baseline) and on a day inside an earnings window (T-3 through T+5). An 8-K EX-99.1 for a watchlist ticker triggers extraction. | SEC EDGAR and company IR pages. robots.txt is honored. HTTP 403 and 429 are not retried. | raw/company_ir/\<ticker\>/\<period\>/ |
+| q2-company-ir-extract | After collect, and on an EX-99.1 trigger | Raw IR documents. Unchanged documents skip the LLM (hash cache). | curated/company_metrics/ |
+| q2-company-ir-serve | After extract | Approved catalog rows only. Partial or failed runs keep the previous serving object and emit FailedRuns. | serving/stock/\<ticker\>.json |
 | short-interest | 18:30 Mon–Fri; stores only new settlement dates, so data lands twice a month on FINRA's publication days | FINRA (DS-91, OAuth keys in SSM) | curated/short_interest/ |
 | options-daily | 16:50 Mon–Fri, after D4 | Alpaca indicative options (DS-92) | curated/options_daily/; enabled by default, with IV30 explicitly unavailable when the feed omits it |
 | backfill | When a user adds a ticker nobody followed, and once at setup (O1) | Yahoo (DS-05) | curated/prices_daily/ |

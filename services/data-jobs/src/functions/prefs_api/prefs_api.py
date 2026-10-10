@@ -302,6 +302,29 @@ def publish_ticker_added(tickers: list[str]) -> None:
     )
 
 
+def _public_stock(document: dict | None, ticker: str) -> dict:
+    """Serve approved company metrics only. A missing object is an empty page, not a fabricated one."""
+    source = document if isinstance(document, dict) else {}
+    metrics = []
+    for metric in source.get("metrics") or []:
+        if not isinstance(metric, dict) or metric.get("approved") is not True:
+            continue
+        if metric.get("approval_state") in {"proposed", "rejected"} or metric.get("status") in {"proposed", "rejected"}:
+            continue
+        metrics.append(metric)
+    return {
+        "ticker": ticker.upper(),
+        "generated_at": source.get("generated_at"),
+        "run_status": source.get("run_status") or "ok",
+        "stale": bool(source.get("stale")),
+        "freshness_label": source.get("freshness_label") or "No company-specific metrics discovered",
+        "discovered": bool(metrics),
+        "metrics": metrics,
+        "unavailable": source.get("unavailable") or [],
+        "mismatches": source.get("mismatches") or [],
+    }
+
+
 def _read_serving_json(key: str) -> dict | None:
     if not LAKE_BUCKET:
         raise RuntimeError("LAKE_BUCKET is not configured")
@@ -358,6 +381,20 @@ def handler(event, context):
         except ClientError:
             print(json.dumps({"event": "chart_data_error", "ticker": ticker}))
             return _response(500, {"error": "Could not load chart data"})
+    if method == "GET" and path.startswith("/stock/"):
+        match = re.fullmatch(r"/stock/([A-Za-z][A-Za-z0-9.\-]{0,9})", path)
+        if not match:
+            return _response(404, {"error": "Company page not found"})
+        ticker = match.group(1).upper()
+        try:
+            prefs = get_prefs(_table_for(sub), sub)
+            if ticker not in prefs["tickers"]:
+                return _response(403, {"error": "Ticker is not in your watchlist"})
+            document = _read_serving_json(f"serving/stock/{ticker}.json")
+            return _response(200, _public_stock(document, ticker))
+        except ClientError:
+            print(json.dumps({"event": "stock_page_error", "ticker": ticker}))
+            return _response(500, {"error": "Could not load the company page"})
 
     table = _table_for(sub)
     try:

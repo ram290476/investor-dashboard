@@ -12,13 +12,24 @@ import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiR
 import { createAccountSettings } from "./account-settings.js";
 import { CHART_PLOT, barStamp, chartTicks, indexAtPlotX, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
-import { routeFromPath, routeStateForPath, tickerResearchPath } from "./routes.js";
+import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import { CATALYST_CATEGORIES, catalystCategoriesInWindow, catalystRows, markerIndex, movingAverageRows, sensitivityRows, sortedDrivers } from "./roadmap.js";
 import {
   correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
   number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
 } from "./signals.js";
 import { drawerControls, emailFromIdToken, fallbackSelection, isPanelOpen, parseSettingsHash, stripOrder, withPanelState } from "./settings-model.js";
+import {
+  callsCopy,
+  companyName,
+  emptyKpiCopy,
+  formatMetricValue,
+  freshnessBadge,
+  LONG_PRESS_MS,
+  nextStockTab,
+  stockPanels,
+  STOCK_TABS,
+} from "./stock-page.js";
 import {
   CHART_LANES,
   OVERLAYS,
@@ -74,6 +85,9 @@ const session = {
   // Inner disclosures that are not bottom drawers (all drivers, release calendar).
   innerDrawers: new Set(),
   panelSaveError: "",
+  stockPage: {},
+  stockPageState: {},
+  stockTab: "overview",
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 let prefsSaveQueue = Promise.resolve();
@@ -198,7 +212,9 @@ async function beginSignIn() {
     const state = randomBase64Url(32);
     sessionStorage.setItem(authKeys.verifier, verifier);
     sessionStorage.setItem(authKeys.state, state);
-    if (parseSettingsHash(location.hash)) sessionStorage.setItem(authKeys.hash, location.hash);
+    if (parseSettingsHash(location.hash) || parseStockHash(location.hash)) {
+      sessionStorage.setItem(authKeys.hash, location.hash);
+    }
     sessionStorage.setItem(
       authKeys.path,
       session.route.page === "research" ? tickerResearchPath(session.selected) : "/",
@@ -275,7 +291,7 @@ function signOut() {
 }
 
 async function apiGet(path) {
-  const what = apiLabels[path] || "The request";
+  const what = apiLabels[path] || (String(path).startsWith("stock/") ? "Company page" : "The request");
   let response;
   try {
     response = await fetch(apiUrl(path), {
@@ -342,6 +358,27 @@ async function loadChartData(ticker, force = false) {
     }
   }
   if (session.selected === ticker) renderDashboard();
+}
+
+async function loadStockPage(ticker, force = false) {
+  if (!ticker || (!force && session.stockPageState[ticker] === "loading")) return;
+  if (!force && session.stockPageState[ticker] === "ready") return;
+  session.stockPageState[ticker] = "loading";
+  if (session.route.page === "stock" && session.selected === ticker) renderDashboard();
+  try {
+    session.stockPage[ticker] = await apiGet(`stock/${encodeURIComponent(ticker)}`);
+    session.stockPageState[ticker] = "ready";
+  } catch (error) {
+    session.stockPageState[ticker] = "error";
+    session.stockPage[ticker] = null;
+    if (error.status === 401) {
+      settings.close();
+      session.accessToken = null;
+      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+      return;
+    }
+  }
+  if (session.route.page === "stock" && session.selected === ticker) renderDashboard();
 }
 
 function updateChartSettings(ticker, settings) {
@@ -881,7 +918,24 @@ function renderWatchlist() {
     button.tabIndex = ticker === session.selected || (!hasSelected && index === 0) ? 0 : -1;
     buttons.push(button);
     button.addEventListener("focus", () => ensureVisible(button));
+    let pressTimer = 0;
+    const cancelPress = () => window.clearTimeout(pressTimer);
+    button.addEventListener("pointerdown", () => {
+      cancelPress();
+      pressTimer = window.setTimeout(() => {
+        button.dataset.longPress = "1";
+        navigateToStock(ticker);
+      }, LONG_PRESS_MS);
+    });
+    button.addEventListener("pointerup", cancelPress);
+    button.addEventListener("pointerleave", cancelPress);
+    button.addEventListener("pointercancel", cancelPress);
     button.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        navigateToStock(ticker);
+        return;
+      }
       const index = buttons.indexOf(button);
       const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
         : event.key === "ArrowRight" ? Math.min(index + 1, buttons.length - 1)
@@ -894,7 +948,14 @@ function renderWatchlist() {
     button.setAttribute("aria-pressed", String(ticker === session.selected));
     button.setAttribute("aria-label", `${ticker}, ${latest ? formatPrice(displayPrice(latest)) : "no price data"}`);
     button.addEventListener("click", () => {
-      if (session.route.page !== "dashboard") {
+      if (button.dataset.longPress === "1") {
+        delete button.dataset.longPress;
+        return;
+      }
+      if (session.route.page === "stock") {
+        navigateToStock(ticker);
+        return;
+      } else if (session.route.page !== "dashboard") {
         navigateToDashboard(ticker);
       } else {
         session.selected = ticker;
@@ -932,6 +993,35 @@ function renderWatchlist() {
         navigateToResearch(ticker);
       });
       item.append(researchLink);
+    }
+    if (ticker === session.selected && stockHash(ticker)) {
+      const openPage = node("a", "ticker-stock-link", `Open ${ticker} page →`);
+      openPage.href = `/${stockHash(ticker)}`;
+      openPage.dataset.stockOpen = ticker;
+      openPage.setAttribute("aria-label", `Open ${ticker} page`);
+      let linkTimer = 0;
+      const cancelLinkPress = () => window.clearTimeout(linkTimer);
+      openPage.addEventListener("pointerdown", () => {
+        cancelLinkPress();
+        linkTimer = window.setTimeout(() => {
+          openPage.dataset.longPress = "1";
+          navigateToStock(ticker);
+        }, LONG_PRESS_MS);
+      });
+      openPage.addEventListener("pointerup", cancelLinkPress);
+      openPage.addEventListener("pointerleave", cancelLinkPress);
+      openPage.addEventListener("pointercancel", cancelLinkPress);
+      openPage.addEventListener("click", (event) => {
+        if (openPage.dataset.longPress === "1") {
+          delete openPage.dataset.longPress;
+          event.preventDefault();
+          return;
+        }
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigateToStock(ticker);
+      });
+      item.append(openPage);
     }
     list.append(item);
   });
@@ -2235,6 +2325,174 @@ function renderAppHeader() {
   return header;
 }
 
+function renderMetricCard(metric) {
+  const card = node("article", `panel stock-metric${metric.unavailable ? " stock-metric-unavailable" : ""}`);
+  card.dataset.metricId = metric.id;
+  const title = node("h3", "stock-metric-title", metric.name);
+  card.append(title);
+  if (metric.unit && !metric.unavailable) card.append(node("p", "signal-note", metric.unit));
+  if (metric.series?.length) {
+    const bars = node("div", "stock-bars");
+    const reported = metric.series.filter((point) => point.reported);
+    const max = Math.max(...reported.map((point) => point.value), 0);
+    bars.setAttribute("role", "img");
+    bars.setAttribute("aria-label", `${metric.name} by quarter`);
+    metric.series.forEach((point) => {
+      const bar = node("span", point.reported ? "stock-bar" : "stock-bar stock-bar-missing");
+      const height = point.reported && max ? Math.max(8, Math.round((point.value / max) * 100)) : 8;
+      bar.style.height = `${height}%`;
+      bar.title = point.reported ? `${point.fiscal_period} ${formatMetricValue(point.value, metric.unit)}` : `${point.fiscal_period} not reported`;
+      bars.append(bar);
+    });
+    card.append(bars);
+  }
+  const latest = node("p", "stock-latest");
+  latest.append(document.createTextNode(metric.unavailable ? "Unavailable. " : `Latest ${metric.latestPeriod ? `${metric.latestPeriod} ` : ""}`));
+  latest.append(node("span", "", metric.unavailable ? metric.sourceTitle : metric.latest));
+  if (!metric.unavailable && metric.qoq) {
+    latest.append(document.createTextNode(" "));
+    latest.append(node("span", metric.qoqValue > 0 ? "positive" : metric.qoqValue < 0 ? "negative" : "neutral", `QoQ ${metric.qoq}`));
+  }
+  if (!metric.unavailable && metric.yoy) {
+    latest.append(document.createTextNode(" "));
+    latest.append(node("span", metric.yoyValue > 0 ? "positive" : metric.yoyValue < 0 ? "negative" : "neutral", `YoY ${metric.yoy}`));
+  }
+  card.append(latest);
+  const provenance = node("p", "stock-provenance");
+  if (metric.sourceUrl) {
+    const link = node("a", "", metric.sourceTitle);
+    link.href = metric.sourceUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    provenance.append(link);
+  } else {
+    provenance.append(document.createTextNode(metric.sourceTitle || "Source unavailable"));
+  }
+  const details = [metric.published, metric.confidence, metric.approval].filter(Boolean).join(" · ");
+  if (details) provenance.append(document.createTextNode(`${metric.sourceUrl || metric.sourceTitle ? " · " : ""}${details}`));
+  card.append(provenance);
+  if (metric.xbrl) card.append(node("p", metric.xbrl === "XBRL mismatch" ? "stock-xbrl mismatch" : "stock-xbrl", metric.xbrl));
+  return card;
+}
+
+function renderStockPage() {
+  const tickerData = selectedData();
+  const chartData = session.chartData[session.selected] || null;
+  const chartDataState = session.chartDataState[session.selected] || "loading";
+  const payload = session.stockPage[session.selected] || null;
+  const pageState = session.stockPageState[session.selected] || "loading";
+  const panels = stockPanels(payload, chartData);
+  const badge = freshnessBadge(payload, pageState);
+  const history = tickerData?.price_history || [];
+  const bars = validBars(history);
+  const latest = bars.at(-1);
+  const dayChange = returns(history, 1);
+  root.replaceChildren();
+  applyTheme(session.prefs.display);
+  root.append(renderAppHeader(), renderWatchlist());
+
+  const heading = node("section", "panel stock-heading");
+  heading.dataset.stockPanel = "overview";
+  const back = action("← Dashboard", "button-link", () => navigateToDashboard());
+  back.dataset.stockBack = "dashboard";
+  const copy = node("div", "stock-heading-copy");
+  const title = node("h2", "", `${session.selected} · ${companyName(session.selected, payload)}`);
+  title.id = "stock-title";
+  title.tabIndex = -1;
+  const price = node("p", "stock-price");
+  price.append(node("span", "stock-price-value", latest ? formatPrice(displayPrice(latest)) : "—"));
+  if (isNumericValue(dayChange)) {
+    price.append(node("span", polarity(dayChange), ` ${formatPercent(dayChange)}`));
+  }
+  const updated = session.dashboard?.generated_at
+    ? `Updated ${formatTime(session.dashboard.generated_at, session.prefs.display.time_zone)}`
+    : "Updated time unavailable";
+  const freshness = node("p", "stock-freshness", badge.text);
+  freshness.dataset.tone = badge.tone;
+  copy.append(title, price, node("p", "overview-meta", updated), freshness);
+  heading.append(back, copy);
+  root.append(heading);
+
+  const page = node("main", "stock-page");
+  page.dataset.stockTab = session.stockTab;
+  page.setAttribute("aria-label", `${session.selected} company page`);
+
+  const chart = renderPricePanel(
+    tickerData,
+    chartData,
+    chartDataState,
+    selectChartPeriod,
+    (next) => updateChartSettings(session.selected, next),
+  );
+  chart.classList.add("price-panel-compact");
+  chart.dataset.stockPanel = "overview";
+
+  const section = (id, label, cards, empty) => {
+    const block = node("section", "stock-section");
+    block.dataset.stockPanel = id;
+    block.id = `stock-panel-${id}`;
+    block.append(node("h3", "stock-section-title", label));
+    if (!cards.length) block.append(node("p", "data-state", empty));
+    else {
+      const grid = node("div", "stock-metric-grid");
+      cards.forEach((metric) => grid.append(renderMetricCard(metric)));
+      block.append(grid);
+    }
+    return block;
+  };
+
+  const calls = callsCopy();
+  const callsBlock = node("section", "stock-section");
+  callsBlock.dataset.stockPanel = "calls";
+  callsBlock.id = "stock-panel-calls";
+  callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
+  if (panels.guidance.length) {
+    const grid = node("div", "stock-metric-grid");
+    panels.guidance.forEach((metric) => grid.append(renderMetricCard(metric)));
+    callsBlock.append(grid);
+  }
+  callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
+
+  page.append(
+    chart,
+    section("kpis", "Operating KPIs", panels.operating, emptyKpiCopy()),
+    section(
+      "fundamentals",
+      panels.fundamentalsSource === "edgar" ? "SEC filings" : "IR fundamentals",
+      panels.fundamentals,
+      "No IR fundamentals are approved, and no SEC XBRL series is in this snapshot.",
+    ),
+    callsBlock,
+  );
+
+  const tabs = node("div", "stock-page-tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Company page sections");
+  STOCK_TABS.forEach((item) => {
+    const tab = action(item.label, "", () => {
+      session.stockTab = item.id;
+      renderDashboard();
+      root.querySelector(`#stock-tab-${item.id}`)?.focus();
+    });
+    tab.id = `stock-tab-${item.id}`;
+    tab.dataset.stockTab = item.id;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", item.id === "overview" ? "stock-title" : `stock-panel-${item.id}`);
+    tab.setAttribute("aria-selected", String(item.id === session.stockTab));
+    tab.tabIndex = item.id === session.stockTab ? 0 : -1;
+    tab.addEventListener("keydown", (event) => {
+      const next = nextStockTab(item.id, event.key);
+      if (!next) return;
+      event.preventDefault();
+      root.querySelector(`#stock-tab-${next}`)?.click();
+    });
+    tabs.append(tab);
+  });
+  page.append(tabs);
+  root.append(page);
+  settings.refresh();
+}
+
 function renderResearchPage() {
   const errorMessage = dashboardBanner(session);
   const tickerData = selectedData();
@@ -2313,6 +2571,21 @@ function renderNotFoundPage() {
   settings.refresh();
 }
 
+function navigateToStock(ticker) {
+  const hash = stockHash(ticker);
+  if (!hash) return;
+  if (session.route.page === "dashboard") session.dashboardSelection = session.selected;
+  const symbol = hash.slice("#stock/".length);
+  history.pushState(history.state, "", `/${hash}`);
+  session.route = routeFromLocation(location.pathname, hash);
+  session.selected = symbol;
+  session.stockTab = "overview";
+  renderDashboard();
+  loadChartData(symbol);
+  loadStockPage(symbol);
+  requestAnimationFrame(() => root.querySelector("#stock-title")?.focus());
+}
+
 function navigateToResearch(ticker) {
   const path = tickerResearchPath(ticker);
   if (!path) return;
@@ -2335,13 +2608,14 @@ function navigateToDashboard(ticker = session.dashboardSelection || session.sele
 }
 
 function handleRoutePopstate() {
-  const state = routeStateForPath(location.pathname, session.dashboardSelection, session.selected);
+  const state = routeStateForLocation(location.pathname, location.hash, session.dashboardSelection, session.selected);
   session.route = state.route;
   session.dashboardSelection = state.dashboardSelection
     || fallbackSelection(session.prefs, session.selected);
   session.selected = state.selected || fallbackSelection(session.prefs, session.dashboardSelection);
   renderDashboard();
   loadChartData(session.selected);
+  if (session.route.page === "stock") loadStockPage(session.selected);
   settings.openFromHash();
 }
 
@@ -2382,6 +2656,10 @@ function renderDashboard() {
   const restoreDrawer = document.activeElement?.dataset?.drawerToggle || null;
   const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
+  if (session.route.page === "stock") {
+    renderStockPage();
+    return;
+  }
   if (session.route.page === "research") {
     renderResearchPage();
     restoreDrawerFocus(restoreDrawer);
@@ -2519,6 +2797,7 @@ async function refreshData(showLoading) {
   session.dashboardError = outcome.dashboardError;
   renderDashboard();
   await loadChartData(session.selected, true);
+  if (session.route.page === "stock") await loadStockPage(session.selected, true);
 }
 
 async function start() {
@@ -2558,8 +2837,9 @@ async function start() {
     const returnTicker = sessionStorage.getItem(authKeys.dashboardTicker);
     sessionStorage.removeItem(authKeys.dashboardTicker);
     session.dashboardSelection = fallbackSelection(session.prefs, returnTicker);
-    const routeState = routeStateForPath(
+    const routeState = routeStateForLocation(
       location.pathname,
+      location.hash,
       session.dashboardSelection,
       session.dashboardSelection,
     );
@@ -2568,7 +2848,11 @@ async function start() {
     session.selected = routeState.selected;
     renderDashboard();
     window.addEventListener("popstate", handleRoutePopstate);
-    window.addEventListener("hashchange", () => settings.openFromHash());
+    window.addEventListener("hashchange", () => {
+      const stock = parseStockHash(location.hash);
+      if (stock || session.route.page === "stock") handleRoutePopstate();
+      settings.openFromHash();
+    });
     settings.openFromHash();
     await refreshData(false);
   } catch (error) {
