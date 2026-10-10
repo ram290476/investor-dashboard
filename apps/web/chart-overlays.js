@@ -1,10 +1,10 @@
 import { chartValue, isNumericValue, validBars } from "./chart-period.js";
 
 export const CHART_LANES = Object.freeze([
-  { id: "VOL", label: "Volume" },
-  { id: "SI", label: "Short interest" },
-  { id: "PRESS", label: "Macro pressure" },
-  { id: "OPT", label: "Options" },
+  { id: "VOL", label: "Volume", colorVar: "--lane-volume", glyph: "bars" },
+  { id: "SI", label: "Short interest", colorVar: "--lane-si", glyph: "step" },
+  { id: "PRESS", label: "Macro pressure", colorVar: "--lane-press", glyph: "pressure" },
+  { id: "OPT", label: "Options", colorVar: "--lane-opt", glyph: "dashed" },
 ]);
 
 export const DEFAULT_CHART_SETTINGS = Object.freeze({ overlays: [], lanes: ["VOL", "PRESS"] });
@@ -234,6 +234,58 @@ export function panelsRevealedByOverlay(overlayId) {
   const group = overlayById.get(overlayId)?.group;
   if (!group) return [];
   return DETAIL_PANELS.filter((panel) => panel.groups.includes(group)).map((panel) => panel.id);
+}
+
+// Closed area between a macro-pressure series and zero. `sign` is +1 for the
+// tailwind side and -1 for the headwind side. Gaps and zero crossings split the fill.
+export function pressureFillPath(points, sign, yAt) {
+  const wanted = sign < 0 ? -1 : 1;
+  const samples = [];
+  let previous = null;
+  for (const point of points || []) {
+    if (!point || !Number.isFinite(point.value) || !Number.isFinite(point.x)) {
+      if (previous) samples.push(null);
+      previous = null;
+      continue;
+    }
+    if (previous && previous.value * point.value < 0) {
+      const t = previous.value / (previous.value - point.value);
+      samples.push({ x: previous.x + (point.x - previous.x) * t, value: 0 });
+    }
+    samples.push(point);
+    previous = point;
+  }
+  const zeroY = yAt(0);
+  let path = "";
+  let run = [];
+  const flush = () => {
+    const active = run.some((point) => point.value !== 0 && Math.sign(point.value) === wanted);
+    if (run.length >= 2 && active) {
+      path += `M${run[0].x.toFixed(2)} ${yAt(run[0].value).toFixed(2)}`;
+      for (let index = 1; index < run.length; index += 1) {
+        path += `L${run[index].x.toFixed(2)} ${yAt(run[index].value).toFixed(2)}`;
+      }
+      const end = run.at(-1);
+      const start = run[0];
+      path += `L${end.x.toFixed(2)} ${zeroY.toFixed(2)}L${start.x.toFixed(2)} ${zeroY.toFixed(2)}Z`;
+    }
+    run = [];
+  };
+  for (const sample of samples) {
+    if (!sample) {
+      flush();
+      continue;
+    }
+    const side = sample.value === 0 ? 0 : Math.sign(sample.value);
+    if (side === wanted || side === 0) run.push(sample);
+    else flush();
+    if (side === 0) {
+      flush();
+      run = [sample];
+    }
+  }
+  flush();
+  return path;
 }
 
 /** Follow mode shows a mapped card only when one of its groups is active. Dismissed cards stay hidden. */

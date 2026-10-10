@@ -56,6 +56,7 @@ import {
   overlayGroups,
   laneValues,
   panelVisible,
+  pressureFillPath,
   panelsRevealedByOverlay,
   valuesForOverlay,
 } from "./chart-overlays.js";
@@ -1759,6 +1760,7 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState, periodId)
   svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${lane.label} over ${bars.length} chart observations`);
+  svg.style.setProperty("--lane-color", `var(${lane.colorVar})`);
   const title = document.createElementNS(svgNS, "title");
   title.textContent = `${lane.label}: ${stat}`;
   svg.append(title);
@@ -1782,11 +1784,23 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState, periodId)
       svg.append(bar);
     });
   } else {
-    const min = lane.id === "PRESS" ? -1 : Math.min(...valid);
-    const max = lane.id === "PRESS" ? 1 : Math.max(...valid);
+    const domain = lane.id === "OPT" ? [...valid, 1] : valid;
+    const min = lane.id === "PRESS" ? -1 : Math.min(...domain);
+    const max = lane.id === "PRESS" ? 1 : Math.max(...domain);
     const spread = max - min || 1;
     const yAt = (value) => laneBottom - ((value - min) / spread) * (laneBottom - laneTop);
     if (lane.id === "PRESS") {
+      const points = values.map((value, index) => (
+        isNumericValue(value) ? { x: xAt(index), value: Number(value) } : null
+      ));
+      for (const [sign, tone] of [[1, "up"], [-1, "down"]]) {
+        const d = pressureFillPath(points, sign, yAt);
+        if (!d) continue;
+        const area = document.createElementNS(svgNS, "path");
+        area.setAttribute("d", d);
+        area.setAttribute("class", `lane-pressure-fill ${tone}`);
+        svg.append(area);
+      }
       const zero = document.createElementNS(svgNS, "line");
       zero.setAttribute("x1", String(left));
       zero.setAttribute("x2", String(right));
@@ -1799,6 +1813,18 @@ function renderLane(lane, bars, tickerData, chartData, chartDataState, periodId)
     path.setAttribute("d", seriesPath(values, xAt, (value) => yAt(value), lane.id === "SI"));
     path.setAttribute("class", `lane-line ${lane.id === "PRESS" ? "lane-pressure-line" : ""}`.trim());
     svg.append(path);
+    if (lane.id === "OPT") {
+      const reference = document.createElementNS(svgNS, "line");
+      reference.setAttribute("x1", String(left));
+      reference.setAttribute("x2", String(right));
+      reference.setAttribute("y1", String(yAt(1)));
+      reference.setAttribute("y2", String(yAt(1)));
+      reference.setAttribute("class", "lane-reference-line");
+      svg.append(reference);
+      const label = document.createElementNS(svgNS, "title");
+      label.textContent = "Put/call ratio 1.0";
+      reference.append(label);
+    }
   }
   appendChartInteraction(svg, { top: laneTop, bottom: laneBottom, layer: "lane", viewHeight });
   row.append(info, svg);
@@ -1813,15 +1839,47 @@ function renderChartLanes(settings, bars, tickerData, chartData, chartDataState,
   return lanes;
 }
 
+function laneGlyph(lane) {
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 12");
+  svg.setAttribute("class", "lane-glyph");
+  const add = (name, attrs) => {
+    const shape = document.createElementNS(svgNS, name);
+    for (const [key, value] of Object.entries(attrs)) shape.setAttribute(key, value);
+    svg.append(shape);
+    return shape;
+  };
+  if (lane.glyph === "bars") {
+    [[1, 5, 3.2, 6], [6.4, 1.5, 3.2, 9.5], [11.8, 3.5, 3.2, 7.5]].forEach(([x, y, width, height]) => {
+      add("rect", { x, y, width, height, rx: "0.4" });
+    });
+  } else if (lane.glyph === "step") {
+    add("path", { d: "M1 9.5 H6 V5 H11 V2 H15" });
+  } else if (lane.glyph === "pressure") {
+    add("line", { class: "lane-glyph-zero", x1: "1", x2: "15", y1: "6", y2: "6" });
+  } else {
+    add("line", { x1: "1", x2: "15", y1: "6", y2: "6", "stroke-dasharray": "2.4 1.8" });
+  }
+  return svg;
+}
+
 function renderLaneControls(settings, available, chartDataState, onSettingsChange) {
   const group = node("div", "lane-controls");
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", "Under-chart lanes");
   available.forEach(lane => {
     const selected = settings.lanes.includes(lane.id);
-    const button = action(lane.label, "lane-toggle", () => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "lane-toggle";
+    button.style.setProperty("--lane-color", `var(${lane.colorVar})`);
+    const swatch = node("span", `lane-swatch lane-swatch-${lane.glyph}`);
+    swatch.setAttribute("aria-hidden", "true");
+    swatch.append(laneGlyph(lane));
+    button.append(swatch, document.createTextNode(lane.label));
+    button.addEventListener("click", () => {
       onSettingsChange({ ...settings, lanes: selected ? settings.lanes.filter(id => id !== lane.id) : [...settings.lanes, lane.id] });
-      root.querySelector(`[data-lane="${lane.id}"]`)?.focus();
+      root.querySelector(`.lane-toggle[data-lane="${lane.id}"]`)?.focus();
     });
     button.dataset.lane = lane.id;
     button.setAttribute("aria-pressed", String(selected));
@@ -2901,6 +2959,7 @@ function renderMetricCard(metric) {
   card.append(title);
   if (metric.unit && !metric.unavailable) card.append(node("p", "signal-note", metric.unit));
   if (metric.series?.length) {
+    const chart = node("div", "stock-chart");
     const bars = node("div", "stock-bars");
     const reported = metric.series.filter((point) => point.reported);
     const max = Math.max(...reported.map((point) => point.value), 0);
@@ -2913,7 +2972,13 @@ function renderMetricCard(metric) {
       bar.title = point.reported ? `${point.fiscal_period} ${formatMetricValue(point.value, metric.unit)}` : `${point.fiscal_period} not reported`;
       bars.append(bar);
     });
-    card.append(bars);
+    const axis = node("div", "stock-axis");
+    const first = metric.series[0]?.fiscal_period;
+    const last = metric.series.at(-1)?.fiscal_period;
+    if (first) axis.append(node("span", "", first));
+    if (last && last !== first) axis.append(node("span", "", last));
+    chart.append(bars, axis);
+    card.append(chart);
   }
   const latest = node("p", "stock-latest");
   latest.append(document.createTextNode(metric.unavailable ? "Unavailable. " : `Latest ${metric.latestPeriod ? `${metric.latestPeriod} ` : ""}`));
@@ -2962,8 +3027,6 @@ function renderStockPage() {
 
   const heading = node("section", "panel stock-heading");
   heading.dataset.stockPanel = "overview";
-  const back = action("← Dashboard", "button-link", () => navigateToDashboard());
-  back.dataset.stockBack = "dashboard";
   const copy = node("div", "stock-heading-copy");
   const title = node("h2", "", `${session.selected} · ${companyName(session.selected, payload)}`);
   title.id = "stock-title";
@@ -2979,7 +3042,15 @@ function renderStockPage() {
   const freshness = node("p", "stock-freshness", badge.text);
   freshness.dataset.tone = badge.tone;
   copy.append(title, price, node("p", "overview-meta", updated), freshness);
-  heading.append(back, copy);
+  const back = node("a", "stock-dashboard-link", "Back to dashboard");
+  back.href = "/";
+  back.dataset.stockBack = "dashboard";
+  back.addEventListener("click", (event) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigateToDashboard();
+  });
+  heading.append(copy, back);
   root.append(heading);
 
   const page = node("main", "stock-page");

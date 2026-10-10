@@ -11,7 +11,9 @@ import {
   fundamentalObservation,
   addOverlay,
   availableLanes,
+  CHART_LANES,
   laneValues,
+  pressureFillPath,
   visibleLanes,
   valuesForOverlay,
 } from "./chart-overlays.js";
@@ -73,6 +75,27 @@ test("availability uses finite aligned values in the selected period, including 
   assert.ok(!ids.includes("SPY") && !ids.includes("DGS2") && !ids.includes("SOFR") && !ids.includes("FUNDAMENTAL:deliveries"));
   assert.deepEqual(overlayGroups(ticker, chart, dashboard, []), []);
   assert.equal(overlayGroups(ticker, chart, dashboard, history.slice(0, 5)).some(group => group.id === "Moving averages"), false);
+});
+
+test("lanes keep their order and each chart shares one color token", () => {
+  assert.deepEqual(CHART_LANES.map((lane) => lane.id), ["VOL", "SI", "PRESS", "OPT"]);
+  assert.deepEqual(CHART_LANES.map((lane) => lane.colorVar), ["--lane-volume", "--lane-si", "--lane-press", "--lane-opt"]);
+  assert.deepEqual(CHART_LANES.map((lane) => lane.glyph), ["bars", "step", "pressure", "dashed"]);
+});
+
+test("macro pressure fill splits at zero and at gaps", () => {
+  const yAt = (value) => 10 - value;
+  const positive = pressureFillPath([{ x: 0, value: 1 }, { x: 10, value: 1 }], 1, yAt);
+  assert.equal(positive, "M0.00 9.00L10.00 9.00L10.00 10.00L0.00 10.00Z");
+  assert.equal(pressureFillPath([{ x: 0, value: 1 }, { x: 10, value: 1 }], -1, yAt), "");
+  const up = pressureFillPath([{ x: 0, value: 1 }, { x: 10, value: -1 }], 1, yAt);
+  const down = pressureFillPath([{ x: 0, value: 1 }, { x: 10, value: -1 }], -1, yAt);
+  assert.match(up, /^M0\.00 9\.00L5\.00 10\.00/);
+  assert.match(down, /M5\.00 10\.00L10\.00 11\.00/);
+  const gapped = pressureFillPath([{ x: 0, value: 1 }, null, { x: 8, value: 1 }], 1, yAt);
+  assert.equal(gapped, "");
+  const rejoin = pressureFillPath([{ x: 0, value: 1 }, { x: 4, value: 0 }, { x: 8, value: 2 }], 1, yAt);
+  assert.equal(rejoin.match(/Z/g).length, 2);
 });
 
 test("lane availability and fixed order use aligned finite data without rewriting the selection", () => {
