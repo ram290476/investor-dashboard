@@ -34,6 +34,19 @@ def test_every_job_has_a_cron_or_a_trigger():
     assert by_job["KALSHI"]["trigger"] is None
 
 
+def test_partial_outcome_is_partial_and_failure_is_failed():
+    now = datetime(2026, 10, 10, 12, tzinfo=UTC)
+    feed = sf.apply_event(None, {"job": "Q2C", "outcome": "partial", "failed_sources": 45}, now)
+    row = {job["job"]: job for job in feed["jobs"]}["Q2C"]
+    assert row["status"] == "partial"
+    assert row["last_outcome"] == "partial"
+    assert row["failed_sources"] == 45
+    feed = sf.apply_event(feed, {"job": "Q2C", "outcome": "failure", "failed_sources": 0}, now)
+    row = {job["job"]: job for job in feed["jobs"]}["Q2C"]
+    assert row["status"] == "failed"
+    assert row["last_outcome"] == "failure"
+
+
 def test_next_run_skips_weekend_and_holiday():
     # Friday 2026-11-20 after the close -> next H1 is Monday 10:05 ET (15:05 UTC)
     assert sf.next_run("H1", datetime(2026, 11, 20, 22, tzinfo=UTC)) == "2026-11-23T15:05+00:00"

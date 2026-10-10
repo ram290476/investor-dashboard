@@ -166,7 +166,7 @@ Monthly series hold their last released value until the next release. Output goe
 | trend-metrics | After D4 or M1 succeeds | curated prices and macro | serving/trend_metrics/ |
 | q1-fundamentals | Mon 08:30 + day after earnings | SEC XBRL (DS-11), manual file (DS-12) | curated/ and serving/fundamentals_quarterly.json |
 | q2-company-ir-collect | Weekdays 07:15 ET. Fetches on Monday (weekly baseline), inside an earnings window (T-3 through T+5), and when H3 reports a new 8-K Item 2.02. | SEC EDGAR submissions, EX-99.1, 10-Q/10-K and companyfacts. ir.tesla.com PDFs are a fallback after robots.txt. tesla.com is not fetched. HTTP 403 and 429 are not retried. | raw/company_ir/\<ticker\>/\<period\>/ |
-| q2-company-ir-extract | After collect, and on an EX-99.1 trigger | Raw IR documents. Unchanged documents skip the LLM (hash cache). | curated/company_metrics/ |
+| q2-company-ir-extract | After collect, including a partial collect | Raw IR documents. Unchanged documents skip the LLM (hash cache). | curated/company_metrics/ |
 | q2-company-ir-serve | After extract | Approved catalog rows only. Partial or failed runs keep the previous serving object and emit FailedRuns. | serving/stock/\<ticker\>.json |
 | short-interest | 18:30 Mon–Fri; stores only new settlement dates, so data lands twice a month on FINRA's publication days | FINRA (DS-91, OAuth keys in SSM) | curated/short_interest/ |
 | options-daily | 16:50 Mon–Fri, after D4 | Alpaca indicative options (DS-92) | curated/options_daily/; enabled by default, with IV30 explicitly unavailable when the feed omits it |

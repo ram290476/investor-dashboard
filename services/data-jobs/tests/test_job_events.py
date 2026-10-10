@@ -18,8 +18,53 @@ def test_rejected_event_publish_is_not_silently_successful(monkeypatch):
     monkeypatch.setattr(observability, "_events", Bus())
     with pytest.raises(RuntimeError, match="EventBridge rejected"):
         observability.emit_job_finished("TREND", "run", "success")
+    with pytest.raises(RuntimeError, match="EventBridge rejected"):
+        observability.emit_job_finished("Q2X", "run", "partial")
     # Preserve the original exception when reporting an already failed job.
     observability.emit_job_finished("TREND", "run", "failure")
+
+
+class _Context:
+    function_name = "test"
+    memory_limit_in_mb = 128
+    invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:test"
+    aws_request_id = "test"
+
+
+def test_run_status_sets_the_logged_and_published_outcome(monkeypatch):
+    captured = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: captured.append((outcome, detail)),
+    )
+
+    @observability.job_handler("Q2C")
+    def partial(event, context):
+        with observability.source_run("edgar:TSLA:8-K"):
+            raise RuntimeError("index 404")
+        return {"status": "partial", "run_status": "partial", "documents": 1}
+
+    partial({}, _Context())
+    assert captured[-1][0] == "partial"
+    assert captured[-1][1]["run_status"] == "partial"
+    assert captured[-1][1]["failed_sources"] == 1
+
+    @observability.job_handler("Q2C")
+    def failed(event, context):
+        return {"status": "failed", "run_status": "failed", "documents": 0}
+
+    failed({}, _Context())
+    assert captured[-1][0] == "failure"
+
+    @observability.job_handler("D1")
+    def still_success(event, context):
+        with observability.source_run("fred:SOFR"):
+            raise ValueError("down")
+        return {"status": "success"}
+
+    still_success({}, _Context())
+    assert captured[-1][0] == "success"
+    assert captured[-1][1]["failed_sources"] == 1
 
 
 def test_partial_source_ids_and_skipped_status_are_actionable():

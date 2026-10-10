@@ -106,10 +106,9 @@ GAAP_XBRL_TAGS = {
     "capex": ("duration", ["PaymentsToAcquirePropertyPlantAndEquipment"]),
     "eps_diluted": ("duration", ["EarningsPerShareDiluted"]),
     "deferred_revenue": ("instant", ["ContractWithCustomerLiability"]),
-    "cash_and_investments": (
-        "instant",
-        ["CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "CashAndCashEquivalentsAtCarryingValue"],
-    ),
+    # Composed per period in cash_and_investments_series. The retired restricted-cash
+    # concept stops at 2018Q3 and must not win just because it has older facts.
+    "cash_and_investments": ("instant", []),
 }
 _FOOTNOTE_TAIL = re.compile(r"(?:\s*[\u00b9\u00b2\u00b3\u2070-\u2079]+|\s*\(\d+\))+\s*$")
 _UNIT_PAREN = re.compile(
@@ -1177,7 +1176,8 @@ def archive_url(cik: str, accession: str, name: str) -> str:
 
 
 def filing_index_url(cik: str, accession: str) -> str:
-    return archive_url(cik, accession, f"{accession}-index.json")
+    """Directory index. `{accession}-index.json` 404s; the filing folder serves `index.json`."""
+    return archive_url(cik, accession, "index.json")
 
 
 def item_202_filings(submissions: dict, *, limit: int = 4) -> list[dict]:
@@ -1458,6 +1458,43 @@ def dedupe_observations(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     return winners, revisions
 
 
+def _xbrl_tag_series(gaap: dict, tag: str, kind: str, unit: str = "USD") -> tuple[dict[str, float], list[dict]]:
+    facts = (gaap.get(tag) or {}).get("units", {}).get(unit) or []
+    if not facts:
+        return {}, []
+    return _select_sane_latest(_collect_xbrl_facts(facts, 12, kind))
+
+
+def cash_and_investments_series(gaap: dict) -> tuple[dict[str, float], list[dict]]:
+    """Cash at carrying value plus one investments concept, then older single-concept fallbacks.
+
+    Tesla's current balance sheet tags cash and short-term investments separately.
+    Short-term investments win over marketable securities for the same quarter so a
+    concept that was filed twice is not added twice. Periods with neither current
+    concept fall back to the restricted-cash total, then the legacy combined tag.
+    """
+    cash, flags = _xbrl_tag_series(gaap, "CashAndCashEquivalentsAtCarryingValue", "instant")
+    short_term, short_flags = _xbrl_tag_series(gaap, "ShortTermInvestments", "instant")
+    marketable, market_flags = _xbrl_tag_series(gaap, "MarketableSecuritiesCurrent", "instant")
+    flags.extend(short_flags)
+    flags.extend(market_flags)
+    selected: dict[str, float] = {}
+    for period, value in cash.items():
+        extra = short_term.get(period)
+        if extra is None:
+            extra = marketable.get(period)
+        selected[period] = value + (extra or 0.0)
+    for tag in (
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+        "CashCashEquivalentsAndShortTermInvestments",
+    ):
+        series, tag_flags = _xbrl_tag_series(gaap, tag, "instant")
+        flags.extend(tag_flags)
+        for period, value in series.items():
+            selected.setdefault(period, value)
+    return selected, flags
+
+
 def companyfacts_observations(companyfacts: dict, catalog: dict, **kwargs) -> tuple[list[dict], list[dict]]:
     """XBRL observations for GAAP catalog rows, with scale-error flags kept off the winning value."""
     gaap = (companyfacts.get("facts") or {}).get("us-gaap") or {}
@@ -1468,16 +1505,19 @@ def companyfacts_observations(companyfacts: dict, catalog: dict, **kwargs) -> tu
         entry = catalog_entry(catalog, metric_id)
         if entry is None:
             continue
-        facts = []
-        for tag in tags:
-            unit_key = "USD/shares" if metric_id == "eps_diluted" else "USD"
-            facts = (gaap.get(tag) or {}).get("units", {}).get(unit_key) or []
-            if facts:
-                break
-        if not facts:
-            continue
-        grouped = _collect_xbrl_facts(facts, 12, kind)
-        selected, scale_flags = _select_sane_latest(grouped)
+        if metric_id == "cash_and_investments":
+            selected, scale_flags = cash_and_investments_series(gaap)
+        else:
+            facts = []
+            for tag in tags:
+                unit_key = "USD/shares" if metric_id == "eps_diluted" else "USD"
+                facts = (gaap.get(tag) or {}).get("units", {}).get(unit_key) or []
+                if facts:
+                    break
+            if not facts:
+                continue
+            grouped = _collect_xbrl_facts(facts, 12, kind)
+            selected, scale_flags = _select_sane_latest(grouped)
         for flag in scale_flags:
             flag["metric_id"] = metric_id
             flag["ticker"] = ticker.upper()

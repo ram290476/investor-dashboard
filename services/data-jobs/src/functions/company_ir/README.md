@@ -28,7 +28,9 @@ Every new entry is `proposed`. The script does not approve metrics and does not 
 
 ## What the collector will and will not fetch
 
-EDGAR is primary: submissions, 8-K Item 2.02 EX-99.1 (deliveries release versus Update deck, by exhibit title), the latest 10-Q and 10-K, and companyfacts. Requests send `InvestorDashboardIR/1.0 (<SEC_USER_AGENT>)` and stay under 10 requests per second.
+EDGAR is primary: submissions, 8-K Item 2.02 EX-99.1 (deliveries release versus Update deck, by exhibit title), the latest 10-Q and 10-K, and companyfacts. The filing index is `{accession-without-dashes}/index.json`. Requests send `InvestorDashboardIR/1.0 (<SEC_USER_AGENT>)` and stay under 10 requests per second.
+
+A collect that stores some documents and fails others publishes outcome `partial`. Extract and serve still run for what landed. A collect that stores nothing publishes `failure` and does not continue.
 
 `www.tesla.com` is not fetched. `ir.tesla.com` HTML is not fetched. A deck PDF on that host is a fallback only, after a cached robots.txt check, and a 403 or 429 stops the host. Leave `ir_sources[].urls` empty to stay on EDGAR.
 

@@ -16,7 +16,7 @@ variable "jobs" {
   type = map(object({
     handler        = string
     schedule       = string       # EventBridge Scheduler expression in America/New_York; "" for event-only
-    triggers       = list(string) # "job:<ID>", "job:<ID>?field>N", "job:*" (any job finished), "ticker-added"
+    triggers       = list(string) # "job:<ID>", "job:<ID>?partial", "job:<ID>?field>N", "job:*", "ticker-added"
     memory         = number
     timeout        = number
     read_prefixes  = list(string)
@@ -103,9 +103,13 @@ locals {
     }
   ]...)
   # "job:BACKFILL?batches>0" becomes detail.batches numeric > 0. Idle runs (batches = 0) do not match.
+  # "job:Q2C?partial" matches outcome success or partial, so a partial collect still extracts.
+  trigger_partial = {
+    for key, spec in local.triggers : key => endswith(spec.trigger, "?partial")
+  }
   trigger_filter = {
     for key, spec in local.triggers : key => (
-      strcontains(spec.trigger, "?") ? {
+      strcontains(spec.trigger, ">") ? {
         field = split(">", split("?", spec.trigger)[1])[0]
         value = tonumber(split(">", split("?", spec.trigger)[1])[1])
       } : null
@@ -410,7 +414,7 @@ resource "aws_cloudwatch_event_rule" "trigger" {
     detail = merge(
       {
         job     = [split("?", trimprefix(each.value.trigger, "job:"))[0]]
-        outcome = ["success"]
+        outcome = local.trigger_partial[each.key] ? ["success", "partial"] : ["success"]
       },
       local.trigger_filter[each.key] == null ? {} : {
         (local.trigger_filter[each.key].field) = [{ numeric = [">", local.trigger_filter[each.key].value] }]

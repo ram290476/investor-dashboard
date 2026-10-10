@@ -88,6 +88,23 @@ def _finished_detail(result: Any) -> dict[str, Any]:
     return detail
 
 
+def chain_outcome(result: Any, default: str = "success") -> str:
+    """Publish partial and failed collector runs as those outcomes.
+
+    Only `run_status` opts in. Other jobs keep outcome success when some sources fail
+    and the status feed still marks them partial from failed_sources. An exception
+    already set default to failure and must stay a failure.
+    """
+    if default != "success" or not isinstance(result, dict):
+        return default
+    reported = result.get("run_status")
+    if reported == "partial":
+        return "partial"
+    if reported in {"failed", "failure"}:
+        return "failure"
+    return default
+
+
 def emit_job_finished(job_id: str, run_id: str, outcome: str, detail: dict[str, Any] | None = None) -> None:
     """Publish a 'Job Finished' event on the default EventBridge bus.
 
@@ -114,7 +131,8 @@ def emit_job_finished(job_id: str, run_id: str, outcome: str, detail: dict[str, 
             raise RuntimeError("EventBridge rejected the job-finished event")
     except Exception:
         logger.exception("emit_job_finished_failed")
-        if outcome == "success":
+        # A dropped success or partial event would skip the downstream job, so retry it.
+        if outcome in {"success", "partial"}:
             raise
 
 
@@ -156,6 +174,7 @@ def job_handler(
                 logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})
                 raise  # Lambda retries twice, then sends the event to the dead-letter queue.
             finally:
+                outcome = chain_outcome(result, outcome)
                 failed_ids = sorted({r["source_id"] for r in _runs if r["outcome"] == "failure"})
                 logger.info(
                     "job_finished",
