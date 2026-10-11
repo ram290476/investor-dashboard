@@ -3610,7 +3610,7 @@ a.catalyst-edgar-link:hover {
   color: var(--text);
 }
 
-.stock-bar-revised {
+.stock-bar.stock-bar-revised {
   background: repeating-linear-gradient(
     -45deg,
     var(--amber) 0 3px,
