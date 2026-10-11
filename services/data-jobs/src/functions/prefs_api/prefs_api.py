@@ -76,8 +76,9 @@ CHART_OVERLAYS = {
     "FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd",
     "NEWS:SENTIMENT",
 }
-# Company metrics beyond the static five (capex, and a pending twin such as capex_pending).
-FUNDAMENTAL_OVERLAY_RE = re.compile(r"^FUNDAMENTAL:[A-Za-z][A-Za-z0-9_]{0,64}$")
+# Company metrics beyond the static ids. The id may include a _pending suffix.
+# \Z (not $) so a trailing newline is not a second, distinct overlay.
+FUNDAMENTAL_OVERLAY_RE = re.compile(r"\AFUNDAMENTAL:[A-Za-z][A-Za-z0-9_]{0,64}\Z")
 DEFAULTS = {
     "tickers": ["TSLA", "SPCX"],
     "pinned": ["TSLA", "SPCX"],
@@ -135,7 +136,7 @@ def normalize_panels(raw) -> dict:
 
 def overlay_allowed(item: str) -> bool:
     """Static overlays, plus any FUNDAMENTAL:<id> with a safe metric id."""
-    return item in CHART_OVERLAYS or bool(FUNDAMENTAL_OVERLAY_RE.match(item))
+    return item in CHART_OVERLAYS or FUNDAMENTAL_OVERLAY_RE.fullmatch(item) is not None
 
 
 def normalize_panel_mode(raw) -> str:

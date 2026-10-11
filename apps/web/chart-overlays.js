@@ -49,8 +49,15 @@ const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", 
 const overlayById = new Map(OVERLAYS.map((overlay) => [overlay.id, overlay]));
 const dynamicById = new Map();
 
+// Same rule as prefs_api FUNDAMENTAL_OVERLAY_RE. The 65-character id includes a _pending suffix.
+const FUNDAMENTAL_OVERLAY_RE = /^FUNDAMENTAL:[A-Za-z][A-Za-z0-9_]{0,64}$/;
+
 function selectableOverlay(id) {
-  return overlayById.has(id) || /^FUNDAMENTAL:[A-Za-z0-9_]+$/.test(String(id || ""));
+  const value = String(id ?? "");
+  if (overlayById.has(value)) return true;
+  // `$` matches before a trailing newline, so require the whole id.
+  const match = FUNDAMENTAL_OVERLAY_RE.exec(value);
+  return Boolean(match && match[0] === value);
 }
 
 function pendingFundamental(rows) {
@@ -68,6 +75,7 @@ function rememberFundamentals(chartData) {
   }
   for (const [seriesId, rows] of rowsById) {
     const id = `FUNDAMENTAL:${seriesId}`;
+    if (!selectableOverlay(id)) continue;
     const base = overlayById.get(id);
     const pending = pendingFundamental(rows);
     const name = rows.find((row) => row.display_name)?.display_name || base?.label || seriesId.replaceAll("_", " ");

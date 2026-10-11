@@ -408,6 +408,8 @@ def test_chart_settings_accept_dynamic_fundamental_overlays(api):
         ({"TSLA": {"overlays": [{}], "lanes": ["VOL"]}}, "unsupported overlay"),
         ({"TSLA": {"overlays": [], "lanes": ["UNKNOWN"]}}, "unsupported lane"),
         ({"TSLA": {"overlays": ["SPY"] * 6, "lanes": ["VOL"]}}, "at most 5"),
+        ({"TSLA": {"overlays": ["FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
+        ({"TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
     ],
 )
 def test_chart_settings_reject_unknown_or_excess_values(api, settings, msg):

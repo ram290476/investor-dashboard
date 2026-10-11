@@ -98,10 +98,38 @@ test("proposed company series stay beside approved EDGAR rows and are labeled pe
   const capex = groups.find((group) => group.id === "Fundamentals").overlays.find((overlay) => overlay.id === "FUNDAMENTAL:capex_pending");
   assert.match(capex.label, /Pending review/);
   assert.equal(overlayDefinition("FUNDAMENTAL:capex_pending").unit, "USD");
+  const maxId = `FUNDAMENTAL:${"a".repeat(65)}`;
+  const pendingMax = `FUNDAMENTAL:${"b".repeat(57)}_pending`;
   assert.deepEqual(
-    chartSettingsFor({ chart_settings: { TSLA: { overlays: ["FUNDAMENTAL:capex_pending", "nope"], lanes: ["VOL"] } } }, "TSLA").overlays,
-    ["FUNDAMENTAL:capex_pending"],
+    chartSettingsFor({
+      chart_settings: {
+        TSLA: {
+          overlays: [
+            "FUNDAMENTAL:capex_pending",
+            "FUNDAMENTAL:1capex",
+            "FUNDAMENTAL:capex\n",
+            maxId,
+            `FUNDAMENTAL:${"a".repeat(66)}`,
+            pendingMax,
+            "nope",
+          ],
+          lanes: ["VOL"],
+        },
+      },
+    }, "TSLA").overlays,
+    ["FUNDAMENTAL:capex_pending", maxId, pendingMax],
   );
+  const hidden = overlayGroups(
+    { ticker: "TSLA", price_history: bars },
+    {
+      fundamentals: [
+        { series_id: "1capex", date: "2026-04-01", value: 3, unit: "USD", display_name: "Bad" },
+        { series_id: "a".repeat(66), date: "2026-04-01", value: 3, unit: "USD", display_name: "Too long" },
+      ],
+    },
+    {},
+  );
+  assert.equal(hidden.find((group) => group.id === "Fundamentals"), undefined);
 });
 
 test("empty fundamentals groups are hidden while all seven definitions remain supported", () => {
