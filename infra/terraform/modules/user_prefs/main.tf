@@ -183,12 +183,26 @@ resource "aws_cloudwatch_log_group" "api_fn" {
   name              = "/aws/lambda/${local.fn_name}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name change. In-place retention updates stay allowed.
+  # See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_cloudwatch_log_group" "api_access" {
   name              = "/aws/apigateway/${var.name}-site-api"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name change. In-place retention updates stay allowed.
+  # See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "aws_iam_policy_document" "api" {
