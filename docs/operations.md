@@ -106,8 +106,9 @@ validation, Terraform format/validation, deploy-guard shell tests, an arm64 Lamb
 and Checkov. It runs on pull requests and pushes to `main`.
 
 `.github/workflows/deploy.yml` runs only after a successful `main` CI push, or by manual
-dispatch from `main`. The manual run has an `allow_destroy` input, default false. Leave it
-false except when a reviewed change intentionally replaces resources. Protect the GitHub
+dispatch from `main`. A manual run honors the `production` environment variable
+`DEPLOY_ALLOW_DESTROY` only when that value is exactly `true`. Leave the variable unset.
+An automatic run after CI ignores it even if it is still set. Protect the GitHub
 `production` environment with required reviewers and branch restrictions; the environment gate
 is what prevents an unreviewed production apply.
 Configure:
@@ -141,6 +142,12 @@ The workflow checks that all four exist and fails with a clear message if one is
 This repository is public, so its workflow logs are public too. The workflow masks every e-mail
 address found in `TERRAFORM_TFVARS` before Terraform runs. Any other value in that secret may
 appear in plan output, so keep only non-sensitive settings in it.
+
+`DEPLOY_ALLOW_DESTROY` is not one of those four, and the deploy does not require it. Leave it
+unset on the `production` environment. Only someone who can edit that environment can set it.
+Setting it does not by itself deploy anything: set it to `true`, dispatch **Deploy production**
+from `main`, then unset it (or set it to `false`) as soon as that run has started. A later
+automatic deploy still ignores the variable.
 
 ### Who can assume the deploy role
 
@@ -201,8 +208,10 @@ and `scripts/check-plan-destroys.sh` reads `terraform show -json`. The apply use
 plan. The gate aborts when the plan deletes or replaces more than 10 managed resources, or
 deletes or replaces any `aws_lambda_function` or `aws_cloudwatch_log_group`. A replacement
 counts because it deletes the existing object; replacing a log group drops its events. A plan
-that cannot be parsed aborts too. The only waiver is a manual run from `main` with
-`allow_destroy` set to true, and that waiver applies only after the plan JSON parses.
+that cannot be parsed aborts too. The only waiver is a manual dispatch from `main` while
+the `production` environment variable `DEPLOY_ALLOW_DESTROY` is exactly `true`. Set that
+variable, dispatch **Deploy production**, then unset it. A `workflow_run` deploy ignores the
+variable. The waiver applies only after the plan JSON parses.
 
 #### CloudWatch log groups
 
@@ -227,12 +236,16 @@ To rename or retire a log group on purpose, knowing that the replacement deletes
 
 1. Remove that resource's `prevent_destroy` block in a reviewed change. On a `for_each` log
    group the block covers every instance, so review the whole plan, not only the one key.
-2. Dispatch **Deploy production** from `main` with `allow_destroy` set to true. The workflow
-   still plans first and records the resources it will destroy.
-3. Restore `prevent_destroy` in a follow-up if any of those log groups remain.
+2. On the `production` environment, set the variable `DEPLOY_ALLOW_DESTROY` to `true`.
+   Only an admin who can edit that environment can do this.
+3. Dispatch **Deploy production** from `main`. The workflow still plans first and records
+   the resources it will destroy. A run started by CI on `main` ignores the variable.
+4. Unset `DEPLOY_ALLOW_DESTROY` (or set it to `false`) as soon as that dispatch has started.
+5. Restore `prevent_destroy` in a follow-up if any of those log groups remain.
 
 `prevent_destroy` is a literal in the configuration. It cannot be turned off from
-`terraform.tfvars` or from the workflow input alone.
+`terraform.tfvars` or from `DEPLOY_ALLOW_DESTROY`. The variable only lets the destroy gate
+accept a plan. Terraform still rejects the plan until the lifecycle block is removed.
 
 #### Admin-only IAM on the deploy role
 

@@ -6,13 +6,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-    inputs:
-      # checkov:skip=CKV_GHA_7: Boolean waiver for a plan that already exists. It does not change the checkout ref, Dockerfile, or image tag, and a workflow_run deploy cannot set it.
-      allow_destroy:
-        description: "Allow deletes and replacements, including Lambda functions and CloudWatch log groups. Leave false unless a reviewed change intentionally replaces them."
-        type: boolean
-        required: false
-        default: false
 
 # Third-party actions are pinned to full commit SHAs (tag in the trailing comment).
 permissions: {}
@@ -34,8 +27,9 @@ jobs:
     timeout-minutes: 55 # the OIDC session lasts 1 hour
     environment: production
     env:
-      # Always the string true or false. workflow_run never sets the dispatch input.
-      ALLOW_DESTROY: ${{ (github.event_name == 'workflow_dispatch' && inputs.allow_destroy == true) && 'true' || 'false' }}
+      # Production environment variable, exact string true. Unset means false.
+      # workflow_run ignores it even when an admin has left the variable set.
+      ALLOW_DESTROY: ${{ (github.event_name == 'workflow_dispatch' && vars.DEPLOY_ALLOW_DESTROY == 'true') && 'true' || 'false' }}
     permissions:
       contents: read
       id-token: write # OIDC token for the AWS role; only this job gets it

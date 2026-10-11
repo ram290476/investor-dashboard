@@ -13,10 +13,11 @@
 # or aws_cloudwatch_log_group. Replacement counts because its actions include
 # "delete", and replacing a log group drops the retained events.
 #
-# ALLOW_DESTROY=true (the workflow_dispatch input, exactly the string true)
-# waives the policy after the JSON has parsed. Any other value, including
-# "false", "1", and an empty string, keeps the policy. Parse failures still
-# abort when the waiver is set.
+# ALLOW_DESTROY=true (exactly that string) waives the policy after the JSON has
+# parsed. The deploy workflow sets it only for workflow_dispatch, and only when
+# the production environment variable DEPLOY_ALLOW_DESTROY is true. Any other
+# value, including "false", "1", and an empty string, keeps the policy. Parse
+# failures still abort when the waiver is set.
 set -euo pipefail
 
 plan_json="${1:-}"
@@ -94,7 +95,7 @@ list_destroys() {
 }
 
 if [[ "${ALLOW_DESTROY:-}" == "true" ]]; then
-  echo "::warning::allow_destroy=true; destroy limits are waived for this plan (${count} delete/replace, ${protected} Lambda or log group)." >&2
+  echo "::warning::DEPLOY_ALLOW_DESTROY is true; destroy limits are waived for this plan (${count} delete/replace, ${protected} Lambda or log group)." >&2
   if [[ "${count}" -gt 0 ]]; then
     list_destroys
   fi
@@ -102,7 +103,7 @@ if [[ "${ALLOW_DESTROY:-}" == "true" ]]; then
 fi
 
 if (( count > max_destroy || protected > 0 )); then
-  echo "::error::Refusing deploy: plan destroys ${count} resource(s) (limit ${max_destroy}), including ${protected} Lambda function or CloudWatch log group resource(s). Dispatch Deploy production from main with allow_destroy=true only for an intentional replacement." >&2
+  echo "::error::Refusing deploy: plan destroys ${count} resource(s) (limit ${max_destroy}), including ${protected} Lambda function or CloudWatch log group resource(s). An admin must set the production environment variable DEPLOY_ALLOW_DESTROY to true, dispatch Deploy production from main, then unset that variable. A workflow_run deploy ignores it." >&2
   list_destroys
   exit 1
 fi
