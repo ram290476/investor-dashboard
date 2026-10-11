@@ -3519,8 +3519,8 @@ function renderStockPage() {
       charts.fundamentals,
       "No company fundamentals are in this snapshot.",
     ),
-    callsBlock,
     renderCompanyMetrics(listed, pageState),
+    callsBlock,
   );
 
   const tabs = node("div", "stock-page-tabs");
