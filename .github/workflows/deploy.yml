@@ -7,6 +7,7 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      # checkov:skip=CKV_GHA_7: Boolean waiver for a plan that already exists. It does not change the checkout ref, Dockerfile, or image tag, and a workflow_run deploy cannot set it.
       allow_destroy:
         description: "Allow deletes and replacements, including Lambda functions and CloudWatch log groups. Leave false unless a reviewed change intentionally replaces them."
         type: boolean
