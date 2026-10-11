@@ -3479,8 +3479,13 @@ function renderStockPage() {
   callsBlock.dataset.stockPanel = "calls";
   callsBlock.id = "stock-panel-calls";
   callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
-  if (charts.guidance.length) appendMetricGroups(callsBlock, charts.guidance, "");
-  callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
+  if (charts.guidance.length) {
+    appendMetricGroups(callsBlock, charts.guidance, "");
+    callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
+  } else {
+    callsBlock.append(node("p", "data-state", calls.transcripts));
+    callsBlock.append(node("p", "signal-note", calls.guidance));
+  }
 
   page.append(
     chart,

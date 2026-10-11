@@ -123,8 +123,12 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   assert.match(page, /charts\.fundamentals/);
   assert.match(page, /charts\.guidance/);
   assert.ok(kpisAt > 0 && metricsAt > kpisAt && callsAt > metricsAt);
+  const callsSource = page.slice(page.indexOf("const calls = callsCopy()"), page.indexOf("page.append("));
+  assert.match(callsSource, /node\("p", "data-state", calls\.transcripts\)/);
+  assert.doesNotMatch(callsSource, /if\s*\([\s\S]*callsBlock\s*=/);
   const phone = styles.slice(styles.indexOf(".stock-page [data-stock-panel]"), styles.indexOf("/* Data refresh"));
   assert.match(phone, /\.stock-page\[data-stock-tab\] \.company-metrics\s*\{[^}]*display:\s*grid/);
+  assert.match(phone, /\.stock-page\[data-stock-tab\] \[data-stock-panel="calls"\]\s*\{[^}]*display:\s*block/);
   const metrics = slice("function renderCompanyMetrics", "function appendMetricGroups");
   assert.match(metrics, /Pending review/);
   assert.match(metrics, /renderReviewBadge\(\)/);
