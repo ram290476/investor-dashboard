@@ -117,7 +117,8 @@ Each ticker adds `release_links`, either null when not supplied or:
   in YoY, or mixed historical inputs. Missing consensus is never displayed as a
   measured consensus surprise.
 
-`serving/chart_data/<T>.json` keeps existing chart fields and adds
+`serving/chart_data/<T>.json` keeps existing chart fields, the five-year
+`price_history` (the dashboard keeps the last 64 closes), and
 `correlation_history[series_id]`: up to 90 dated points with nullable 30D/90D
 correlations. Monthly points stay null. Null pressure is excluded from the
 renderable pressure history. UI correlation drift compares the latest 90D link

@@ -1,4 +1,4 @@
-import { chartValue, isNumericValue, validBars } from "./chart-period.js";
+import { chartValue, isNumericValue, servedPriceHistory, validBars } from "./chart-period.js";
 
 export const CHART_LANES = Object.freeze([
   { id: "VOL", label: "Volume", colorVar: "--lane-volume", glyph: "bars" },
@@ -44,6 +44,10 @@ export const OVERLAYS = [
   { id: "FUNDAMENTAL:fsd_subscribers", label: "FSD subscribers", group: "Fundamentals", kind: "fundamental" },
   { id: "NEWS:SENTIMENT", label: "7-day news sentiment", group: "Sentiment", kind: "sentiment" },
 ].map((overlay, index) => ({ ...overlay, short: overlay.kind === "market" ? overlay.id : undefined, color: index }));
+
+export const MARKET_OVERLAY_IDS = Object.freeze(
+  OVERLAYS.filter((overlay) => overlay.kind === "market").map((overlay) => overlay.id),
+);
 
 const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", "Policy & geo", "Fundamentals", "Sentiment"];
 const overlayById = new Map(OVERLAYS.map((overlay) => [overlay.id, overlay]));
@@ -143,9 +147,9 @@ export function chartSettingsFor(prefs, ticker) {
   };
 }
 
-export function overlayGroups(tickerData, chartData, dashboard, bars = validBars(tickerData?.price_history)) {
+export function overlayGroups(tickerData, chartData, dashboard, bars = validBars(servedPriceHistory(tickerData, chartData)), charts = null) {
   rememberFundamentals(chartData);
-  const context = { bars, tickerData, chartData, dashboard };
+  const context = { bars, tickerData, chartData, dashboard, charts };
   return GROUP_ORDER.map((label) => ({
     id: label,
     label,
@@ -236,18 +240,19 @@ function movingAverage(priceHistory, window, bars) {
   return alignedValues(averagePoints, bars);
 }
 
-function marketValues(overlay, dashboard, bars) {
+function marketValues(overlay, dashboard, bars, charts) {
   const record = dashboard?.tickers?.[overlay.id];
-  if (!record) return bars.map(() => null);
-  if (bars.some((bar) => bar.ts) && record.intraday?.bars?.length) {
+  const history = servedPriceHistory(record, charts?.[overlay.id]);
+  if (!record && !history.length) return bars.map(() => null);
+  if (bars.some((bar) => bar.ts) && record?.intraday?.bars?.length) {
     return alignedIntradayValues(record.intraday.bars, bars);
   }
-  const daily = (record.price_history || []).map((bar) => ({ date: bar.date, value: chartValue(bar) }));
+  const daily = history.map((bar) => ({ date: bar.date, value: chartValue(bar) }));
   const valuesByDate = new Map(daily.map((point) => [point.date, point.value]));
   return bars.map((bar) => valuesByDate.get(dateKey(bar)) ?? null);
 }
 
-export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard }) {
+export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard, charts }) {
   const overlay = overlayById.get(id);
   if (!overlay) {
     if (String(id || "").startsWith("FUNDAMENTAL:")) {
@@ -256,8 +261,8 @@ export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard })
     }
     return bars.map(() => null);
   }
-  if (overlay.kind === "market") return marketValues(overlay, dashboard, bars);
-  if (overlay.kind === "average") return movingAverage(tickerData?.price_history || [], overlay.window, bars);
+  if (overlay.kind === "market") return marketValues(overlay, dashboard, bars, charts);
+  if (overlay.kind === "average") return movingAverage(servedPriceHistory(tickerData, chartData), overlay.window, bars);
   if (overlay.kind === "macro") return alignedValues(chartData?.macro_series?.[overlay.id], bars);
   if (overlay.kind === "sentiment") {
     const observed = new Map((tickerData?.news?.sentiment_history || []).map(point => [dateKey(point), pointValue(point)]));

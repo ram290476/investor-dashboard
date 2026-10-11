@@ -139,6 +139,12 @@ def test_chart_route_only_reads_a_ticker_in_the_callers_watchlist(api, monkeypat
     assert denied["statusCode"] == 403
     assert reads == ["serving/chart_data/TSLA.json"]
 
+    proxy = _event("GET")
+    proxy["rawPath"] = "/chart/SPY"
+    allowed = mod.handler(proxy, None)
+    assert allowed["statusCode"] == 200
+    assert reads == ["serving/chart_data/TSLA.json", "serving/chart_data/SPY.json"]
+
 
 def test_stock_route_serves_proposed_metrics_with_status_and_stays_on_the_watchlist(api, monkeypatch):
     mod, _ = api
