@@ -84,6 +84,7 @@ module "alerting" {
   sms_window_minutes       = var.sms_window_minutes
   sms_max_per_window       = var.sms_max_per_window
   enable_cloudfront_alarms = var.enable_cloudfront_alarms
+  alert_notifier_enabled   = var.alert_notifier_enabled
   reserved_concurrency     = var.lambda_reserved_concurrency
 }
 
@@ -125,6 +126,7 @@ module "us_east_1" {
   primary_region             = var.region
   forward_event_patterns     = module.alerting.global_event_patterns
   sms_notifier_arn           = module.alerting.sms_notifier_arn
+  alert_notifier_enabled     = var.alert_notifier_enabled # plan-time; the ARN above is not known until apply
 }
 
 # Provider API keys in SSM (encrypted with the data key) plus a daily rotation

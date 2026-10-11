@@ -1,8 +1,10 @@
-# Email and SMS both go through this Lambda. Alarm topics (ops, security, and
-# the us-east-1 CloudFront topic) invoke it and do not deliver to an inbox or
-# a handset themselves. The Lambda is the only application publisher to the
-# ops-email and security-email topics, and to the SMS topic when a handset is
-# set. A direct subscription on an alarm topic would bypass the hourly cap.
+# Email and SMS both go through this Lambda. Alarm intake topics
+# (${name}-ops-alarms, ${name}-security-alarms, and the us-east-1 CloudFront
+# topic) invoke it and do not deliver to an inbox or a handset themselves.
+# The Lambda is the only application publisher to the delivery topics
+# (${name}-ops-alerts and ${name}-security-alerts, main.tf), which keep the
+# inboxes' existing, confirmed email subscriptions, and to the SMS topic when a
+# handset is set. A direct subscription on an intake topic would bypass the cap.
 #
 # Windows are fixed America/Los_Angeles clock buckets aligned to local midnight,
 # not a rolling interval from the first send. Email and SMS keep separate
@@ -72,6 +74,12 @@ variable "sms_max_per_window" {
 
 variable "enable_cloudfront_alarms" {
   description = "Also let the us-east-1 CloudFront topic invoke the notifier."
+  type        = bool
+  default     = true
+}
+
+variable "alert_notifier_enabled" {
+  description = "Plan-time switch for the us-east-1 CloudFront topic's notifier subscription (and this permission). Must match the us_east_1 module."
   type        = bool
   default     = true
 }
@@ -171,7 +179,7 @@ data "aws_iam_policy_document" "notifier" {
     sid     = "PublishOutbound"
     actions = ["sns:Publish"]
     resources = concat(
-      [for topic in aws_sns_topic.outbound_email : topic.arn],
+      [for topic in aws_sns_topic.this : topic.arn],
       local.sms_on ? [aws_sns_topic.sms[0].arn] : [],
     )
   }
@@ -211,25 +219,19 @@ resource "aws_iam_role_policy" "notifier" {
   policy = data.aws_iam_policy_document.notifier.json
 }
 
-resource "aws_sns_topic" "outbound_email" {
+# Intake topics. CloudWatch alarms, EventBridge rules and the key-rotation check
+# publish here; only the notifier subscribes. Delivery to inboxes stays on the
+# pre-existing ${name}-<topic>-alerts topics so their confirmed email
+# subscriptions are not replaced (deploy #199).
+resource "aws_sns_topic" "alarm" {
   for_each = local.topics
 
-  name              = "${var.name}-${each.key}-email"
+  name              = "${var.name}-${each.key}-alarms"
   kms_master_key_id = var.data_key_arn
 }
 
-data "aws_iam_policy_document" "outbound_email" {
+data "aws_iam_policy_document" "alarm" {
   for_each = local.topics
-
-  statement {
-    sid       = "NotifierPublish"
-    actions   = ["SNS:Publish"]
-    resources = [aws_sns_topic.outbound_email[each.key].arn]
-    principals {
-      type        = "AWS"
-      identifiers = [aws_iam_role.notifier.arn]
-    }
-  }
 
   statement {
     sid = "AccountOwnerManage"
@@ -237,7 +239,7 @@ data "aws_iam_policy_document" "outbound_email" {
       "SNS:GetTopicAttributes", "SNS:SetTopicAttributes", "SNS:Subscribe",
       "SNS:ListSubscriptionsByTopic", "SNS:Publish",
     ]
-    resources = [aws_sns_topic.outbound_email[each.key].arn]
+    resources = [aws_sns_topic.alarm[each.key].arn]
     principals {
       type        = "AWS"
       identifiers = ["arn:${data.aws_partition.current.partition}:iam::${local.account_id}:root"]
@@ -245,10 +247,25 @@ data "aws_iam_policy_document" "outbound_email" {
   }
 
   statement {
+    sid       = "AlarmsAndEventRulesPublish"
+    actions   = ["SNS:Publish"]
+    resources = [aws_sns_topic.alarm[each.key].arn]
+    principals {
+      type        = "Service"
+      identifiers = ["cloudwatch.amazonaws.com", "events.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+
+  statement {
     sid       = "DenyInsecureTransport"
     effect    = "Deny"
     actions   = ["SNS:Publish"]
-    resources = [aws_sns_topic.outbound_email[each.key].arn]
+    resources = [aws_sns_topic.alarm[each.key].arn]
     principals {
       type        = "*"
       identifiers = ["*"]
@@ -261,11 +278,11 @@ data "aws_iam_policy_document" "outbound_email" {
   }
 }
 
-resource "aws_sns_topic_policy" "outbound_email" {
+resource "aws_sns_topic_policy" "alarm" {
   for_each = local.topics
 
-  arn    = aws_sns_topic.outbound_email[each.key].arn
-  policy = data.aws_iam_policy_document.outbound_email[each.key].json
+  arn    = aws_sns_topic.alarm[each.key].arn
+  policy = data.aws_iam_policy_document.alarm[each.key].json
 }
 
 resource "aws_sns_topic" "sms" {
@@ -355,8 +372,8 @@ resource "aws_lambda_function" "notifier" {
     variables = merge(
       {
         CAP_TABLE_NAME           = aws_dynamodb_table.cap.name
-        OPS_EMAIL_TOPIC_ARN      = aws_sns_topic.outbound_email["ops"].arn
-        SECURITY_EMAIL_TOPIC_ARN = aws_sns_topic.outbound_email["security"].arn
+        OPS_EMAIL_TOPIC_ARN      = aws_sns_topic.this["ops"].arn
+        SECURITY_EMAIL_TOPIC_ARN = aws_sns_topic.this["security"].arn
         EMAIL_WINDOW_MINUTES     = tostring(var.email_window_minutes)
         EMAIL_MAX_PER_WINDOW     = tostring(var.email_max_per_window)
         SMS_WINDOW_MINUTES       = tostring(var.sms_window_minutes)
@@ -381,13 +398,13 @@ resource "aws_lambda_permission" "topics" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.notifier.function_name
   principal     = "sns.amazonaws.com"
-  source_arn    = aws_sns_topic.this[each.key].arn
+  source_arn    = aws_sns_topic.alarm[each.key].arn
 }
 
 resource "aws_sns_topic_subscription" "notifier" {
   for_each = local.topics
 
-  topic_arn = aws_sns_topic.this[each.key].arn
+  topic_arn = aws_sns_topic.alarm[each.key].arn
   protocol  = "lambda"
   endpoint  = aws_lambda_function.notifier.arn
 
@@ -397,7 +414,7 @@ resource "aws_sns_topic_subscription" "notifier" {
 # The CloudFront alarm topic lives in us-east-1. The subscription is created there;
 # this permission lets that topic invoke the notifier without a module cycle.
 resource "aws_lambda_permission" "cloudfront_topic" {
-  count = var.enable_cloudfront_alarms ? 1 : 0
+  count = var.enable_cloudfront_alarms && var.alert_notifier_enabled ? 1 : 0
 
   statement_id  = "AllowCloudFrontTopic"
   action        = "lambda:InvokeFunction"

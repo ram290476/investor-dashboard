@@ -2,9 +2,12 @@
 
 Windows are fixed buckets in America/Los_Angeles, aligned to local midnight
 (default 60 minutes, so one clock hour). Email and SMS each have their own
-window length and maximum. This function is the only publisher to the email
-topics and, when a handset is configured, the SMS topic. A direct subscription
-on an alarm topic would bypass the cap.
+window length and maximum. Alarms publish to the intake topics
+(``<name>-ops-alarms``, ``<name>-security-alarms``, and the us-east-1 CloudFront
+topic), which invoke this function. It is the only publisher to the delivery
+topics (``<name>-ops-alerts``, ``<name>-security-alerts``) where the inboxes
+subscribe and, when a handset is configured, the SMS topic. A direct
+subscription on an intake topic would bypass the cap.
 
 Fail open: if the dedupe table errors, that channel is still sent. If
 publishing itself fails, the invocation raises so SNS retries, and that
@@ -90,8 +93,14 @@ class DynamoCapStore:
 
 
 def email_topic_arn(source_arn: str, ops_arn: str, security_arn: str) -> str:
-    """Ops alarms, including the us-east-1 CloudFront topic, use the ops email topic."""
-    if "security-alerts" in (source_arn or ""):
+    """Pick the delivery topic for the intake topic that invoked us.
+
+    Security intake (``<name>-security-alarms``) mails the security delivery
+    topic. Everything else, including the us-east-1 CloudFront topic, mails ops.
+    ``-security-alerts`` is accepted too so a legacy source still routes to security.
+    """
+    topic_name = (source_arn or "").rsplit(":", 1)[-1]
+    if topic_name.endswith(("-security-alarms", "-security-alerts")):
         return security_arn
     return ops_arn
 
