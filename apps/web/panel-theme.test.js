@@ -28,14 +28,20 @@ test("the chart panel opens the company page from the right of the live price", 
   assert.doesNotMatch(styles, /\.company-page-link[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
 });
 
-test("the ticker bar keeps its research arrow and opens the company page from the ticker", () => {
+test("the ticker bar has no research arrow on desktop or mobile", () => {
   const watch = slice("function renderWatchlist", "function periodDirection");
-  assert.match(watch, /ticker-research/);
-  assert.match(watch, /navigateToResearch/);
+  assert.doesNotMatch(watch, /ticker-research/);
+  assert.doesNotMatch(watch, /navigateToResearch/);
+  assert.doesNotMatch(watch, /Open \$\{ticker\} research/);
+  assert.match(watch, /event\.key === "Enter"/);
+  assert.match(watch, /LONG_PRESS_MS/);
   assert.match(watch, /navigateToStock\(ticker\)/);
   assert.doesNotMatch(watch, /ticker-stock-link/);
   assert.doesNotMatch(watch, /Open \$\{ticker\} page/);
   assert.doesNotMatch(styles, /\.ticker-stock-link/);
+  assert.doesNotMatch(styles, /\.ticker-research/);
+  const phone = styles.slice(styles.indexOf("@media (max-width: 640px)"), styles.indexOf(".stock-page-tabs {"));
+  assert.doesNotMatch(phone, /ticker-research/);
 });
 
 test("government contracts use catalyst rows and month-day dates", () => {
@@ -102,6 +108,12 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   const heading = page.slice(0, page.indexOf("const page = node"));
   assert.doesNotMatch(heading, /renderMetricReview/);
   assert.match(page, /id === "kpis"\) block\.append\(renderMetricReview\(\)\)/);
+  const review = styles.slice(styles.indexOf(".metric-review {"), styles.indexOf(".metric-review-option {"));
+  assert.match(review, /margin-bottom:\s*var\(--space-3\)/);
+  assert.doesNotMatch(review, /margin(?:-top|-bottom)?:\s*-/);
+  assert.doesNotMatch(review, /position:\s*absolute/);
+  assert.doesNotMatch(styles, /\.metric-review-option\s*\{[^}]*position:\s*absolute/);
+  assert.doesNotMatch(styles, /\.metric-review-option\s*\{[^}]*margin(?:-top|-bottom)?:\s*-/);
   const appended = page.slice(page.indexOf("page.append("));
   const metricsAt = appended.indexOf("renderCompanyMetrics(listed, pageState)");
   const kpisAt = appended.indexOf('section("kpis", "Operating KPIs", charts.operating');
@@ -111,8 +123,12 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   assert.match(page, /charts\.fundamentals/);
   assert.match(page, /charts\.guidance/);
   assert.ok(kpisAt > 0 && metricsAt > kpisAt && callsAt > metricsAt);
+  const callsSource = page.slice(page.indexOf("const calls = callsCopy()"), page.indexOf("page.append("));
+  assert.match(callsSource, /node\("p", "data-state", calls\.transcripts\)/);
+  assert.doesNotMatch(callsSource, /if\s*\([\s\S]*callsBlock\s*=/);
   const phone = styles.slice(styles.indexOf(".stock-page [data-stock-panel]"), styles.indexOf("/* Data refresh"));
   assert.match(phone, /\.stock-page\[data-stock-tab\] \.company-metrics\s*\{[^}]*display:\s*grid/);
+  assert.match(phone, /\.stock-page\[data-stock-tab\] \[data-stock-panel="calls"\]\s*\{[^}]*display:\s*block/);
   const metrics = slice("function renderCompanyMetrics", "function appendMetricGroups");
   assert.match(metrics, /Pending review/);
   assert.match(metrics, /renderReviewBadge\(\)/);

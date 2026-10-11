@@ -324,9 +324,13 @@ test("company header shows only the company name and a centered Back to dashboar
   assert.match(styles, /\.stock-heading\s*\{[^}]*display:\s*grid/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*align-items:\s*center/);
+  assert.match(styles, /\.stock-heading\s*\{[^}]*padding-inline:\s*calc\(var\(--space-2\) \* 2\)/);
+  assert.match(styles, /\.overview\s*\{[^}]*padding:\s*14px 16px 12px/);
+  assert.match(styles, /\.stock-section\s*\{[^}]*padding:\s*14px 16px 16px/);
   const mobileAt = styles.lastIndexOf(".stock-heading {");
   const mobileHeading = styles.slice(mobileAt, styles.indexOf(".stock-page-tabs {", mobileAt));
   assert.match(mobileHeading, /align-items:\s*center/);
+  assert.doesNotMatch(mobileHeading, /padding-inline:\s*0/);
   assert.match(mobileHeading, /\.stock-dashboard-link\s*\{[^}]*align-self:\s*center/);
   const linkCss = styles.slice(styles.indexOf(".stock-dashboard-link {"), styles.indexOf(".stock-dashboard-link:hover"));
   assert.match(linkCss, /justify-self:\s*end/);

@@ -1377,19 +1377,6 @@ function renderWatchlist() {
     );
     const item = node("div", "ticker-watch-item");
     item.append(button);
-    const researchPath = tickerResearchPath(ticker);
-    if (researchPath) {
-      const researchLink = node("a", "ticker-research", "↗");
-      researchLink.href = researchPath;
-      researchLink.title = `Open ${ticker} research`;
-      researchLink.setAttribute("aria-label", `Open ${ticker} research page`);
-      researchLink.addEventListener("click", (event) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        event.preventDefault();
-        navigateToResearch(ticker);
-      });
-      item.append(researchLink);
-    }
     list.append(item);
   });
   const manage = node("button", "ticker-button ticker-manage");
@@ -3605,8 +3592,13 @@ function renderStockPage() {
   callsBlock.dataset.stockPanel = "calls";
   callsBlock.id = "stock-panel-calls";
   callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
-  if (charts.guidance.length) appendMetricGroups(callsBlock, charts.guidance, "");
-  callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
+  if (charts.guidance.length) {
+    appendMetricGroups(callsBlock, charts.guidance, "");
+    callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
+  } else {
+    callsBlock.append(node("p", "data-state", calls.transcripts));
+    callsBlock.append(node("p", "signal-note", calls.guidance));
+  }
 
   page.append(
     chart,

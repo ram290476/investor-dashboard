@@ -331,26 +331,6 @@ a {
   flex: 0 0 148px;
 }
 
-.ticker-research {
-  display: grid;
-  width: 38px;
-  min-height: 44px;
-  flex: 0 0 38px;
-  place-items: center;
-  align-self: center;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  color: var(--muted);
-  font-size: 16px;
-  text-decoration: none;
-}
-
-.ticker-research:hover {
-  border-color: var(--blue);
-  background: var(--hover);
-  color: var(--blue);
-}
-
 .watchlist-bar {
   display: flex;
   align-items: center;
@@ -3397,11 +3377,6 @@ a.catalyst-edgar-link:hover {
     flex-basis: 142px;
   }
 
-  .ticker-research {
-    width: 34px;
-    flex-basis: 34px;
-  }
-
   .ticker-button {
     min-width: 142px;
     flex: 0 0 142px;
@@ -3544,6 +3519,7 @@ a.catalyst-edgar-link:hover {
   gap: var(--space-2) var(--space-3);
   margin: 4px 0 12px;
   min-width: 0;
+  padding-inline: calc(var(--space-2) * 2);
 }
 
 .stock-heading-copy {
@@ -3804,6 +3780,7 @@ a.catalyst-edgar-link:hover {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+  margin-bottom: var(--space-3);
 }
 
 .metric-review-option {
@@ -4033,6 +4010,10 @@ a.catalyst-edgar-link:hover {
 
   .stock-page[data-stock-tab] .company-metrics {
     display: grid;
+  }
+
+  .stock-page[data-stock-tab] [data-stock-panel="calls"] {
+    display: block;
   }
 }
 
