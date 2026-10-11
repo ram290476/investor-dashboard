@@ -102,12 +102,14 @@ The CloudFront alarm and the IAM/sign-in forwarding rules are in us-east-1, so l
 ## GitHub Actions CI/CD
 
 `.github/workflows/ci.yml` runs Python lint/tests, dependency audit, browser-JavaScript syntax
-validation, Terraform format/validation, an arm64 Lambda image build and Checkov. It runs on pull
-requests and pushes to `main`.
+validation, Terraform format/validation, deploy-guard shell tests, an arm64 Lambda image build
+and Checkov. It runs on pull requests and pushes to `main`.
 
 `.github/workflows/deploy.yml` runs only after a successful `main` CI push, or by manual
-dispatch from `main`. Protect the GitHub `production` environment with required reviewers and
-branch restrictions; the environment gate is what prevents an unreviewed production apply.
+dispatch from `main`. The manual run has an `allow_destroy` input, default false. Leave it
+false except when a reviewed change intentionally replaces resources. Protect the GitHub
+`production` environment with required reviewers and branch restrictions; the environment gate
+is what prevents an unreviewed production apply.
 Configure:
 
 ### One-time setup
@@ -181,9 +183,56 @@ The deploy workflow must never pass an empty `jobs_image_uri` once jobs exist:
 2. **Every later run:** skip that bootstrap apply, build/push a new image, then apply once with
    that image URI. The workflow also refuses to apply if `JOBS_IMAGE_URI` is unset.
 
-The bootstrap check loads `terraform state list` into a bash array first. Piping `state list`
-directly into `grep -q` under `set -o pipefail` is unsafe: a successful early match can SIGPIPE
-`state list`, flip an `if !` condition, and re-enter the empty-image apply.
+The bootstrap check writes `terraform state list` to a file and compares addresses in bash
+(`scripts/decide-bootstrap.sh`). Do not pipe that list, or a `printf` of it, into `grep -q`
+under `set -o pipefail`. `grep -q` exits at the first match and SIGPIPEs the writer; the
+pipeline status is non-zero even though the address is present, and the workflow treats that
+as "not in state". Deploy 37496345092 failed that way on `terraform state list | grep -q`.
+Deploy 38137774464 (11 Oct 2026, 05:02 PT, commit `f1f5af6`) failed the same way on
+`printf | grep -q`: the guard took the empty-image path, Terraform destroyed 201 job
+resources (Lambdas, roles, rules, schedules, and log groups), and the second apply recreated
+them, which deleted the retained CloudWatch log events.
+
+If `terraform state list` fails, the deploy aborts. An empty list is the only signal for a
+first-time bootstrap. A failed list is not an empty state.
+
+Before either apply, `scripts/plan-guard.sh` runs `terraform plan -detailed-exitcode -out=tfplan`
+and `scripts/check-plan-destroys.sh` reads `terraform show -json`. The apply uses that saved
+plan. The gate aborts when the plan deletes or replaces more than 10 managed resources, or
+deletes or replaces any `aws_lambda_function` or `aws_cloudwatch_log_group`. A replacement
+counts because it deletes the existing object; replacing a log group drops its events. A plan
+that cannot be parsed aborts too. The only waiver is a manual run from `main` with
+`allow_destroy` set to true, and that waiver applies only after the plan JSON parses.
+
+#### CloudWatch log groups
+
+These log groups set `lifecycle { prevent_destroy = true }`:
+
+| Resource | What it keeps |
+| --- | --- |
+| `module.jobs.aws_cloudwatch_log_group.job` | Per-job Lambda logs |
+| `module.observability.aws_cloudwatch_log_group.lambda` | Pre-created function log groups |
+| `module.api_keys.aws_cloudwatch_log_group.checker` | Key-rotation checker logs |
+| `module.user_prefs.aws_cloudwatch_log_group.api_fn` | Preferences API logs |
+| `module.user_prefs.aws_cloudwatch_log_group.api_access` | API Gateway access logs |
+
+Terraform rejects the plan before it deletes retained events. That includes the empty-image
+failure mode: `module.jobs` drops every job instance when `jobs_image_uri` is empty, and
+`prevent_destroy` on the `for_each` log group rejects that plan. Changing retention is an
+in-place update and stays allowed. Automatic KMS key-material rotation keeps the same key ARN
+and stays allowed. Changing `name`, or the `for_each` key, is a replacement (destroy plus
+create), so it is rejected too.
+
+To rename or retire a log group on purpose, knowing that the replacement deletes its events:
+
+1. Remove that resource's `prevent_destroy` block in a reviewed change. On a `for_each` log
+   group the block covers every instance, so review the whole plan, not only the one key.
+2. Dispatch **Deploy production** from `main` with `allow_destroy` set to true. The workflow
+   still plans first and records the resources it will destroy.
+3. Restore `prevent_destroy` in a follow-up if any of those log groups remain.
+
+`prevent_destroy` is a literal in the configuration. It cannot be turned off from
+`terraform.tfvars` or from the workflow input alone.
 
 #### Admin-only IAM on the deploy role
 

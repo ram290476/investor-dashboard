@@ -98,6 +98,13 @@ resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${each.value}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name or for_each key change. In-place retention updates stay
+  # allowed. See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Saved Logs Insights queries for audit review (AU-6) and troubleshooting.
