@@ -1333,6 +1333,35 @@ function renderWatchlist() {
       });
       item.append(researchLink);
     }
+    if (ticker === session.selected && stockHash(ticker)) {
+      const openPage = node("a", "ticker-stock-link", `Open ${ticker} page →`);
+      openPage.href = `/${stockHash(ticker)}`;
+      openPage.dataset.stockOpen = ticker;
+      openPage.setAttribute("aria-label", `Open ${ticker} page`);
+      let linkTimer = 0;
+      const cancelLinkPress = () => window.clearTimeout(linkTimer);
+      openPage.addEventListener("pointerdown", () => {
+        cancelLinkPress();
+        linkTimer = window.setTimeout(() => {
+          openPage.dataset.longPress = "1";
+          navigateToStock(ticker);
+        }, LONG_PRESS_MS);
+      });
+      openPage.addEventListener("pointerup", cancelLinkPress);
+      openPage.addEventListener("pointerleave", cancelLinkPress);
+      openPage.addEventListener("pointercancel", cancelLinkPress);
+      openPage.addEventListener("click", (event) => {
+        if (openPage.dataset.longPress === "1") {
+          delete openPage.dataset.longPress;
+          event.preventDefault();
+          return;
+        }
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigateToStock(ticker);
+      });
+      item.append(openPage);
+    }
     list.append(item);
   });
   const manage = node("button", "ticker-button ticker-manage");

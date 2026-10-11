@@ -351,6 +351,26 @@ a {
   color: var(--blue);
 }
 
+.ticker-stock-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--blue);
+  background: var(--surface);
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ticker-stock-link:hover,
+.ticker-stock-link:focus-visible {
+  border-color: var(--blue);
+  background: var(--hover);
+}
+
 .watchlist-bar {
   display: flex;
   align-items: center;

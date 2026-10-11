@@ -28,11 +28,15 @@ test("the chart panel opens the company page from the right of the live price", 
   assert.doesNotMatch(styles, /\.company-page-link[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
 });
 
-test("the ticker bar keeps its research arrow and does not gain a company-page arrow", () => {
+test("the ticker bar keeps its research arrow and the company-page arrow", () => {
   const watch = slice("function renderWatchlist", "function periodDirection");
   assert.match(watch, /ticker-research/);
   assert.match(watch, /navigateToResearch/);
-  assert.doesNotMatch(watch, /ticker-stock-link|Open \$\{ticker\} page/);
+  assert.match(watch, /ticker-stock-link/);
+  assert.match(watch, /Open \$\{ticker\} page →/);
+  assert.match(watch, /navigateToStock\(ticker\)/);
+  assert.match(styles, /\.ticker-stock-link\s*\{[^}]*color:\s*var\(--blue\)/);
+  assert.doesNotMatch(styles, /\.ticker-stock-link[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
 });
 
 test("government contracts use catalyst rows and month-day dates", () => {
