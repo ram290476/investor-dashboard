@@ -1,5 +1,7 @@
 // Rates & yields blocks (#89). Pure view models: missing prints stay unavailable, never zero.
 
+import { formatConsumerDate, readablePanelText } from "./panel-dates.js";
+
 export const CURVE_TENOR_ORDER = ["1M", "3M", "6M", "1Y", "2Y", "3Y", "5Y", "7Y", "10Y", "20Y", "30Y"];
 const REGIME_MIN_BP = 1;
 
@@ -48,19 +50,21 @@ function statusOf(rates, key, fallbackSource) {
 }
 
 function whenText(lastAttempt) {
-  return lastAttempt ? `last attempt ${lastAttempt}` : "no attempt recorded";
+  if (!lastAttempt) return "no attempt recorded";
+  const day = formatConsumerDate(lastAttempt) || readablePanelText(lastAttempt);
+  return `last attempt ${day}`;
 }
 
 function unavailableMessage(block, status, fallback) {
   const source = status.source || "source not selected";
   const detail = status.detail || fallback;
-  return `Unavailable · ${block} · ${source} · ${whenText(status.last_attempt)}. ${detail}`;
+  return readablePanelText(`Unavailable · ${block} · ${source} · ${whenText(status.last_attempt)}. ${detail}`);
 }
 
 function errorMessage(block, status) {
   const source = status.source || "source not selected";
   const detail = status.detail || "Refresh data to retry.";
-  return `${block} could not be loaded · ${source} · ${whenText(status.last_attempt)}. ${detail}`;
+  return readablePanelText(`${block} could not be loaded · ${source} · ${whenText(status.last_attempt)}. ${detail}`);
 }
 
 function linePath(values, width, height) {
@@ -171,9 +175,9 @@ export function curveView(rates, dashboardState) {
   return {
     kind: "ready",
     regime: shown,
-    dates: `${curve.date} vs ${curve.ref_date_1m}`,
+    dates: `${formatConsumerDate(curve.date) || curve.date} vs ${formatConsumerDate(curve.ref_date_1m) || curve.ref_date_1m}`,
     note: moves.length ? `${moves.join(" · ")} (1M)` : "",
-    ariaLabel: `Treasury yield curve on ${curve.date} versus ${curve.ref_date_1m}. ${shown || "Regime unavailable"}.`,
+    ariaLabel: `Treasury yield curve on ${formatConsumerDate(curve.date) || curve.date} versus ${formatConsumerDate(curve.ref_date_1m) || curve.ref_date_1m}. ${shown || "Regime unavailable"}.`,
     todayPath: paths.today,
     agoPath: paths.ago,
     fillPath: paths.fill,

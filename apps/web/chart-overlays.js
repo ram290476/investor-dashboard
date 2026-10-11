@@ -1,4 +1,5 @@
 import { chartValue, isNumericValue, servedPriceHistory, validBars } from "./chart-period.js";
+import { formatQuarterLabel } from "./panel-dates.js";
 
 export const CHART_LANES = Object.freeze([
   { id: "VOL", label: "Volume", colorVar: "--lane-volume", glyph: "bars" },
@@ -314,7 +315,8 @@ export function fundamentalSummary(id, chartData, through) {
   const value = row.unit === "ratio" ? `${(Number(row.value) * 100).toFixed(1)}%`
     : row.unit === "USD" ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(row.value)
     : Number(row.value).toLocaleString("en-US");
-  return `${value}${row.fiscal_quarter ? ` · ${row.fiscal_quarter}` : ""}`;
+  const quarter = row.fiscal_quarter ? (formatQuarterLabel(row.fiscal_quarter) || row.fiscal_quarter) : "";
+  return `${value}${quarter ? ` · ${quarter}` : ""}`;
 }
 
 export function isMarketOverlay(id) {
