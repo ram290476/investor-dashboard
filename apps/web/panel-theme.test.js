@@ -64,13 +64,14 @@ test("about this data uses the compact themed button and the theme face", () => 
   assert.match(styles, /\.panel\[data-drawer="about-data"\] \.overlay-chip/);
 });
 
-test("company page panels use panel chrome, month-day dates, and direction marks", () => {
+test("company page panels use panel chrome and direction marks", () => {
   const page = slice("function renderStockPage", "function renderResearchPage");
   const card = slice("function renderMetricCard", "function renderStockPage");
   const mark = slice("function renderDirectionMark", "function renderMetricCard");
   assert.match(page, /panel stock-section/);
-  assert.match(page, /monthDay\(session\.dashboard\?\.generated_at\)/);
-  assert.match(page, /stockFreshnessText\([\s\S]*displayZone\(\)/);
+  assert.match(page, /companyName\(session\.selected, payload\)/);
+  assert.doesNotMatch(page, /monthDay\(session\.dashboard\?\.generated_at\)/);
+  assert.doesNotMatch(page, /stockFreshnessText\(/);
   assert.match(page, /overlay-chip stock-tab/);
   assert.match(card, /renderDirectionMark\("QoQ"/);
   assert.match(card, /renderDirectionMark\("YoY"/);

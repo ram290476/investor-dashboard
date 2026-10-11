@@ -35,7 +35,6 @@ import {
   formatMetricValue,
   freshnessBadge,
   metricsForReview,
-  stockFreshnessText,
   LONG_PRESS_MS,
   nextStockTab,
   stockPanels,
@@ -3442,11 +3441,6 @@ function renderStockPage() {
   // The review toggle filters the metrics list. Chart panels always include pending series.
   const listed = stockPanels(payload, chartData, { ...periodOptions, review });
   const charts = stockPanels(payload, chartData, { ...periodOptions, review: "all" });
-  const badge = freshnessBadge(payload, pageState, session.selected, review);
-  const freshnessText = stockFreshnessText(payload, pageState, session.selected, new Date(), displayZone(), review);
-  const bars = validBars(history);
-  const latest = bars.at(-1);
-  const dayChange = returns(history, 1);
   root.replaceChildren();
   applyTheme(session.prefs.display);
   root.append(renderAppHeader(), renderWatchlist());
@@ -3454,19 +3448,10 @@ function renderStockPage() {
   const heading = node("section", "panel stock-heading");
   heading.dataset.stockPanel = "overview";
   const copy = node("div", "stock-heading-copy");
-  const title = node("h2", "", `${session.selected} · ${companyName(session.selected, payload)}`);
+  const title = node("h2", "", companyName(session.selected, payload));
   title.id = "stock-title";
   title.tabIndex = -1;
-  const price = node("p", "stock-price");
-  price.append(node("span", "stock-price-value", latest ? formatPrice(displayPrice(latest)) : "—"));
-  if (isNumericValue(dayChange)) {
-    price.append(node("span", polarity(dayChange), ` ${formatPercent(dayChange)}`));
-  }
-  const updatedDay = monthDay(session.dashboard?.generated_at);
-  const updated = updatedDay ? `Updated ${updatedDay}` : "Updated time unavailable";
-  const freshness = node("p", "stock-freshness", freshnessText);
-  freshness.dataset.tone = badge.tone;
-  copy.append(title, price, node("p", "overview-meta", updated), freshness);
+  copy.append(title);
   const back = node("a", "stock-dashboard-link", "Back to dashboard");
   back.href = "/";
   back.dataset.stockBack = "dashboard";
