@@ -3512,7 +3512,6 @@ function renderStockPage() {
 
   page.append(
     chart,
-    renderCompanyMetrics(listed, pageState),
     section("kpis", "Operating KPIs", charts.operating, emptyKpiCopy()),
     section(
       "fundamentals",
@@ -3521,6 +3520,7 @@ function renderStockPage() {
       "No company fundamentals are in this snapshot.",
     ),
     callsBlock,
+    renderCompanyMetrics(listed, pageState),
   );
 
   const tabs = node("div", "stock-page-tabs");
