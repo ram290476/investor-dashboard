@@ -430,8 +430,15 @@ a {
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.8fr);
-  gap: 12px;
+  gap: var(--space-3);
   align-items: start;
+}
+
+.side-column {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: var(--space-3);
 }
 
 .research-heading {
@@ -2252,7 +2259,7 @@ input::placeholder {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 12px;
+  gap: var(--space-3);
   margin: 12px 0;
 }
 
@@ -3328,7 +3335,7 @@ a.catalyst-edgar-link:hover {
   .side-column {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: var(--space-3);
   }
 
   .side-column .panel {
