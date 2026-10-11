@@ -1582,7 +1582,7 @@ def test_balance_sheet_dates_do_not_propose_and_keep_column_alignment():
 
 
 def test_restated_nine_months_beats_the_original_and_a_stale_q4_loses_to_the_release():
-    """BYND Q4 is FY minus the 10-K's restated nine months, not the original 10-Q figure."""
+    """A normal Q4 is FY minus the 10-Q nine-month figure. Only a restated nine-month value is stale."""
     quarters = [
         _tagged_fact("2025-01-01", "2025-03-31", 10, "10q", "2025-11-12", fp="Q3", fy=2025),
         _tagged_fact("2025-04-01", "2025-06-30", 20, "10q", "2025-11-12", fp="Q3", fy=2025),
@@ -1624,8 +1624,18 @@ def test_restated_nine_months_beats_the_original_and_a_stale_q4_loses_to_the_rel
         _tagged_fact("2025-01-01", "2025-09-30", 0, "10q", "2025-11-12", form="10-Q", fp="Q3", fy=2025),
         _tagged_fact("2025-01-01", "2025-12-31", -130.18, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
     ]
-    stale = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": stale_facts}}}, "BYND")
-    assert _value(stale, "operating_income", "2025Q4") == pytest.approx(-130.18)
+    normal = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": stale_facts}}}, "BYND")
+    assert _value(normal, "operating_income", "2025Q4") == pytest.approx(-130.18)
+    assert normal[-1].get("derivation") != "stale_ytd"
+    restated_later = [
+        *stale_facts,
+        _tagged_fact("2025-01-01", "2025-09-30", 2.563, "10k-a", "2026-04-20", form="10-K/A", fp="FY", fy=2025),
+    ]
+    revised = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": restated_later}}}, "BYND")
+    revised_q4 = next(
+        row for row in revised if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4"
+    )
+    assert revised_q4["derivation"] == "stale_ytd"
     release = """
     <p>(In thousands)</p>
     <table>
@@ -1639,11 +1649,88 @@ def test_restated_nine_months_beats_the_original_and_a_stale_q4_loses_to_the_rel
         ir.load_catalog("BYND"),
         **_meta(ticker="BYND", source_kind="press_release", fiscal_period="2025Q4"),
     )["rows"]
-    winners, _revisions = ir.dedupe_observations(stale + press)
+    winners, _revisions = ir.dedupe_observations(normal + press)
     chosen = next(row for row in winners if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4")
-    assert chosen["value"] == pytest.approx(-132_743_000)
-    assert chosen["source_kind"] == "press_release"
+    assert chosen["value"] == pytest.approx(-130.18)
+    assert chosen["source_kind"] == "xbrl"
+    replaced, _revisions = ir.dedupe_observations(revised + press)
+    segment_loses = next(
+        row for row in replaced if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4"
+    )
+    assert segment_loses["value"] == pytest.approx(-132_743_000)
+    assert segment_loses["source_kind"] == "press_release"
     fresh, _revisions = ir.dedupe_observations(operating + press)
     kept = next(row for row in fresh if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4")
     assert kept["value"] == pytest.approx(-132.743)
     assert kept["source_kind"] == "xbrl"
+
+
+def test_segment_heading_row_does_not_replace_the_company_total():
+    """Amazon prints 'AWS Segment:' as a row, then the segment's operating income."""
+    html = """
+    <p>(in millions)</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q4 2024</td></tr>
+      <tr><td>Operating income</td><td>24,977</td><td>21,203</td></tr>
+      <tr><td>AWS Segment:</td><td></td><td></td></tr>
+      <tr><td>Operating income</td><td>12,465</td><td>10,632</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        html,
+        ir.load_catalog("AMZN"),
+        **_meta(ticker="AMZN", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    assert _value(parsed["rows"], "operating_income", "2025Q4") == pytest.approx(24_977_000_000)
+    assert _value(parsed["rows"], "operating_income", "2024Q4") == pytest.approx(21_203_000_000)
+    assert not any(row["value"] == pytest.approx(12_465_000_000) for row in parsed["rows"])
+
+
+def test_millions_caption_above_a_long_preamble_scales_revenue():
+    """Alphabet's '(in millions)' caption sits well above the revenue table."""
+    filler = " ".join(["narrative"] * 200)
+    html = f"""
+    <p>(in millions, except per share amounts)</p>
+    <p>{filler}</p>
+    <table>
+      <tr><td></td><td>Q4 2024</td><td>Q4 2025</td></tr>
+      <tr><td>Revenues</td><td>96,469</td><td>113,828</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        html,
+        ir.load_catalog("GOOG"),
+        **_meta(ticker="GOOG", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    assert _value(parsed["rows"], "revenue_gaap", "2025Q4") == pytest.approx(113_828_000_000)
+    assert _value(parsed["rows"], "revenue_gaap", "2024Q4") == pytest.approx(96_469_000_000)
+
+
+def test_footnote_adjusted_and_reconciliation_labels_are_not_proposed():
+    html = """
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Adjusted EBITDA1</td><td>10</td><td>9</td></tr>
+      <tr><td>Adjusted operating income</td><td>8</td><td>7</td></tr>
+      <tr><td>GAAP net loss</td><td>(4)</td><td>(3)</td></tr>
+      <tr><td>GAAP revenue</td><td>20</td><td>18</td></tr>
+      <tr><td>Robotaxi miles</td><td>5</td><td>4</td></tr>
+    </table>
+    <table>
+      <tr><td>Reconciliation of GAAP to non-GAAP</td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Other operating metric</td><td>1</td><td>2</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        html,
+        ir.load_catalog("EVGO"),
+        **_meta(ticker="EVGO", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    labels = " ".join(item["metric_id"] for item in parsed["proposals"])
+    assert "adjusted" not in labels
+    assert "ebitda" not in labels
+    assert "gaap" not in labels
+    assert "robotaxi_miles" in labels
+    assert "other_operating_metric" not in labels
+    stored = {row["metric_id"] for row in parsed["rows"]}
+    assert stored.isdisjoint({"net_income_gaap", "revenue_gaap", "operating_income"})

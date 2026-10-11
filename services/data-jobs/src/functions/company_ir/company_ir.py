@@ -795,7 +795,20 @@ _BALANCE_SHEET = re.compile(
     re.IGNORECASE,
 )
 _PROPOSAL_SKIP = re.compile(
-    r"^(?:total|totals|basic|diluted)$|\b(?:basic|diluted)\b|\bfootnotes?\b|^\(\d+\)|\(\d+\)\s",
+    r"^(?:total|totals|basic|diluted)$"
+    r"|\b(?:basic|diluted)\b"
+    r"|\bfootnotes?\b"
+    r"|^\(\d+\)|\(\d+\)\s"
+    r"|[a-z]\d+$"
+    r"|^adjusted\b"
+    r"|^gaap\s+(?:net\s+(?:loss|income)|revenue)\b",
+    re.IGNORECASE,
+)
+_SEGMENT_HEADING = re.compile(r"\bsegment\s*:?\s*$", re.IGNORECASE)
+_CONSOLIDATED_HEADING = re.compile(r"\bconsolidated\b", re.IGNORECASE)
+_RECONCILIATION = re.compile(r"\breconciliation\b", re.IGNORECASE)
+_SCALE_CAPTION = re.compile(
+    r"(?:\(\s*)?(?:\$\s*)?in\s+(?:thousands|millions|billions)\b",
     re.IGNORECASE,
 )
 
@@ -937,6 +950,7 @@ def table_scan(
         tail = " ".join(str(cell) for cell in table[0])[-300:]
         header_blob = " ".join(str(cell) for cell in table[0])
         segment_table = re.search(r"\bsegment\b", tail, re.IGNORECASE) is not None
+        reconciliation = _RECONCILIATION.search(header_blob) is not None
         in_non_gaap = _NON_GAAP.search(tail) is not None
         reported_scale = table_unit_scale(table[0])
         date_only = all(_column_is_date(table[0][index]) for index, _period, _end in quarters)
@@ -948,6 +962,8 @@ def table_scan(
         header_indexes = [index for index, _period, _end in quarters]
         table_rows: list[tuple[bool, dict]] = []
         table_proposals: list[tuple[str, dict]] = []
+        # A row such as "AWS Segment:" scopes the following lines until a total or consolidated heading.
+        segment_scope = segment_table
         for cells in table[1:]:
             if not cells or not str(cells[0]).strip():
                 continue
@@ -965,6 +981,10 @@ def table_scan(
                 for period, _end, cell_index in aligned
                 if cell_index < len(cells) and _parse_cell(cells[cell_index])[0] is not None
             ]
+            if _SEGMENT_HEADING.search(raw_label):
+                segment_scope = True
+            elif _CONSOLIDATED_HEADING.search(raw_label):
+                segment_scope = False
             if not valued and raw_label:
                 if _NON_GAAP.search(raw_label):
                     in_non_gaap = True
@@ -976,17 +996,24 @@ def table_scan(
                 # Cash-flow "change in" lines and the noncurrent rollforward are not the balance.
                 if "change in" in normalized or "net of current" in normalized or "write down" in normalized:
                     entry = None
+            is_total = normalized == "total" or normalized.endswith(" total") or normalized.startswith("total ")
+            if is_total and not segment_table:
+                segment_scope = False
             blocked = False
             if entry and (in_non_gaap or _NON_GAAP.search(raw_label)) and _is_gaap_metric(entry):
                 blocked = True
                 entry = None
-            if entry and segment_table and entry.get("metric_id") in _COMPANY_TOTAL_METRICS:
+            if entry and (segment_table or segment_scope) and entry.get("metric_id") in _COMPANY_TOTAL_METRICS:
                 blocked = True
                 entry = None
             if entry and balance_sheet and not _is_instant_metric(str(entry.get("metric_id") or "")):
                 blocked = True
                 entry = None
-            is_total = normalized == "total" or normalized.endswith(" total") or normalized.startswith("total ")
+            if entry and _is_gaap_metric(entry) and re.match(
+                r"adjusted\b|^gaap\s+(?:net\s+(?:loss|income)|revenue)\b", normalized, re.IGNORECASE
+            ):
+                blocked = True
+                entry = None
             label_scale, unit_hint = scale_from_label(raw_label)
             parsed_any = False
             for fiscal_period, column_end, index in aligned:
@@ -1030,7 +1057,7 @@ def table_scan(
                         ),
                     )
                 )
-            if blocked or entry is not None or not parsed_any or method == "llm" or balance_sheet:
+            if blocked or entry is not None or not parsed_any or method == "llm" or balance_sheet or reconciliation:
                 continue
             if _skip_proposal(raw_label):
                 continue
@@ -1330,7 +1357,6 @@ def _derive_filing_quarters(
     components: dict[tuple[str, str], tuple[float, str]],
     published: dict[str, float],
     seen_ends: dict[str, float],
-    filed_for: dict[tuple[str, str], str] | None = None,
     prior_nines: dict[int, tuple[float, str, str]] | None = None,
 ) -> tuple[dict[str, tuple[float, str]], set[str]]:
     """Difference YTD pieces from this filing. Borrow an earlier quarter only for a new span.
@@ -1339,10 +1365,10 @@ def _derive_filing_quarters(
     The first time an end date appears, earlier published quarters complete the difference.
     A missing quarter also comes from two consecutive spans in the same filing, including
     Q1 = six months minus Q2 when the three-month Q1 fact was never filed.
-    Q4 uses the latest nine-month figure. One filed with the 10-K is the comparative.
-    One that exists only on the earlier 10-Q is marked stale so a press release can win.
+    Q4 is the fiscal year minus the nine-month figure from the earlier 10-Q. That is the
+    normal case: a 10-K does not repeat the nine-month fact. It is stale only when a
+    later filing restates that same nine-month value.
     """
-    filed_for = filed_for or {}
     prior_nines = prior_nines or {}
     years = sorted({int(period[:4]) for period, _bucket in components})
     derived: dict[str, tuple[float, str]] = {}
@@ -1398,20 +1424,12 @@ def _derive_filing_quarters(
         if q4 is not None:
             derived[quarter_key] = q4
         elif fy is not None and (nine is not None or year in prior_nines):
-            if nine is not None:
-                nine_value, nine_filed = nine[0], filed_for.get((f"{year}Q3", "nine"), "")
-            else:
-                nine_value, _nine_end, nine_filed = prior_nines[year]
+            nine_value = nine[0] if nine is not None else prior_nines[year][0]
             derived[quarter_key] = (fy[0] - nine_value, fy[1])
-            fy_filed = filed_for.get((f"{year}Q4", "fy"), "")
-            if nine_filed < fy_filed:
-                stale.add(quarter_key)
         elif fy is not None and (q1 is not None or q2 is not None or q3 is not None or fresh(fy)):
             base = prior_sum(year, (1, 2, 3))
             if base is not None:
                 derived[quarter_key] = (fy[0] - base, fy[1])
-                if not (q1 is not None and q2 is not None and q3 is not None):
-                    stale.add(quarter_key)
     return derived, stale
 
 
@@ -1421,7 +1439,8 @@ def _discrete_cashflow(
 ) -> tuple[dict[str, float], dict[str, str], set[str]]:
     """Single quarters, preferring every input from the same filing, plus the closing end date.
 
-    The third item is fiscal periods whose Q4 used a nine-month figure older than the 10-K.
+    The third item is quarters whose nine-month input was restated by a later filing.
+    A 10-K that simply arrives after the 10-Q does not make Q4 stale.
     """
     periods = _periods_for_facts(facts, fiscal_end_month)
     filings: dict[tuple, list[tuple[str, str, float, str, str]]] = {}
@@ -1445,6 +1464,7 @@ def _discrete_cashflow(
     ends: dict[str, str] = {}
     seen_ends: dict[str, float] = {}
     prior_nines: dict[int, tuple[float, str, str]] = {}
+    nine_values: dict[int, list[float]] = {}
     stale: set[str] = set()
     for key in order:
         components: dict[tuple[str, str], tuple[float, str]] = {}
@@ -1455,9 +1475,7 @@ def _discrete_cashflow(
                 continue
             components[slot] = (value, end)
             filed_for[slot] = filed
-        derived, derived_stale = _derive_filing_quarters(
-            components, published, seen_ends, filed_for, prior_nines
-        )
+        derived, derived_stale = _derive_filing_quarters(components, published, seen_ends, prior_nines)
         stale -= set(derived)
         stale |= derived_stale
         for period, (value, end) in derived.items():
@@ -1469,6 +1487,15 @@ def _discrete_cashflow(
             if slot[1] == "nine" and len(slot[0]) >= 4 and slot[0][:4].isdigit():
                 year = int(slot[0][:4])
                 filed = filed_for.get(slot, "")
+                seen = nine_values.setdefault(year, [])
+                restated = any(abs(value - earlier) > 1e-6 for earlier in seen)
+                # The filing that carries both the new nine-month figure and the fiscal year
+                # already subtracted the restated amount. Any other later change leaves Q4
+                # on the original nine-month figure.
+                same_filing = (f"{year}Q4", "fy") in components
+                if restated and f"{year}Q4" in published and not same_filing:
+                    stale.add(f"{year}Q4")
+                seen.append(value)
                 previous = prior_nines.get(year)
                 if previous is None or filed >= previous[2]:
                     prior_nines[year] = (value, end, filed)
@@ -2709,18 +2736,33 @@ def narrative_candidates(text: str, *, enabled: bool) -> list[dict]:
     return found
 
 
+def _scale_phrase(text: str) -> str:
+    """The unit caption in `text`, if it says the figures are in thousands, millions, or billions."""
+    found = list(_SCALE_CAPTION.finditer(text or ""))
+    if not found:
+        return ""
+    phrase = text[found[-1].start() : found[-1].end()]
+    return " ".join(phrase.split())
+
+
 def _with_scale_caption(text: str, tables: list[list[list[str]]]) -> list[list[list[str]]]:
-    """Pull `(in thousands)` / `(in millions)` from the text above an HTML table."""
+    """Pull `(in thousands)` / `(in millions)` from the text above an HTML table.
+
+    The caption often sits well above the table it covers. Each table takes only the
+    caption in its own preamble, so a unit on one statement does not scale a later table.
+    """
     if not tables or "<table" not in text.lower():
         return tables
-    matches = list(re.finditer(r"(?is)<table\b.*?</table>", text))
-    if len(matches) != len(tables):
-        return tables
+    starts = [match.start() for match in re.finditer(r"(?is)<table\b", text)]
     captioned = []
-    for table, match in zip(tables, matches, strict=True):
-        before = plain_text(text[max(0, match.start() - 800) : match.start()])
-        snippet = " ".join(before.split())[-500:]
-        if re.search(r"in\s+(?:thousands|millions|billions)", snippet, re.IGNORECASE):
+    for index, table in enumerate(tables):
+        if index >= len(starts):
+            captioned.append(table)
+            continue
+        before = plain_text(text[max(0, starts[index] - 8000) : starts[index]])
+        snippet = _scale_phrase(before)
+        own = _scale_phrase(" ".join(" ".join(row) for row in table[:8]))
+        if snippet and not own:
             table = [[snippet], *table]
         captioned.append(table)
     return captioned
@@ -2812,7 +2854,7 @@ def _priority(row: dict) -> tuple:
     extracted = row.get("extracted_at")
     stamp = extracted.isoformat() if isinstance(extracted, datetime) else str(extracted or "")
     score = table.get(kind, 0)
-    # Q4 inferred from an older 10-Q nine-month figure loses to the press release for that quarter.
+    # Q4 loses to the press release only when a later filing restated the nine-month figure.
     if row.get("derivation") == "stale_ytd":
         score = min(score, 30)
     return (score, published, stamp)
