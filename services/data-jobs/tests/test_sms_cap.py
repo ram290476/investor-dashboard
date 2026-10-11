@@ -1,14 +1,24 @@
 """Hourly email and SMS caps: one message per issue per channel per fixed Pacific clock window."""
 
+import copy
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import boto3
 import pytest
 from moto import mock_aws
 
-from sms_cap import MemoryStore, deliver, format_email, format_sms, issue_key, window_bounds
+from sms_cap import (
+    MemoryStore,
+    deliver,
+    format_email,
+    format_sms,
+    is_vulnerability_key,
+    issue_key,
+    window_bounds,
+)
 from sms_notifier import DynamoCapStore, email_topic_arn, handler
 
 PT = ZoneInfo("America/Los_Angeles")
@@ -131,7 +141,7 @@ def test_security_hub_repeats_of_one_cve_share_a_key_and_a_short_text():
             "detail": {"findings": [{"Title": "CVE-2026-84233 - rpm, rpm-libs", "GeneratorId": "AWSInspector"}]},
         }
     )
-    assert issue_key("AWS Notification Message", body) == "securityhub:CVE-2026-84233 - rpm, rpm-libs"
+    assert issue_key("AWS Notification Message", body) == "vuln:CVE-2026-84233"
     text = format_sms("AWS Notification Message", body + "\n\n--\nunsubscribe", 0)
     assert text.startswith("CVE-2026-84233")
     assert "unsubscribe" not in text
@@ -312,3 +322,168 @@ def test_dynamodb_store_caps_each_channel_per_hour(monkeypatch):
             assert str(item["window"]) == "2026-10-11T10:00-0700"
             # TTL reaches the end of the next window (12:00 PT), not a multi-day hold.
             assert int(item["expires_at"]) == int(_pt(11, 12, 0).timestamp())
+
+
+# ---------------------------------------------------------------------------
+# Vulnerability findings: Inspector and its Security Hub copy are one issue.
+# Fixtures are the 2026-10-11 10:46 PT events for CVE-2026-56857 on the jobs
+# image (deploy #200), with the account id redacted.
+# ---------------------------------------------------------------------------
+FIXTURES = Path(__file__).parent / "fixtures" / "notifier"
+SECURITY_ALARMS = "arn:aws:sns:us-west-1:123456789012:invdash-security-alarms"
+
+
+def _fixture(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text())
+
+
+def _inspector() -> dict:
+    return _fixture("inspector2_finding_cve.json")
+
+
+def _security_hub() -> dict:
+    return _fixture("securityhub_imported_cve.json")
+
+
+def _sns(payload: dict, subject: str | None = None) -> dict:
+    sns = {"TopicArn": SECURITY_ALARMS, "Message": json.dumps(payload)}
+    if subject is not None:
+        sns["Subject"] = subject
+    return {"Records": [{"Sns": sns}]}
+
+
+def test_inspector_and_security_hub_copy_of_one_cve_share_a_key():
+    inspector = issue_key("", json.dumps(_inspector()))
+    hub = issue_key("AWS Notification Message", json.dumps(_security_hub()))
+    assert inspector == hub == "vuln:CVE-2026-56857:ecr:invdash/jobs"
+    assert is_vulnerability_key(inspector)
+    assert "inspector" not in inspector and "securityhub" not in inspector
+
+
+def test_new_image_digest_with_the_same_cve_keeps_the_key():
+    later = _inspector()
+    digest = "sha256:" + "1" * 64
+    later["detail"]["resources"][0]["id"] = later["detail"]["resources"][0]["id"].rsplit("sha256:", 1)[0] + digest
+    later["detail"]["resources"][0]["details"]["awsEcrContainerImage"]["imageHash"] = digest
+    assert issue_key("", json.dumps(later)) == issue_key("", json.dumps(_inspector()))
+
+
+def test_other_cve_or_other_repository_is_a_different_issue():
+    other_cve = _inspector()
+    other_cve["detail"]["packageVulnerabilityDetails"]["vulnerabilityId"] = "CVE-2026-78367"
+    other_repo = _security_hub()
+    other_repo["detail"]["findings"][0]["Resources"][0]["Details"]["AwsEcrContainerImage"]["RepositoryName"] = "x/api"
+    base = issue_key("", json.dumps(_inspector()))
+    assert issue_key("", json.dumps(other_cve)) == "vuln:CVE-2026-78367:ecr:invdash/jobs"
+    assert issue_key("", json.dumps(other_repo)) == "vuln:CVE-2026-56857:ecr:x/api"
+    assert len({base, issue_key("", json.dumps(other_cve)), issue_key("", json.dumps(other_repo))}) == 3
+
+
+def test_ghsa_advisories_are_keyed_the_same_way():
+    inspector = _inspector()
+    inspector["detail"]["packageVulnerabilityDetails"]["vulnerabilityId"] = "GHSA-9g5q-2w5x-hmxf"
+    inspector["detail"]["title"] = "GHSA-9g5q-2w5x-hmxf - github.com/go-chi/chi/v5"
+    hub = _security_hub()
+    hub["detail"]["findings"][0]["Vulnerabilities"][0]["Id"] = "GHSA-9g5q-2w5x-hmxf"
+    hub["detail"]["findings"][0]["Title"] = "GHSA-9g5q-2w5x-hmxf - github.com/go-chi/chi/v5"
+    key = issue_key("", json.dumps(inspector))
+    assert key == issue_key("", json.dumps(hub)) == "vuln:GHSA-9G5Q-2W5X-HMXF:ecr:invdash/jobs"
+
+
+def test_lambda_function_resource_is_keyed_by_function_name():
+    inspector = _inspector()
+    inspector["detail"]["resources"] = [
+        {
+            "type": "AWS_LAMBDA_FUNCTION",
+            "id": "arn:aws:lambda:us-west-1:123456789012:function:invdash-prefs-api:$LATEST",
+            "details": {"awsLambdaFunction": {"functionName": "invdash-prefs-api"}},
+        }
+    ]
+    hub = _security_hub()
+    hub["detail"]["findings"][0]["Resources"] = [
+        {
+            "Type": "AwsLambdaFunction",
+            "Id": "arn:aws:lambda:us-west-1:123456789012:function:invdash-prefs-api:$LATEST",
+            "Details": {"AwsLambdaFunction": {"FunctionName": "invdash-prefs-api"}},
+        }
+    ]
+    assert issue_key("", json.dumps(inspector)) == issue_key("", json.dumps(hub))
+    assert issue_key("", json.dumps(hub)) == "vuln:CVE-2026-56857:lambda:invdash-prefs-api"
+
+
+def test_non_cve_security_findings_keep_their_product_keys():
+    control = _security_hub()
+    finding = control["detail"]["findings"][0]
+    finding.pop("Vulnerabilities")
+    finding["Types"] = ["Software and Configuration Checks/Industry and Regulatory Standards"]
+    finding["Title"] = "IAM.6 Hardware MFA should be enabled for the root user"
+    finding["GeneratorId"] = "security-control/IAM.6"
+    assert issue_key("", json.dumps(control)) == "securityhub:IAM.6 Hardware MFA should be enabled for the root user"
+
+    network = _inspector()
+    network["detail"]["type"] = "NETWORK_REACHABILITY"
+    network["detail"].pop("packageVulnerabilityDetails")
+    network["detail"]["title"] = "Port 22 is reachable from an Internet Gateway"
+    assert issue_key("", json.dumps(network)) == "inspector:Port 22 is reachable from an Internet Gateway"
+
+    probe = "Recon:EC2/PortProbeUnprotectedPort"
+    guardduty = json.dumps({"detail-type": "GuardDuty Finding", "detail": {"type": probe}})
+    assert issue_key("", guardduty) == "guardduty:Recon:EC2/PortProbeUnprotectedPort"
+    assert not is_vulnerability_key(issue_key("", json.dumps(control)))
+
+
+def test_handler_mails_one_cve_once_for_inspector_and_its_security_hub_copy(monkeypatch):
+    monkeypatch.setenv("VULN_WINDOW_MINUTES", "1440")
+    store = MemoryStore()
+    emails: list[str] = []
+    texts: list[str] = []
+    at = _pt(11, 10, 46)
+    handler(_sns(_inspector()), None, store=store, publish=texts.append, publish_email=emails.append, now=at)
+    handler(
+        _sns(_security_hub(), "AWS Notification Message"),
+        None,
+        store=store,
+        publish=texts.append,
+        publish_email=emails.append,
+        now=at + timedelta(seconds=11),
+    )
+    assert len(emails) == 1 and len(texts) == 1
+    assert "CVE-2026-56857" in emails[0]
+    item = store.items[("email", "vuln:CVE-2026-56857:ecr:invdash/jobs")]
+    assert item["sent"] == 1 and item["suppressed"] == 1
+
+
+def test_cve_rescans_wait_for_the_long_window_but_alarms_keep_the_hour(monkeypatch):
+    monkeypatch.setenv("VULN_WINDOW_MINUTES", "1440")
+    store = MemoryStore()
+    emails: list[str] = []
+    for hour in (10, 13, 23):  # rescans and image pushes later the same Pacific day
+        handler(_sns(_inspector()), None, store=store, publish_email=emails.append, now=_pt(11, hour, 46))
+    assert len(emails) == 1
+    handler(_sns(_inspector()), None, store=store, publish_email=emails.append, now=_pt(12, 0, 5))
+    assert len(emails) == 2
+    assert "suppressed 2 repeats" in emails[1].partition("\n")[0]
+
+    alarm_store = MemoryStore()
+    alarm_mail: list[str] = []
+    for hour in (10, 11):
+        handler(_event(), None, store=alarm_store, publish_email=alarm_mail.append, now=_pt(11, hour, 5))
+    assert len(alarm_mail) == 2
+
+
+def test_vuln_window_defaults_to_one_pacific_day(monkeypatch):
+    monkeypatch.delenv("VULN_WINDOW_MINUTES", raising=False)
+    store = MemoryStore()
+    emails: list[str] = []
+    handler(_sns(_inspector()), None, store=store, publish_email=emails.append, now=_pt(11, 1, 0))
+    handler(_sns(copy.deepcopy(_security_hub())), None, store=store, publish_email=emails.append, now=_pt(11, 22, 0))
+    assert len(emails) == 1
+
+
+def test_deliver_without_vuln_window_uses_the_channel_window():
+    store = MemoryStore()
+    sent: list[str] = []
+    body = json.dumps(_inspector())
+    deliver("", body, store, sent.append, now=_pt(11, 10, 46), channel="email")
+    deliver("", body, store, sent.append, now=_pt(11, 11, 46), channel="email")
+    assert len(sent) == 2

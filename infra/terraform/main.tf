@@ -83,6 +83,7 @@ module "alerting" {
   email_max_per_window     = var.email_max_per_window
   sms_window_minutes       = var.sms_window_minutes
   sms_max_per_window       = var.sms_max_per_window
+  vuln_window_minutes      = var.vuln_window_minutes
   enable_cloudfront_alarms = var.enable_cloudfront_alarms
   alert_notifier_enabled   = var.alert_notifier_enabled
   reserved_concurrency     = var.lambda_reserved_concurrency

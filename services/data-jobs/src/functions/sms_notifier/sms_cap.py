@@ -10,6 +10,11 @@ and its own maximum (defaults: 60 minutes and 1). One issue can therefore text
 again inside an hour while mail for that issue is still held, when the SMS
 window is shorter or its maximum is higher.
 
+Vulnerability findings are keyed by CVE (or GHSA) id and affected resource,
+not by the reporting product, so Inspector's finding and its Security Hub
+copy are one issue. Those keys may use a longer window (``VULN_WINDOW_MINUTES``,
+default 1440, one Pacific calendar day) for both channels.
+
 The dedupe item for a channel expires at the end of the following window for
 that channel, long enough for the next window's first message to report how
 many repeats were held back. If the store cannot be read or updated, that
@@ -220,10 +225,18 @@ def deliver(
     channel: str = "sms",
     window_minutes: int = 60,
     limit: int = 1,
+    vuln_window_minutes: int | None = None,
 ) -> Decision:
-    """Send or log one channel. Store errors publish that channel and return fail_open."""
+    """Send or log one channel. Store errors publish that channel and return fail_open.
+
+    Vulnerability keys (``vuln:``) use ``vuln_window_minutes`` instead of
+    ``window_minutes`` when it is set, so a CVE re-reported by rescans mails
+    once per long window rather than every hour.
+    """
     _check_channel(channel)
     key = issue_key(subject, message)
+    if vuln_window_minutes and is_vulnerability_key(key):
+        window_minutes = vuln_window_minutes
     try:
         decision = plan(
             store, key, now, channel=channel, window_minutes=window_minutes, limit=limit
@@ -319,9 +332,107 @@ def _job_key(payload: dict[str, Any]) -> str | None:
     return None
 
 
+VULN_PREFIX = "vuln:"
+_VULN_ID = re.compile(r"\b(CVE-\d{4}-\d{4,}|GHSA(?:-[0-9a-z]{4}){3})\b", re.IGNORECASE)
+_IMAGE_DIGEST = re.compile(r"[/@]sha256:[0-9a-f]+$")
+
+
+def is_vulnerability_key(key: str) -> bool:
+    """True for keys from :func:`vulnerability_key`. Callers give these a longer window."""
+    return key.startswith(VULN_PREFIX)
+
+
+def vulnerability_key(payload: dict[str, Any]) -> str | None:
+    """One key per vulnerability and affected resource, whichever product reported it.
+
+    Inspector sends its own ``Inspector2 Finding`` event and Security Hub then
+    imports a copy (``Security Hub Findings - Imported``). Both carry the same
+    CVE (or GHSA) id and the same ECR repository, so both map to
+    ``vuln:<id>:<resource>`` and share one cap counter. The resource is the
+    repository name, not the image digest, so a rescan or a new image push
+    with the same CVE does not count as a new issue. Returns None for findings
+    without a vulnerability id; those keep their product-specific keys.
+    """
+    detail_type = str(payload.get("detail-type") or "")
+    detail = payload.get("detail") if isinstance(payload.get("detail"), dict) else {}
+    if "Inspector" in detail_type:
+        vuln = _inspector_vuln_id(detail)
+        resources = detail.get("resources") or []
+        resource = _inspector_resource(resources[0]) if resources and isinstance(resources[0], dict) else ""
+    elif "Security Hub" in detail_type:
+        findings = detail.get("findings") or []
+        finding = findings[0] if findings and isinstance(findings[0], dict) else {}
+        vuln = _asff_vuln_id(finding)
+        resources = finding.get("Resources") or []
+        resource = _asff_resource(resources[0]) if resources and isinstance(resources[0], dict) else ""
+    else:
+        return None
+    if not vuln:
+        return None
+    key = f"{VULN_PREFIX}{vuln.upper()}"
+    if resource:
+        key += f":{resource}"
+    return _clip(key)
+
+
+def _vuln_id_from(text: object) -> str:
+    match = _VULN_ID.search(str(text or ""))
+    return match.group(1) if match else ""
+
+
+def _inspector_vuln_id(detail: dict[str, Any]) -> str:
+    pkg = detail.get("packageVulnerabilityDetails")
+    if isinstance(pkg, dict) and pkg.get("vulnerabilityId"):
+        return _vuln_id_from(pkg.get("vulnerabilityId")) or str(pkg["vulnerabilityId"])
+    if detail.get("type") == "PACKAGE_VULNERABILITY":
+        return _vuln_id_from(detail.get("title"))
+    return ""
+
+
+def _asff_vuln_id(finding: dict[str, Any]) -> str:
+    vulns = finding.get("Vulnerabilities") or []
+    if vulns and isinstance(vulns[0], dict) and vulns[0].get("Id"):
+        return _vuln_id_from(vulns[0].get("Id")) or str(vulns[0]["Id"])
+    types = finding.get("Types") or []
+    if any("Vulnerabilities/CVE" in str(t) for t in types) or str(finding.get("Title") or "").upper().startswith(
+        ("CVE-", "GHSA-")
+    ):
+        return _vuln_id_from(finding.get("Title"))
+    return ""
+
+
+def _strip_digest(resource_id: str) -> str:
+    return _IMAGE_DIGEST.sub("", resource_id)
+
+
+def _inspector_resource(resource: dict[str, Any]) -> str:
+    details = resource.get("details") if isinstance(resource.get("details"), dict) else {}
+    image = details.get("awsEcrContainerImage") if isinstance(details.get("awsEcrContainerImage"), dict) else {}
+    if image.get("repositoryName"):
+        return f"ecr:{image['repositoryName']}"
+    fn = details.get("awsLambdaFunction") if isinstance(details.get("awsLambdaFunction"), dict) else {}
+    if fn.get("functionName"):
+        return f"lambda:{fn['functionName']}"
+    return _strip_digest(str(resource.get("id") or ""))
+
+
+def _asff_resource(resource: dict[str, Any]) -> str:
+    details = resource.get("Details") if isinstance(resource.get("Details"), dict) else {}
+    image = details.get("AwsEcrContainerImage") if isinstance(details.get("AwsEcrContainerImage"), dict) else {}
+    if image.get("RepositoryName"):
+        return f"ecr:{image['RepositoryName']}"
+    fn = details.get("AwsLambdaFunction") if isinstance(details.get("AwsLambdaFunction"), dict) else {}
+    if fn.get("FunctionName"):
+        return f"lambda:{fn['FunctionName']}"
+    return _strip_digest(str(resource.get("Id") or ""))
+
+
 def _routed_event_key(payload: dict[str, Any]) -> str | None:
     detail_type = str(payload.get("detail-type") or "")
     detail = payload.get("detail") if isinstance(payload.get("detail"), dict) else {}
+    vuln = vulnerability_key(payload)
+    if vuln:
+        return vuln
     if detail_type == "GuardDuty Finding":
         return _clip(f"guardduty:{detail.get('type') or 'finding'}")
     if "Security Hub" in detail_type:

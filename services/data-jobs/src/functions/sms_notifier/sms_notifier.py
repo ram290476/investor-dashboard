@@ -144,6 +144,7 @@ def handler(event, _context, store=None, publish=None, publish_email=None, now=N
     email_limit = _positive("EMAIL_MAX_PER_WINDOW", 1)
     sms_window = _positive("SMS_WINDOW_MINUTES", 60)
     sms_limit = _positive("SMS_MAX_PER_WINDOW", 1)
+    vuln_window = _positive("VULN_WINDOW_MINUTES", 1440)
     ops_email = os.environ.get("OPS_EMAIL_TOPIC_ARN", "")
     security_email = os.environ.get("SECURITY_EMAIL_TOPIC_ARN", "")
     sms_topic = os.environ.get("SMS_TOPIC_ARN", "")
@@ -172,6 +173,7 @@ def handler(event, _context, store=None, publish=None, publish_email=None, now=N
                 channel="email",
                 window_minutes=email_window,
                 limit=email_limit,
+                vuln_window_minutes=vuln_window,
             )
 
         if publish is not None or sms_topic:
@@ -191,5 +193,6 @@ def handler(event, _context, store=None, publish=None, publish_email=None, now=N
                 channel="sms",
                 window_minutes=sms_window,
                 limit=sms_limit,
+                vuln_window_minutes=vuln_window,
             )
     return {"ok": True}

@@ -88,6 +88,17 @@ variable "email_max_per_window" {
   }
 }
 
+variable "vuln_window_minutes" {
+  description = "Cap window in minutes for vulnerability findings (CVE or GHSA id). The notifier keys these by id and affected resource (ECR repository or Lambda function), not by Inspector vs Security Hub, so both reports of one CVE are one issue. This window replaces email_window_minutes and sms_window_minutes for those keys, so rescans and new image pushes do not re-send the same CVE each hour. Fixed America/Los_Angeles clock buckets aligned to local midnight; 1440 (default) is one Pacific calendar day. Other findings keep the normal windows."
+  type        = number
+  default     = 1440
+
+  validation {
+    condition     = var.vuln_window_minutes >= 1 && var.vuln_window_minutes <= 1440
+    error_message = "vuln_window_minutes must be from 1 to 1440."
+  }
+}
+
 variable "alert_sms_e164" {
   description = "E.164 mobile number for SMS alerts, for example +14155552671. Empty leaves SMS off. Email still goes through the notifier and stays capped. Do not subscribe this number, or an inbox, directly to the ops, security, or CloudFront topics; that bypasses the cap."
   type        = string
