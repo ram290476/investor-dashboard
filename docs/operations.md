@@ -504,7 +504,9 @@ The Rates & yields drawer reads one shared `rates` object on `serving/dashboard.
 | --- | --- | --- | --- |
 | `rates.curve` | FRED constant-maturity `DGS1MO`, `DGS3MO`, `DGS6MO`, `DGS1`, `DGS2`, `DGS3`, `DGS5`, `DGS7`, `DGS10`, `DGS20`, `DGS30` | Weekdays 07:00 ET with D1 | Today's yield, the print on or before 30 calendar days earlier, and the change in basis points. The regime label needs both the 2Y and 10Y moves. Tenors that are not already trend drivers are stored in the same macro table and are not chart overlays. |
 | `rates.fomc` | Kalshi public market-data API (DS-89), no key | Not enabled | The collector parses the next meeting's cut, hold and hike prices, stops on 4xx and 429 without retry, and has status-feed id `KALSHI`. Live fetches stay off until Ram accepts the Kalshi terms. Until a document is stored, the panel says Kalshi is unavailable. |
-| `rates.policy_path` | Not selected | No job | Ram has not chosen the Atlanta Fed market probability tracker, Kalshi multi-meeting markets, or fed funds futures. The field is null. The panel says the source has not been selected. |
+| `rates.policy_path` | Not selected | No job | Ram has not chosen the Atlanta Fed market probability tracker, Kalshi multi-meeting markets, or fed funds futures. The field is null. The panel heading says Atlanta Fed and the body says the source has not been selected. |
+
+The drawer body is the curve (regime, 2Y/10Y one-month note, filled area, tenor changes), then FOMC, then the policy path. It does not repeat the 2Y, 10Y, 30Y, spread, real, SOFR, or breakeven sparkline rows. `releases.inflation` on the same document holds the last six CPI YoY prints (`CUSR0000SA0`) and the headline and core direction from the last two prints. Each print's change is versus the previous YoY print, not a Cleveland Fed nowcast. Nowcasts and Kalshi CPI probabilities are not stored, so the inflation panel says the nowcast is absent.
 
 D1, M1, TREND and DASHBOARD use conditional S3 leases to prevent concurrent
 read/build/publish runs from overwriting newer documents. Leases expire after 15
@@ -587,7 +589,7 @@ The #27 roadmap UI consumes the existing schema-v3 serving document and chart hi
   is `follow` (the default when the key is missing) or `all`. Ram has not confirmed the
   default, and has not decided whether adding an overlay should reopen a dismissed card.
   This build does not reopen it. Follow mode shows Market comparison, Moving averages,
-  Rates & yields, Inflation & release links, Volatility, Dollar & oil, Tariffs &
+  Rates & yields, Inflation surprise, Volatility, Dollar & oil, Tariffs &
   geopolitics, the company panel and News & sentiment only when that overlay group is
   active. Risk covers both Volatility and Dollar & oil. Correlation drift has no group,
   so it stays visible in Follow mode until dismissed. A PUT that omits `panels` or

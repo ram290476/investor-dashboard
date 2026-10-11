@@ -266,6 +266,65 @@ def build_releases(rows: list[dict], calendar: list[dict]) -> dict:
     return {
         "latest": [latest[key] for key in sorted(latest)],
         "next": [{"series": row.get("series"), "release_ts": row.get("release_ts")} for row in upcoming],
+        "inflation": build_inflation_block(rows),
+    }
+
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_CPI_SERIES = "CUSR0000SA0"
+_CORE_SERIES = "CUSR0000SA0L1E"
+
+
+def _yoy_by_period(rows: list[dict], series_id: str) -> tuple[list[str], dict[str, float]]:
+    chosen: dict[str, float] = {}
+    for row in rows or []:
+        if row.get("series_id") != series_id:
+            continue
+        yoy = row.get("yoy")
+        if isinstance(yoy, bool) or not isinstance(yoy, (int, float)):
+            continue
+        period = str(row.get("period") or "")[:7]
+        if len(period) != 7 or period[4] != "-":
+            continue
+        chosen[period] = float(yoy)
+    return sorted(chosen), chosen
+
+
+def _yoy_direction(ordered: list[str], values: dict[str, float]) -> str | None:
+    if len(ordered) < 2:
+        return None
+    current = values[ordered[-1]]
+    previous = values[ordered[-2]]
+    if current > previous:
+        return "firming"
+    if current < previous:
+        return "easing"
+    return "range-bound"
+
+
+def build_inflation_block(rows: list[dict]) -> dict:
+    """Last six CPI YoY prints. The change is versus the previous print, not a nowcast."""
+    ordered, values = _yoy_by_period(rows, _CPI_SERIES)
+    core_ordered, core_values = _yoy_by_period(rows, _CORE_SERIES)
+    prints = []
+    if ordered:
+        window = ordered[-6:]
+        earlier = [period for period in ordered if period < window[0]]
+        previous = values[earlier[-1]] if earlier else None
+        for period in window:
+            yoy = values[period]
+            surprise = None if previous is None else yoy - previous
+            prints.append({
+                "period": period,
+                "month": _MONTHS[int(period[5:7]) - 1],
+                "yoy": yoy,
+                "surprise_pp": surprise,
+            })
+            previous = yoy
+    return {
+        "prints": prints,
+        "headline": _yoy_direction(ordered, values),
+        "core": _yoy_direction(core_ordered, core_values),
     }
 
 

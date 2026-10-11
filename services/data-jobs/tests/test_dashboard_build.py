@@ -180,6 +180,28 @@ def test_releases_keep_the_latest_print_and_the_next_five_dates():
     ]
     assert len(snapshot["releases"]["next"]) == 5
     assert snapshot["releases"]["next"][0]["release_ts"].startswith("2026-11-01")
+    assert snapshot["releases"]["inflation"] == {"prints": [], "headline": None, "core": None}
+
+
+def test_inflation_block_keeps_six_cpi_yoy_prints_and_the_previous_print_change():
+    rows = []
+    for index, yoy in enumerate((2.7, 2.8, 2.9, 3.0, 2.9, 3.0, 2.8)):
+        month = index + 1
+        rows.append({"series_id": "CUSR0000SA0", "period": f"2026-{month:02d}", "yoy": yoy, "actual": 300 + yoy})
+    rows.append({"series_id": "CUSR0000SA0L1E", "period": "2026-06", "yoy": 3.1})
+    rows.append({"series_id": "CUSR0000SA0L1E", "period": "2026-07", "yoy": 3.0})
+    rows.append({"series_id": "CUSR0000SA0", "period": "2026-08", "actual": 321.0})
+    block = dashboard_build.build_inflation_block(rows)
+    assert [row["month"] for row in block["prints"]] == ["Feb", "Mar", "Apr", "May", "Jun", "Jul"]
+    assert block["prints"][0]["yoy"] == 2.8
+    assert block["prints"][0]["surprise_pp"] == pytest.approx(0.1)
+    last = block["prints"][-1]
+    assert last["period"] == "2026-07"
+    assert last["month"] == "Jul"
+    assert last["yoy"] == 2.8
+    assert last["surprise_pp"] == pytest.approx(-0.2)
+    assert block["headline"] == "easing"
+    assert block["core"] == "easing"
 
 
 def test_snapshot_carries_close_raw_and_tolerates_rows_without_it():

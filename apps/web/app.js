@@ -44,7 +44,8 @@ import {
   stockPanels,
   STOCK_TABS,
 } from "./stock-page.js";
-import { curveView, fomcView, policyPathView } from "./rates-panel.js";
+import { curveView, fomcView, policyPathView, sparklinePath } from "./rates-panel.js";
+import { inflationSurpriseView } from "./inflation-panel.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
@@ -198,7 +199,7 @@ function panelLabel(id) {
   }
   return {
     rates: "Rates & yields",
-    inflation: "Inflation & release links",
+    inflation: "Inflation surprise",
     "market-comparison": "Market comparison",
     "moving-averages": "Moving averages",
     volatility: "Volatility",
@@ -1160,14 +1161,10 @@ function ratesSummary(rows) {
   return parts.join(" · ") || "Unavailable";
 }
 
-function inflationSummary(tickerData) {
+function inflationSummary() {
   if (session.dashboardState === "loading") return "Loading…";
-  const latest = (tickerData?.release_links?.latest || []).find((row) => row.series_id === "CPI_YOY");
-  const next = (session.dashboard?.releases?.next || [])[0];
-  const parts = [];
-  if (signalNumber(latest?.yoy) != null) parts.push(`CPI YoY ${Number(latest.yoy).toFixed(1)}%`);
-  if (next?.release_ts) parts.push(`next release ${shortReleaseDate(next.release_ts)}`);
-  return parts.join(" · ") || "Unavailable";
+  const view = inflationSurpriseView(session.dashboard?.releases, session.dashboardState);
+  return view.kind === "ready" ? view.state : "Unavailable";
 }
 
 function indexLabels() {
@@ -2582,20 +2579,20 @@ function signalSparkline(points, color = "var(--price)", label = "Historical ser
 
 function renderCurveBlock(view) {
   const block = node("div", "rates-curve");
-  block.append(node("h3", "signal-label", "Treasury yield curve"));
   if (view.kind !== "ready") {
+    block.append(node("h3", "signal-label", "Treasury yield curve"));
     block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
     return block;
   }
-  const heading = node("div", "signal-heading");
-  heading.append(node("span", "", view.regime || "Regime unavailable"), node("span", "mono", view.dates));
+  const heading = node("div", "rates-regime");
+  heading.append(node("span", "rates-regime-name", view.regime || "Regime unavailable"), node("span", "rates-regime-note", view.note));
   block.append(heading);
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", "0 0 300 100");
   svg.setAttribute("class", "yield-curve");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", view.ariaLabel);
-  [["curve-ago", view.agoPath], ["curve-today", view.todayPath]].forEach(([className, pathData]) => {
+  [["curve-fill", view.fillPath], ["curve-ago", view.agoPath], ["curve-today", view.todayPath]].forEach(([className, pathData]) => {
     if (!pathData) return;
     const path = document.createElementNS(svgNS, "path");
     path.setAttribute("class", className);
@@ -2608,43 +2605,69 @@ function renderCurveBlock(view) {
     labels.append(node("span", "", tenor.tenor));
     changes.append(node("span", tenor.bpClass, tenor.bpText));
   });
-  block.append(svg, labels, changes, node("p", "signal-note", "Today (solid) versus 1M ago (dashed). The bp change uses the print on or before 30 calendar days earlier."));
+  const legend = node("div", "rates-legend");
+  [["rates-swatch-today", "Today"], ["rates-swatch-ago", "1M ago"]].forEach(([className, label]) => {
+    const item = node("span", "rates-legend-item");
+    item.append(node("span", className), document.createTextNode(label));
+    legend.append(item);
+  });
+  legend.append(node("span", "", "bp change per tenor"));
+  block.append(svg, labels, changes, legend);
   return block;
 }
 
 function renderFomcBlock(view) {
   const block = node("div", "rates-fomc");
-  block.append(node("h3", "signal-label", "Next FOMC · Kalshi"));
   if (view.kind !== "ready") {
+    block.append(node("h3", "signal-label", "Next FOMC · Kalshi"));
     block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
     return block;
   }
   const row = node("div", "rates-fomc-row");
-  const copy = node("div", "");
-  copy.append(node("p", "signal-heading", view.meeting));
+  const copy = node("div", "rates-fomc-copy");
+  const heading = node("div", "rates-fomc-heading");
+  heading.append(node("span", "", view.meeting), node("span", "mono", view.cutTrend));
+  copy.append(heading);
   const bar = node("div", "fomc-bar");
   bar.setAttribute("role", "img");
   bar.setAttribute("aria-label", view.ariaLabel);
   view.segments.forEach((segment) => {
-    const piece = node("span", segment.className);
+    const piece = node("span", segment.className, segment.text);
     piece.style.width = segment.width;
     piece.title = segment.title;
     bar.append(piece);
   });
-  copy.append(bar, node("p", "signal-note", view.legend));
-  row.append(copy, signalSparkline(view.history.map((point) => ({ value: point.cut })), "var(--price)", view.sparkLabel));
+  copy.append(bar);
+  row.append(copy, ratesSpark(view.history.map((point) => point.cut), view.sparkLabel));
   block.append(row);
   return block;
 }
 
+function ratesSpark(values, label) {
+  const pathData = sparklinePath(values);
+  if (!pathData) return node("span", "signal-note", "History unavailable");
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", "0 0 100 28");
+  svg.setAttribute("class", "rates-spark");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", label);
+  svg.setAttribute("preserveAspectRatio", "none");
+  const path = document.createElementNS(svgNS, "path");
+  path.setAttribute("d", pathData);
+  svg.append(path);
+  return svg;
+}
+
 function renderPolicyBlock(view) {
   const block = node("div", "rates-policy");
-  block.append(node("h3", "signal-label", "Implied policy path"));
   if (view.kind !== "ready") {
+    block.append(node("h3", "signal-label", "Implied policy path · Atlanta Fed"));
     block.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
     return block;
   }
-  block.append(node("p", "signal-note", view.note));
+  const heading = node("div", "rates-fomc-heading");
+  heading.append(node("span", "", "Implied policy path · Atlanta Fed"), node("span", "mono", view.note));
+  block.append(heading);
   const chart = node("div", "policy-bars");
   chart.setAttribute("role", "img");
   chart.setAttribute("aria-label", view.ariaLabel);
@@ -2660,7 +2683,7 @@ function renderPolicyBlock(view) {
       track.append(reference);
     }
     track.append(fill);
-    column.append(track, node("span", "", bar.meeting), node("span", "mono", bar.changeText));
+    column.append(track, node("span", "", bar.meeting));
     chart.append(column);
   });
   block.append(chart);
@@ -2688,60 +2711,42 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
     renderFomcBlock(fomcView(ratesDocument, session.dashboardState)),
     renderPolicyBlock(policyPathView(ratesDocument, session.dashboardState)),
   );
-  if (!rates.length) rateBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading rates…"
-    : session.dashboardState === "error" ? "Rates could not be loaded. Refresh data to retry."
-      : "Rates are unavailable until D1 observations reach the trend build."));
-  if (chartDataState === "loading") rateBody.append(node("p", "data-state", "Loading rate history…"));
-  else if (chartDataState === "error") rateBody.append(node("p", "data-state error", "Rate history could not be loaded. Refresh data to retry."));
-  rates.forEach(row => {
-    const entry = node("div", "rate-entry");
-    const copy = node("div", "signal-heading");
-    copy.append(node("span", "", driverLabel(row.series_id)),
-      node("span", "mono", `${driverValue(row)} · ${driverChange(row)}`));
-    entry.append(copy, signalSparkline((chartData?.macro_series?.[row.series_id] || []).slice(-63),
-      "var(--price)", `${driverLabel(row.series_id)} over the last 63 stored sessions`));
-    rateBody.append(entry);
-  });
   });
   const inflation = renderDrawer({
     id: "inflation",
-    title: "Inflation & release links",
-    subtitle: `YoY trend · historical links to ${session.selected}`,
+    title: "Inflation surprise",
+    subtitle: "CPI YoY versus the previous print",
     summary: inflationSummary(tickerData),
     mobilePanel: "calendar",
     panelId: "mobile-panel-calendar",
     keys: drawerKeys("inflation"),
   }, (releaseBody) => {
-  const links = tickerData?.release_links;
-  const latest = (links?.latest || []).filter(row => /^(CORE_)?(CPI|PCE)_YOY$/.test(row.series_id));
-  if (!latest.length) releaseBody.append(node("p", "data-state", session.dashboardState === "loading" ? "Loading releases…"
-    : session.dashboardState === "error" ? "Releases could not be loaded. Refresh data to retry."
-      : "Release history is unavailable until M1 has published release-dated data."));
-  latest.forEach(row => {
-    const block = node("div", "release-block");
-    block.append(node("h3", "signal-label", driverLabel(row.series_id)),
-      node("p", "", `${signalNumber(row.yoy) == null ? "--" : Number(row.yoy).toFixed(2)}% YoY · ${row.trend_direction || "Trend unavailable"} · ${row.consecutive_releases || 0} releases`),
-      node("p", "signal-note", `Released ${row.release_date || "--"} · ${row.surprise_basis === "consensus" ? "Consensus surprise" : "YoY change"} ${signed(row.surprise)}pp`));
-    const windows = (links?.summaries || []).filter(summary => summary.series_id === row.series_id);
-    windows.forEach(summary => {
-      const numeric = signalNumber(summary.correlation_surprise);
-      block.append(node("p", "release-window", `${RELEASE_WINDOWS[summary.window] || summary.window}: ${
-        numeric == null ? (summary.n_releases >= 12
-          ? "Link unavailable; insufficient usable history or variation"
-          : "Link unavailable; at least 12 paired releases required")
-          : `correlation ${signed(numeric)}`
-      } · n=${summary.n_releases || 0}`));
-    });
-    releaseBody.append(block);
-  });
-  const calendar = session.dashboard?.releases?.next || [];
-  if (calendar.length) {
-    const drawer = rememberInner(node("details", "signal-drawer"), "release-calendar");
-    drawer.append(node("summary", "", `Release calendar · ${calendar.length} upcoming`));
-    calendar.forEach(row => drawer.append(node("p", "signal-note", `${row.series} · ${formatTime(row.release_ts, session.prefs.display.time_zone)}`)));
-    releaseBody.append(drawer);
+  const view = inflationSurpriseView(session.dashboard?.releases, session.dashboardState);
+  if (view.kind !== "ready") {
+    releaseBody.append(node("p", view.kind === "error" ? "data-state error" : "data-state", view.message));
+    return;
   }
-  releaseBody.append(node("p", "signal-note", "Monthly releases are excluded from daily rolling correlations. Missing consensus uses YoY change, not a consensus surprise. Links describe historical association, not causation."));
+  const heading = node("div", "rates-regime");
+  heading.append(node("span", "rates-regime-name", view.state), node("span", "rates-regime-note", view.streak));
+  releaseBody.append(heading);
+  const columns = node("div", "cpi-prints");
+  view.columns.forEach((column) => {
+    const item = node("div", "cpi-print");
+    item.append(node("span", "mono", column.valueText));
+    const track = node("span", "cpi-track");
+    if (!column.pending) {
+      const fill = node("span", "cpi-fill");
+      fill.style.height = column.height;
+      track.append(fill);
+    }
+    item.append(track, node("span", "", column.month), node("span", `mono ${column.surpriseClass}`, column.surpriseText));
+    columns.append(item);
+  });
+  const legend = node("div", "rates-legend");
+  const actual = node("span", "rates-legend-item");
+  actual.append(node("span", "cpi-swatch"), document.createTextNode("CPI YoY (BLS)"));
+  legend.append(actual, node("span", "", "change versus the previous YoY print"));
+  releaseBody.append(columns, legend, node("p", "data-state", view.nowcast));
   });
   const drift = renderDrawer({
     id: "correlation",

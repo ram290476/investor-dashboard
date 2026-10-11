@@ -32,7 +32,8 @@ test("bottom panels are drawers and the old nested disclosures are gone", () => 
   assert.match(app, /restoreDrawerFocus/);
   assert.doesNotMatch(app, /rememberDrawer|openDrawers/);
   assert.doesNotMatch(app, /signal-drawer panel-body/);
-  assert.match(app, /rememberInner\([\s\S]*"release-calendar"\)/);
+  assert.doesNotMatch(app, /rememberInner\([\s\S]*"release-calendar"\)/);
+  assert.match(app, /title: "Inflation surprise"/);
   assert.match(app, /rememberInner\([\s\S]*"all-drivers"\)/);
 });
 
