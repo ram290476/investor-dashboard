@@ -878,6 +878,9 @@ def test_spacex_release_parses_segment_rows_without_html_tables():
     assert _value(rows, "segment_adj_ebitda_connectivity", "2026Q2") == pytest.approx(2_597_000_000)
     assert _value(rows, "adjusted_ebitda", "2026Q2") == pytest.approx(3_538_000_000)
     assert _value(rows, "capex_total", "2026Q2") == pytest.approx(18_369_000_000)
+    # The highlights Total is `$(1,943)`, not `(1,943)`. Segment operating income must not win.
+    assert _value(rows, "operating_income", "2026Q1") == pytest.approx(-1_943_000_000)
+    assert _value(rows, "operating_income", "2026Q2") == pytest.approx(-143_000_000)
 
 
 def test_nvidia_exhibits_use_fiscal_q2_fy27_not_the_august_filing_date():
@@ -1504,3 +1507,143 @@ def test_proposals_use_the_newest_column_and_press_release_period_ends():
 
 def catalog_entry(catalog):
     return next(item for item in catalog["metrics"] if item["metric_id"] == "deferred_revenue")
+
+
+def test_currency_paren_and_ytd_gap_recover_spacex_company_totals():
+    """SPCX Q1 operating income is `$(1,943)`. R&D and SG&A are six-month totals minus Q2."""
+    assert ir._parse_cell("$(1,943)") == (-1_943.0, False)
+    assert ir._parse_cell("$ (1,943)") == (-1_943.0, False)
+    assert ir._parse_cell("$(143)") == (-143.0, False)
+    assert ir._parse_cell("(1)") == (None, False)
+    snippet = """
+    Second Quarter Financial Highlights $, in millions
+    Three Months Ended June 30, 2026 March 31, 2026 June 30, 2025
+    Income (Loss) from Operations Space $(542) $(662) $(369)
+    Total $(143) $(1,943) $(970)
+    """
+    parsed = ir.parse_company_document(
+        snippet,
+        ir.load_catalog("SPCX"),
+        **_meta(ticker="SPCX", source_kind="press_release", fiscal_period="2026Q2"),
+    )
+    assert _value(parsed["rows"], "operating_income", "2026Q1") == pytest.approx(-1_943_000_000)
+    assert _value(parsed["rows"], "operating_income", "2026Q2") == pytest.approx(-143_000_000)
+    research = [
+        _tagged_fact("2026-04-01", "2026-06-30", 3_548_000_000, "spcx-q2", "2026-08-05"),
+        _tagged_fact("2026-01-01", "2026-06-30", 7_062_000_000, "spcx-q2", "2026-08-05"),
+    ]
+    overhead = [
+        _tagged_fact("2026-04-01", "2026-06-30", 912_000_000, "spcx-q2", "2026-08-05"),
+        _tagged_fact("2026-01-01", "2026-06-30", 1_658_000_000, "spcx-q2", "2026-08-05"),
+    ]
+    # Q3 from consecutive spans: nine months minus the six-month total in the same filing.
+    nine = [
+        _tagged_fact("2026-01-01", "2026-06-30", 100, "spcx-q3", "2026-11-05"),
+        _tagged_fact("2026-01-01", "2026-09-30", 160, "spcx-q3", "2026-11-05"),
+    ]
+    rows = _xbrl_rows(
+        {
+            "ResearchAndDevelopmentExpense": {"units": {"USD": research}},
+            "SellingGeneralAndAdministrativeExpense": {"units": {"USD": overhead}},
+            "OperatingIncomeLoss": {"units": {"USD": nine}},
+        },
+        "SPCX",
+    )
+    assert _value(rows, "research_and_development", "2026Q1") == pytest.approx(3_514_000_000)
+    assert _value(rows, "research_and_development", "2026Q2") == pytest.approx(3_548_000_000)
+    assert _value(rows, "sga", "2026Q1") == pytest.approx(746_000_000)
+    assert _value(rows, "sga", "2026Q2") == pytest.approx(912_000_000)
+    assert _value(rows, "operating_income", "2026Q3") == 60
+
+
+def test_balance_sheet_dates_do_not_propose_and_keep_column_alignment():
+    """A colspan balance sheet has `$` beside the amount. The amount belongs to its own date."""
+    html = """
+    <table>
+      <tr><td>As of</td><td>June 30, 2026</td><td>December 31, 2025</td></tr>
+      <tr><td>Cash and cash equivalents</td><td>$</td><td>86,810</td><td>$</td><td>78,779</td></tr>
+      <tr><td>Goodwill</td><td>$</td><td>23,274</td><td>$</td><td>22,111</td></tr>
+      <tr><td>Total liabilities</td><td>$</td><td>100,000</td><td>$</td><td>90,000</td></tr>
+      <tr><td>Retained earnings</td><td>$</td><td>50,000</td><td>$</td><td>40,000</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        html,
+        ir.load_catalog("AMZN"),
+        **_meta(ticker="AMZN", source_kind="press_release"),
+    )
+    assert _value(parsed["rows"], "cash_and_equivalents", "2026Q2") == 86_810
+    assert _value(parsed["rows"], "cash_and_equivalents", "2025Q4") == 78_779
+    labels = " ".join(item["metric_id"] for item in parsed["proposals"])
+    assert "goodwill" not in labels
+    assert "liabilit" not in labels
+    assert "retained" not in labels
+    assert parsed["proposals"] == []
+
+
+def test_restated_nine_months_beats_the_original_and_a_stale_q4_loses_to_the_release():
+    """BYND Q4 is FY minus the 10-K's restated nine months, not the original 10-Q figure."""
+    quarters = [
+        _tagged_fact("2025-01-01", "2025-03-31", 10, "10q", "2025-11-12", fp="Q3", fy=2025),
+        _tagged_fact("2025-04-01", "2025-06-30", 20, "10q", "2025-11-12", fp="Q3", fy=2025),
+        _tagged_fact("2025-07-01", "2025-09-30", 30, "10q", "2025-11-12", fp="Q3", fy=2025),
+        _tagged_fact("2025-01-01", "2025-09-30", 60, "10q", "2025-11-12", form="10-Q", fp="Q3", fy=2025),
+    ]
+    restated = [
+        *quarters,
+        _tagged_fact("2025-01-01", "2025-03-31", 10, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
+        _tagged_fact("2025-04-01", "2025-06-30", 20, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
+        _tagged_fact("2025-07-01", "2025-09-30", 30, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
+        _tagged_fact("2025-01-01", "2025-09-30", 2.563, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
+        _tagged_fact("2025-01-01", "2025-12-31", -130.18, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
+    ]
+    operating = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": restated}}}, "BYND")
+    assert _value(operating, "operating_income", "2025Q4") == pytest.approx(-132.743)
+    income = _xbrl_rows(
+        {
+            "NetIncomeLoss": {
+                "units": {
+                    "USD": [
+                        _tagged_fact(
+                            "2025-01-01", "2025-09-30", 0, "10q", "2025-11-12", form="10-Q", fp="Q3", fy=2025
+                        ),
+                        _tagged_fact(
+                            "2025-01-01", "2025-09-30", 2.02, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025
+                        ),
+                        _tagged_fact(
+                            "2025-01-01", "2025-12-31", 411.87, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025
+                        ),
+                    ]
+                }
+            }
+        },
+        "BYND",
+    )
+    assert _value(income, "net_income_gaap", "2025Q4") == pytest.approx(409.85)
+    stale_facts = [
+        _tagged_fact("2025-01-01", "2025-09-30", 0, "10q", "2025-11-12", form="10-Q", fp="Q3", fy=2025),
+        _tagged_fact("2025-01-01", "2025-12-31", -130.18, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
+    ]
+    stale = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": stale_facts}}}, "BYND")
+    assert _value(stale, "operating_income", "2025Q4") == pytest.approx(-130.18)
+    release = """
+    <p>(In thousands)</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Loss from operations</td><td>(132,743)</td><td>(100)</td></tr>
+      <tr><td>Net income</td><td>409,850</td><td>10</td></tr>
+    </table>
+    """
+    press = ir.parse_company_document(
+        release,
+        ir.load_catalog("BYND"),
+        **_meta(ticker="BYND", source_kind="press_release", fiscal_period="2025Q4"),
+    )["rows"]
+    winners, _revisions = ir.dedupe_observations(stale + press)
+    chosen = next(row for row in winners if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4")
+    assert chosen["value"] == pytest.approx(-132_743_000)
+    assert chosen["source_kind"] == "press_release"
+    fresh, _revisions = ir.dedupe_observations(operating + press)
+    kept = next(row for row in fresh if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4")
+    assert kept["value"] == pytest.approx(-132.743)
+    assert kept["source_kind"] == "xbrl"
