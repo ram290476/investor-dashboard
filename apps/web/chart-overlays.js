@@ -53,19 +53,20 @@ const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", 
 const overlayById = new Map(OVERLAYS.map((overlay) => [overlay.id, overlay]));
 const dynamicById = new Map();
 
-// Same rule as prefs_api FUNDAMENTAL_OVERLAY_RE. The 65-character id includes a _pending suffix.
+// Same rule as prefs_api FUNDAMENTAL_OVERLAY_RE. Pending-review ids (`*_pending`) are not selectable.
 const FUNDAMENTAL_OVERLAY_RE = /^FUNDAMENTAL:[A-Za-z][A-Za-z0-9_]{0,64}$/;
 
 function selectableOverlay(id) {
   const value = String(id ?? "");
+  if (value.endsWith("_pending")) return false;
   if (overlayById.has(value)) return true;
   // `$` matches before a trailing newline, so require the whole id.
   const match = FUNDAMENTAL_OVERLAY_RE.exec(value);
   return Boolean(match && match[0] === value);
 }
 
-function pendingFundamental(rows) {
-  return rows.length > 0 && rows.every((row) => row.approval_state === "proposed" || row.status === "proposed");
+function proposedRow(row) {
+  return row?.approval_state === "proposed" || row?.status === "proposed";
 }
 
 function rememberFundamentals(chartData) {
@@ -73,6 +74,7 @@ function rememberFundamentals(chartData) {
   const rowsById = new Map();
   for (const row of chartData?.fundamentals || []) {
     if (!row?.series_id || !isNumericValue(row.value)) continue;
+    if (String(row.series_id).endsWith("_pending") || proposedRow(row)) continue;
     const list = rowsById.get(row.series_id) || [];
     list.push(row);
     rowsById.set(row.series_id, list);
@@ -81,9 +83,8 @@ function rememberFundamentals(chartData) {
     const id = `FUNDAMENTAL:${seriesId}`;
     if (!selectableOverlay(id)) continue;
     const base = overlayById.get(id);
-    const pending = pendingFundamental(rows);
     const name = rows.find((row) => row.display_name)?.display_name || base?.label || seriesId.replaceAll("_", " ");
-    const label = pending && !name.includes("Pending review") ? `${name} · Pending review` : (base?.label || name);
+    const label = base?.label || name;
     if (base && label === base.label) continue;
     dynamicById.set(id, {
       ...(base || {
@@ -92,41 +93,47 @@ function rememberFundamentals(chartData) {
         kind: "fundamental",
         color: OVERLAYS.length + dynamicById.size,
       }),
-      label: pending ? (name.includes("Pending review") ? name : `${name} · Pending review`) : (base?.label || name),
+      label,
       unit: rows.find((row) => row.unit)?.unit || "",
     });
   }
 }
 
-function pendingMetric(metric) {
-  return metric?.approval_state === "proposed" || metric?.status === "proposed" || metric?.pending === true;
+function approvedMetric(metric) {
+  return (metric?.approval_state || metric?.status) === "approved";
 }
 
 export function mergeCompanyFundamentals(chartData, metrics) {
   const extra = [];
   for (const metric of metrics || []) {
-    const pending = pendingMetric(metric);
-    const name = metric.display_name || metric.metric_id;
-    const seriesId = pending ? `${metric.metric_id}_pending` : metric.metric_id;
+    if (!approvedMetric(metric)) continue;
+    const seriesId = String(metric.metric_id || "");
+    if (!seriesId || seriesId.endsWith("_pending")) continue;
+    const name = metric.display_name || seriesId;
     for (const point of metric?.series || []) {
       if (!point || point.reported === false || !isNumericValue(point.value)) continue;
       const date = point.period_end || point.date;
       if (!date) continue;
       extra.push({
         series_id: seriesId,
-        display_name: pending && !String(name).includes("Pending review") ? `${name} · Pending review` : name,
+        display_name: name,
         date,
         value: Number(point.value),
         unit: metric.unit || "",
         fiscal_quarter: point.fiscal_period,
         source_id: metric.provenance?.source_title || metric.provenance?.source_kind || "Company metrics",
-        approval_state: pending ? "proposed" : "approved",
+        approval_state: "approved",
       });
     }
   }
-  if (!extra.length) return chartData;
-  const replaced = new Set(extra.filter((row) => row.approval_state !== "proposed").map((row) => row.series_id));
-  const base = (chartData?.fundamentals || []).filter((row) => !replaced.has(row.series_id));
+  const raw = chartData?.fundamentals || [];
+  const kept = raw.filter((row) => {
+    const seriesId = String(row?.series_id || "");
+    return seriesId && !seriesId.endsWith("_pending") && !proposedRow(row);
+  });
+  if (!extra.length && kept.length === raw.length) return chartData;
+  const replaced = new Set(extra.map((row) => row.series_id));
+  const base = kept.filter((row) => !replaced.has(row.series_id));
   return { ...(chartData || {}), fundamentals: [...base, ...extra] };
 }
 
@@ -253,6 +260,7 @@ function marketValues(overlay, dashboard, bars, charts) {
 }
 
 export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard, charts }) {
+  if (String(id || "").endsWith("_pending")) return (bars || []).map(() => null);
   const overlay = overlayById.get(id);
   if (!overlay) {
     if (String(id || "").startsWith("FUNDAMENTAL:")) {

@@ -16,7 +16,8 @@ Item (table user_prefs, partition key user_sub):
                            theme (see THEMES; missing legacy values default to industrial-dark),
                            panels (optional map of bottom-drawer id -> "open"|"closed"; unknown ids
                            are ignored, other values are rejected, omitted key keeps the stored map)
-    chart_settings map     per-ticker overlay IDs and under-chart lane IDs, limited to tickers and allowlists
+    chart_settings map     per-ticker overlay IDs and under-chart lane IDs, limited to tickers and allowlists.
+                           FUNDAMENTAL:<id>_pending overlays are dropped on read and write.
     version       number   optimistic concurrency; PUT must send the version it read
     updated_at    string   ISO-8601 UTC
 
@@ -86,7 +87,7 @@ CHART_OVERLAYS = {
     "FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd",
     "NEWS:SENTIMENT",
 }
-# Company metrics beyond the static ids. The id may include a _pending suffix.
+# Company metrics beyond the static ids. Pending-review aliases (`*_pending`) are not selectable.
 # \Z (not $) so a trailing newline is not a second, distinct overlay.
 FUNDAMENTAL_OVERLAY_RE = re.compile(r"\AFUNDAMENTAL:[A-Za-z][A-Za-z0-9_]{0,64}\Z")
 DEFAULTS = {
@@ -146,7 +147,14 @@ def normalize_panels(raw) -> dict:
 
 def overlay_allowed(item: str) -> bool:
     """Static overlays, plus any FUNDAMENTAL:<id> with a safe metric id."""
+    if item.endswith("_pending"):
+        return False
     return item in CHART_OVERLAYS or FUNDAMENTAL_OVERLAY_RE.fullmatch(item) is not None
+
+
+def visible_overlays(overlays: list) -> list:
+    """Drop saved pending-review series. Those ids are no longer chart overlays."""
+    return [item for item in overlays if isinstance(item, str) and not item.endswith("_pending")]
 
 
 def normalize_panel_mode(raw) -> str:
@@ -223,6 +231,7 @@ def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
             raise ValidationError("chart_settings contains an unsupported overlay")
         if any(not isinstance(item, str) for item in lanes):
             raise ValidationError("chart_settings contains an unsupported lane")
+        overlays = visible_overlays(overlays)
         if len(overlays) > 5 or len(overlays) != len(set(overlays)):
             raise ValidationError("Choose at most 5 unique chart overlays")
         if any(not overlay_allowed(item) for item in overlays):
@@ -298,7 +307,10 @@ def _public(item: dict) -> dict:
         "pinned": list(item.get("pinned", [])),
         "display": _public_display(item),
         "chart_settings": {
-            ticker: {"overlays": list(settings.get("overlays", [])), "lanes": list(settings.get("lanes", []))}
+            ticker: {
+                "overlays": visible_overlays(list(settings.get("overlays", []))),
+                "lanes": list(settings.get("lanes", [])),
+            }
             for ticker, settings in chart_settings.items()
             if isinstance(settings, dict)
         },

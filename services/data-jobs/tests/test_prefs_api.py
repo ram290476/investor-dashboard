@@ -516,7 +516,57 @@ def test_chart_settings_accept_dynamic_fundamental_overlays(api):
     )
     assert response["statusCode"] == 200
     saved = json.loads(response["body"])["chart_settings"]["TSLA"]["overlays"]
-    assert saved == ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending"]
+    assert saved == ["FUNDAMENTAL:capex"]
+    dropped = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": ["FUNDAMENTAL:capex_pending", "FUNDAMENTAL:capex_pending", "FUNDAMENTAL:opex_pending"],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert dropped["chart_settings"]["TSLA"]["overlays"] == []
+    under_cap = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": [
+                "FUNDAMENTAL:a_pending", "FUNDAMENTAL:b_pending", "FUNDAMENTAL:c_pending",
+                "FUNDAMENTAL:d_pending", "FUNDAMENTAL:e_pending", "FUNDAMENTAL:opex",
+            ],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert under_cap["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:opex"]
+    kept = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": ["SPY", "DIA", "QQQ", "MA20", "DGS10", "FUNDAMENTAL:capex_pending"],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert kept["chart_settings"]["TSLA"]["overlays"] == ["SPY", "DIA", "QQQ", "MA20", "DGS10"]
+    boto3.resource("dynamodb").Table("invdash-user-prefs").put_item(Item={
+        "user_sub": "user-a",
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "display": {},
+        "chart_settings": {
+            "TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending"], "lanes": ["VOL"]},
+        },
+        "version": 4,
+    })
+    loaded = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert loaded["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:capex"]
+    rewritten = json.loads(mod.handler(
+        _event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": loaded["version"]}),
+        None,
+    )["body"])
+    assert rewritten["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:capex"]
     rejected = mod.handler(
         _event(
             "PUT",
@@ -540,6 +590,12 @@ def test_chart_settings_accept_dynamic_fundamental_overlays(api):
         ({"TSLA": {"overlays": [{}], "lanes": ["VOL"]}}, "unsupported overlay"),
         ({"TSLA": {"overlays": [], "lanes": ["UNKNOWN"]}}, "unsupported lane"),
         ({"TSLA": {"overlays": ["SPY"] * 6, "lanes": ["VOL"]}}, "at most 5"),
+        (
+            {"TSLA": {"overlays": [
+                "FUNDAMENTAL:capex", "FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending",
+            ], "lanes": ["VOL"]}},
+            "at most 5",
+        ),
         ({"TSLA": {"overlays": ["FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
         ({"TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
     ],
