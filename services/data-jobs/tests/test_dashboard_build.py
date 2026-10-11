@@ -44,19 +44,11 @@ def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals()
     assert snapshot["generated_at"] == "2026-10-04T22:00:00+00:00"
     assert snapshot["data_status"] == "available"
     assert snapshot["tickers"]["TSLA"]["price_history"] == [
-        {
-            "date": "2026-10-02",
-            "close": 441.0,
-            "close_raw": None,
-            "adj_close": 441.0,
-            "volume": 101,
-            "volume_source": None,
-            "volume_iex": None,
-        }
+        {"date": "2026-10-02", "close": 441.0, "volume": 101}
     ]
     assert snapshot["tickers"]["TSLA"]["trend"]["ticker"] == "TSLA"
     assert snapshot["tickers"]["SPCX"]["price_status"] == "unavailable"
-    assert snapshot["fundamentals"] == [{"ticker": "TSLA", "metric": "deliveries", "value": 500000}]
+    assert "fundamentals" not in snapshot
     assert snapshot["status"]["jobs"][0]["job"] == "D4"
 
 
@@ -77,7 +69,7 @@ def test_snapshot_keeps_each_ticker_when_price_rows_are_mixed():
     tsla = snapshot["tickers"]["TSLA"]["price_history"]
     spcx = snapshot["tickers"]["SPCX"]["price_history"]
     assert [row["close"] for row in tsla] == [100.0, 110.0]
-    assert [row["adj_close"] for row in tsla] == [100.0, 110.0]
+    assert [row.get("adj_close", row["close"]) for row in tsla] == [100.0, 110.0]
     assert [row["close"] for row in spcx] == [200.0, 190.0]
     assert [row["adj_close"] for row in spcx] == [180.0, 170.0]
     assert tsla != spcx
@@ -163,6 +155,8 @@ def test_chart_data_prefers_filed_public_float_estimate_and_falls_back_to_shares
     assert next(row for row in chart["fundamentals"] if row["series_id"] == "gross_margin_gaap")["source_id"] == "DS-11"
     assert chart["options"][0]["iv30"] is None
     assert any(row["series_id"] == "gross_margin_gaap" for row in chart["fundamentals"])
+    assert chart["price_history"] == [{"date": "2026-06-30", "close": 100.0}]
+    assert chart["volume_source_changes"] == []
 
 
 def test_releases_keep_the_latest_print_and_the_next_five_dates():
@@ -202,15 +196,13 @@ def test_snapshot_carries_close_raw_and_tolerates_rows_without_it():
         status=None,
     )
     history = snapshot["tickers"]["TSLA"]["price_history"]
-    assert history[0]["close_raw"] is None and history[0]["adj_close"] is None
+    assert "close_raw" not in history[0] and "adj_close" not in history[0]
     assert history[1] == {
         "date": "2026-10-02",
         "close": 150.0,
         "close_raw": 300.0,
         "adj_close": 149.0,
         "volume": 2,
-        "volume_source": None,
-        "volume_iex": None,
     }
 
 
@@ -251,7 +243,7 @@ def test_snapshot_serves_volume_source_and_an_explicit_change_point():
     )
     history = snapshot["tickers"]["TSLA"]["price_history"]
     assert [row["volume_source"] for row in history] == ["DS-05", "DS-02", "DS-05"]
-    assert history[1]["volume"] == 524882 and history[1]["volume_iex"] == 524882
+    assert history[1]["volume"] == 524882 and "volume_iex" not in history[1]
     assert history[2]["volume"] == 39235800 and history[2]["volume_iex"] == 779713
     assert snapshot["tickers"]["TSLA"]["volume_source_changes"] == [
         {"date": "2026-09-29", "from": "DS-05", "to": "DS-02"},
@@ -685,7 +677,7 @@ def test_intraday_is_today_only_and_short_interest_is_the_latest_settlement():
     intraday = snapshot["tickers"]["TSLA"]["intraday"]
     assert intraday["last"] == 372.0
     assert [bar["ts"] for bar in intraday["bars"]] == ["2026-10-06T14:00:00+00:00", "2026-10-06T20:00:00+00:00"]
-    assert intraday["change_pct"] == (372.0 / 360.0 - 1)
+    assert intraday["change_pct"] == pytest.approx(372.0 / 360.0 - 1, abs=1e-6)
     assert snapshot["tickers"]["TSLA"]["short_interest"] == {
         "settlement_date": "2026-09-30",
         "shares_short": 90,
@@ -730,6 +722,125 @@ def test_publish_writes_gzip_siblings_and_size_metrics(monkeypatch):
     assert compressed == gzip.compress(raw, compresslevel=6, mtime=0)
 
 
+def _weekday_session(count: int) -> list[str]:
+    from datetime import date, timedelta
+
+    days = []
+    cursor = date(2021, 10, 4)
+    while len(days) < count:
+        if cursor.weekday() < 5:
+            days.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return days
+
+
+def test_synthetic_25_ticker_dashboard_stays_under_two_megabytes():
+    """A 25-ticker build with five-year inputs must keep dashboard.json under 2 MB raw.
+
+    The same prices, short-interest settlements and correlation rows are heavy enough
+    that leaving the five-year closes on the snapshot exceeds that budget.
+    """
+    days = _weekday_session(dashboard_build.MAX_PRICE_ROWS)
+    tickers = [f"T{index:02d}" for index in range(25)]
+    series_ids = ["DGS10", "DGS2", "VIXCLS", "T10Y2Y", "DCOILWTICO"]
+    prices: dict[str, list[dict]] = {}
+    shorts: dict[str, list[dict]] = {}
+    trends: dict[str, dict] = {}
+    trend_rows: dict[str, list[dict]] = {}
+    for index, ticker in enumerate(tickers):
+        prices[ticker] = [
+            {
+                "ticker": ticker,
+                "date": day,
+                "close": 100 + index + offset * 0.137,
+                "adj_close": 99 + index + offset * 0.131,
+                "close_raw": 101 + index + offset * 0.139,
+                "volume": 1_000_000 + offset,
+                "volume_source": "DS-02" if offset % 50 else "DS-05",
+                "volume_iex": 800_000 + offset,
+            }
+            for offset, day in enumerate(days)
+        ]
+        shorts[ticker] = [
+            {
+                "ticker": ticker,
+                "settlement_date": day,
+                "short_interest": 1_000_000 + offset,
+                "previous_short_interest": 900_000 + offset,
+                "days_to_cover": 1.25,
+            }
+            for offset, day in enumerate(days[::10])
+        ]
+        trends[ticker] = {
+            "ticker": ticker,
+            "date": days[-1],
+            "rows": [
+                {
+                    "series_id": series,
+                    "value": 1.23456789 + slot,
+                    "corr_30d": 0.123456789,
+                    "corr_90d": -0.234567891,
+                    "effect": 0.034567891,
+                    "net_pressure": 0.111111111,
+                }
+                for slot, series in enumerate(series_ids)
+            ],
+        }
+        trend_rows[ticker] = [
+            {
+                "ticker": ticker,
+                "date": day,
+                "series_id": series,
+                "value": 4.2 + slot,
+                "net_pressure": 0.2,
+                "corr_30d": 0.111111111,
+                "corr_90d": -0.222222222,
+            }
+            for day in days[-90:]
+            for slot, series in enumerate(series_ids[:3])
+        ]
+    snapshot = dashboard_build.build_snapshot(
+        tickers=tickers,
+        prices=prices,
+        trends=trends,
+        fundamentals=[{"ticker": tickers[0], "metric": "deliveries", "release_date": days[-1], "value": 500000}],
+        status={"jobs": [{"job": "D4", "status": "ok"}]},
+        generated_at="2026-10-06T18:00:00+00:00",
+        short_interest=shorts,
+        rates_observations={
+            "DGS2": [{"obs_date": "2026-10-01", "value": 4.11}, {"obs_date": "2026-09-01", "value": 4.01}],
+            "DGS10": [{"obs_date": "2026-10-01", "value": 4.32}, {"obs_date": "2026-09-01", "value": 4.21}],
+        },
+    )
+    raw = json.dumps(snapshot, separators=(",", ":"), default=str).encode()
+    assert len(raw) < dashboard_build.DASHBOARD_RAW_BUDGET_BYTES, len(raw)
+    assert b"correlation_history" not in raw
+    assert b'"fundamentals"' not in raw
+    for ticker in tickers:
+        record = snapshot["tickers"][ticker]
+        assert len(record["price_history"]) == dashboard_build.SUMMARY_PRICE_ROWS
+        assert isinstance(record["short_interest"], dict)
+        assert record["price_history"][-1]["date"] == days[-1]
+    chart = dashboard_build.build_chart_data(
+        ticker=tickers[0],
+        trend_rows=trend_rows[tickers[0]],
+        short_interest_rows=shorts[tickers[0]],
+        options_rows=[],
+        fundamentals=[],
+        price_rows=prices[tickers[0]],
+        generated_at=snapshot["generated_at"],
+    )
+    assert len(chart["price_history"]) == dashboard_build.MAX_PRICE_ROWS
+    assert len(chart["short_interest"]) > 50
+    assert len(chart["correlation_history"]["DGS10"]) == 90
+    bloated = json.loads(raw)
+    bloated["tickers"][tickers[0]]["price_history"] = chart["price_history"]
+    for ticker in tickers[1:]:
+        bloated["tickers"][ticker]["price_history"] = dashboard_build.price_history_for(ticker, prices[ticker])
+    bloated_raw = json.dumps(bloated, separators=(",", ":"), default=str).encode()
+    assert len(bloated_raw) > dashboard_build.DASHBOARD_RAW_BUDGET_BYTES, len(bloated_raw)
+
+
 def test_charts_are_written_one_ticker_at_a_time(monkeypatch):
     held: list[str] = []
     written: list[str] = []
@@ -749,6 +860,7 @@ def test_charts_are_written_one_ticker_at_a_time(monkeypatch):
         ticker = key.removeprefix("serving/chart_data/").removesuffix(".json")
         assert held == [ticker]
         assert obj["ticker"] == ticker
+        assert obj["price_history"] == [{"date": "2026-10-01", "close": 1}]
         held.clear()
         written.append(ticker)
         return {"raw_bytes": 1, "gzip_bytes": 1}
@@ -851,3 +963,63 @@ def test_handler_publishes_charts_before_the_next_ticker_when_rates_are_denied(m
     assert "EVGO" in dashboard["tickers"]
     assert any(key == "serving/chart_data/META.json" for kind, key in events if kind == "write")
     assert any(key == "serving/chart_data/EVGO.json" for kind, key in events if kind == "write")
+
+
+def test_index_proxy_chart_files_carry_full_price_history(monkeypatch):
+    """SPY, QQQ, and the other overlay ETFs are collected with the watchlist.
+
+    Their chart documents used to be empty stubs, so the comparison lines had nothing
+    to draw. The one-ticker loop must write the same daily history it writes for equities.
+    """
+    sessions = _weekday_session(80)
+
+    def read_prices(ticker, bucket=None):
+        return pl.DataFrame(
+            {
+                "ticker": [ticker] * len(sessions),
+                "date": sessions,
+                "close": [100 + offset for offset in range(len(sessions))],
+                "volume": [1_000 + offset for offset in range(len(sessions))],
+            }
+        )
+
+    def read_prefix(prefix, bucket=None, columns=None):
+        if "macro_daily" in str(prefix):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "ListObjectsV2")
+        return pl.DataFrame()
+
+    def read_json(key, bucket=None):
+        if str(key).startswith("serving/rates/"):
+            raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "missing"}}, "GetObject")
+        return None
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setattr(universe, "user_ticker_union", lambda: [])
+    monkeypatch.setattr(lake, "read_prices", read_prices)
+    monkeypatch.setattr(lake, "read_parquet_prefix", read_prefix)
+    monkeypatch.setattr(lake, "read_json", read_json)
+    covered = universe.collection_universe([])
+    symbols = covered["equities"] + covered["etfs"]
+    with mock_aws():
+        client = boto3.client("s3", region_name="us-east-1")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        dashboard_build.handler({}, _Context())
+        dashboard = json.loads(client.get_object(Bucket="lake", Key="serving/dashboard.json")["Body"].read())
+        for symbol in universe.INDEX_PROXIES:
+            raw = client.get_object(Bucket="lake", Key=f"serving/chart_data/{symbol}.json")["Body"].read()
+            chart = json.loads(raw)
+            assert len(raw) > 192
+            assert chart["ticker"] == symbol
+            assert len(chart["price_history"]) == len(sessions)
+            assert chart["price_history"][0]["date"] == sessions[0]
+            assert chart["price_history"][-1]["close"] == 100 + len(sessions) - 1
+            assert len(dashboard["tickers"][symbol]["price_history"]) == dashboard_build.SUMMARY_PRICE_ROWS
+            assert dashboard["tickers"][symbol]["price_history"][-1]["date"] == sessions[-1]
+        for symbol in symbols:
+            chart = json.loads(
+                client.get_object(Bucket="lake", Key=f"serving/chart_data/{symbol}.json")["Body"].read()
+            )
+            assert len(chart["price_history"]) == len(sessions)

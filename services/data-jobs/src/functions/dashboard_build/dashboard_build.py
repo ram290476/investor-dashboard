@@ -12,6 +12,12 @@ from market_session import market_block
 from yield_curve import CURVE_SERIES_IDS, build_rates
 
 MAX_PRICE_ROWS = 1260
+# Recent closes for first paint: the 22-session spark, the 1M chip, the 63-session
+# comparison spark, and the 3M chip (one bar more than 63 sessions). 1Y/3Y/5Y,
+# moving averages beyond this window, and market-overlay history live on chart_data.
+SUMMARY_PRICE_ROWS = 64
+# Raw serving/dashboard.json budget for a 25-ticker build. The CloudWatch alarm stays at 4 MiB.
+DASHBOARD_RAW_BUDGET_BYTES = 2_000_000
 SCHEMA_VERSION = 3
 HEADLINE_LIMIT = 30
 ET = ZoneInfo("America/New_York")
@@ -32,7 +38,34 @@ MACRO_COLUMNS = ["series_id", "obs_date", "date", "value", "ingested_at"]
 
 
 def number(value: object) -> float | None:
-    return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
+def compact_number(value: object, digits: int = 4) -> int | float | None:
+    """Round a finite number for JSON. Whole values become ints so the dump omits ``.0``."""
+    parsed = number(value)
+    if parsed is None:
+        return None
+    rounded = round(parsed, digits)
+    if rounded == 0:
+        return 0
+    whole = round(rounded)
+    if abs(rounded - whole) < 10 ** (-(digits + 1)) and abs(whole) < 10**15:
+        return int(whole)
+    return rounded
+
+
+def _compact_tree(value: object, digits: int = 6) -> object:
+    if isinstance(value, dict):
+        return {key: _compact_tree(item, digits) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_compact_tree(item, digits) for item in value]
+    if isinstance(value, float):
+        return compact_number(value, digits)
+    return value
 
 
 def _headline_score(row: dict) -> tuple[float | None, str | None]:
@@ -257,12 +290,19 @@ def build_intraday(rows: list[dict], daily_history: list[dict]) -> dict | None:
     for day in daily_history:
         if str(day.get("date", "")) < session and isinstance(day.get("close"), (int, float)):
             prior = float(day["close"])
-    last = today[-1]["close"]
+    last = float(today[-1]["close"])
+    bars = []
+    for row in today:
+        bar = {"ts": row["ts"], "close": compact_number(row["close"], 4)}
+        volume = compact_number(row.get("volume"), 0)
+        if volume is not None:
+            bar["volume"] = volume
+        bars.append(bar)
     return {
         "as_of": today[-1]["ts"],
-        "last": last,
-        "change_pct": None if not prior else last / prior - 1,
-        "bars": today,
+        "last": compact_number(last, 4),
+        "change_pct": None if not prior else compact_number(last / prior - 1, 6),
+        "bars": bars,
     }
 
 
@@ -295,9 +335,9 @@ def latest_short_interest(rows: list[dict]) -> dict[str, dict]:
             pct = (float(shares) - float(previous)) / float(previous)
         latest[ticker] = {
             "settlement_date": day,
-            "shares_short": shares,
-            "days_to_cover": row.get("days_to_cover"),
-            "pct_change": pct,
+            "shares_short": compact_number(shares, 0) if number(shares) is not None else shares,
+            "days_to_cover": compact_number(row.get("days_to_cover"), 4),
+            "pct_change": compact_number(pct, 6),
         }
     return latest
 
@@ -325,13 +365,15 @@ def build_chart_data(
         if not day:
             continue
         if series_id and value is not None:
-            trends_by_series.setdefault(series_id, {})[day] = value
+            trends_by_series.setdefault(series_id, {})[day] = compact_number(value, 6)
         if series_id:
             correlation_by_series.setdefault(series_id, []).append({
-                "date": day, "corr_30d": number(row.get("corr_30d")), "corr_90d": number(row.get("corr_90d")),
+                "date": day,
+                "corr_30d": compact_number(row.get("corr_30d"), 6),
+                "corr_90d": compact_number(row.get("corr_90d"), 6),
             })
         if pressure is not None:
-            pressure_by_date[day] = pressure
+            pressure_by_date[day] = compact_number(pressure, 6)
 
     shares_rows = sorted(
         (
@@ -382,15 +424,17 @@ def build_chart_data(
         short_interest.append(
             {
                 "date": day,
-                "shares_short": shares_short,
-                "shares_denominator": denominator,
+                "shares_short": compact_number(shares_short, 0),
+                "shares_denominator": compact_number(denominator, 0),
                 "denominator_type": (
                     "estimated_public_float" if float_shares_as_of is not None
                     else "shares_outstanding_proxy" if shares_proxy_as_of is not None
                     else None
                 ),
-                "short_pct_denominator": None if denominator is None else 100 * shares_short / denominator,
-                "days_to_cover": number(row.get("days_to_cover")),
+                "short_pct_denominator": (
+                    None if denominator is None else compact_number(100 * shares_short / denominator, 6)
+                ),
+                "days_to_cover": compact_number(row.get("days_to_cover"), 4),
             }
         )
 
@@ -404,17 +448,18 @@ def build_chart_data(
         options.append(
             {
                 "date": day,
-                "put_call_volume_ratio": number(row.get("put_call_volume_ratio")),
-                "iv30": number(row.get("iv30")),
+                "put_call_volume_ratio": compact_number(row.get("put_call_volume_ratio"), 6),
+                "iv30": compact_number(row.get("iv30"), 6),
                 "iv_available": bool(row.get("iv_available")),
             }
         )
 
+    history = price_history_for(ticker, price_rows or [])
     company_series = [
         {
             "date": str(row.get("release_date") or "")[:10],
             "series_id": str(row.get("metric")),
-            "value": number(row.get("value")),
+            "value": compact_number(row.get("value"), 6),
             "unit": row.get("unit"),
             "fiscal_quarter": row.get("fiscal_quarter"),
             "measurement_date": row.get("measurement_date"),
@@ -425,10 +470,12 @@ def build_chart_data(
         and row.get("release_date")
         and number(row.get("value")) is not None
     ]
-    return {
+    return _compact_tree({
         "schema_version": 1,
         "ticker": ticker,
         "generated_at": generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
+        "price_history": history,
+        "volume_source_changes": volume_source_changes(history),
         "macro_series": {
             series_id: [{"date": day, "value": values[day]} for day in sorted(values)[-MAX_PRICE_ROWS:]]
             for series_id, values in sorted(trends_by_series.items())
@@ -443,7 +490,7 @@ def build_chart_data(
         "short_interest": short_interest[-MAX_PRICE_ROWS:],
         "options": options[-MAX_PRICE_ROWS:],
         "fundamentals": sorted(company_series, key=lambda row: (row["date"], row["series_id"])),
-    }
+    })
 
 
 def volume_source_of(row: dict) -> str | None:
@@ -470,6 +517,48 @@ def volume_source_changes(history: list[dict]) -> list[dict]:
     return changes
 
 
+def _price_bar(day: str, row: dict) -> dict | None:
+    """One served close. Equal or missing adjusted/traded closes and duplicate IEX volume are omitted."""
+    close = compact_number(row.get("close"), 4)
+    if close is None:
+        return None
+    bar: dict = {"date": day, "close": close}
+    traded = compact_number(row.get("close_raw"), 4)
+    adjusted = compact_number(row.get("adj_close"), 4)
+    if traded is not None and traded != close:
+        bar["close_raw"] = traded
+    if adjusted is not None and adjusted != close:
+        bar["adj_close"] = adjusted
+    volume = compact_number(row.get("volume"), 0)
+    if volume is not None:
+        bar["volume"] = volume
+    source = volume_source_of(row)
+    if source:
+        bar["volume_source"] = source
+    iex = row.get("volume_iex")
+    if iex is None and source == "DS-02":
+        iex = row.get("volume")
+    iex_n = compact_number(iex, 0)
+    if iex_n is not None and iex_n != volume:
+        bar["volume_iex"] = iex_n
+    return bar
+
+
+def price_history_for(ticker: str, rows: list[dict]) -> list[dict]:
+    """Split-adjusted daily bars for one ticker, capped at the five-year serving window."""
+    unique: dict[str, dict] = {}
+    symbol = ticker.upper()
+    for row in rows:
+        owner = str(row.get("ticker") or "").upper()
+        if owner and owner != symbol:
+            continue
+        day = str(row.get("date") or "")[:10]
+        bar = _price_bar(day, row) if day else None
+        if bar is not None:
+            unique[day] = bar
+    return [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
+
+
 def build_snapshot(
     tickers: list[str],
     prices: dict[str, list[dict]],
@@ -491,35 +580,19 @@ def build_snapshot(
     rates_attempts: dict | None = None,
     rates: dict | object | None = _UNSET,
 ) -> dict:
-    """Create a deterministic API document; absent source data remains explicitly unavailable."""
+    """Create a deterministic API document; absent source data remains explicitly unavailable.
+
+    ``price_history`` on each ticker is the recent first-paint tail. The five-year
+    series is written to ``serving/chart_data/<T>.json``. Quarterly fundamentals are
+    not repeated on this document.
+    """
     clock = _as_of(generated_at)
     instruments = {}
     for ticker in tickers:
-        unique: dict[str, dict] = {}
-        for row in prices.get(ticker, []):
-            # A mixed frame (another symbol's rows under this key) must not overwrite
-            # this ticker's close for the day. Rows with no ticker are already scoped.
-            owner = str(row.get("ticker") or "").upper()
-            if owner and owner != ticker.upper():
-                continue
-            day = str(row.get("date", ""))
-            close = row.get("close")
-            if day and isinstance(close, (int, float)):
-                source = volume_source_of(row)
-                iex = row.get("volume_iex")
-                # A legacy IEX row stored the print in volume and had no volume_iex column.
-                if iex is None and source == "DS-02":
-                    iex = row.get("volume")
-                unique[day] = {
-                    "date": day,
-                    "close": float(close),  # split-adjusted
-                    "close_raw": row.get("close_raw"),  # actual traded close; null on older rows
-                    "adj_close": row.get("adj_close"),  # split- and dividend-adjusted; charts use this
-                    "volume": row.get("volume"),
-                    "volume_source": source,
-                    "volume_iex": iex,
-                }
-        history = [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
+        # Full five-year bars go to chart_data. The dashboard keeps the recent tail
+        # the watchlist, 1M chip, and comparison sparklines draw before that fetch.
+        full_history = price_history_for(ticker, prices.get(ticker, []))
+        history = full_history[-SUMMARY_PRICE_ROWS:]
         bundle = None if news is None else news.get(ticker) or {}
         filing_rows = None if filings is None else filings.get(ticker) or []
         award = None
@@ -550,7 +623,7 @@ def build_snapshot(
             "news": None
             if bundle is None
             else build_news(ticker, bundle.get("daily") or [], bundle.get("articles") or [], clock),
-            "intraday": build_intraday((hourly or {}).get(ticker, []), history),
+            "intraday": build_intraday((hourly or {}).get(ticker, []), full_history),
             "short_interest": interest.get(ticker),
             "filings": None if filing_rows is None else build_filings(filing_rows),
             "insider_30d": None if filing_rows is None else build_insider(filing_rows, clock.date()),
@@ -559,16 +632,14 @@ def build_snapshot(
             "price_as_of": history[-1]["date"] if history else None,
         }
 
-    normalized_fundamentals = [
-        row for row in fundamentals if row.get("ticker") in instruments and row.get("metric")
-    ]
+    # Quarterly fundamentals are per ticker on chart_data. They are not repeated here.
+    del fundamentals
     available = any(item["price_status"] == "available" for item in instruments.values())
-    return {
+    return _compact_tree({
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
         "data_status": "available" if available else "unavailable",
         "tickers": instruments,
-        "fundamentals": normalized_fundamentals,
         "events": None if events is None else build_events(events, clock.date()),
         "releases": (
             None
@@ -580,7 +651,7 @@ def build_snapshot(
             build_rates(rates_observations, rates_fomc, rates_attempts) if rates is _UNSET else rates
         ),
         "market": market_block(clock),
-    }
+    })
 
 
 def publish_serving_documents(snapshot: dict, charts: dict[str, dict]) -> dict[str, int]:
@@ -807,7 +878,9 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             extra={
                 "tickers": len(tickers),
                 "tickers_with_prices": sum(bool(row["price_history"]) for row in snapshot["tickers"].values()),
-                "fundamentals": len(snapshot["fundamentals"]),
+                "fundamentals": sum(
+                    1 for row in fundamental_rows if row.get("ticker") in tickers and row.get("metric")
+                ),
                 "generated_at": snapshot["generated_at"],
                 "rates": rates_block is not None,
                 "raw_bytes": size["raw_bytes"],

@@ -6,6 +6,7 @@ import {
   normalizePeriod,
   periodQuote,
   resolveChartPeriod,
+  servedPriceHistory,
   sessionReturn,
   validBars,
 } from "./chart-period.js";
@@ -173,6 +174,16 @@ test("5Y uses the stored backfill and does not extend it", () => {
   assert.equal(fiveYear.window[0].date, "2021-10-07");
   assert.equal(fiveYear.window.at(-1).date, "2026-10-06");
   assert.equal(fiveYear.returnValue, completed.at(-1).adj_close / completed[0].adj_close - 1);
+});
+
+test("served price history prefers the chart series and keeps the dashboard tail until it arrives", () => {
+  const summary = bars(64);
+  const full = bars(1260);
+  assert.equal(servedPriceHistory({ price_history: summary }, null), summary);
+  assert.equal(servedPriceHistory({ price_history: summary }, { price_history: [] }), summary);
+  assert.equal(servedPriceHistory({ price_history: summary }, { price_history: full }), full);
+  assert.equal(servedPriceHistory(null, { price_history: full }).length, 1260);
+  assert.deepEqual(servedPriceHistory({ price_history: summary }, { price_history: summary.slice(-10) }), summary);
 });
 
 function datedSpan(startDate, endDate, count, startPrice = 80) {

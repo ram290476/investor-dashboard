@@ -249,6 +249,14 @@ test("ETF overlays match timestamps for intraday bars", () => {
   assert.deepEqual(valuesForOverlay("SPY", { bars, tickerData: {}, chartData: {}, dashboard }), [500, 500, 501]);
 });
 
+test("market overlays use the per-ticker chart history when the dashboard only has the recent tail", () => {
+  const bars = [{ date: "2024-01-02", close: 1 }, { date: "2026-10-01", close: 2 }];
+  const dashboard = { tickers: { SPY: { price_history: [{ date: "2026-10-01", close: 500 }] } } };
+  const charts = { SPY: { price_history: [{ date: "2024-01-02", close: 400 }, { date: "2026-10-01", close: 500 }] } };
+  assert.deepEqual(valuesForOverlay("SPY", { bars, tickerData: {}, chartData: {}, dashboard, charts }), [400, 500]);
+  assert.deepEqual(valuesForOverlay("SPY", { bars, tickerData: {}, chartData: {}, dashboard }), [null, 500]);
+});
+
 test("fundamental summaries are unit-aware, quarter-labelled and publication-date safe", () => {
   const chart = { fundamentals: [
     {

@@ -1,6 +1,9 @@
 import base64
 import gzip
 import json
+import os
+import subprocess
+import sys
 
 import boto3
 import pytest
@@ -138,6 +141,12 @@ def test_chart_route_only_reads_a_ticker_in_the_callers_watchlist(api, monkeypat
     denied = mod.handler(other_ticker, None)
     assert denied["statusCode"] == 403
     assert reads == ["serving/chart_data/TSLA.json"]
+
+    proxy = _event("GET")
+    proxy["rawPath"] = "/chart/SPY"
+    allowed = mod.handler(proxy, None)
+    assert allowed["statusCode"] == 200
+    assert reads == ["serving/chart_data/TSLA.json", "serving/chart_data/SPY.json"]
 
 
 def test_stock_route_serves_proposed_metrics_with_status_and_stays_on_the_watchlist(api, monkeypatch):
@@ -1036,3 +1045,51 @@ def test_put_keeps_saved_prefs_when_eventbridge_publish_fails(api, monkeypatch, 
     assert len(logs) == 1
     _assert_log(logs[0], "ticker_added_publish_failed", "TICKER_ADDED_PUBLISH_FAILED", "ClientError", "PUT /prefs")
     assert "RIVN" not in json.dumps(logs[0])
+
+
+def test_prefs_api_imports_without_the_app_package():
+    """The user_prefs Lambda zip is prefs_api.py alone, so this import cannot see src/app."""
+    function_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.pardir, "src", "functions", "prefs_api")
+    )
+    repo = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir))
+    probe = """
+import sys
+from pathlib import Path
+
+function_dir = Path(sys.argv[1]).resolve()
+repo = Path(sys.argv[2]).resolve()
+kept = [str(function_dir)]
+for entry in sys.path:
+    if not entry:
+        continue
+    path = Path(entry).resolve()
+    if path == repo or repo in path.parents:
+        continue
+    kept.append(str(path))
+sys.path = kept
+import prefs_api
+
+assert "universe" not in sys.modules
+assert not any((Path(entry) / "universe.py").is_file() for entry in sys.path)
+assert prefs_api.INDEX_PROXIES == ("SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH")
+"""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = ""
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    completed = subprocess.run(
+        [sys.executable, "-c", probe, function_dir, repo],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=function_dir,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_prefs_index_proxies_match_the_collector_universe():
+    import prefs_api
+    import universe
+
+    assert prefs_api.INDEX_PROXIES == universe.INDEX_PROXIES

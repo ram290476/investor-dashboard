@@ -20,7 +20,8 @@ Item (table user_prefs, partition key user_sub):
     version       number   optimistic concurrency; PUT must send the version it read
     updated_at    string   ISO-8601 UTC
 
-GET /chart/{ticker} checks that ticker is in this caller's preferences before reading its chart document.
+GET /chart/{ticker} reads a chart document when the ticker is in this caller's preferences
+or is an index proxy (SPY, DIA, QQQ, IWM, XLY, ITA, SMH). Other symbols return 403.
 GET /dashboard, /chart/{ticker} and /status are gzip-encoded when the client accepts gzip and the
 JSON body is over 1 KB. The Lambda response stays under the 6 MiB synchronous payload limit.
 
@@ -44,6 +45,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
 from botocore.exceptions import ClientError
+
+# This file is the entire user_prefs Lambda zip (infra/terraform/modules/user_prefs archive_file).
+# Do not import src/app. These are the same symbols as universe.INDEX_PROXIES; GET /chart allows
+# them even when they are not on the caller's watchlist, because the market overlays read them.
+INDEX_PROXIES = ("SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH")
 
 TABLE = os.environ.get("PREFS_TABLE", "invdash-user-prefs")
 LAKE_BUCKET = os.environ.get("LAKE_BUCKET", "")
@@ -675,7 +681,7 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
             return respond(404, {"error": "Chart data not found"})
         ticker = match.group(1).upper()
         prefs = get_prefs(_table_for(sub), sub)
-        if ticker not in prefs["tickers"]:
+        if ticker not in prefs["tickers"] and ticker not in INDEX_PROXIES:
             return respond(403, {"error": "Ticker is not in your watchlist"})
         chart_key = f"serving/chart_data/{ticker}.json"
         loaded = _read_serving_document(chart_key)

@@ -86,7 +86,7 @@ Tables are grouped by how often they change, and that sets their file layout: ho
 | ingestion_runs | Every run | run_id | job, source_id, status, rows, error, duration_ms | year/month | all jobs |
 | user_prefs (DynamoDB) | On change | user_sub | tickers\[\], pinned\[\] (max 6), display.time_zone, display.updown_palette, display.chart_period, version, updated_at | n/a | prefs API |
 
-**Serving layer** — the compact `serving/dashboard.json` snapshot plus per-ticker `serving/chart_data/<T>.json` histories for macro overlays, macro pressure, short interest, options, and quarterly fundamentals. `serving/stock/<T>.json` is the approved-metric payload for the per-stock page (series, latest value, QoQ/YoY, provenance, run status). `GET /chart/{ticker}` and `GET /stock/{ticker}` serve only a ticker in the caller's watchlist. Proposed company metrics are omitted.
+**Serving layer** — the compact `serving/dashboard.json` snapshot (first-paint summary, including a short daily-close tail) plus per-ticker `serving/chart_data/<T>.json` histories for the five-year price series, macro overlays, macro pressure, correlation, short interest, options, and quarterly fundamentals. `serving/stock/<T>.json` is the approved-metric payload for the per-stock page (series, latest value, QoQ/YoY, provenance, run status). `GET /chart/{ticker}` and `GET /stock/{ticker}` serve only a ticker in the caller's watchlist. Proposed company metrics are omitted.
 
 - Macro series use one long table (series_id, obs_date, value) so a new FRED or BLS series needs no schema change.
 

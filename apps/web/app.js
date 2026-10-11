@@ -2,8 +2,10 @@ import {
   PERIODS,
   chartValue,
   isNumericValue,
+  normalizePeriod,
   periodQuote,
   resolveChartPeriod,
+  servedPriceHistory,
   sessionReturn,
   validBars,
 } from "./chart-period.js";
@@ -43,6 +45,7 @@ import { curveView, fomcView, policyPathView } from "./rates-panel.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
+  MARKET_OVERLAY_IDS,
   OVERLAYS,
   activeOverlayGroups,
   addOverlay,
@@ -395,6 +398,13 @@ function selectCatalyst(event) {
   });
 }
 
+function withChartHistory(tickerData, chartData, chartDataState) {
+  if (!tickerData || chartDataState !== "ready") return tickerData;
+  const history = servedPriceHistory(tickerData, chartData);
+  if (history === tickerData.price_history) return tickerData;
+  return { ...tickerData, price_history: history };
+}
+
 function selectedChartBars(tickerData) {
   const history = tickerData?.price_history || [];
   const period = resolveChartPeriod(session.prefs.display?.chart_period, history);
@@ -575,10 +585,21 @@ async function savePrefs(update) {
   return save;
 }
 
+function ensureMarketCharts(force = false) {
+  for (const id of MARKET_OVERLAY_IDS) {
+    if (id === session.selected || !session.dashboard?.tickers?.[id]) continue;
+    loadChartData(id, force);
+  }
+}
+
 async function loadChartData(ticker, force = false) {
   if (!ticker || (!force && ["ready", "loading"].includes(session.chartDataState[ticker]))) return;
+  const selected = session.selected === ticker;
   session.chartDataState[ticker] = "loading";
-  if (session.selected === ticker) renderDashboard();
+  if (selected) {
+    renderDashboard();
+    ensureMarketCharts(force);
+  }
   try {
     session.chartData[ticker] = await apiGet(`chart/${encodeURIComponent(ticker)}`);
     session.chartDataState[ticker] = "ready";
@@ -595,7 +616,7 @@ async function loadChartData(ticker, force = false) {
       return;
     }
   }
-  if (session.selected === ticker) renderDashboard();
+  if (selected || MARKET_OVERLAY_IDS.includes(ticker)) renderDashboard();
 }
 
 async function loadStockPage(ticker, force = false) {
@@ -1135,7 +1156,7 @@ function marketSummary() {
 }
 
 function movingAverageSummary(history) {
-  if (session.dashboardState === "loading") return "Loading…";
+  if (session.dashboardState === "loading" || history == null) return "Loading…";
   const rows = movingAverageRows(history);
   const known = rows.filter((row) => row.distance != null);
   if (!known.length) return "Unavailable";
@@ -1428,13 +1449,14 @@ function disabledPeriodTip(period, quote) {
   return `Not enough history yet · ${period.id} needs ${quote.needed} sessions (${have})`;
 }
 
-function renderPeriodChips(history, activeId, onSelect, intraday) {
+function renderPeriodChips(history, activeId, onSelect, intraday, historyState = "ready") {
   const group = node("div", "period-chips");
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", "Period: return over each period; select one to chart it");
+  const loading = historyState === "loading";
   PERIODS.forEach((period) => {
     const quote = periodQuote(history, period.id);
-    const selected = quote.available && period.id === activeId;
+    const selected = (quote.available || (loading && period.id === activeId)) && period.id === activeId;
     const button = node("button", "period-chip");
     button.type = "button";
     button.dataset.period = period.id;
@@ -1442,9 +1464,14 @@ function renderPeriodChips(history, activeId, onSelect, intraday) {
     const liveReturn = period.id === "1D" && isNumericValue(intraday?.change_pct) ? Number(intraday.change_pct) : null;
     const shownReturn = liveReturn == null ? quote.returnValue : liveReturn;
     const valueClass = quote.available || liveReturn != null ? polarity(shownReturn) : "neutral";
-    const valueText = quote.available || liveReturn != null ? formatPercent(shownReturn, 1) : "—";
+    const valueText = quote.available || liveReturn != null ? formatPercent(shownReturn, 1) : loading ? "…" : "—";
     button.append(node("span", "period-label", period.id), node("span", `period-return mono ${valueClass}`, valueText));
-    if (!quote.available) {
+    if (!quote.available && loading) {
+      button.setAttribute("aria-disabled", "true");
+      button.title = `Loading ${period.id} history`;
+      button.setAttribute("aria-label", `${period.id}, loading history`);
+      button.addEventListener("click", (event) => event.preventDefault());
+    } else if (!quote.available) {
       const reason = disabledPeriodTip(period, quote);
       button.setAttribute("aria-disabled", "true");
       button.title = reason;
@@ -1490,7 +1517,13 @@ function chartControlsFor(tickerData, chartData, chartDataState, bars) {
     .map((metric) => metric.metric_id)
     .join(",");
   const key = `${session.selected}|${session.prefs.display?.chart_period}|${session.metricReview || "all"}|${companyKey}|${bars[0]?.ts || bars[0]?.date}|${bars.at(-1)?.ts || bars.at(-1)?.date}`;
-  const groups = overlayGroups(tickerData, chartDataState === "ready" ? chartData : null, session.dashboard, bars);
+  const groups = overlayGroups(
+    tickerData,
+    chartDataState === "ready" ? chartData : null,
+    session.dashboard,
+    bars,
+    session.chartData,
+  );
   const lanes = availableLanes(bars, chartDataState === "ready" ? chartData : null);
   const historyBacked = overlay => ["macro", "fundamental"].includes(overlay.kind);
   if (chartDataState === "ready") {
@@ -2014,13 +2047,15 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
     chartData,
     metricsForReview(session.stockPage[session.selected], session.metricReview || "all"),
   );
-  const history = tickerData?.price_history || [];
+  const history = servedPriceHistory(tickerData, chartDataState === "ready" ? chartData : null);
   const bars = validBars(history);
   const chartSettings = chartSettingsFor(session.prefs, session.selected);
-  const activeId = resolveChartPeriod(session.prefs.display?.chart_period, history);
+  const requested = normalizePeriod(session.prefs.display?.chart_period);
+  const waiting = chartDataState === "loading" && !periodQuote(history, requested).available;
+  const activeId = waiting ? requested : resolveChartPeriod(requested, history);
   const quote = periodQuote(history, activeId);
   const intradayBars = tickerData?.intraday?.bars || [];
-  const chartHistory = selectedChartBars(tickerData);
+  const chartHistory = waiting ? [] : selectedChartBars({ ...tickerData, price_history: history });
   const controls = chartControlsFor(tickerData, chartData, chartDataState, chartHistory);
   const visibleOverlayIds = controls.groups.flatMap(group => group.overlays).filter(overlay => overlay.available).map(overlay => overlay.id);
   const visibleOverlays = chartSettings.overlays.filter(id => visibleOverlayIds.includes(id));
@@ -2058,7 +2093,13 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
     });
     side.append(openPage);
   }
-  side.append(renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
+  side.append(renderPeriodChips(
+    history,
+    waiting || quote.available ? activeId : "",
+    onSelectPeriod,
+    tickerData?.intraday,
+    chartDataState === "loading" ? "loading" : "ready",
+  ));
   overview.append(quoteBlock, side);
   panel.append(overview);
   panel.append(renderOverlayControls(controls.groups, chartDataState, onSettingsChange));
@@ -2106,9 +2147,10 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   let placedLanes = false;
   if (chartHistory.length >= 2) {
     const chart = drawChart(chartHistory, session.selected, activeId, visibleOverlays, {
-      tickerData,
+      tickerData: { ...tickerData, price_history: history },
       chartData,
       dashboard: session.dashboard,
+      charts: session.chartData,
     });
     if (chart) {
       const stack = node("div", "chart-stack");
@@ -2149,7 +2191,13 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
         adjustedMax: numericValues.length ? Math.max(...numericValues) : null,
         overlays: visibleOverlays.map((id) => {
           const definition = overlayDefinition(id);
-          const series = valuesForOverlay(id, { bars: chartHistory, tickerData, chartData, dashboard: session.dashboard });
+          const series = valuesForOverlay(id, {
+            bars: chartHistory,
+            tickerData: { ...tickerData, price_history: history },
+            chartData,
+            dashboard: session.dashboard,
+            charts: session.chartData,
+          });
           const lastObservationIndex = series.findLastIndex(isNumericValue);
           return {
             definition,
@@ -2182,7 +2230,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       node(
         "p",
         "data-state",
-        session.dashboardState === "loading"
+        session.dashboardState === "loading" || waiting
           ? "Loading daily closes…"
           : session.dashboardState === "error" && !tickerData
             ? "Daily closes could not be loaded. Use Try again above."
@@ -2742,15 +2790,17 @@ function renderDetailPanels(tickerData, chartData, chartDataState) {
   if (market && session.dashboardState === "loading") market.append(node("p", "data-state", "Loading market prices…"));
   else if (market && session.dashboardState === "error") market.append(node("p", "data-state error", "Market prices could not be loaded. Refresh data to retry."));
   if (market) [session.selected, "SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH"].filter((id, i, ids) => ids.indexOf(id) === i).forEach(id => {
-    const history = session.dashboard?.tickers?.[id]?.price_history || [];
+    const history = servedPriceHistory(session.dashboard?.tickers?.[id], session.chartData?.[id]);
     const quote = periodQuote(history, "1M");
     market.append(node("p", "signal-heading", `${id} · ${quote.available ? formatPercent(quote.returnValue, 1) : "History unavailable"}`),
       signalSparkline(history.slice(-63).map(bar => ({ value: chartValue(bar) })), "var(--price)", `${id} adjusted closes`));
   });
-  const averages = create("moving-averages", "Moving averages", `${session.selected} · adjusted daily closes`, movingAverageSummary(tickerData?.price_history));
-  if (averages && session.dashboardState === "loading") averages.append(node("p", "data-state", "Loading daily closes…"));
-  else if (averages && session.dashboardState === "error") averages.append(node("p", "data-state error", "Daily closes could not be loaded."));
-  if (averages) movingAverageRows(tickerData?.price_history).forEach(row => averages.append(node("p", "signal-heading",
+  const averages = create("moving-averages", "Moving averages", `${session.selected} · adjusted daily closes`, movingAverageSummary(chartDataState === "loading" ? null : tickerData?.price_history));
+  if (averages && (session.dashboardState === "loading" || chartDataState === "loading")) {
+    averages.append(node("p", "data-state", "Loading daily closes…"));
+  } else if (averages && session.dashboardState === "error") {
+    averages.append(node("p", "data-state error", "Daily closes could not be loaded."));
+  } else if (averages) movingAverageRows(tickerData?.price_history).forEach(row => averages.append(node("p", "signal-heading",
     `${row.window}D · ${row.value == null ? "Insufficient history" : `${formatPrice(row.value)} · price ${formatPercent(row.distance, 1)} vs average`}`)));
   const drivers = driverRows(tickerData);
   [
@@ -3362,9 +3412,9 @@ function appendMetricGroups(block, cards, empty) {
 }
 
 function renderStockPage() {
-  const tickerData = selectedData();
   const chartData = session.chartData[session.selected] || null;
   const chartDataState = session.chartDataState[session.selected] || "loading";
+  const tickerData = withChartHistory(selectedData(), chartData, chartDataState);
   const payload = session.stockPage[session.selected] || null;
   const pageState = session.stockPageState[session.selected] || "loading";
   const review = session.metricReview || "all";
@@ -3479,9 +3529,9 @@ function renderStockPage() {
 
 function renderResearchPage() {
   const errorMessage = dashboardBanner(session);
-  const tickerData = selectedData();
   const chartData = session.chartData[session.selected] || null;
   const chartDataState = session.chartDataState[session.selected] || "loading";
+  const tickerData = withChartHistory(selectedData(), chartData, chartDataState);
   root.replaceChildren();
   applyTheme(session.prefs.display);
   root.append(renderAppHeader(), renderWatchlist());
@@ -3685,9 +3735,9 @@ function renderDashboard() {
     root.append(alert);
   }
 
-  const tickerData = selectedData();
   const chartData = session.chartData[session.selected] || null;
   const chartDataState = session.chartDataState[session.selected] || "loading";
+  const tickerData = withChartHistory(selectedData(), chartData, chartDataState);
   const mainGrid = node("main", "dashboard-grid");
   mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
   const primary = node("div", "primary-column");
