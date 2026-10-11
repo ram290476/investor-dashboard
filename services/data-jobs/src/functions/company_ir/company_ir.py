@@ -801,7 +801,10 @@ _PROPOSAL_SKIP = re.compile(
     r"|^\(\d+\)|\(\d+\)\s"
     r"|[a-z]\d+$"
     r"|^adjusted\b"
-    r"|^gaap\s+(?:net\s+(?:loss|income)|revenue)\b"
+    r"|^gaap\s+"
+    r"|^net loss,? as reported\b"
+    r"|^(?:loss|income) before (?:income )?taxes\b"
+    r"|^income\s+\(loss\)\s+from\s+operations\s+\S"
     r"|\bebitda\b"
     r"|\btotal adjustments\b"
     r"|\binterest expense\b"
@@ -819,13 +822,41 @@ _RECON_MARK = re.compile(
     re.IGNORECASE,
 )
 _RECON_SECTION = re.compile(r"\breconciliation\b|\btotal adjustments\b", re.IGNORECASE)
-_CASH_FLOW_LABEL = re.compile(r"net cash (?:used in|provided by)", re.IGNORECASE)
+_CASH_FLOW_LABEL = re.compile(
+    r"net cash (?:used in|provided by)"
+    r"|cash flows provided by \(used in\)"
+    r"|cash flows \(used in\) provided by",
+    re.IGNORECASE,
+)
+_GAAP_LINE = re.compile(r"^gaap\s+\S", re.IGNORECASE)
+_ADJUSTED_TOTAL = re.compile(r"^adjusted\s+\S", re.IGNORECASE)
+_TOTAL_ADJUSTMENTS = re.compile(r"\btotal\b.*\badjustments?\b", re.IGNORECASE)
 _YTD_SPAN = re.compile(r"\b(?:six|nine)\s+months\s+ended\b", re.IGNORECASE)
 _QUARTER_SPAN = re.compile(r"\bthree\s+months\s+ended\b|\bquarter(?:s)?\s+ended\b|\bq[1-4]\b", re.IGNORECASE)
 _SCALE_CAPTION = re.compile(
     r"(?:\(\s*)?(?:\$\s*)?in\s+(?:thousands|millions|billions)\b",
     re.IGNORECASE,
 )
+
+
+def _labels_are_bridge(labels: list[str]) -> bool:
+    """A non-GAAP bridge, even when the caption never says reconciliation.
+
+    EVgo's tables pair ``GAAP revenue`` lines with an ``Adjusted EBITDA`` total, or a
+    ``Total ... adjustments`` row, and do not use the word reconciliation.
+    """
+    gaap_line = False
+    adjusted_total = False
+    total_adjustments = False
+    for label in labels:
+        text = normalize_label(label)
+        if _GAAP_LINE.search(text):
+            gaap_line = True
+        if _ADJUSTED_TOTAL.search(text):
+            adjusted_total = True
+        if _TOTAL_ADJUSTMENTS.search(text):
+            total_adjustments = True
+    return (gaap_line and adjusted_total) or total_adjustments
 
 
 def _is_gaap_metric(entry: dict) -> bool:
@@ -986,12 +1017,14 @@ def table_scan(
         tail = " ".join(str(cell) for cell in table[0])[-300:]
         header_blob = " ".join(str(cell) for cell in table[0])
         caption = _header_caption(table[0])
-        label_blob = " ".join(str(row[0]) for row in table[1:] if row)
+        row_labels = [str(row[0]) for row in table[1:] if row]
+        label_blob = " ".join(row_labels)
         segment_table = re.search(r"\bsegment\b", tail, re.IGNORECASE) is not None
         # A reconciliation bridge, including its GAAP starting line and the adjustments
         # under it, is not a set of company metrics. Cash-flow and year-to-date-only
-        # statements are not quarterly KPI tables.
-        recon_table = _RECON_MARK.search(caption) is not None
+        # statements are not quarterly KPI tables. EVgo never captions the bridge
+        # "reconciliation"; the GAAP lines plus an Adjusted total identify it.
+        recon_table = _RECON_MARK.search(caption) is not None or _labels_are_bridge(row_labels)
         cash_flow = (
             _CASH_FLOW_LABEL.search(caption) is not None or _CASH_FLOW_LABEL.search(label_blob) is not None
         )

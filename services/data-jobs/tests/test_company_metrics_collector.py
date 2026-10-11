@@ -1710,11 +1710,14 @@ def test_footnote_adjusted_and_reconciliation_labels_are_not_proposed():
     html = """
     <table>
       <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Robotaxi miles</td><td>5</td><td>4</td></tr>
+    </table>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
       <tr><td>Adjusted EBITDA1</td><td>10</td><td>9</td></tr>
       <tr><td>Adjusted operating income</td><td>8</td><td>7</td></tr>
       <tr><td>GAAP net loss</td><td>(4)</td><td>(3)</td></tr>
       <tr><td>GAAP revenue</td><td>20</td><td>18</td></tr>
-      <tr><td>Robotaxi miles</td><td>5</td><td>4</td></tr>
     </table>
     <table>
       <tr><td>Reconciliation of GAAP to non-GAAP</td><td>Q4 2025</td><td>Q3 2025</td></tr>
@@ -1866,3 +1869,110 @@ def test_reconciliation_cash_flow_and_prose_dates_are_not_proposed():
     assert "robotaxi_miles" in flowing_ids
     assert "six_months_ended_june" not in flowing_ids
     assert all(item["first_seen"]["period"] <= "2026Q2" for item in flowing["proposals"])
+
+
+def test_bridge_structure_cash_flow_wording_and_gaap_labels_stay_out_of_proposals():
+    """EVgo's bridge has no 'reconciliation' caption. Channel and region KPIs stay."""
+    evgo = """
+    <p>Fourth quarter 2025</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Charging stalls</td><td>1</td><td>1</td></tr>
+      <tr><td>Network throughput</td><td>2</td><td>2</td></tr>
+      <tr><td>Stall utilization</td><td>3</td><td>3</td></tr>
+      <tr><td>Customer accounts</td><td>4</td><td>4</td></tr>
+      <tr><td>Network gigawatt hours</td><td>5</td><td>5</td></tr>
+      <tr><td>Membership fees</td><td>6</td><td>6</td></tr>
+    </table>
+    <table>
+      <tr><td>Non-GAAP measures</td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>GAAP revenue</td><td>20</td><td>18</td></tr>
+      <tr><td>GAAP cost of sales</td><td>8</td><td>7</td></tr>
+      <tr><td>GAAP gross profit</td><td>12</td><td>11</td></tr>
+      <tr><td>GAAP gross margin</td><td>60</td><td>61</td></tr>
+      <tr><td>GAAP capital expenditures</td><td>3</td><td>2</td></tr>
+      <tr><td>GAAP G&amp;A</td><td>4</td><td>3</td></tr>
+      <tr><td>Net loss</td><td>(4)</td><td>(3)</td></tr>
+      <tr><td>Interest expense</td><td>1</td><td>1</td></tr>
+      <tr><td>Total other adjustments</td><td>5</td><td>4</td></tr>
+      <tr><td>Adjusted EBITDA</td><td>10</td><td>9</td></tr>
+    </table>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Cash flows provided by (used in) operating activities</td><td>1</td><td>2</td></tr>
+      <tr><td>Purchases of equipment</td><td>3</td><td>4</td></tr>
+    </table>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Cash flows (used in) provided by investing activities</td><td>5</td><td>6</td></tr>
+      <tr><td>Proceeds from borrowings</td><td>7</td><td>8</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        evgo,
+        ir.load_catalog("EVGO"),
+        **_meta(ticker="EVGO", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    proposed = {item["metric_id"] for item in parsed["proposals"]}
+    assert proposed == {
+        "charging_stalls",
+        "network_throughput",
+        "stall_utilization",
+        "customer_accounts",
+        "network_gigawatt_hours",
+        "membership_fees",
+    }
+    assert not any(
+        row["metric_id"] in {"revenue_gaap", "gross_profit", "net_income_gaap", "operating_income"}
+        for row in parsed["rows"]
+    )
+    bynd = """
+    <p>Fourth quarter 2025</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Retail channel net revenues</td><td>10</td><td>9</td></tr>
+      <tr><td>Foodservice channel net revenues</td><td>8</td><td>7</td></tr>
+      <tr><td>U.S. net revenues</td><td>12</td><td>11</td></tr>
+      <tr><td>International net revenues</td><td>6</td><td>5</td></tr>
+      <tr><td>Volume of products sold</td><td>4</td><td>3</td></tr>
+      <tr><td>Net loss, as reported</td><td>(1)</td><td>(2)</td></tr>
+      <tr><td>Loss before taxes</td><td>(3)</td><td>(4)</td></tr>
+      <tr><td>Income before taxes</td><td>1</td><td>2</td></tr>
+      <tr><td>Loss before income taxes</td><td>(5)</td><td>(6)</td></tr>
+      <tr><td>Income (Loss) from Operations Space</td><td>5</td><td>6</td></tr>
+    </table>
+    """
+    bynd_parsed = ir.parse_company_document(
+        bynd,
+        ir.load_catalog("BYND"),
+        **_meta(ticker="BYND", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    bynd_ids = {item["metric_id"] for item in bynd_parsed["proposals"]}
+    assert bynd_ids == {
+        "retail_channel_net_revenues",
+        "foodservice_channel_net_revenues",
+        "u_s_net_revenues",
+        "international_net_revenues",
+        "volume_of_products_sold",
+    }
+    goog = """
+    <p>Fourth quarter 2025</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>United States revenues</td><td>40</td><td>38</td></tr>
+      <tr><td>EMEA revenues</td><td>30</td><td>28</td></tr>
+      <tr><td>APAC revenues</td><td>20</td><td>18</td></tr>
+      <tr><td>Other Americas revenues</td><td>10</td><td>9</td></tr>
+    </table>
+    """
+    goog_parsed = ir.parse_company_document(
+        goog,
+        ir.load_catalog("GOOG"),
+        **_meta(ticker="GOOG", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    assert {item["metric_id"] for item in goog_parsed["proposals"]} == {
+        "united_states_revenues",
+        "emea_revenues",
+        "apac_revenues",
+        "other_americas_revenues",
+    }
