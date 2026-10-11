@@ -109,7 +109,7 @@ output "job_functions" {
 }
 
 output "sms_notifier_arn" {
-  description = "Lambda that caps SMS to sms_daily_cap texts per issue per Pacific day. Empty until alert_sms_e164 is set. Email is not capped."
+  description = "Lambda that caps SMS to sms_max_per_window texts per issue per Pacific clock window (sms_window_minutes, default one hour). Empty until alert_sms_e164 is set. Email is not capped."
   value       = module.alerting.sms_notifier_arn
 }
 

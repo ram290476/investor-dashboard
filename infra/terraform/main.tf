@@ -79,7 +79,8 @@ module "alerting" {
   alert_emails             = var.alert_emails
   security_alert_emails    = local.security_alert_emails
   alert_sms_e164           = var.alert_sms_e164
-  sms_daily_cap            = var.sms_daily_cap
+  sms_window_minutes       = var.sms_window_minutes
+  sms_max_per_window       = var.sms_max_per_window
   enable_cloudfront_alarms = var.enable_cloudfront_alarms
   reserved_concurrency     = var.lambda_reserved_concurrency
 }

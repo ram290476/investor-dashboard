@@ -719,9 +719,10 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 * Deployment-review notifications remain GitHub environment notifications. Ops and security
   email, including ram.vellamsetti@gmail.com, is a direct SNS subscription and is not capped.
   SMS is sent only when `alert_sms_e164` is set, by `invdash-sms-notifier`, at most
-  `sms_daily_cap` texts per issue per Pacific day (default 1). Repeats are logged. The next
-  day's first text includes how many repeats were suppressed. On October 8, 2026 the account
-  was in the SMS sandbox with no sending number. Do not add a direct SMS subscription on the
+  `sms_max_per_window` texts per issue per fixed Pacific clock window (default 60 minutes,
+  one clock hour aligned to local midnight). Repeats in that hour are logged and still
+  emailed. The next window's first text includes how many repeats were suppressed. On October 8,
+  2026 the account was in the SMS sandbox with no sending number. Do not add a direct SMS subscription on the
   ops, security, or CloudFront topics; that bypasses the cap.
 * The UI is a zero-build vanilla JavaScript implementation rather than the architecture
   document's proposed TypeScript/Vite/Svelte stack.

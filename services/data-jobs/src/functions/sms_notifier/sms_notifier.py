@@ -1,12 +1,13 @@
-"""SNS subscriber that texts at most N times per issue per Pacific day.
+"""SNS subscriber that texts at most N times per issue per Pacific clock window.
 
-Ops and security email subscriptions stay on their topics and are not capped.
-This function is the only publisher to the SMS topic. A direct SMS subscription
-on an alarm topic would bypass the cap.
+Windows are fixed buckets in America/Los_Angeles, aligned to local midnight
+(default 60 minutes, so one clock hour). Ops and security email subscriptions
+stay on their topics and are not capped. This function is the only publisher
+to the SMS topic. A direct SMS subscription on an alarm topic would bypass the cap.
 
 Fail open: if the dedupe table errors, the text is still sent. If publishing
-itself fails, the invocation raises so SNS retries, and the day's slot is left
-unused.
+itself fails, the invocation raises so SNS retries, and the window's slot is
+left unused.
 """
 
 from __future__ import annotations
@@ -39,19 +40,19 @@ class DynamoCapStore:
         if not item:
             return None
         return {
-            "day": str(item["day"]),
+            "window": str(item["window"]),
             "sent": int(item.get("sent", 0)),
             "suppressed": int(item.get("suppressed", 0)),
         }
 
-    def record_sent(self, issue_key: str, day: str, ttl: int) -> None:
+    def record_sent(self, issue_key: str, window: str, ttl: int) -> None:
         try:
             self.table.update_item(
                 Key={"issue_key": issue_key},
                 UpdateExpression="ADD sent :one",
-                ConditionExpression="#d = :day",
-                ExpressionAttributeNames={"#d": "day"},
-                ExpressionAttributeValues={":one": 1, ":day": day},
+                ConditionExpression="#w = :window",
+                ExpressionAttributeNames={"#w": "window"},
+                ExpressionAttributeValues={":one": 1, ":window": window},
             )
             return
         except ClientError as exc:
@@ -62,33 +63,33 @@ class DynamoCapStore:
         try:
             self.table.update_item(
                 Key={"issue_key": issue_key},
-                UpdateExpression="SET #d = :day, sent = :one, suppressed = :zero, expires_at = :ttl",
-                ExpressionAttributeNames={"#d": "day"},
-                ExpressionAttributeValues={":day": day, ":one": 1, ":zero": 0, ":ttl": ttl},
+                UpdateExpression="SET #w = :window, sent = :one, suppressed = :zero, expires_at = :ttl",
+                ExpressionAttributeNames={"#w": "window"},
+                ExpressionAttributeValues={":window": window, ":one": 1, ":zero": 0, ":ttl": ttl},
             )
         except (ClientError, BotoCoreError) as exc:
             raise CapStoreError("dedupe store request failed") from exc
 
-    def record_suppressed(self, issue_key: str, day: str) -> None:
+    def record_suppressed(self, issue_key: str, window: str) -> None:
         try:
             self.table.update_item(
                 Key={"issue_key": issue_key},
                 UpdateExpression="ADD suppressed :one",
-                ConditionExpression="#d = :day",
-                ExpressionAttributeNames={"#d": "day"},
-                ExpressionAttributeValues={":one": 1, ":day": day},
+                ConditionExpression="#w = :window",
+                ExpressionAttributeNames={"#w": "window"},
+                ExpressionAttributeValues={":one": 1, ":window": window},
             )
         except (ClientError, BotoCoreError) as exc:
             raise CapStoreError("dedupe store request failed") from exc
 
 
-def _limit() -> int:
-    raw = os.environ.get("SMS_DAILY_CAP", "1")
+def _positive(name: str, default: int) -> int:
+    raw = os.environ.get(name, str(default))
     try:
         value = int(raw)
     except ValueError:
-        return 1
-    return value if value >= 1 else 1
+        return default
+    return value if value >= 1 else default
 
 
 def _sns_publish(topic_arn: str, text: str) -> None:
@@ -116,7 +117,8 @@ def handler(event, _context, store=None, publish=None, now=None):
     if publish is None:
         publish = publish_sms
     moment = now or datetime.now(UTC)
-    limit = _limit()
+    window_minutes = _positive("SMS_WINDOW_MINUTES", 60)
+    limit = _positive("SMS_MAX_PER_WINDOW", 1)
     for record in event.get("Records") or []:
         sns_rec = record.get("Sns") or {}
         deliver(
@@ -124,7 +126,8 @@ def handler(event, _context, store=None, publish=None, now=None):
             sns_rec.get("Message") or "",
             store,
             publish,
-            limit=limit,
             now=moment,
+            window_minutes=window_minutes,
+            limit=limit,
         )
     return {"ok": True}

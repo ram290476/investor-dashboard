@@ -1,4 +1,4 @@
-"""Daily SMS cap: one text per issue per Pacific day, then a reset."""
+"""Hourly SMS cap: one text per issue per fixed Pacific clock hour."""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -8,7 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from sms_cap import MemoryStore, calendar_day, deliver, format_sms, issue_key
+from sms_cap import MemoryStore, deliver, format_sms, issue_key, window_bounds
 from sms_notifier import DynamoCapStore, handler
 
 PT = ZoneInfo("America/Los_Angeles")
@@ -17,29 +17,30 @@ SITE_OK = 'OK: "invdash-site-api-5xx" in US West (N. California)'
 LAMBDA = 'ALARM: "invdash-lambda-errors" in US West (N. California)'
 
 
-def _at(hour: int, day: int = 11) -> datetime:
-    return datetime(2026, 10, day, hour, 0, tzinfo=PT)
+def _pt(day: int, hour: int, minute: int = 0) -> datetime:
+    return datetime(2026, 10, day, hour, minute, tzinfo=PT)
 
 
-def test_same_issue_twice_in_a_day_sends_one_sms():
+def test_same_issue_twice_within_the_hour_sends_one_sms():
     store = MemoryStore()
     sent: list[str] = []
-    first = deliver(SITE, "alarm", store, sent.append, limit=1, now=_at(9))
-    second = deliver(SITE_OK, "recovered", store, sent.append, limit=1, now=_at(10))
+    first = deliver(SITE, "alarm", store, sent.append, now=_pt(11, 14, 10))
+    second = deliver(SITE_OK, "recovered", store, sent.append, now=_pt(11, 14, 50))
     assert first.send and first.reason == "sent"
     assert not second.send and second.reason == "suppressed"
     assert len(sent) == 1
     assert issue_key(SITE, "") == issue_key(SITE_OK, "") == "alarm:invdash-site-api-5xx"
 
 
-def test_new_pacific_day_resets_and_reports_suppressed_repeats():
+def test_the_next_clock_hour_sends_again_and_reports_suppressed_repeats():
     store = MemoryStore()
     sent: list[str] = []
-    deliver(SITE, "", store, sent.append, limit=1, now=_at(9))
-    deliver(SITE, "", store, sent.append, limit=1, now=_at(12))
-    deliver(SITE, "", store, sent.append, limit=1, now=_at(18))
+    deliver(SITE, "", store, sent.append, now=_pt(11, 14, 10))
+    deliver(SITE, "", store, sent.append, now=_pt(11, 14, 40))
+    deliver(SITE, "", store, sent.append, now=_pt(11, 14, 55))
     assert len(sent) == 1
-    deliver(SITE, "", store, sent.append, limit=1, now=_at(9, day=12))
+    # 15 minutes later is a new clock hour, not a continuation of a rolling hour.
+    deliver(SITE, "", store, sent.append, now=_pt(11, 15, 5))
     assert len(sent) == 2
     assert "suppressed 2 repeats" in sent[1]
 
@@ -47,26 +48,27 @@ def test_new_pacific_day_resets_and_reports_suppressed_repeats():
 def test_different_issues_are_independent():
     store = MemoryStore()
     sent: list[str] = []
-    deliver(SITE, "", store, sent.append, limit=1, now=_at(9))
-    deliver(LAMBDA, "", store, sent.append, limit=1, now=_at(9))
-    deliver(SITE, "", store, sent.append, limit=1, now=_at(11))
-    deliver(LAMBDA, "", store, sent.append, limit=1, now=_at(11))
+    deliver(SITE, "", store, sent.append, now=_pt(11, 14, 10))
+    deliver(LAMBDA, "", store, sent.append, now=_pt(11, 14, 10))
+    deliver(SITE, "", store, sent.append, now=_pt(11, 14, 40))
+    deliver(LAMBDA, "", store, sent.append, now=_pt(11, 14, 40))
     assert len(sent) == 2
     assert "invdash-site-api-5xx" in sent[0]
     assert "invdash-lambda-errors" in sent[1]
 
 
-def test_utc_evening_and_next_morning_can_be_different_pacific_days():
-    # 06:30 UTC is still the previous Pacific date while DST is in effect (UTC-7).
-    same_utc_date_late = datetime(2026, 10, 12, 6, 30, tzinfo=UTC)
-    same_utc_date_early = datetime(2026, 10, 12, 7, 30, tzinfo=UTC)
-    assert calendar_day(same_utc_date_late) == "2026-10-11"
-    assert calendar_day(same_utc_date_early) == "2026-10-12"
+def test_windows_follow_pacific_clock_time_not_utc():
+    # 06:10 and 06:40 UTC are both 23:xx Pacific (PDT, UTC-7): one clock hour.
+    late = datetime(2026, 10, 12, 6, 10, tzinfo=UTC)
+    still = datetime(2026, 10, 12, 6, 40, tzinfo=UTC)
+    nxt = datetime(2026, 10, 12, 7, 5, tzinfo=UTC)
+    assert window_bounds(late, 60)[0] == window_bounds(still, 60)[0] == "2026-10-11T23:00-0700"
+    assert window_bounds(nxt, 60)[0] == "2026-10-12T00:00-0700"
     store = MemoryStore()
     sent: list[str] = []
-    deliver(SITE, "", store, sent.append, limit=1, now=same_utc_date_late)
-    deliver(SITE, "", store, sent.append, limit=1, now=same_utc_date_late + timedelta(minutes=20))
-    deliver(SITE, "", store, sent.append, limit=1, now=same_utc_date_early)
+    deliver(SITE, "", store, sent.append, now=late)
+    deliver(SITE, "", store, sent.append, now=still)
+    deliver(SITE, "", store, sent.append, now=nxt)
     assert len(sent) == 2
 
 
@@ -77,9 +79,9 @@ def test_job_and_error_code_are_their_own_issue():
     assert issue_key("", other) == "job:H1:TIMEOUT"
     store = MemoryStore()
     sent: list[str] = []
-    deliver("", prices, store, sent.append, limit=1, now=_at(9))
-    deliver("", prices, store, sent.append, limit=1, now=_at(10))
-    deliver("", other, store, sent.append, limit=1, now=_at(10))
+    deliver("", prices, store, sent.append, now=_pt(11, 9, 5))
+    deliver("", prices, store, sent.append, now=_pt(11, 9, 40))
+    deliver("", other, store, sent.append, now=_pt(11, 9, 40))
     assert len(sent) == 2
 
 
@@ -98,8 +100,8 @@ def test_security_hub_repeats_of_one_cve_share_a_key_and_a_short_text():
 
 def test_suppressed_repeat_is_logged(capsys):
     store = MemoryStore()
-    deliver(SITE, "", store, lambda _text: None, limit=1, now=_at(9))
-    deliver(SITE, "", store, lambda _text: None, limit=1, now=_at(10))
+    deliver(SITE, "", store, lambda _text: None, now=_pt(11, 9, 5))
+    deliver(SITE, "", store, lambda _text: None, now=_pt(11, 9, 40))
     logged = capsys.readouterr().out
     assert '"event": "sms_suppressed"' in logged
     assert "alarm:invdash-site-api-5xx" in logged
@@ -109,7 +111,7 @@ def test_store_read_failure_still_sends():
     store = MemoryStore()
     store.fail_reads = True
     sent: list[str] = []
-    decision = deliver(SITE, "", store, sent.append, limit=1, now=_at(9))
+    decision = deliver(SITE, "", store, sent.append, now=_pt(11, 9, 5))
     assert decision.send and decision.reason == "fail_open"
     assert len(sent) == 1
 
@@ -117,9 +119,9 @@ def test_store_read_failure_still_sends():
 def test_failed_suppress_write_still_sends():
     store = MemoryStore()
     sent: list[str] = []
-    deliver(SITE, "", store, sent.append, limit=1, now=_at(9))
+    deliver(SITE, "", store, sent.append, now=_pt(11, 9, 5))
     store.fail_suppress = True
-    decision = deliver(SITE, "", store, sent.append, limit=1, now=_at(10))
+    decision = deliver(SITE, "", store, sent.append, now=_pt(11, 9, 20))
     assert decision.reason == "fail_open"
     assert len(sent) == 2
 
@@ -131,16 +133,16 @@ def test_publish_failure_does_not_consume_the_slot():
         raise RuntimeError("sns down")
 
     with pytest.raises(RuntimeError, match="sns down"):
-        deliver(SITE, "", store, boom, limit=1, now=_at(9))
+        deliver(SITE, "", store, boom, now=_pt(11, 9, 5))
     sent: list[str] = []
-    deliver(SITE, "", store, sent.append, limit=1, now=_at(9))
+    deliver(SITE, "", store, sent.append, now=_pt(11, 9, 5))
     assert len(sent) == 1
 
 
-def test_handler_retries_a_failed_publish_without_using_up_the_day():
+def test_handler_retries_a_failed_publish_without_using_up_the_hour():
     store = MemoryStore()
     event = {"Records": [{"Sns": {"Subject": SITE, "Message": "Threshold Crossed", "MessageId": "m1"}}]}
-    now = _at(15)
+    now = _pt(11, 15, 10)
 
     def boom(_text: str) -> None:
         raise RuntimeError("sns down")
@@ -153,7 +155,7 @@ def test_handler_retries_a_failed_publish_without_using_up_the_day():
     assert sent == [SITE]
 
 
-def test_dynamodb_store_caps_one_issue_and_resets_the_next_day(monkeypatch):
+def test_dynamodb_store_caps_one_issue_per_hour(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     with mock_aws():
@@ -165,15 +167,17 @@ def test_dynamodb_store_caps_one_issue_and_resets_the_next_day(monkeypatch):
         )
         store = DynamoCapStore("invdash-sms-cap")
         sent: list[str] = []
-        deliver(SITE, "", store, sent.append, limit=1, now=_at(9))
-        deliver(SITE, "", store, sent.append, limit=1, now=_at(11))
-        deliver(LAMBDA, "", store, sent.append, limit=1, now=_at(11))
-        deliver(SITE, "", store, sent.append, limit=1, now=_at(9, day=12))
+        first = _pt(11, 9, 10)
+        deliver(SITE, "", store, sent.append, now=first)
+        deliver(SITE, "", store, sent.append, now=_pt(11, 9, 40))
+        deliver(LAMBDA, "", store, sent.append, now=_pt(11, 9, 40))
+        deliver(SITE, "", store, sent.append, now=_pt(11, 10, 5))
         assert len(sent) == 3
         assert "suppressed 1 repeat" in sent[2]
         item = boto3.resource("dynamodb").Table("invdash-sms-cap").get_item(
             Key={"issue_key": "alarm:invdash-site-api-5xx"}
         )["Item"]
         assert int(item["sent"]) == 1
-        assert str(item["day"]) == "2026-10-12"
-        assert int(item["expires_at"]) > 0
+        assert str(item["window"]) == "2026-10-11T10:00-0700"
+        # TTL reaches the end of the next window (11:00 PT), not a multi-day hold.
+        assert int(item["expires_at"]) == int((_pt(11, 12, 0)).timestamp())

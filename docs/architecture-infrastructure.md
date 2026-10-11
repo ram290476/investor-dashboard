@@ -377,7 +377,7 @@ Alerts go to two email topics: **ops** for reliability and **security** for inci
 
 - **AWS Health events** go to the ops topic.
 
-- **SMS (optional):** set `alert_sms_e164`. A notifier Lambda texts at most `sms_daily_cap` times per issue per Pacific day (default 1). The issue is the alarm name, or the job and error code. Repeats are logged, and the next day's first text says how many were held back. Email is a separate subscription and is not capped.
+- **SMS (optional):** set `alert_sms_e164`. A notifier Lambda texts at most `sms_max_per_window` times per issue per fixed Pacific clock window (default 60 minutes, aligned to local midnight, so one clock hour). The issue is the alarm name, or the job and error code. Repeats in that hour are logged, and the next window's first text says how many were held back. Email is a separate subscription and is not capped.
 
 - **Dashboards:** two CloudWatch dashboards, ops and SLO. Data health per source stays in the app's own panel.
 

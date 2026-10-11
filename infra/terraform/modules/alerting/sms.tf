@@ -1,7 +1,7 @@
 # SMS is off until alert_sms_e164 is set. Email subscriptions on the ops and
 # security topics stay as they are and are not capped. This Lambda is the only
 # application publisher to the SMS topic, so a phone subscribed directly to an
-# alarm topic would bypass the daily cap.
+# alarm topic would bypass the hourly cap.
 
 terraform {
   required_providers {
@@ -40,8 +40,14 @@ variable "alert_sms_e164" {
   default     = ""
 }
 
-variable "sms_daily_cap" {
-  description = "Texts per issue per America/Los_Angeles calendar day."
+variable "sms_window_minutes" {
+  description = "Fixed America/Los_Angeles clock window, aligned to local midnight. 60 is one clock hour."
+  type        = number
+  default     = 60
+}
+
+variable "sms_max_per_window" {
+  description = "Texts per issue per clock window. Email is not capped."
   type        = number
   default     = 1
 }
@@ -74,8 +80,8 @@ resource "aws_dynamodb_table" "cap" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "issue_key"
 
-  # Counters are disposable, but point-in-time recovery is cheap at this size and
-  # keeps a bad deploy from wiping the day's cap.
+  # Counters are disposable. Each item's TTL is the end of the next clock window,
+  # long enough for that window's first text to report suppressed repeats.
   deletion_protection_enabled = true
 
   attribute {
@@ -261,7 +267,7 @@ resource "aws_lambda_function" "notifier" {
   #checkov:skip=CKV_AWS_272:Code signing not used; images and zips are built by CI from the protected main branch
   #checkov:skip=CKV_AWS_116:SNS retries a failed invoke. A dedupe-store error still sends the text (fail open), so a DLQ would only hold texts already decided
   function_name                  = local.sms_fn
-  description                    = "Cap SMS to N texts per issue per Pacific day; email is not capped"
+  description                    = "Cap SMS to N texts per issue per Pacific clock window; email is not capped"
   role                           = aws_iam_role.notifier[0].arn
   runtime                        = "python3.12"
   architectures                  = ["arm64"]
@@ -277,7 +283,8 @@ resource "aws_lambda_function" "notifier" {
     variables = {
       CAP_TABLE_NAME        = aws_dynamodb_table.cap[0].name
       SMS_TOPIC_ARN         = aws_sns_topic.sms[0].arn
-      SMS_DAILY_CAP         = tostring(var.sms_daily_cap)
+      SMS_WINDOW_MINUTES    = tostring(var.sms_window_minutes)
+      SMS_MAX_PER_WINDOW    = tostring(var.sms_max_per_window)
       AWS_USE_FIPS_ENDPOINT = "true"
     }
   }
