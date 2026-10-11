@@ -3433,13 +3433,15 @@ function renderStockPage() {
   const review = session.metricReview || "all";
   const history = tickerData?.price_history || [];
   const period = resolveChartPeriod(session.prefs.display?.chart_period, history);
-  const panels = stockPanels(payload, chartData, {
-    review,
+  const periodOptions = {
     period,
     history,
     ticker: session.selected,
     asOf: String(history.at(-1)?.date || "").slice(0, 10),
-  });
+  };
+  // The review toggle filters the metrics list. Chart panels always include pending series.
+  const listed = stockPanels(payload, chartData, { ...periodOptions, review });
+  const charts = stockPanels(payload, chartData, { ...periodOptions, review: "all" });
   const badge = freshnessBadge(payload, pageState, session.selected, review);
   const freshnessText = stockFreshnessText(payload, pageState, session.selected, new Date(), displayZone(), review);
   const bars = validBars(history);
@@ -3505,17 +3507,17 @@ function renderStockPage() {
   callsBlock.dataset.stockPanel = "calls";
   callsBlock.id = "stock-panel-calls";
   callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
-  if (panels.guidance.length) appendMetricGroups(callsBlock, panels.guidance, "");
+  if (charts.guidance.length) appendMetricGroups(callsBlock, charts.guidance, "");
   callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
 
   page.append(
     chart,
-    renderCompanyMetrics(panels, pageState),
-    section("kpis", "Operating KPIs", panels.operating, emptyKpiCopy()),
+    renderCompanyMetrics(listed, pageState),
+    section("kpis", "Operating KPIs", charts.operating, emptyKpiCopy()),
     section(
       "fundamentals",
-      panels.fundamentalsSource === "edgar" ? "SEC filings" : "Fundamentals",
-      panels.fundamentals,
+      charts.fundamentalsSource === "edgar" ? "SEC filings" : "Fundamentals",
+      charts.fundamentals,
       "No company fundamentals are in this snapshot.",
     ),
     callsBlock,

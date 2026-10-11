@@ -101,8 +101,12 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   const heading = page.slice(0, page.indexOf("const page = node"));
   assert.doesNotMatch(heading, /renderMetricReview/);
   assert.match(page, /id === "kpis"\) block\.append\(renderMetricReview\(\)\)/);
-  const metricsAt = page.indexOf("renderCompanyMetrics(panels, pageState)");
-  const kpisAt = page.indexOf('section("kpis", "Operating KPIs"');
+  const metricsAt = page.indexOf("renderCompanyMetrics(listed, pageState)");
+  const kpisAt = page.indexOf('section("kpis", "Operating KPIs", charts.operating');
+  assert.match(page, /stockPanels\(payload, chartData, \{ \.\.\.periodOptions, review \}\)/);
+  assert.match(page, /stockPanels\(payload, chartData, \{ \.\.\.periodOptions, review: "all" \}\)/);
+  assert.match(page, /charts\.fundamentals/);
+  assert.match(page, /charts\.guidance/);
   assert.ok(metricsAt > 0 && kpisAt > metricsAt);
   const metrics = slice("function renderCompanyMetrics", "function appendMetricGroups");
   assert.match(metrics, /Pending review/);

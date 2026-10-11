@@ -529,7 +529,7 @@ export function stockPanels(payload, chartData, options = {}) {
 
 export function callsCopy() {
   return {
-    guidance: "Approved outlook is shown as primary. Proposed outlook is listed under Company metrics as Pending review and can be hidden with Approved only.",
+    guidance: "Proposed outlook stays on these charts and is listed under Company metrics as Pending review. Approved only hides those rows in the list.",
     transcripts: "Quarterly call transcripts are not collected. They are added only where the company hosts them or the license explicitly allows it.",
   };
 }
