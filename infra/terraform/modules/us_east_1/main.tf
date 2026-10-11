@@ -22,11 +22,6 @@ variable "name" {
   type = string
 }
 
-variable "alert_emails" {
-  description = "Recipients of the CloudFront alarm (the ops alert list). Each must confirm this topic's subscription too."
-  type        = list(string)
-}
-
 variable "enable_cloudfront_alarms" {
   type = bool
 }
@@ -44,6 +39,12 @@ variable "primary_region" {
 variable "forward_event_patterns" {
   description = "Rule name => event pattern, forwarded from us-east-1 to the primary region's default bus."
   type        = map(string)
+}
+
+variable "sms_notifier_arn" {
+  description = "Primary-region Lambda that caps email and SMS. Empty skips the subscription, so this alarm would not be mailed."
+  type        = string
+  default     = ""
 }
 
 data "aws_caller_identity" "current" {}
@@ -167,12 +168,14 @@ resource "aws_sns_topic_policy" "ops" {
   policy = data.aws_iam_policy_document.ops_topic[0].json
 }
 
-resource "aws_sns_topic_subscription" "ops_email" {
-  for_each = local.alarm_on ? toset(var.alert_emails) : toset([])
+# Mail for this alarm is capped by the primary-region notifier, which republishes
+# to the ops-email topic. A direct email subscription here would bypass that cap.
+resource "aws_sns_topic_subscription" "sms_notifier" {
+  count = local.alarm_on && var.sms_notifier_arn != "" ? 1 : 0
 
   topic_arn = aws_sns_topic.ops[0].arn
-  protocol  = "email"
-  endpoint  = each.value
+  protocol  = "lambda"
+  endpoint  = var.sms_notifier_arn
 }
 
 resource "aws_cloudwatch_metric_alarm" "cloudfront_5xx" {

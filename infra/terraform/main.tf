@@ -70,10 +70,21 @@ module "security_services" {
 module "alerting" {
   source = "./modules/alerting"
 
-  name                  = local.name
-  data_key_arn          = module.kms.data_key_arn
-  alert_emails          = var.alert_emails
-  security_alert_emails = local.security_alert_emails
+  permissions_boundary_arn = module.workload_boundary.arn
+
+  name                     = local.name
+  data_key_arn             = module.kms.data_key_arn
+  audit_key_arn            = module.kms.audit_key_arn
+  log_retention_days       = var.log_retention_days
+  alert_emails             = var.alert_emails
+  security_alert_emails    = local.security_alert_emails
+  alert_sms_e164           = var.alert_sms_e164
+  email_window_minutes     = var.email_window_minutes
+  email_max_per_window     = var.email_max_per_window
+  sms_window_minutes       = var.sms_window_minutes
+  sms_max_per_window       = var.sms_max_per_window
+  enable_cloudfront_alarms = var.enable_cloudfront_alarms
+  reserved_concurrency     = var.lambda_reserved_concurrency
 }
 
 # Logs, metrics, alarms, SLOs, dashboards, external canary, budget (AU-6, SI-4, CP-2, SA-9).
@@ -109,11 +120,11 @@ module "us_east_1" {
   }
 
   name                       = local.name
-  alert_emails               = var.alert_emails
   enable_cloudfront_alarms   = var.enable_cloudfront_alarms
   cloudfront_distribution_id = var.cloudfront_distribution_id != "" ? var.cloudfront_distribution_id : module.site_hosting.distribution_id
   primary_region             = var.region
   forward_event_patterns     = module.alerting.global_event_patterns
+  sms_notifier_arn           = module.alerting.sms_notifier_arn
 }
 
 # Provider API keys in SSM (encrypted with the data key) plus a daily rotation

@@ -90,9 +90,11 @@ resource "aws_sns_topic_policy" "this" {
   policy   = data.aws_iam_policy_document.topic[each.key].json
 }
 
+# Inboxes subscribe to the capped republish topics, not the alarm topics.
+# A direct email subscription here would bypass the hourly cap.
 resource "aws_sns_topic_subscription" "email" {
   for_each  = local.subscriptions
-  topic_arn = aws_sns_topic.this[each.value.topic].arn
+  topic_arn = aws_sns_topic.outbound_email[each.value.topic].arn
   protocol  = "email"
   endpoint  = each.value.email
 }

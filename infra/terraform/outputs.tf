@@ -108,8 +108,13 @@ output "job_functions" {
   value       = module.jobs.function_names
 }
 
+output "sms_notifier_arn" {
+  description = "Lambda that caps email (email_max_per_window per email_window_minutes) and SMS (sms_max_per_window per sms_window_minutes) independently per issue. Windows are fixed Pacific clock buckets, default one hour."
+  value       = module.alerting.sms_notifier_arn
+}
+
 output "cloudfront_alarm_topic_arn" {
-  description = "us-east-1 topic for the CloudFront 5xx alarm (null when enable_cloudfront_alarms is false). Recipients confirm it separately."
+  description = "us-east-1 topic for the CloudFront 5xx alarm (null when enable_cloudfront_alarms is false). It invokes the notifier; mail is sent from the ops-email topic."
   value       = module.us_east_1.cloudfront_topic_arn
 }
 
