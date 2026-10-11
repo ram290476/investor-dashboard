@@ -792,7 +792,7 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
   Confirm the invdash-ops-alerts and invdash-security-alerts subscriptions. On October 8, 2026 the account was
   in the SMS sandbox with no sending number. Do not subscribe the inbox or the phone directly
   to the intake (-alarms) or CloudFront topics; that bypasses the cap. AWS Budgets mail is not
-  part of this cap.
+  part of this cap. Vulnerability findings are keyed by CVE (or GHSA) id plus the affected ECR repository or Lambda function, not by the reporting product, so an Inspector finding and its Security Hub copy are one issue and mail once. Those keys use `vuln_window_minutes` (default 1440, one Pacific calendar day aligned to midnight) on both channels, so rescans and new image pushes with the same CVE do not re-send it every hour. Other security findings (GuardDuty, Security Hub controls, Inspector network findings) keep their product-specific keys and the normal windows.
 * The UI is a zero-build vanilla JavaScript implementation rather than the architecture
   document's proposed TypeScript/Vite/Svelte stack.
 * No public freshness document is currently published, so the external Synthetics canary is

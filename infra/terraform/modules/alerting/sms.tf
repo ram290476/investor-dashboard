@@ -72,6 +72,12 @@ variable "sms_max_per_window" {
   default     = 1
 }
 
+variable "vuln_window_minutes" {
+  description = "Cap window for vulnerability (CVE/GHSA) keys on both channels. 1440 is one Pacific calendar day."
+  type        = number
+  default     = 1440
+}
+
 variable "enable_cloudfront_alarms" {
   description = "Also let the us-east-1 CloudFront topic invoke the notifier."
   type        = bool
@@ -378,6 +384,7 @@ resource "aws_lambda_function" "notifier" {
         EMAIL_MAX_PER_WINDOW     = tostring(var.email_max_per_window)
         SMS_WINDOW_MINUTES       = tostring(var.sms_window_minutes)
         SMS_MAX_PER_WINDOW       = tostring(var.sms_max_per_window)
+        VULN_WINDOW_MINUTES      = tostring(var.vuln_window_minutes)
         AWS_USE_FIPS_ENDPOINT    = "true"
       },
       local.sms_on ? { SMS_TOPIC_ARN = aws_sns_topic.sms[0].arn } : {},

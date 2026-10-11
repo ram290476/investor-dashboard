@@ -1,0 +1,113 @@
+{
+  "version": "0",
+  "id": "0d1e2f3a-4b5c-6d7e-8f90-a1b2c3d4e5f6",
+  "detail-type": "Inspector2 Finding",
+  "source": "aws.inspector2",
+  "account": "123456789012",
+  "time": "2026-10-11T17:46:30Z",
+  "region": "us-west-1",
+  "resources": [
+    "arn:aws:inspector2:us-west-1:123456789012:finding/e2a63f89f4239e946cbb8e1349777ebd",
+    "arn:aws:ecr:us-west-1:123456789012:repository/invdash/jobs/sha256:e0ef0623b885ef75b6b6f74855d3beace47cace60231cd05d62e467539b5a556"
+  ],
+  "detail": {
+    "findingArn": "arn:aws:inspector2:us-west-1:123456789012:finding/e2a63f89f4239e946cbb8e1349777ebd",
+    "awsAccountId": "123456789012",
+    "type": "PACKAGE_VULNERABILITY",
+    "description": "On Windows, when the target of Root.Mkdir or Root.MkdirAll is a junction pointing to an empty location, the operation can create a directory at the junction target even when that target is located outside the root. This only applies to operations where the last path component is a junction (path/to/junction, but not path/junction/target).",
+    "title": "CVE-2026-56857 - go/stdlib",
+    "remediation": {
+      "recommendation": {
+        "text": "None Provided"
+      }
+    },
+    "severity": "CRITICAL",
+    "firstObservedAt": "2026-10-11T10:46:30.590000-07:00",
+    "lastObservedAt": "2026-10-11T10:46:30.590000-07:00",
+    "updatedAt": "2026-10-11T10:46:30.590000-07:00",
+    "status": "ACTIVE",
+    "resources": [
+      {
+        "type": "AWS_ECR_CONTAINER_IMAGE",
+        "id": "arn:aws:ecr:us-west-1:123456789012:repository/invdash/jobs/sha256:e0ef0623b885ef75b6b6f74855d3beace47cace60231cd05d62e467539b5a556",
+        "partition": "aws",
+        "region": "us-west-1",
+        "tags": {},
+        "details": {
+          "awsEcrContainerImage": {
+            "repositoryName": "invdash/jobs",
+            "imageTags": [
+              "78dbb17da4b05353d03f1c77fafb6ddf589a0cdb-1"
+            ],
+            "pushedAt": "2026-10-11T10:45:19.805000-07:00",
+            "architecture": "arm64",
+            "imageHash": "sha256:e0ef0623b885ef75b6b6f74855d3beace47cace60231cd05d62e467539b5a556",
+            "registry": "123456789012",
+            "platform": "AMAZON_LINUX_2023"
+          },
+          "image": {
+            "repositoryName": "invdash/jobs",
+            "registry": "123456789012",
+            "imageTags": [
+              "78dbb17da4b05353d03f1c77fafb6ddf589a0cdb-1"
+            ],
+            "imageDigest": "sha256:e0ef0623b885ef75b6b6f74855d3beace47cace60231cd05d62e467539b5a556",
+            "pushedAt": "2026-10-11T10:45:19.805000-07:00",
+            "architecture": "arm64",
+            "platform": "AMAZON_LINUX_2023"
+          }
+        },
+        "provider": "AWS",
+        "providerAccountId": "123456789012"
+      }
+    ],
+    "inspectorScore": 9.8,
+    "inspectorScoreDetails": {
+      "adjustedCvss": {
+        "scoreSource": "NVD",
+        "cvssSource": "NVD",
+        "version": "3.1",
+        "score": 9.8,
+        "scoringVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "adjustments": []
+      }
+    },
+    "packageVulnerabilityDetails": {
+      "vulnerabilityId": "CVE-2026-56857",
+      "vulnerablePackages": [
+        {
+          "name": "go/stdlib",
+          "version": "1.26.7",
+          "sourceLayerHash": "sha256:01182965da0515f455e364bca80c2339d11b979f6a2ce23c7fec207dc0c5fdb6",
+          "epoch": 0,
+          "packageManager": "GENERIC",
+          "filePath": "/usr/local/bin/aws-lambda-rie",
+          "fixedInVersion": "1.27.2"
+        }
+      ],
+      "source": "NVD",
+      "cvss": [
+        {
+          "baseScore": 9.8,
+          "scoringVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "version": "3.1",
+          "source": "NVD"
+        }
+      ],
+      "relatedVulnerabilities": [],
+      "sourceUrl": "https://nvd.nist.gov/vuln/detail/CVE-2026-56857",
+      "vendorSeverity": "CRITICAL",
+      "vendorCreatedAt": "2026-10-08T16:17:01-07:00",
+      "vendorUpdatedAt": "2026-10-09T09:35:35-07:00",
+      "referenceUrls": [
+        "https://groups.google.com/g/golang-announce/c/U2fTuyDJznI",
+        "https://nvd.nist.gov/vuln/detail/CVE-2026-56857"
+      ]
+    },
+    "fixAvailable": "YES",
+    "exploitAvailable": "NO",
+    "epss": {
+      "score": 0.00493
+    }
+  }
+}
