@@ -1362,19 +1362,6 @@ function renderWatchlist() {
     );
     const item = node("div", "ticker-watch-item");
     item.append(button);
-    const researchPath = tickerResearchPath(ticker);
-    if (researchPath) {
-      const researchLink = node("a", "ticker-research", "↗");
-      researchLink.href = researchPath;
-      researchLink.title = `Open ${ticker} research`;
-      researchLink.setAttribute("aria-label", `Open ${ticker} research page`);
-      researchLink.addEventListener("click", (event) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        event.preventDefault();
-        navigateToResearch(ticker);
-      });
-      item.append(researchLink);
-    }
     list.append(item);
   });
   const manage = node("button", "ticker-button ticker-manage");
