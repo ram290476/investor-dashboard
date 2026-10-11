@@ -3517,7 +3517,7 @@ a.catalyst-edgar-link:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2) var(--space-3);
-  margin: 4px 0 12px;
+  margin-block: var(--space-3);
   min-width: 0;
   padding-inline: calc(var(--space-2) * 2);
 }
@@ -3562,7 +3562,7 @@ a.catalyst-edgar-link:hover {
 
 .stock-page {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .stock-section {

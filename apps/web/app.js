@@ -120,7 +120,7 @@ const session = {
   stockPageState: {},
   stockPageError: {},
   stockTab: "overview",
-  metricReview: "all",
+  metricReview: readStoredMetricReview(),
   metricSave: false,
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
@@ -3117,6 +3117,23 @@ function renderFilings(tickerData) {
   });
 }
 
+function readStoredMetricReview() {
+  try {
+    return localStorage.getItem("investor-dashboard.metric-review") === "approved" ? "approved" : "all";
+  } catch {
+    return "all";
+  }
+}
+
+function storeMetricReview(mode) {
+  const value = mode === "approved" ? "approved" : "all";
+  try {
+    localStorage.setItem("investor-dashboard.metric-review", value);
+  } catch {
+    // Storage can be unavailable. The choice still applies until reload.
+  }
+}
+
 function renderMetricReview() {
   const bar = node("div", "metric-review");
   bar.setAttribute("role", "group");
@@ -3129,6 +3146,7 @@ function renderMetricReview() {
     button.addEventListener("click", () => {
       if (mode === id) return;
       session.metricReview = id;
+      storeMetricReview(id);
       renderDashboard();
     });
     bar.append(button);
@@ -3538,9 +3556,8 @@ function renderStockPage() {
     ticker: session.selected,
     asOf: String(history.at(-1)?.date || "").slice(0, 10),
   };
-  // The review toggle filters the metrics list. Chart panels always include pending series.
-  const listed = stockPanels(payload, chartData, { ...periodOptions, review });
-  const charts = stockPanels(payload, chartData, { ...periodOptions, review: "all" });
+  // The review toggle filters every company-page metric panel, including chart cards.
+  const charts = stockPanels(payload, chartData, { ...periodOptions, review });
   root.replaceChildren();
   applyTheme(session.prefs.display);
   root.append(renderAppHeader(), renderWatchlist());
@@ -3609,7 +3626,7 @@ function renderStockPage() {
       charts.fundamentals,
       "No company fundamentals are in this snapshot.",
     ),
-    renderCompanyMetrics(listed, pageState),
+    renderCompanyMetrics(charts, pageState),
     callsBlock,
   );
 
