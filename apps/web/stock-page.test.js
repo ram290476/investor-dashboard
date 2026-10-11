@@ -309,24 +309,34 @@ test("stock page panels are two-up on desktop and one-up below 1024px", () => {
   assert.doesNotMatch(card, /stock-provenance|stock-xbrl|DS-11/);
 });
 
-test("company header pins Back to dashboard at the top-right", () => {
+test("company header shows only the company name and a centered Back to dashboard link", () => {
   const header = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
-  const copyAt = header.indexOf('node("div", "stock-heading-copy")');
-  const linkAt = header.indexOf('node("a", "stock-dashboard-link", "Back to dashboard")');
+  const heading = header.slice(header.indexOf('node("section", "panel stock-heading")'), header.indexOf('const page = node("main", "stock-page")'));
+  const copyAt = heading.indexOf('node("div", "stock-heading-copy")');
+  const linkAt = heading.indexOf('node("a", "stock-dashboard-link", "Back to dashboard")');
   assert.ok(copyAt > 0 && linkAt > copyAt);
+  assert.match(heading, /node\("h2", "", companyName\(session\.selected, payload\)\)/);
+  assert.match(heading, /copy\.append\(title\)/);
+  assert.doesNotMatch(heading, /stock-price|stock-freshness|overview-meta|formatPrice|monthDay|session\.selected\} ·/);
   assert.match(header, /back\.href = "\/"/);
   assert.match(header, /heading\.append\(copy, back\)/);
   assert.match(header, /navigateToDashboard\(\)/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*display:\s*grid/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
-  const linkCss = styles.slice(styles.indexOf(".stock-dashboard-link {"), styles.indexOf(".stock-price {"));
+  assert.match(styles, /\.stock-heading\s*\{[^}]*align-items:\s*center/);
+  const mobileAt = styles.lastIndexOf(".stock-heading {");
+  const mobileHeading = styles.slice(mobileAt, styles.indexOf(".stock-page-tabs {", mobileAt));
+  assert.match(mobileHeading, /align-items:\s*center/);
+  assert.match(mobileHeading, /\.stock-dashboard-link\s*\{[^}]*align-self:\s*center/);
+  const linkCss = styles.slice(styles.indexOf(".stock-dashboard-link {"), styles.indexOf(".stock-dashboard-link:hover"));
   assert.match(linkCss, /justify-self:\s*end/);
-  assert.match(linkCss, /align-self:\s*start/);
+  assert.match(linkCss, /align-self:\s*center/);
   assert.match(linkCss, /margin-left:\s*auto/);
   assert.match(linkCss, /min-height:\s*44px/);
   assert.match(linkCss, /var\(--/);
   assert.doesNotMatch(linkCss, /#[0-9a-fA-F]{3,8}/);
-  assert.doesNotMatch(styles, /\.stock-dashboard-link\s*\{[^}]*align-self:\s*flex-end/);
+  assert.doesNotMatch(styles, /\.stock-dashboard-link\s*\{[^}]*align-self:\s*(?:start|flex-end)/);
+  assert.doesNotMatch(styles, /\.stock-heading\s*\{[^}]*align-items:\s*start/);
   assert.doesNotMatch(styles, /\.stock-heading-copy\s*\{[^}]*flex-basis:\s*100%/);
 });
 

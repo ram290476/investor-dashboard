@@ -3370,7 +3370,7 @@ a.catalyst-edgar-link:hover {
 .stock-heading {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2) var(--space-3);
   margin: 4px 0 12px;
@@ -3395,7 +3395,7 @@ a.catalyst-edgar-link:hover {
   align-items: center;
   justify-content: center;
   justify-self: end;
-  align-self: start;
+  align-self: center;
   margin-left: auto;
   box-sizing: border-box;
   min-height: 44px;
@@ -3413,36 +3413,6 @@ a.catalyst-edgar-link:hover {
 .stock-dashboard-link:focus-visible {
   border-color: var(--blue);
   background: var(--hover);
-}
-
-.stock-price {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: baseline;
-  margin: 6px 0 0;
-  font-size: 28px;
-  font-weight: 600;
-}
-
-.stock-freshness {
-  display: inline-block;
-  margin: 8px 0 0;
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.stock-freshness[data-tone="ok"] {
-  color: var(--green);
-  border-color: var(--green);
-}
-
-.stock-freshness[data-tone="partial"] {
-  color: var(--amber);
-  border-color: var(--amber);
 }
 
 .stock-page {
@@ -3857,7 +3827,7 @@ a.catalyst-edgar-link:hover {
 
   .stock-heading {
     grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
+    align-items: center;
   }
 
   .stock-heading-copy {
@@ -3865,7 +3835,7 @@ a.catalyst-edgar-link:hover {
   }
 
   .stock-dashboard-link {
-    align-self: start;
+    align-self: center;
     justify-self: end;
     margin-left: auto;
   }
