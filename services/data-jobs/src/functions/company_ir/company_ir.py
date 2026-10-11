@@ -795,7 +795,35 @@ _BALANCE_SHEET = re.compile(
     re.IGNORECASE,
 )
 _PROPOSAL_SKIP = re.compile(
-    r"^(?:total|totals|basic|diluted)$|\b(?:basic|diluted)\b|\bfootnotes?\b|^\(\d+\)|\(\d+\)\s",
+    r"^(?:total|totals|basic|diluted)$"
+    r"|\b(?:basic|diluted)\b"
+    r"|\bfootnotes?\b"
+    r"|^\(\d+\)|\(\d+\)\s"
+    r"|[a-z]\d+$"
+    r"|^adjusted\b"
+    r"|^gaap\s+(?:net\s+(?:loss|income)|revenue)\b"
+    r"|\bebitda\b"
+    r"|\btotal adjustments\b"
+    r"|\binterest expense\b"
+    r"|\baccretion\b"
+    r"|\bdepreciation\b|\bamortiz"
+    r"|\bshare[-\s]?based\b|\bstock[-\s]?based\b"
+    r"|\bnet cash (?:used in|provided by)\b"
+    r"|\b(?:six|nine)\s+months\s+ended\b",
+    re.IGNORECASE,
+)
+_SEGMENT_HEADING = re.compile(r"\bsegment\s*:?\s*$", re.IGNORECASE)
+_CONSOLIDATED_HEADING = re.compile(r"\bconsolidated\b", re.IGNORECASE)
+_RECON_MARK = re.compile(
+    r"\breconciliation\b|\btotal adjustments\b|\badjusted\s+ebitda\b|\bebitda\b",
+    re.IGNORECASE,
+)
+_RECON_SECTION = re.compile(r"\breconciliation\b|\btotal adjustments\b", re.IGNORECASE)
+_CASH_FLOW_LABEL = re.compile(r"net cash (?:used in|provided by)", re.IGNORECASE)
+_YTD_SPAN = re.compile(r"\b(?:six|nine)\s+months\s+ended\b", re.IGNORECASE)
+_QUARTER_SPAN = re.compile(r"\bthree\s+months\s+ended\b|\bquarter(?:s)?\s+ended\b|\bq[1-4]\b", re.IGNORECASE)
+_SCALE_CAPTION = re.compile(
+    r"(?:\(\s*)?(?:\$\s*)?in\s+(?:thousands|millions|billions)\b",
     re.IGNORECASE,
 )
 
@@ -904,6 +932,26 @@ def _match_row_entry(raw_label: str, catalog: dict) -> dict | None:
     return None
 
 
+def _header_caption(header: list[str]) -> str:
+    """Column titles. A long flowing-text preamble is not a caption."""
+    cells = [str(cell) for cell in header]
+    if cells and len(cells[0]) > 180:
+        cells = cells[1:]
+    return " ".join(cells)
+
+
+def _quarters_ahead(period: str, filing_period: str | None) -> int | None:
+    """How many quarters `period` sits after the filing. None when either side is not a quarter."""
+    if not filing_period:
+        return None
+    token = quarter_token(period) or period
+    current = _linear_quarter(str(filing_period))
+    candidate = _linear_quarter(token)
+    if current is None or candidate is None:
+        return None
+    return candidate - current
+
+
 def table_scan(
     tables: list[list[list[str]]],
     catalog: dict,
@@ -916,6 +964,7 @@ def table_scan(
     method: str = "table",
     source_kind: str = "deck",
     fiscal_end_month: int = 12,
+    filing_period: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Split a quarter table into catalog matches and proposed labels.
 
@@ -936,7 +985,17 @@ def table_scan(
             continue
         tail = " ".join(str(cell) for cell in table[0])[-300:]
         header_blob = " ".join(str(cell) for cell in table[0])
+        caption = _header_caption(table[0])
+        label_blob = " ".join(str(row[0]) for row in table[1:] if row)
         segment_table = re.search(r"\bsegment\b", tail, re.IGNORECASE) is not None
+        # A reconciliation bridge, including its GAAP starting line and the adjustments
+        # under it, is not a set of company metrics. Cash-flow and year-to-date-only
+        # statements are not quarterly KPI tables.
+        recon_table = _RECON_MARK.search(caption) is not None
+        cash_flow = (
+            _CASH_FLOW_LABEL.search(caption) is not None or _CASH_FLOW_LABEL.search(label_blob) is not None
+        )
+        ytd_only = _YTD_SPAN.search(caption) is not None and _QUARTER_SPAN.search(caption) is None
         in_non_gaap = _NON_GAAP.search(tail) is not None
         reported_scale = table_unit_scale(table[0])
         date_only = all(_column_is_date(table[0][index]) for index, _period, _end in quarters)
@@ -948,6 +1007,9 @@ def table_scan(
         header_indexes = [index for index, _period, _end in quarters]
         table_rows: list[tuple[bool, dict]] = []
         table_proposals: list[tuple[str, dict]] = []
+        # A row such as "AWS Segment:" scopes the following lines until a total or consolidated heading.
+        segment_scope = segment_table
+        in_recon = recon_table
         for cells in table[1:]:
             if not cells or not str(cells[0]).strip():
                 continue
@@ -965,6 +1027,12 @@ def table_scan(
                 for period, _end, cell_index in aligned
                 if cell_index < len(cells) and _parse_cell(cells[cell_index])[0] is not None
             ]
+            if _SEGMENT_HEADING.search(raw_label):
+                segment_scope = True
+            elif _CONSOLIDATED_HEADING.search(raw_label):
+                segment_scope = False
+            if _RECON_SECTION.search(raw_label):
+                in_recon = True
             if not valued and raw_label:
                 if _NON_GAAP.search(raw_label):
                     in_non_gaap = True
@@ -976,17 +1044,27 @@ def table_scan(
                 # Cash-flow "change in" lines and the noncurrent rollforward are not the balance.
                 if "change in" in normalized or "net of current" in normalized or "write down" in normalized:
                     entry = None
+            is_total = normalized == "total" or normalized.endswith(" total") or normalized.startswith("total ")
+            if is_total and not segment_table:
+                segment_scope = False
             blocked = False
             if entry and (in_non_gaap or _NON_GAAP.search(raw_label)) and _is_gaap_metric(entry):
                 blocked = True
                 entry = None
-            if entry and segment_table and entry.get("metric_id") in _COMPANY_TOTAL_METRICS:
+            if entry and (segment_table or segment_scope) and entry.get("metric_id") in _COMPANY_TOTAL_METRICS:
                 blocked = True
                 entry = None
             if entry and balance_sheet and not _is_instant_metric(str(entry.get("metric_id") or "")):
                 blocked = True
                 entry = None
-            is_total = normalized == "total" or normalized.endswith(" total") or normalized.startswith("total ")
+            if entry and _is_gaap_metric(entry) and re.match(
+                r"adjusted\b|^gaap\s+(?:net\s+(?:loss|income)|revenue)\b", normalized, re.IGNORECASE
+            ):
+                blocked = True
+                entry = None
+            if entry and in_recon and _is_gaap_metric(entry):
+                blocked = True
+                entry = None
             label_scale, unit_hint = scale_from_label(raw_label)
             parsed_any = False
             for fiscal_period, column_end, index in aligned:
@@ -1030,11 +1108,29 @@ def table_scan(
                         ),
                     )
                 )
-            if blocked or entry is not None or not parsed_any or method == "llm" or balance_sheet:
+            if (
+                blocked
+                or entry is not None
+                or not parsed_any
+                or method == "llm"
+                or balance_sheet
+                or cash_flow
+                or ytd_only
+                or in_recon
+            ):
                 continue
             if _skip_proposal(raw_label):
                 continue
             key = normalize_label(raw_label)
+            seen_periods = list(valued or [period for period, _end, _index in aligned])
+            if filing_period and _linear_quarter(str(filing_period)) is not None:
+                seen_periods = [
+                    period
+                    for period in seen_periods
+                    if (ahead := _quarters_ahead(period, str(filing_period))) is not None and ahead <= 0
+                ]
+            if not seen_periods or not key:
+                continue
             if key:
                 table_proposals.append(
                     (
@@ -1043,7 +1139,7 @@ def table_scan(
                             raw_label,
                             unit=unit_hint or "",
                             scale=label_scale,
-                            fiscal_period=_newest_column(valued or [period for period, _end, _index in aligned]),
+                            fiscal_period=_newest_column(seen_periods),
                             source=source_url,
                             lower_bound=any(
                                 _parse_cell(cells[index])[1]
@@ -1330,7 +1426,6 @@ def _derive_filing_quarters(
     components: dict[tuple[str, str], tuple[float, str]],
     published: dict[str, float],
     seen_ends: dict[str, float],
-    filed_for: dict[tuple[str, str], str] | None = None,
     prior_nines: dict[int, tuple[float, str, str]] | None = None,
 ) -> tuple[dict[str, tuple[float, str]], set[str]]:
     """Difference YTD pieces from this filing. Borrow an earlier quarter only for a new span.
@@ -1339,10 +1434,11 @@ def _derive_filing_quarters(
     The first time an end date appears, earlier published quarters complete the difference.
     A missing quarter also comes from two consecutive spans in the same filing, including
     Q1 = six months minus Q2 when the three-month Q1 fact was never filed.
-    Q4 uses the latest nine-month figure. One filed with the 10-K is the comparative.
-    One that exists only on the earlier 10-Q is marked stale so a press release can win.
+    Q4 is the fiscal year minus the nine-month figure from the earlier 10-Q. That is the
+    normal case: a 10-K does not repeat the nine-month fact. Q4 is stale when a later
+    filing restates that nine-month value, or an earlier piece of the same year (Q1 or
+    the six-month total) that the nine-month figure was built from.
     """
-    filed_for = filed_for or {}
     prior_nines = prior_nines or {}
     years = sorted({int(period[:4]) for period, _bucket in components})
     derived: dict[str, tuple[float, str]] = {}
@@ -1398,21 +1494,28 @@ def _derive_filing_quarters(
         if q4 is not None:
             derived[quarter_key] = q4
         elif fy is not None and (nine is not None or year in prior_nines):
-            if nine is not None:
-                nine_value, nine_filed = nine[0], filed_for.get((f"{year}Q3", "nine"), "")
-            else:
-                nine_value, _nine_end, nine_filed = prior_nines[year]
+            nine_value = nine[0] if nine is not None else prior_nines[year][0]
             derived[quarter_key] = (fy[0] - nine_value, fy[1])
-            fy_filed = filed_for.get((f"{year}Q4", "fy"), "")
-            if nine_filed < fy_filed:
-                stale.add(quarter_key)
         elif fy is not None and (q1 is not None or q2 is not None or q3 is not None or fresh(fy)):
             base = prior_sum(year, (1, 2, 3))
             if base is not None:
                 derived[quarter_key] = (fy[0] - base, fy[1])
-                if not (q1 is not None and q2 is not None and q3 is not None):
-                    stale.add(quarter_key)
     return derived, stale
+
+
+def _q4_input_year(period: str, bucket: str) -> int | None:
+    """Q1, the six-month total, and the nine-month total are the pieces behind FY minus 9M."""
+    if not _QUARTER.fullmatch(period):
+        return None
+    year = int(period[:4])
+    quarter = int(period[-1])
+    if bucket == "quarter" and quarter == 1:
+        return year
+    if bucket == "h1" and quarter == 2:
+        return year
+    if bucket == "nine" and quarter == 3:
+        return year
+    return None
 
 
 def _discrete_cashflow(
@@ -1421,7 +1524,8 @@ def _discrete_cashflow(
 ) -> tuple[dict[str, float], dict[str, str], set[str]]:
     """Single quarters, preferring every input from the same filing, plus the closing end date.
 
-    The third item is fiscal periods whose Q4 used a nine-month figure older than the 10-K.
+    The third item is quarters whose Q1, six-month, or nine-month input was restated
+    by a later filing. A 10-K that simply arrives after the 10-Q does not make Q4 stale.
     """
     periods = _periods_for_facts(facts, fiscal_end_month)
     filings: dict[tuple, list[tuple[str, str, float, str, str]]] = {}
@@ -1445,6 +1549,8 @@ def _discrete_cashflow(
     ends: dict[str, str] = {}
     seen_ends: dict[str, float] = {}
     prior_nines: dict[int, tuple[float, str, str]] = {}
+    component_values: dict[tuple[str, str], list[float]] = {}
+    invalid_q4: set[int] = set()
     stale: set[str] = set()
     for key in order:
         components: dict[tuple[str, str], tuple[float, str]] = {}
@@ -1455,23 +1561,38 @@ def _discrete_cashflow(
                 continue
             components[slot] = (value, end)
             filed_for[slot] = filed
-        derived, derived_stale = _derive_filing_quarters(
-            components, published, seen_ends, filed_for, prior_nines
-        )
+        derived, derived_stale = _derive_filing_quarters(components, published, seen_ends, prior_nines)
         stale -= set(derived)
         stale |= derived_stale
         for period, (value, end) in derived.items():
             published[period] = value
             if end:
                 ends[period] = end
+        changed_nine: set[int] = set()
         for slot, (value, end) in components.items():
             seen_ends[end] = value
-            if slot[1] == "nine" and len(slot[0]) >= 4 and slot[0][:4].isdigit():
-                year = int(slot[0][:4])
+            year = _q4_input_year(slot[0], slot[1])
+            if year is None:
+                continue
+            seen = component_values.setdefault(slot, [])
+            if any(abs(value - earlier) > 1e-6 for earlier in seen):
+                invalid_q4.add(year)
+                if slot[1] == "nine":
+                    changed_nine.add(year)
+            seen.append(value)
+            if slot[1] == "nine":
                 filed = filed_for.get(slot, "")
                 previous = prior_nines.get(year)
                 if previous is None or filed >= previous[2]:
                     prior_nines[year] = (value, end, filed)
+        for year in changed_nine:
+            # This filing subtracted its own restated nine-month figure from the fiscal year.
+            if (f"{year}Q4", "fy") in components and (f"{year}Q3", "nine") in components:
+                invalid_q4.discard(year)
+                stale.discard(f"{year}Q4")
+        for year in invalid_q4:
+            if f"{year}Q4" in published:
+                stale.add(f"{year}Q4")
     return published, ends, stale
 
 
@@ -2308,7 +2429,34 @@ def _columns_for_dates(plain: str, cluster: list[re.Match[str]], fiscal_end_mont
     return columns
 
 
-def flowing_text_tables(text: str, fiscal_end_month: int = 12) -> list[list[list[str]]]:
+_HEADER_GAP = re.compile(
+    r"twelve[-\s]*months?|six[-\s]*months?|nine[-\s]*months?|three[-\s]*months?"
+    r"|months?\s+ended|\bttm\b|\bltm\b|\bytd\b",
+    re.IGNORECASE,
+)
+
+
+def _date_cluster_is_prose(plain: str, cluster: list[re.Match[str]]) -> bool:
+    """Bond-maturity sentences are not column headers.
+
+    A real header has only spaces, or a duration phrase such as ``Twelve Months Ended``,
+    between its dates. ``and`` in ``July 15, 2031, and July 15, 2056`` is prose.
+    """
+    for index in range(len(cluster) - 1):
+        between = plain[cluster[index].end() : cluster[index + 1].start()]
+        if _HEADER_GAP.search(between):
+            continue
+        if re.search(r"[A-Za-z]{3,}", between):
+            return True
+    lead = plain[max(0, cluster[0].start() - 80) : cluster[0].start()]
+    return re.search(r"\b(?:matur\w*|tranches?|bonds?|senior notes?)\b", lead, re.IGNORECASE) is not None
+
+
+def flowing_text_tables(
+    text: str,
+    fiscal_end_month: int = 12,
+    filing_period: str | None = None,
+) -> list[list[list[str]]]:
     """KPI rows with no `<table>` tag: a label, then quarter values, then YoY.
 
     Also accepts a run of period-end dates. A repeated date is a year-to-date column
@@ -2335,7 +2483,14 @@ def flowing_text_tables(text: str, fiscal_end_month: int = 12) -> list[list[list
     for index, cluster in enumerate(clusters):
         if any(start <= cluster[0].start() < end for start, end in occupied):
             continue
+        if _date_cluster_is_prose(plain, cluster):
+            continue
         columns = _columns_for_dates(plain, cluster, fiscal_end_month)
+        if filing_period:
+            columns = [
+                "TTM" if (ahead := _quarters_ahead(cell, filing_period)) is not None and ahead > 1 else cell
+                for cell in columns
+            ]
         if sum(1 for cell in columns if quarter_token(cell)) < 2:
             continue
         body_at = cluster[-1].end()
@@ -2709,18 +2864,33 @@ def narrative_candidates(text: str, *, enabled: bool) -> list[dict]:
     return found
 
 
+def _scale_phrase(text: str) -> str:
+    """The unit caption in `text`, if it says the figures are in thousands, millions, or billions."""
+    found = list(_SCALE_CAPTION.finditer(text or ""))
+    if not found:
+        return ""
+    phrase = text[found[-1].start() : found[-1].end()]
+    return " ".join(phrase.split())
+
+
 def _with_scale_caption(text: str, tables: list[list[list[str]]]) -> list[list[list[str]]]:
-    """Pull `(in thousands)` / `(in millions)` from the text above an HTML table."""
+    """Pull `(in thousands)` / `(in millions)` from the text above an HTML table.
+
+    The caption often sits well above the table it covers. Each table takes only the
+    caption in its own preamble, so a unit on one statement does not scale a later table.
+    """
     if not tables or "<table" not in text.lower():
         return tables
-    matches = list(re.finditer(r"(?is)<table\b.*?</table>", text))
-    if len(matches) != len(tables):
-        return tables
+    starts = [match.start() for match in re.finditer(r"(?is)<table\b", text)]
     captioned = []
-    for table, match in zip(tables, matches, strict=True):
-        before = plain_text(text[max(0, match.start() - 800) : match.start()])
-        snippet = " ".join(before.split())[-500:]
-        if re.search(r"in\s+(?:thousands|millions|billions)", snippet, re.IGNORECASE):
+    for index, table in enumerate(tables):
+        if index >= len(starts):
+            captioned.append(table)
+            continue
+        before = plain_text(text[max(0, starts[index] - 8000) : starts[index]])
+        snippet = _scale_phrase(before)
+        own = _scale_phrase(" ".join(" ".join(row) for row in table[:8]))
+        if snippet and not own:
             table = [[snippet], *table]
         captioned.append(table)
     return captioned
@@ -2728,24 +2898,33 @@ def _with_scale_caption(text: str, tables: list[list[list[str]]]) -> list[list[l
 
 def parse_company_document(text: str, catalog: dict, **kwargs) -> dict:
     """Press-release grids, five-quarter summary tables, and optional low-confidence narrative candidates."""
+    fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
+    text_period = fiscal_period_from_text(text, fiscal_end_month)
+    # A table's first comparative quarter is not the filing. The cap is the later of the
+    # heading and the period the collector already assigned.
+    cap_candidates = [
+        str(candidate)
+        for candidate in (text_period, kwargs.get("fiscal_period"))
+        if candidate and _linear_quarter(str(candidate)) is not None
+    ]
+    filing_period = max(cap_candidates, key=_linear_quarter) if cap_candidates else None
     tables = html_tables(text) if "<table" in text.lower() or "<tr" in text.lower() else []
     tables = _with_scale_caption(text, tables)
     has_quarter_table = any(_prepare_quarter_table(table) for table in tables)
     if not has_quarter_table:
-        fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
-        tables = [*tables, *text_tables(text), *flowing_text_tables(text, fiscal_end_month)]
+        tables = [*tables, *text_tables(text), *flowing_text_tables(text, fiscal_end_month, filing_period)]
     source_kind = kwargs.get("source_kind") or "deck"
     detected = classify_release(title_from_html(text), text)
     body = plain_text(text).lower()
     if detected == "press_release" and "production" in body and "deliver" in body:
         source_kind = "press_release"
-    fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
     rows, proposals = table_scan(
         tables,
         catalog,
         source_kind=source_kind,
         method=kwargs.get("method") or "table",
         fiscal_end_month=fiscal_end_month,
+        filing_period=str(filing_period) if filing_period else None,
         **{
             key: kwargs[key]
             for key in (
@@ -2757,7 +2936,6 @@ def parse_company_document(text: str, catalog: dict, **kwargs) -> dict:
             )
         },
     )
-    text_period = fiscal_period_from_text(text, fiscal_end_month)
     period = text_period or kwargs.get("fiscal_period")
     matrix_kwargs = {key: value for key, value in kwargs.items() if key not in {"fiscal_period", "fiscal_end_month"}}
     if period and source_kind == "press_release":
@@ -2812,7 +2990,7 @@ def _priority(row: dict) -> tuple:
     extracted = row.get("extracted_at")
     stamp = extracted.isoformat() if isinstance(extracted, datetime) else str(extracted or "")
     score = table.get(kind, 0)
-    # Q4 inferred from an older 10-Q nine-month figure loses to the press release for that quarter.
+    # Q4 loses to the press release when a later filing restated Q1, the six-month total, or the nine-month total.
     if row.get("derivation") == "stale_ytd":
         score = min(score, 30)
     return (score, published, stamp)
