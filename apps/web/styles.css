@@ -3636,6 +3636,7 @@ a.catalyst-edgar-link:hover {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+  margin-bottom: var(--space-3);
 }
 
 .metric-review-option {
