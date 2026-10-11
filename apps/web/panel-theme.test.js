@@ -109,7 +109,7 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   assert.match(page, /stockPanels\(payload, chartData, \{ \.\.\.periodOptions, review: "all" \}\)/);
   assert.match(page, /charts\.fundamentals/);
   assert.match(page, /charts\.guidance/);
-  assert.ok(kpisAt > 0 && callsAt > kpisAt && metricsAt > callsAt);
+  assert.ok(kpisAt > 0 && metricsAt > kpisAt && callsAt > metricsAt);
   const phone = styles.slice(styles.indexOf(".stock-page [data-stock-panel]"), styles.indexOf("/* Data refresh"));
   assert.match(phone, /\.stock-page\[data-stock-tab\] \.company-metrics\s*\{[^}]*display:\s*grid/);
   const metrics = slice("function renderCompanyMetrics", "function appendMetricGroups");
