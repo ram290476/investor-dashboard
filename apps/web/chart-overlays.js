@@ -86,17 +86,23 @@ function rememberFundamentals(chartData) {
   }
 }
 
+function pendingMetric(metric) {
+  return metric?.approval_state === "proposed" || metric?.status === "proposed" || metric?.pending === true;
+}
+
 export function mergeCompanyFundamentals(chartData, metrics) {
   const extra = [];
   for (const metric of metrics || []) {
-    const pending = metric?.approval_state === "proposed" || metric?.status === "proposed" || metric?.pending === true;
+    const pending = pendingMetric(metric);
+    const name = metric.display_name || metric.metric_id;
+    const seriesId = pending ? `${metric.metric_id}_pending` : metric.metric_id;
     for (const point of metric?.series || []) {
       if (!point || point.reported === false || !isNumericValue(point.value)) continue;
       const date = point.period_end || point.date;
       if (!date) continue;
       extra.push({
-        series_id: metric.metric_id,
-        display_name: metric.display_name || metric.metric_id,
+        series_id: seriesId,
+        display_name: pending && !String(name).includes("Pending review") ? `${name} · Pending review` : name,
         date,
         value: Number(point.value),
         unit: metric.unit || "",
@@ -107,8 +113,8 @@ export function mergeCompanyFundamentals(chartData, metrics) {
     }
   }
   if (!extra.length) return chartData;
-  const covered = new Set(extra.map((row) => row.series_id));
-  const base = (chartData?.fundamentals || []).filter((row) => !covered.has(row.series_id));
+  const replaced = new Set(extra.filter((row) => row.approval_state !== "proposed").map((row) => row.series_id));
+  const base = (chartData?.fundamentals || []).filter((row) => !replaced.has(row.series_id));
   return { ...(chartData || {}), fundamentals: [...base, ...extra] };
 }
 

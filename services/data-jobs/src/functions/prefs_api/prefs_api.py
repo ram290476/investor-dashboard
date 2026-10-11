@@ -76,6 +76,8 @@ CHART_OVERLAYS = {
     "FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd",
     "NEWS:SENTIMENT",
 }
+# Company metrics beyond the static five (capex, and a pending twin such as capex_pending).
+FUNDAMENTAL_OVERLAY_RE = re.compile(r"^FUNDAMENTAL:[A-Za-z][A-Za-z0-9_]{0,64}$")
 DEFAULTS = {
     "tickers": ["TSLA", "SPCX"],
     "pinned": ["TSLA", "SPCX"],
@@ -129,6 +131,11 @@ def normalize_panels(raw) -> dict:
             raise ValidationError("panel state must be open, closed, or dismissed")
         panels[panel_id] = value
     return panels
+
+
+def overlay_allowed(item: str) -> bool:
+    """Static overlays, plus any FUNDAMENTAL:<id> with a safe metric id."""
+    return item in CHART_OVERLAYS or bool(FUNDAMENTAL_OVERLAY_RE.match(item))
 
 
 def normalize_panel_mode(raw) -> str:
@@ -207,7 +214,7 @@ def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
             raise ValidationError("chart_settings contains an unsupported lane")
         if len(overlays) > 5 or len(overlays) != len(set(overlays)):
             raise ValidationError("Choose at most 5 unique chart overlays")
-        if any(item not in CHART_OVERLAYS for item in overlays):
+        if any(not overlay_allowed(item) for item in overlays):
             raise ValidationError("chart_settings contains an unsupported overlay")
         if len(lanes) > len(CHART_LANES) or len(lanes) != len(set(lanes)):
             raise ValidationError("Choose unique chart lanes")

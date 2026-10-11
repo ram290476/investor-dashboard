@@ -2016,7 +2016,21 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
     meta.textContent = `As of ${asOf}`;
   }
   quoteBlock.append(meta);
-  overview.append(quoteBlock, renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
+  const side = node("div", "overview-side");
+  if (session.route.page === "dashboard" && stockHash(session.selected)) {
+    const openPage = node("a", "company-page-link", "Open company page");
+    openPage.href = `/${stockHash(session.selected)}`;
+    openPage.dataset.companyPage = session.selected;
+    openPage.setAttribute("aria-label", `Open ${session.selected} company page`);
+    openPage.addEventListener("click", (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigateToStock(session.selected);
+    });
+    side.append(openPage);
+  }
+  side.append(renderPeriodChips(history, quote.available ? activeId : "", onSelectPeriod, tickerData?.intraday));
+  overview.append(quoteBlock, side);
   panel.append(overview);
   panel.append(renderOverlayControls(controls.groups, chartDataState, onSettingsChange));
   const filters = node("div", "catalyst-filters");
@@ -2586,6 +2600,7 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   const grid = node("div", "macro-panel-grid");
   if (!tabHasVisibleDetail("signals")) grid.append(renderPanelEmpty("signals"));
   if (!tabHasVisibleDetail("calendar")) grid.append(renderPanelEmpty("calendar"));
+  grid.append(renderPanelToolbar("signals"), renderPanelToolbar("calendar"));
   const rows = driverRows(tickerData);
   const rates = rows.filter(row => ["DGS2", "DGS10", "DGS30", "T10Y2Y", "DFII10", "SOFR", "T10YIE"].includes(row.series_id));
   const ratesPanel = renderDrawer({
@@ -3230,7 +3245,10 @@ function renderMetricCard(metric) {
     const axisModel = fiscalAxis(metric.series.map((point) => point.fiscal_period), { compact: axisCompact() || metric.series.length > 12 });
     metric.series.forEach((point, index) => {
       const bar = node("span", point.reported ? "stock-bar" : "stock-bar stock-bar-missing");
-      if (point.revised) bar.classList.add("stock-bar-revised");
+      if (point.revised) {
+        bar.classList.add("stock-bar-revised");
+        bar.append(node("span", "stock-bar-revised-mark", "Rev"));
+      }
       if (axisModel.years.some((band) => band.start === index && band.start > 0)) bar.classList.add("stock-bar-year");
       const height = point.reported && max ? Math.max(8, Math.round((point.value / max) * 100)) : 8;
       bar.style.height = `${height}%`;
@@ -3243,7 +3261,10 @@ function renderMetricCard(metric) {
     });
     const quarters = node("div", "stock-axis stock-quarters");
     quarters.style.gridTemplateColumns = `repeat(${metric.series.length}, minmax(0, 1fr))`;
-    axisModel.ticks.forEach((tick) => quarters.append(node("span", "", tick.show ? tick.label : "")));
+    axisModel.ticks.forEach((tick, index) => {
+      const revised = metric.series[index]?.revised && tick.show;
+      quarters.append(node("span", revised ? "stock-quarter-revised" : "", tick.show ? `${tick.label}${revised ? " Rev" : ""}` : ""));
+    });
     const yearTrack = node("div", "stock-years stock-year-track");
     yearTrack.style.gridTemplateColumns = `repeat(${metric.series.length}, minmax(0, 1fr))`;
     axisModel.years.forEach((band) => {
@@ -3666,6 +3687,7 @@ function renderDashboard() {
   const about = renderAboutData();
   if (about) primary.append(about);
   if (!tabHasVisibleDetail("more")) primary.append(renderPanelEmpty("more"));
+  primary.append(renderPanelToolbar("more"));
   mainGrid.append(primary, side);
   ["chart", "signals", "calendar", "more"].forEach((view) => claimMobileId(mainGrid, view));
   const mobileTabs = node("div", "mobile-view-tabs");
