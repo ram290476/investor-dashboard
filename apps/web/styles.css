@@ -3891,6 +3891,10 @@ a.catalyst-edgar-link:hover {
   .stock-page[data-stock-tab="calls"] [data-stock-panel="calls"] {
     display: block;
   }
+
+  .stock-page[data-stock-tab] .company-metrics {
+    display: grid;
+  }
 }
 
 /* Data refresh rows stack on a phone. Desktop keeps the five-column table. */
