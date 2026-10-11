@@ -815,6 +815,7 @@ def test_synthetic_25_ticker_dashboard_stays_under_two_megabytes():
     raw = json.dumps(snapshot, separators=(",", ":"), default=str).encode()
     assert len(raw) < dashboard_build.DASHBOARD_RAW_BUDGET_BYTES, len(raw)
     assert b"correlation_history" not in raw
+    assert b"market_comparison" not in raw
     assert b'"fundamentals"' not in raw
     for ticker in tickers:
         record = snapshot["tickers"][ticker]
@@ -1023,3 +1024,106 @@ def test_index_proxy_chart_files_carry_full_price_history(monkeypatch):
                 client.get_object(Bucket="lake", Key=f"serving/chart_data/{symbol}.json")["Body"].read()
             )
             assert len(chart["price_history"]) == len(sessions)
+            assert "market_comparison" in chart
+            assert symbol not in chart["market_comparison"]["indexes"]
+            assert chart["market_comparison"]["window_sessions"] == 90
+        tsla = json.loads(client.get_object(Bucket="lake", Key="serving/chart_data/TSLA.json")["Body"].read())
+        spy = tsla["market_comparison"]["indexes"]["SPY"]
+        assert spy["n"] == len(sessions) - 1
+        assert spy["rho_90d"] == pytest.approx(1)
+        assert spy["beta_90d"] == pytest.approx(1)
+        assert tsla["market_comparison"]["returns"]["5Y"] is None
+        assert tsla["market_comparison"]["returns"]["1M"] is not None
+        raw_dashboard = client.get_object(Bucket="lake", Key="serving/dashboard.json")["Body"].read()
+        assert b"market_comparison" not in raw_dashboard
+
+
+def _walk(start: float, returns: list[float]) -> list[float]:
+    prices = [start]
+    for value in returns:
+        prices.append(prices[-1] * (1 + value))
+    return prices
+
+
+def _dated(values: list[float], start: str = "2026-01-05") -> list[dict]:
+    from datetime import date, timedelta
+
+    cursor = date.fromisoformat(start)
+    rows = []
+    for value in values:
+        while cursor.weekday() >= 5:
+            cursor += timedelta(days=1)
+        rows.append({"date": cursor.isoformat(), "close": value, "adj_close": value, "ticker": "X"})
+        cursor += timedelta(days=1)
+    return rows
+
+
+def test_beta_is_stock_on_index_and_period_returns_follow_the_chart_windows():
+    assert dashboard_build.INDEX_PROXIES == universe.INDEX_PROXIES
+    moves = [0.01, -0.02, 0.015, 0.005] * 8
+    index = _dated(_walk(100, moves))
+    stock = _dated(_walk(200, [value * 1.5 for value in moves]))
+    link = dashboard_build.beta_rho(stock, index)
+    assert link["n"] == 32
+    assert link["rho_90d"] == pytest.approx(1)
+    assert link["beta_90d"] == pytest.approx(1.5)
+    short = dashboard_build.beta_rho(stock[:10], index[:10])
+    assert short["rho_90d"] is None and short["n"] == 9
+    flat = _dated([50] * 30)
+    assert dashboard_build.beta_rho(flat, index[:30])["rho_90d"] is None
+    # Dropping the index's first session removes one return date. The rest stay paired.
+    gapped = dashboard_build.beta_rho(stock, index[1:])
+    assert gapped["n"] == 31
+    assert gapped["beta_90d"] == pytest.approx(1.5)
+    returns = dashboard_build.period_returns(stock)
+    assert returns["1D"] == pytest.approx(stock[-1]["close"] / stock[-2]["close"] - 1)
+    assert returns["1M"] == pytest.approx(stock[-1]["close"] / stock[-22]["close"] - 1)
+    assert returns["1Y"] is None
+    year = [
+        {"date": "2025-12-31", "close": 10, "adj_close": 10},
+        {"date": "2026-01-02", "close": 12, "adj_close": 12},
+        {"date": "2026-01-05", "close": 13, "adj_close": 13},
+    ]
+    assert dashboard_build.period_returns(year)["YTD"] == pytest.approx(13 / 12 - 1)
+
+
+def test_market_comparison_stays_on_the_chart_file_and_correlation_history_keeps_six_months():
+    from datetime import date, timedelta
+
+    cursor = date(2025, 6, 2)
+    days = []
+    while len(days) < 200:
+        if cursor.weekday() < 5:
+            days.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    trend_rows = [
+        {"ticker": "TSLA", "date": day, "series_id": "DGS10", "value": 4.0, "corr_30d": 0.2, "corr_90d": 0.1}
+        for day in days[:200]
+    ]
+    prices = _dated(_walk(100, [0.001] * 40), start="2026-01-05")
+    for row in prices:
+        row["ticker"] = "TSLA"
+    index = [{**row, "ticker": "SPY"} for row in prices]
+    chart = dashboard_build.build_chart_data(
+        ticker="TSLA",
+        trend_rows=trend_rows,
+        short_interest_rows=[],
+        options_rows=[],
+        fundamentals=[],
+        price_rows=prices,
+        index_prices={"SPY": index, "TSLA": prices},
+        generated_at="2026-10-11T00:00:00+00:00",
+    )
+    assert len(chart["correlation_history"]["DGS10"]) == dashboard_build.CORRELATION_HISTORY_ROWS
+    assert chart["correlation_history"]["DGS10"][-1]["date"] == trend_rows[199]["date"]
+    assert chart["correlation_history"]["DGS10"][0]["date"] == trend_rows[200 - 126]["date"]
+    assert "SPY" in chart["market_comparison"]["indexes"]
+    assert "TSLA" not in chart["market_comparison"]["indexes"]
+    bare = dashboard_build.build_chart_data(
+        ticker="TSLA", trend_rows=[], short_interest_rows=[], options_rows=[], fundamentals=[], price_rows=prices,
+    )
+    assert "market_comparison" not in bare
+    snapshot = dashboard_build.build_snapshot(
+        tickers=["TSLA"], prices={"TSLA": prices}, trends={}, fundamentals=[], status=None,
+    )
+    assert "market_comparison" not in json.dumps(snapshot)

@@ -542,7 +542,14 @@ The #27 roadmap UI consumes the existing schema-v3 serving document and chart hi
 - Signals rank finite driver effects, show price/macro regime labels and report release
   sensitivity only with a finite correlation and at least 12 paired releases. Sensitivity
   is historical association, not a causal forecast.
-- Market comparisons use each symbol's adjusted daily history. Moving averages require
+- Market comparison rows follow the chart's selected index overlays and the
+  active period. Return and relative performance use adjusted closes. ρ and β
+  are the last 90 paired daily returns (at least 20), stored on the ticker's
+  chart file, not on `dashboard.json`. Correlation drift lists the live daily
+  drivers from the design (yields, real yield, VIX, dollar, WTI, policy
+  uncertainty) and flags a 30D versus 90D shift of at least 0.08, or a sign
+  change. The sparkline is up to six months of 30D correlation.
+- Moving averages require
   all 10/20/50/100/200 observations; missing history is never replaced with demo series.
   Rates, inflation, volatility, dollar/oil and policy panels identify missing inputs.
   Policy uncertainty is a proxy, not a tariff-rate or geopolitical-risk measurement.

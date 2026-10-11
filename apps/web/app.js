@@ -24,9 +24,13 @@ import {
 import { legendItems, overlayCorrelation, seriesLineStyle } from "./chart-legend.js";
 import { sparkline, sparklineModel, sparklineSummary } from "./sparkline.js";
 import {
-  correlationDrift, driverChange, driverLabel, driverRows, driverTrend, driverValue,
+  driverChange, driverLabel, driverRows, driverTrend, driverValue,
   number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
 } from "./signals.js";
+import {
+  correlationPanelModel, deltaText, formatLink, marketComparisonModel, nowText,
+  returnTone, signedPercent, signedPoints,
+} from "./market-correlation.js";
 import { canApproveMetrics, drawerControls, emailFromIdToken, fallbackSelection, isPanelOpen, panelState, parseSettingsHash, stripOrder, withPanelState } from "./settings-model.js";
 import {
   callsCopy,
@@ -1166,14 +1170,32 @@ function inflationSummary(tickerData) {
   return parts.join(" · ") || "Unavailable";
 }
 
-function marketSummary() {
+function indexLabels() {
+  return Object.fromEntries(MARKET_OVERLAY_IDS.map((id) => [id, overlayDefinition(id)?.label || id]));
+}
+
+function marketView(chartData, chartDataState) {
+  const ticker = session.selected;
+  const settings = chartSettingsFor(session.prefs, ticker);
+  const histories = {};
+  for (const id of MARKET_OVERLAY_IDS) {
+    histories[id] = servedPriceHistory(session.dashboard?.tickers?.[id], session.chartData?.[id]);
+  }
+  return marketComparisonModel({
+    ticker,
+    periodId: session.prefs.display?.chart_period,
+    overlayIds: settings.overlays,
+    stockHistory: servedPriceHistory(session.dashboard?.tickers?.[ticker], chartData),
+    indexHistories: histories,
+    server: chartDataState === "ready" ? chartData?.market_comparison : null,
+    labels: indexLabels(),
+    linkLoading: chartDataState === "loading",
+  });
+}
+
+function marketSummary(chartData, chartDataState) {
   if (session.dashboardState === "loading") return "Loading…";
-  const quote = (id) => periodQuote(session.dashboard?.tickers?.[id]?.price_history || [], "1M");
-  const own = quote(session.selected);
-  const spy = quote("SPY");
-  if (!own.available && !spy.available) return "Unavailable";
-  const text = (id, item) => `${id} ${item.available ? formatPercent(item.returnValue, 1) : "—"}`;
-  return `${text(session.selected, own)} vs ${text("SPY", spy)} (1M)`;
+  return marketView(chartData, chartDataState).summary;
 }
 
 function movingAverageSummary(history) {
@@ -1210,22 +1232,15 @@ function tariffSummary(rows) {
   return `Policy uncertainty ${value} · ${events.length} recent event${events.length === 1 ? "" : "s"}`;
 }
 
+function correlationView(rows, chartData) {
+  return correlationPanelModel(session.selected, rows, chartData?.correlation_history);
+}
+
 function correlationSummary(rows, chartData, chartDataState) {
-  if (session.dashboardState === "loading" || chartDataState === "loading") return "Loading…";
-  const daily = rows.filter((row) => !row.series_id.endsWith("_YOY"));
-  if (!daily.length) return "Unavailable";
-  let known = 0;
-  let strengthening = 0;
-  let flips = 0;
-  daily.forEach((row) => {
-    const change = correlationDrift(row, chartData?.correlation_history?.[row.series_id] || []);
-    if (!change) return;
-    known += 1;
-    if (change.stronger) strengthening += 1;
-    if (change.signFlip) flips += 1;
-  });
-  if (!known) return "Unavailable";
-  return `${strengthening} strengthening · ${flips} sign flip${flips === 1 ? "" : "s"}`;
+  if (session.dashboardState === "loading") return "Loading…";
+  const view = correlationView(rows, chartData);
+  if (!view.known && chartDataState === "loading") return "Loading…";
+  return view.summary;
 }
 
 function displayZone() {
@@ -2744,30 +2759,135 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   const drift = renderDrawer({
     id: "correlation",
     title: "Correlation drift",
-    subtitle: `${session.selected} · 30D / 90D rolling correlations`,
+    subtitle: "30-day link versus the 90-day link",
     summary: correlationSummary(rows, chartData, chartDataState),
     mobilePanel: "signals",
     keys: drawerKeys("correlation"),
   }, (drawer) => {
-  if (chartDataState === "error") drawer.append(node("p", "data-state error", "Correlation history could not be loaded. Use Try again above."));
-  else if (chartDataState === "loading") drawer.append(node("p", "data-state", "Loading correlation history…"));
-  const daily = rows.filter(row => !row.series_id.endsWith("_YOY"));
-  daily.forEach(row => {
-    const history = chartData?.correlation_history?.[row.series_id] || [];
-    const change = correlationDrift(row, history);
-    const entry = node("div", "rate-entry");
-    entry.append(node("h3", "signal-label", driverLabel(row.series_id)),
-      node("p", "mono", `30D ${signed(row.corr_30d)} · 90D ${signed(row.corr_90d)}`),
-      signalSparkline(history.map(point => ({value: point.corr_90d})), "var(--blue)", `${driverLabel(row.series_id)} 90-day correlation history`),
-      node("p", "signal-note", change ? `${change.signFlip ? "Sign flip · " : ""}${change.stronger ? "Strengthening" : "Fading"} · 1M drift ${signed(change.delta)}` : "Drift unavailable; needs 22 linked sessions."));
-    drawer.append(entry);
-  });
-  if (!daily.length) drawer.append(node("p", "data-state", "No daily driver correlations available yet."));
+  renderCorrelationBody(drawer, rows, chartData, chartDataState);
   });
   grid.append(...[
     ratesPanel, inflation, ...renderDetailPanels(tickerData, chartData, chartDataState), drift, renderCatalystCalendar(tickerData),
   ].filter(Boolean));
   return grid;
+}
+
+function renderCorrelationSpark(spark, tone, label) {
+  if (!spark) return node("span", "signal-note", "History unavailable");
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${spark.width} ${spark.height}`);
+  svg.setAttribute("class", "drift-spark");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", label);
+  svg.setAttribute("preserveAspectRatio", "none");
+  const zero = document.createElementNS(svgNS, "path");
+  zero.setAttribute("class", "drift-zero");
+  zero.setAttribute("d", `M0 ${spark.zero} L${spark.width} ${spark.zero}`);
+  const line = document.createElementNS(svgNS, "path");
+  line.setAttribute("class", tone === "against" ? "drift-against" : "drift-with");
+  line.setAttribute("d", spark.d);
+  svg.append(zero, line);
+  return svg;
+}
+
+function renderCorrelationBody(drawer, rows, chartData, chartDataState) {
+  if (chartDataState === "error") drawer.append(node("p", "data-state error", "Correlation history could not be loaded. Use Try again above."));
+  else if (chartDataState === "loading") drawer.append(node("p", "data-state", "Loading correlation history…"));
+  const view = correlationView(rows, chartData);
+  const table = node("table", "drift-table");
+  table.setAttribute("aria-label", `${session.selected} correlation drift`);
+  const head = node("thead", "visually-hidden");
+  const headRow = node("tr");
+  ["Driver", "30-day correlation", "Now", "Change vs 90-day", "Flag"].forEach((label) => {
+    headRow.append(node("th", "", label));
+  });
+  head.append(headRow);
+  const body = node("tbody");
+  view.rows.forEach((row) => {
+    const tr = node("tr");
+    const name = node("th", "drift-name", row.label);
+    name.scope = "row";
+    tr.append(name);
+    const sparkCell = node("td", "drift-spark-cell");
+    const tone = row.link?.withStock === false ? "against" : "with";
+    sparkCell.append(renderCorrelationSpark(
+      row.spark,
+      tone,
+      `${row.label} 30-day correlation, up to 6 months`,
+    ));
+    const now = node("td", `mono drift-now ${row.link ? (row.link.withStock ? "drift-with-text" : "drift-against-text") : ""}`, row.link ? nowText(row.corr30) : "—");
+    const delta = node("td", "mono drift-delta", row.link ? deltaText(row.link.delta) : "—");
+    const flag = node("td");
+    const pill = node("span", `drift-flag drift-flag-${row.link ? row.link.flag : "unavailable"}`, row.link ? row.link.label : "Unavailable");
+    flag.append(pill);
+    tr.append(sparkCell, now, delta, flag);
+    body.append(tr);
+  });
+  table.append(head, body);
+  drawer.append(table);
+  if (!view.known && chartDataState !== "loading") {
+    drawer.append(node("p", "data-state", "No daily driver correlations available yet."));
+  }
+  drawer.append(node("p", "signal-note", view.footer));
+}
+
+function renderMarketComparison(body, chartData, chartDataState) {
+  if (session.dashboardState === "loading") {
+    body.append(node("p", "data-state", "Loading market prices…"));
+    return;
+  }
+  if (session.dashboardState === "error") {
+    body.append(node("p", "data-state error", "Market prices could not be loaded. Refresh data to retry."));
+    return;
+  }
+  const view = marketView(chartData, chartDataState);
+  if (!view.rows.length) {
+    body.append(node("p", "data-state", "Select a market index on the chart to compare its return, ρ, and β."));
+    return;
+  }
+  body.append(node("p", "compare-headline", view.headline));
+  const table = node("table", "compare-table");
+  table.setAttribute("aria-label", `${session.selected} market comparison for ${view.period}`);
+  const head = node("thead");
+  const headRow = node("tr");
+  [`Index · ${view.period}`, "Return", `${session.selected} vs`, "ρ", "β"].forEach((label, index) => {
+    const cell = node("th", index ? "num" : "", label);
+    cell.scope = "col";
+    headRow.append(cell);
+  });
+  head.append(headRow);
+  const tbody = node("tbody");
+  view.rows.forEach((row) => {
+    const tr = node("tr");
+    const name = node("th", "compare-name");
+    name.scope = "row";
+    const definition = overlayDefinition(row.id);
+    const swatch = node("span", "compare-swatch");
+    swatch.setAttribute("aria-hidden", "true");
+    if (definition) swatch.style.borderTopColor = overlayColor(definition.color, session.prefs.display?.theme);
+    const label = node("span", "compare-label", row.label);
+    const nameRow = node("span", "compare-name-row");
+    nameRow.append(swatch, label);
+    name.append(nameRow);
+    const ret = node("td", `mono num ${returnTone(row.ret)}`, signedPercent(row.ret));
+    const rel = node("td", `mono num ${returnTone(row.relative)}`, signedPoints(row.relative));
+    const rhoText = row.linkState === "loading" ? "…" : formatLink(row.rho);
+    const betaText = row.linkState === "loading" ? "…" : formatLink(row.beta);
+    const rho = node("td", "mono num compare-link", rhoText);
+    const beta = node("td", "mono num compare-link", betaText);
+    if (row.n != null) {
+      const tip = `${row.n} paired daily return${row.n === 1 ? "" : "s"}`;
+      rho.title = tip;
+      beta.title = tip;
+    } else if (row.linkState === "loading") {
+      rho.title = "Loading correlation and beta";
+      beta.title = "Loading correlation and beta";
+    }
+    tr.append(name, ret, rel, rho, beta);
+    tbody.append(tr);
+  });
+  table.append(head, tbody);
+  body.append(table, node("p", "signal-note", view.footer));
 }
 
 function renderDetailPanels(tickerData, chartData, chartDataState) {
@@ -2778,15 +2898,8 @@ function renderDetailPanels(tickerData, chartData, chartDataState) {
     if (panel) panels.push(panel);
     return body || null;
   };
-  const market = create("market-comparison", "Market comparison", `1M adjusted returns · ${session.selected} and ETF proxies`, marketSummary());
-  if (market && session.dashboardState === "loading") market.append(node("p", "data-state", "Loading market prices…"));
-  else if (market && session.dashboardState === "error") market.append(node("p", "data-state error", "Market prices could not be loaded. Refresh data to retry."));
-  if (market) [session.selected, "SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH"].filter((id, i, ids) => ids.indexOf(id) === i).forEach(id => {
-    const history = servedPriceHistory(session.dashboard?.tickers?.[id], session.chartData?.[id]);
-    const quote = periodQuote(history, "1M");
-    market.append(node("p", "signal-heading", `${id} · ${quote.available ? formatPercent(quote.returnValue, 1) : "History unavailable"}`),
-      signalSparkline(history.slice(-63).map(bar => ({ value: chartValue(bar) })), "var(--price)", `${id} adjusted closes`));
-  });
+  const market = create("market-comparison", "Market comparison", "Index ETFs · H1/D4", marketSummary(chartData, chartDataState));
+  if (market) renderMarketComparison(market, chartData, chartDataState);
   const averages = create("moving-averages", "Moving averages", `${session.selected} · adjusted daily closes`, movingAverageSummary(chartDataState === "loading" ? null : tickerData?.price_history));
   if (averages && (session.dashboardState === "loading" || chartDataState === "loading")) {
     averages.append(node("p", "data-state", "Loading daily closes…"));
