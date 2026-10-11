@@ -410,8 +410,9 @@ variable "jobs" {
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?batches>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1"]
-      memory   = 1024
+      # Rebuild when a backfill ticker finishes (tickers_completed > 0), not after every batch.
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1"]
+      memory   = 2048
       timeout  = 300
       read_prefixes = [
         "curated/prices_daily/",
@@ -432,6 +433,8 @@ variable "jobs" {
         "curated/releases/",
         "curated/release_calendar/",
         "curated/release_links/",
+        "curated/macro_daily/source=fred/",
+        "serving/rates/",
       ]
       write_prefixes = ["serving/dashboard.json", "serving/chart_data/", "serving/dashboard-build/"]
       api_keys       = []
@@ -489,11 +492,12 @@ variable "jobs" {
       api_keys       = []
       reads_prefs    = false
     }
-    # Daily poll; writes only when FINRA publishes a new settlement date (twice a month)
+    # Daily poll; writes only when FINRA publishes a new settlement date (twice a month).
+    # ticker-added also runs a one-time full-history catch-up for tickers that have none stored.
     short-interest = {
       handler        = "short_interest.handler"
       schedule       = "cron(30 18 ? * MON-FRI *)"
-      triggers       = []
+      triggers       = ["ticker-added"]
       memory         = 512
       timeout        = 300
       read_prefixes  = ["curated/short_interest/"]

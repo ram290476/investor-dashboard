@@ -26,8 +26,11 @@ FIELDS = {
 }
 
 
-def query_body(tickers: list[str], after: str | None) -> dict:
-    body: dict = {"limit": 5000, "domainFilters": [{"fieldName": "symbolCode", "values": tickers}]}
+def query_body(tickers: list[str], after: str | None, *, offset: int = 0, limit: int = 5000) -> dict:
+    """One FINRA page. ``after`` is the incremental watermark; omit it for a full history pull."""
+    body: dict = {"limit": limit, "domainFilters": [{"fieldName": "symbolCode", "values": tickers}]}
+    if offset:
+        body["offset"] = offset
     if after:
         body["compareFilters"] = [{"compareType": "GREATER", "fieldName": "settlementDate", "fieldValue": after}]
     return body
