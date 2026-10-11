@@ -2,6 +2,8 @@ project            = "invdash"
 region             = "us-west-1"
 dr_region          = "us-west-2" # must differ from region
 alert_emails       = ["you@example.com"] # also receive the us-east-1 CloudFront alarm topic
+# alert_sms_e164     = "+14155552671" # optional; confirm the text, then do not subscribe this number to the alarm topics
+# sms_daily_cap      = 1              # texts per issue per America/Los_Angeles day; email stays uncapped
 monthly_budget_usd = 40
 
 # Fill in once the dashboard is deployed behind CloudFront:

@@ -46,6 +46,12 @@ variable "forward_event_patterns" {
   type        = map(string)
 }
 
+variable "sms_notifier_arn" {
+  description = "Primary-region Lambda that caps SMS. Empty leaves this topic email-only."
+  type        = string
+  default     = ""
+}
+
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
@@ -173,6 +179,15 @@ resource "aws_sns_topic_subscription" "ops_email" {
   topic_arn = aws_sns_topic.ops[0].arn
   protocol  = "email"
   endpoint  = each.value
+}
+
+# Email above is not capped. SMS for this alarm goes through the primary-region notifier.
+resource "aws_sns_topic_subscription" "sms_notifier" {
+  count = local.alarm_on && var.sms_notifier_arn != "" ? 1 : 0
+
+  topic_arn = aws_sns_topic.ops[0].arn
+  protocol  = "lambda"
+  endpoint  = var.sms_notifier_arn
 }
 
 resource "aws_cloudwatch_metric_alarm" "cloudfront_5xx" {

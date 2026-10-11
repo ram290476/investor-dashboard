@@ -377,6 +377,8 @@ Alerts go to two email topics: **ops** for reliability and **security** for inci
 
 - **AWS Health events** go to the ops topic.
 
+- **SMS (optional):** set `alert_sms_e164`. A notifier Lambda texts at most `sms_daily_cap` times per issue per Pacific day (default 1). The issue is the alarm name, or the job and error code. Repeats are logged, and the next day's first text says how many were held back. Email is a separate subscription and is not capped.
+
 - **Dashboards:** two CloudWatch dashboards, ops and SLO. Data health per source stays in the app's own panel.
 
 ### Reliability
@@ -553,7 +555,7 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 | data_lake | Lake bucket with versioning, KMS and TLS-only access, replicated to us-west-2; job dead-letter queue; ECR repo with immutable tags |
 | audit_logging | CloudTrail with data events, validation and Insights into an Object-Locked audit bucket; AWS Config into its own versioned config bucket |
 | security_services | GuardDuty with S3, Lambda and malware protection; Security Hub NIST 800-53 Rev 5; Inspector; Access Analyzer; account guardrails |
-| alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes |
+| alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes; optional per-issue SMS cap |
 | us_east_1 | CloudFront 5xx alarm with its own encrypted topic and key; forwarding of IAM and root sign-in events to the primary region |
 | observability | Log groups, saved queries, alarms with SLO burn rates, 2 dashboards, canary, \$40 budget |
 | api_keys | 14 SSM SecureStrings with rotation periods (now including FINRA); daily 8:00 PT check that emails reminders |

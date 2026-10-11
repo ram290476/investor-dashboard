@@ -108,6 +108,11 @@ output "job_functions" {
   value       = module.jobs.function_names
 }
 
+output "sms_notifier_arn" {
+  description = "Lambda that caps SMS to sms_daily_cap texts per issue per Pacific day. Empty until alert_sms_e164 is set. Email is not capped."
+  value       = module.alerting.sms_notifier_arn
+}
+
 output "cloudfront_alarm_topic_arn" {
   description = "us-east-1 topic for the CloudFront 5xx alarm (null when enable_cloudfront_alarms is false). Recipients confirm it separately."
   value       = module.us_east_1.cloudfront_topic_arn

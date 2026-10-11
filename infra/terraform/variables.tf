@@ -60,6 +60,28 @@ variable "security_alert_emails" {
   default     = []
 }
 
+variable "alert_sms_e164" {
+  description = "E.164 mobile number for SMS alerts, for example +14155552671. Empty leaves SMS off. Email subscriptions stay in place and are not capped. Do not also subscribe this number directly to the ops, security, or CloudFront topics; that bypasses the daily cap."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alert_sms_e164 == "" || can(regex("^\\+[1-9][0-9]{7,14}$", var.alert_sms_e164))
+    error_message = "alert_sms_e164 must be empty or an E.164 number such as +14155552671."
+  }
+}
+
+variable "sms_daily_cap" {
+  description = "Maximum SMS messages for one issue (CloudWatch alarm name, or job and error code) per calendar day in America/Los_Angeles. Further repeats are logged. Email is not capped."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.sms_daily_cap >= 1 && var.sms_daily_cap <= 100
+    error_message = "sms_daily_cap must be from 1 to 100."
+  }
+}
+
 variable "monthly_budget_usd" {
   description = "Monthly cost budget. Emails at 80% actual and 100% forecast."
   type        = number
