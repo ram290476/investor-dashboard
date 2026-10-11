@@ -3375,6 +3375,7 @@ a.catalyst-edgar-link:hover {
   gap: var(--space-2) var(--space-3);
   margin: 4px 0 12px;
   min-width: 0;
+  padding-inline: calc(var(--space-2) * 2);
 }
 
 .stock-heading-copy {
