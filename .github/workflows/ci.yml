@@ -105,6 +105,13 @@ jobs:
           terraform init -backend=false
           terraform validate
 
+      # Mock-provider plans of the root module on a fresh stack. They fail with
+      # "Invalid count argument" if a count or for_each reads a value known only
+      # after apply, as Deploy production #199 did.
+      - name: Plan-time count and for_each check (terraform test)
+        working-directory: infra/terraform
+        run: terraform test
+
       - name: Build the Lambda image for its deployment architecture
         run: |
           docker buildx build --file infra/docker/Dockerfile --platform linux/arm64 --load -t investor-dashboard-jobs:ci .

@@ -31,7 +31,11 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
-# Two encrypted topics: ops (reliability) and security (incident response).
+# Two encrypted delivery topics: ops (reliability) and security (incident
+# response). Inboxes subscribe here; the notifier (sms.tf) is the only
+# publisher. Alarms publish to the intake topics (aws_sns_topic.alarm).
+# These keep their original names and addresses so the confirmed email
+# subscriptions are not replaced.
 # ---------------------------------------------------------------------------
 resource "aws_sns_topic" "this" {
   for_each          = local.topics
@@ -52,18 +56,15 @@ data "aws_iam_policy_document" "topic" {
     }
   }
 
+  # Only the notifier publishes here (sms.tf). Alarms and rules publish to the
+  # intake topics, so a repeat cannot bypass the per-window email cap.
   statement {
-    sid       = "AlarmsAndEventRulesPublish"
+    sid       = "NotifierPublish"
     actions   = ["SNS:Publish"]
     resources = [aws_sns_topic.this[each.key].arn]
     principals {
-      type        = "Service"
-      identifiers = ["cloudwatch.amazonaws.com", "events.amazonaws.com"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [local.account_id]
+      type        = "AWS"
+      identifiers = [aws_iam_role.notifier.arn]
     }
   }
 
@@ -90,11 +91,11 @@ resource "aws_sns_topic_policy" "this" {
   policy   = data.aws_iam_policy_document.topic[each.key].json
 }
 
-# Inboxes subscribe to the capped republish topics, not the alarm topics.
-# A direct email subscription here would bypass the hourly cap.
+# Inboxes subscribe to the capped delivery topics, not the intake topics.
+# An email subscription on an intake topic would bypass the hourly cap.
 resource "aws_sns_topic_subscription" "email" {
   for_each  = local.subscriptions
-  topic_arn = aws_sns_topic.outbound_email[each.value.topic].arn
+  topic_arn = aws_sns_topic.this[each.value.topic].arn
   protocol  = "email"
   endpoint  = each.value.email
 }
@@ -243,15 +244,27 @@ resource "aws_cloudwatch_event_target" "this" {
   for_each  = local.rules
   rule      = aws_cloudwatch_event_rule.this[each.key].name
   target_id = "sns-${each.value.topic}"
-  arn       = aws_sns_topic.this[each.value.topic].arn
+  arn       = aws_sns_topic.alarm[each.value.topic].arn
 }
 
 output "ops_topic_arn" {
-  value = aws_sns_topic.this["ops"].arn
+  description = "Ops intake topic for alarm actions. Invokes the notifier; do not subscribe inboxes here."
+  value       = aws_sns_topic.alarm["ops"].arn
 }
 
 output "security_topic_arn" {
-  value = aws_sns_topic.this["security"].arn
+  description = "Security intake topic for rules and publishers. Invokes the notifier; do not subscribe inboxes here."
+  value       = aws_sns_topic.alarm["security"].arn
+}
+
+output "ops_email_topic_arn" {
+  description = "Ops delivery topic (inbox subscriptions). Only the notifier publishes here."
+  value       = aws_sns_topic.this["ops"].arn
+}
+
+output "security_email_topic_arn" {
+  description = "Security delivery topic (inbox subscriptions). Only the notifier publishes here."
+  value       = aws_sns_topic.this["security"].arn
 }
 
 output "global_event_patterns" {

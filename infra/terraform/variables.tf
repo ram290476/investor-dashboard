@@ -50,14 +50,20 @@ variable "use_fips_endpoint" {
 }
 
 variable "alert_emails" {
-  description = "Inboxes for ops alerts, including the CloudFront alarm. The notifier republishes to the ops-email topic; each address must confirm that subscription. Do not also subscribe these addresses to the ops, security, or CloudFront alarm topics."
+  description = "Inboxes for ops alerts, including the CloudFront alarm. The notifier republishes to the ops delivery topic (<name>-ops-alerts); each address must confirm that subscription once. Do not also subscribe these addresses to the intake topics (<name>-ops-alarms, <name>-security-alarms) or the CloudFront alarm topic."
   type        = list(string)
 }
 
 variable "security_alert_emails" {
-  description = "Optional separate recipients for security alerts, on the security-email topic. Defaults to alert_emails when empty. Each address must confirm that subscription."
+  description = "Optional separate recipients for security alerts, on the security delivery topic (<name>-security-alerts). Defaults to alert_emails when empty. Each address must confirm that subscription."
   type        = list(string)
   default     = []
+}
+
+variable "alert_notifier_enabled" {
+  description = "Subscribe the us-east-1 CloudFront alarm topic to the alert notifier Lambda (which caps and sends email and SMS). Plan-time switch: the notifier ARN is unknown until apply on first create, so it cannot drive count (deploy #199). False leaves the CloudFront 5xx alarm without email or SMS."
+  type        = bool
+  default     = true
 }
 
 variable "email_window_minutes" {

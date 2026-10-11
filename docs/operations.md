@@ -789,9 +789,9 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
   `sms_max_per_window`). Repeats in the window are not mailed or texted; the log line records
   the issue key, the channel, and the suppressed count. The next window's first message for
   that channel includes the count. If the dedupe table errors, that channel still sends.
-  Confirm the ops-email and security-email subscriptions. On October 8, 2026 the account was
+  Confirm the invdash-ops-alerts and invdash-security-alerts subscriptions. On October 8, 2026 the account was
   in the SMS sandbox with no sending number. Do not subscribe the inbox or the phone directly
-  to the ops, security, or CloudFront topics; that bypasses the cap. AWS Budgets mail is not
+  to the intake (-alarms) or CloudFront topics; that bypasses the cap. AWS Budgets mail is not
   part of this cap.
 * The UI is a zero-build vanilla JavaScript implementation rather than the architecture
   document's proposed TypeScript/Vite/Svelte stack.

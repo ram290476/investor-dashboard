@@ -42,9 +42,15 @@ variable "forward_event_patterns" {
 }
 
 variable "sms_notifier_arn" {
-  description = "Primary-region Lambda that caps email and SMS. Empty skips the subscription, so this alarm would not be mailed."
+  description = "Primary-region Lambda that caps email and SMS. Usually unknown until apply, so it must never drive count; alert_notifier_enabled does."
   type        = string
   default     = ""
+}
+
+variable "alert_notifier_enabled" {
+  description = "Subscribe the CloudFront alarm topic to the notifier. A plan-time boolean: the notifier ARN is unknown until apply on a fresh stack and cannot decide count (deploy #199). False leaves the alarm without email or SMS."
+  type        = bool
+  default     = true
 }
 
 data "aws_caller_identity" "current" {}
@@ -170,12 +176,20 @@ resource "aws_sns_topic_policy" "ops" {
 
 # Mail for this alarm is capped by the primary-region notifier, which republishes
 # to the ops-email topic. A direct email subscription here would bypass that cap.
+# count reads only plan-time inputs. The ARN is checked at apply instead.
 resource "aws_sns_topic_subscription" "sms_notifier" {
-  count = local.alarm_on && var.sms_notifier_arn != "" ? 1 : 0
+  count = local.alarm_on && var.alert_notifier_enabled ? 1 : 0
 
   topic_arn = aws_sns_topic.ops[0].arn
   protocol  = "lambda"
   endpoint  = var.sms_notifier_arn
+
+  lifecycle {
+    precondition {
+      condition     = var.sms_notifier_arn != ""
+      error_message = "alert_notifier_enabled is true but sms_notifier_arn is empty; pass the notifier ARN or set alert_notifier_enabled = false."
+    }
+  }
 }
 
 resource "aws_cloudwatch_metric_alarm" "cloudfront_5xx" {

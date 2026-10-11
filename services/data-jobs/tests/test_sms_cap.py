@@ -21,7 +21,7 @@ def _pt(day: int, hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 10, day, hour, minute, tzinfo=PT)
 
 
-def _event(topic: str = "arn:aws:sns:us-west-1:1:invdash-ops-alerts") -> dict:
+def _event(topic: str = "arn:aws:sns:us-west-1:1:invdash-ops-alarms") -> dict:
     return {"Records": [{"Sns": {"TopicArn": topic, "Subject": SITE, "Message": "Threshold Crossed"}}]}
 
 
@@ -222,7 +222,7 @@ def test_handler_caps_each_channel_for_the_hour_and_resets_after():
     store = MemoryStore()
     emails: list[str] = []
     texts: list[str] = []
-    event = _event("arn:aws:sns:us-west-1:1:invdash-security-alerts")
+    event = _event("arn:aws:sns:us-west-1:1:invdash-security-alarms")
     handler(event, None, store=store, publish=texts.append, publish_email=emails.append, now=_pt(11, 14, 10))
     handler(event, None, store=store, publish=texts.append, publish_email=emails.append, now=_pt(11, 14, 50))
     assert len(emails) == 1
@@ -257,9 +257,15 @@ def test_handler_reads_separate_limits_per_channel(monkeypatch):
 
 
 def test_email_topic_follows_the_source_alarm_topic():
-    assert email_topic_arn("arn:aws:sns:us-west-1:1:invdash-ops-alerts", "ops", "sec") == "ops"
+    assert email_topic_arn("arn:aws:sns:us-west-1:1:invdash-ops-alarms", "ops", "sec") == "ops"
     assert email_topic_arn("arn:aws:sns:us-east-1:1:invdash-ops-alerts-us-east-1", "ops", "sec") == "ops"
+    assert email_topic_arn("arn:aws:sns:us-west-1:1:invdash-security-alarms", "ops", "sec") == "sec"
+    # Legacy source names still route by topic.
+    assert email_topic_arn("arn:aws:sns:us-west-1:1:invdash-ops-alerts", "ops", "sec") == "ops"
     assert email_topic_arn("arn:aws:sns:us-west-1:1:invdash-security-alerts", "ops", "sec") == "sec"
+    # Only the topic name counts, not a substring elsewhere in the ARN.
+    assert email_topic_arn("arn:aws:sns:us-west-1:1:security-alarms-ops", "ops", "sec") == "ops"
+    assert email_topic_arn("", "ops", "sec") == "ops"
 
 
 def test_handler_skips_sms_when_no_handset_is_configured():
