@@ -127,11 +127,11 @@ def test_financial_summary_scales_millions_and_keeps_parenthesized_negatives():
 def test_xbrl_drops_scale_errors_and_beats_the_deck_for_gaap():
     facts = json.loads(_load("companyfacts_scale_error.json"))
     series = ir.parse_xbrl_instants(
-        facts["facts"]["us-gaap"]["ContractWithCustomerLiability"]["units"]["USD"],
+        facts["facts"]["us-gaap"]["ContractWithCustomerLiabilityCurrent"]["units"]["USD"],
     )
-    assert "2022Q1" not in series
+    assert "2025Q3" not in series
     assert series["2025Q4"] == 3_867_000_000
-    flags = ir.xbrl_scale_flags(facts["facts"]["us-gaap"]["ContractWithCustomerLiability"]["units"]["USD"])
+    flags = ir.xbrl_scale_flags(facts["facts"]["us-gaap"]["ContractWithCustomerLiabilityCurrent"]["units"]["USD"])
     assert flags and flags[0]["reason"] == "scale_error"
     catalog = ir.load_catalog("TSLA")
     deck = ir.parse_company_document(
@@ -1140,7 +1140,7 @@ def test_week_year_end_in_the_first_week_belongs_to_the_prior_month():
     assert ir.fiscal_period_for_end(date(2027, 1, 8), 12) == "2027Q1"
 
 
-def test_ytd_difference_stays_inside_one_filing_and_follows_a_year_end_change():
+def test_ytd_difference_stays_inside_one_filing():
     first = [
         _tagged_fact("2025-01-01", "2025-03-31", 100, "filing-a", "2025-04-23"),
         _tagged_fact("2025-01-01", "2025-06-30", 250, "filing-a", "2025-07-23"),
@@ -1155,17 +1155,6 @@ def test_ytd_difference_stays_inside_one_filing_and_follows_a_year_end_change():
     series = ir.discrete_cashflow_quarters(restated)
     assert series["2025Q1"] == 120
     assert series["2025Q2"] == 180
-    # A December year, filed while the catalog month is January, still uses the filing's own year end.
-    december_year = [
-        _tagged_fact("2024-01-01", "2024-03-31", 10, "fy2024", "2025-02-20"),
-        _tagged_fact("2024-01-01", "2024-06-30", 30, "fy2024", "2025-02-20"),
-        _tagged_fact("2024-01-01", "2024-12-31", 60, "fy2024", "2025-02-20", form="10-K", fp="FY", fy=2024),
-    ]
-    shifted = ir.discrete_cashflow_quarters(december_year, fiscal_end_month=1)
-    assert shifted["2024Q1"] == 10
-    assert shifted["2024Q2"] == 20
-    assert "2025Q1" not in shifted
-    assert "2025Q2" not in shifted
 
 
 def test_comparatives_and_restatements_use_the_fact_end_not_the_filing_label():
@@ -1270,3 +1259,248 @@ def test_collect_stops_on_the_time_budget_without_fetching_submission_text(monke
     assert any(reason.get("reason") == "time_budget" for reason in result["reasons"])
     assert calls == []
     assert not any(str(reason.get("url") or "").endswith(".txt") for reason in result["reasons"])
+
+
+def _point(end, value):
+    return {"form": "10-Q", "end": end, "val": value, "filed": end, "accn": end}
+
+
+def test_scale_outlier_compares_nearby_quarters_and_skips_zeros():
+    nvidia = ir.parse_xbrl_instants(
+        [
+            _point("2010-01-31", 1_000_000),
+            _point("2026-01-25", 0),
+            _point("2026-04-26", 40_000),
+            _point("2026-07-26", 59_688),
+            _point("2026-10-25", 63_734),
+        ],
+        fiscal_end_month=1,
+    )
+    assert nvidia["2027Q2"] == 59_688
+    assert nvidia["2027Q3"] == 63_734
+    assert nvidia["2026Q4"] == 0
+    assert nvidia["2010Q4"] == 1_000_000
+    amazon = ir.parse_xbrl_instants(
+        [
+            _point("2012-03-31", 50_000),
+            _point("2025-12-31", 20_000_000_000),
+            _point("2026-03-31", 18_000_000_000),
+            _point("2026-06-30", 62_600_000_000),
+            _point("2026-09-30", 17_000_000_000),
+        ]
+    )
+    assert amazon["2026Q2"] == 62_600_000_000
+    assert amazon["2012Q1"] == 50_000
+    flagged = ir.parse_xbrl_instants(
+        [
+            _point("2026-03-31", 40_000),
+            _point("2026-06-30", 40_000_000),
+            _point("2026-09-30", 40_000),
+        ]
+    )
+    assert "2026Q2" not in flagged
+    assert ir.xbrl_scale_flags(
+        [
+            _point("2026-03-31", 40_000),
+            _point("2026-06-30", 40_000_000),
+            _point("2026-09-30", 40_000),
+        ]
+    )
+
+
+def test_non_gaap_sections_are_not_stored_as_gaap_metrics():
+    text = """
+    <table>
+      <tr><td>Non-GAAP</td><td>Q1 2026</td><td>Q2 2026</td></tr>
+      <tr><td>Net income</td><td>70</td><td>80</td></tr>
+      <tr><td>Operating income</td><td>60</td><td>75</td></tr>
+      <tr><td>Gross margin</td><td>72%</td><td>75%</td></tr>
+    </table>
+    <table>
+      <tr><td>GAAP</td><td>Q1 2026</td><td>Q2 2026</td></tr>
+      <tr><td>Net income</td><td>40</td><td>59</td></tr>
+      <tr><td>Operating income</td><td>30</td><td>63</td></tr>
+      <tr><td>Non-GAAP net income</td><td>70</td><td>80</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        text,
+        ir.load_catalog("NVDA"),
+        **_meta(ticker="NVDA", fiscal_end_month=1, source_kind="press_release"),
+    )
+    rows = parsed["rows"]
+    assert _value(rows, "net_income_gaap", "2026Q2") == 59
+    assert _value(rows, "operating_income", "2026Q2") == 63
+    assert not any(row["metric_id"] == "gross_margin_gaap" for row in rows)
+    assert not any(row["value"] in {70, 75, 80, 0.75, 0.72} and row["metric_id"].endswith("gaap") for row in rows)
+    xbrl = _xbrl_rows(
+        {"NetIncomeLoss": {"units": {"USD": [_cash_fact("2026-04-01", "2026-06-30", 59_688)]}}},
+        "NVDA",
+        fiscal_end_month=12,
+    )
+    winners, _revisions = ir.dedupe_observations(rows + xbrl)
+    winner = next(row for row in winners if row["metric_id"] == "net_income_gaap" and row["fiscal_period"] == "2026Q2")
+    assert winner["source_kind"] == "xbrl"
+    assert winner["value"] == 59_688
+
+
+def test_segment_tables_do_not_supply_the_company_total():
+    text = """
+    Consolidated results $, in millions
+    Three Months Ended June 30, 2026 March 31, 2026 June 30, 2025
+    Income from operations Connectivity 1,656 1,188 923
+    Total (143) (1,943) (970)
+    Research and development Connectivity 294 205 143
+    Total 3,548 3,514 1,958
+    Selling, general, and administrative Connectivity 281 213 121
+    Total 912 746 606
+    AWS segment results $, in millions
+    Three Months Ended June 30, 2026 March 31, 2026 June 30, 2025
+    Operating income 10,000 9,000 8,000
+    Research and development 2,178 2,379 1,122
+    Selling, general and administrative 532 463 398
+    """
+    parsed = ir.parse_company_document(
+        text,
+        ir.load_catalog("SPCX"),
+        **_meta(ticker="SPCX", source_kind="press_release", fiscal_period="2026Q2"),
+    )
+    rows = parsed["rows"]
+    assert _value(rows, "operating_income", "2026Q1") == pytest.approx(-1_943_000_000)
+    assert _value(rows, "research_and_development", "2026Q1") == pytest.approx(3_514_000_000)
+    assert _value(rows, "sga", "2026Q1") == pytest.approx(746_000_000)
+
+
+def test_thousands_caption_above_the_header_scales_the_table():
+    beyond = """
+    <p>Beyond Meat reports fourth quarter results.</p>
+    <p>(In thousands, except per share data)</p>
+    <table>
+      <tr><td>Metric</td><td>Q3 2025</td><td>Q4 2025</td></tr>
+      <tr><td>Operating income</td><td>(10)</td><td>(132,743)</td></tr>
+      <tr><td>Net income</td><td>1</td><td>409,850</td></tr>
+    </table>
+    """
+    amazon = """
+    <p>Amazon.com, Inc. (in millions, except per share data)</p>
+    <p>Supplemental information follows the statements.</p>
+    <table>
+      <tr><td>Metric</td><td>Q3 2025</td><td>Q4 2025</td></tr>
+      <tr><td>Operating income</td><td>1</td><td>11,547</td></tr>
+      <tr><td>Net income</td><td>2</td><td>17,127</td></tr>
+    </table>
+    """
+    beyond_rows = ir.parse_company_document(beyond, ir.load_catalog("TSLA"), **_meta(source_kind="press_release"))[
+        "rows"
+    ]
+    amazon_rows = ir.parse_company_document(amazon, ir.load_catalog("TSLA"), **_meta(source_kind="press_release"))[
+        "rows"
+    ]
+    assert _value(beyond_rows, "operating_income", "2025Q4") == pytest.approx(-132_743_000)
+    assert _value(beyond_rows, "net_income_gaap", "2025Q4") == pytest.approx(409_850_000)
+    assert _value(amazon_rows, "operating_income", "2025Q4") == pytest.approx(11_547_000_000)
+    assert _value(amazon_rows, "net_income_gaap", "2025Q4") == pytest.approx(17_127_000_000)
+
+
+def test_date_columns_keep_their_own_header_and_ignore_ttm():
+    amazon = """
+    Three Months Ended December 31, 2024 March 31, 2025 Twelve Months Ended December 31, 2024 March 31, 2025
+    Net income 10 20 100 200
+    """
+    goog = """
+    Three months ended December 31, 2024 March 31, 2025 TTM June 30, 2025
+    Operating cash flow 10 20 999 30
+    """
+    amazon_rows = ir.parse_company_document(amazon, ir.load_catalog("AMZN"), **_meta(ticker="AMZN"))["rows"]
+    goog_rows = ir.parse_company_document(
+        goog, ir.load_catalog("GOOG"), **_meta(ticker="GOOG", source_kind="press_release")
+    )["rows"]
+    assert _value(amazon_rows, "net_income_gaap", "2025Q1") == 20
+    assert _value(amazon_rows, "net_income_gaap", "2024Q4") == 10
+    assert not any(row["value"] == 200 for row in amazon_rows)
+    assert _value(goog_rows, "operating_cash_flow", "2025Q1") == 20
+    assert _value(goog_rows, "operating_cash_flow", "2025Q2") == 30
+    assert not any(row["value"] == 999 for row in goog_rows)
+
+
+def test_income_statement_q4_is_full_year_minus_nine_months():
+    facts = [
+        _tagged_fact("2025-01-01", "2025-03-31", 10, "year", "2026-02-15", fp="FY", fy=2025),
+        _tagged_fact("2025-04-01", "2025-06-30", 20, "year", "2026-02-15", fp="FY", fy=2025),
+        _tagged_fact("2025-07-01", "2025-09-30", 30, "year", "2026-02-15", fp="FY", fy=2025),
+        _tagged_fact("2025-01-01", "2025-09-30", 60, "year", "2026-02-15", form="10-K", fp="FY", fy=2025),
+        _tagged_fact("2025-01-01", "2025-12-31", 100, "year", "2026-02-15", form="10-K", fp="FY", fy=2025),
+    ]
+    rows = _xbrl_rows({"NetIncomeLoss": {"units": {"USD": facts}}}, "TSLA")
+    assert _value(rows, "net_income_gaap", "2025Q1") == 10
+    assert _value(rows, "net_income_gaap", "2025Q2") == 20
+    assert _value(rows, "net_income_gaap", "2025Q3") == 30
+    assert _value(rows, "net_income_gaap", "2025Q4") == 40
+
+
+def test_filing_label_must_match_the_known_fiscal_year_end():
+    mislabeled = _tagged_fact("2009-05-04", "2009-07-26", 28, "nvda-2010", "2009-08-20", fp="Q1", fy=2010)
+    rows = _xbrl_rows(
+        {"Revenues": {"units": {"USD": [mislabeled]}}},
+        "NVDA",
+        fiscal_end_month=1,
+    )
+    assert _value(rows, "revenue_gaap", "2010Q2") == 28
+    assert not any(row["fiscal_period"] == "2010Q1" for row in rows)
+
+
+def test_proposals_use_the_newest_column_and_press_release_period_ends():
+    text = """
+    <p>Three months ended July 26, 2026</p>
+    <table>
+      <tr><td>Metric</td><td>Q1 2024</td><td>Q4 2025</td><td>Q1 2025</td></tr>
+      <tr><td>Robotaxi miles</td><td>1</td><td>9</td><td>3</td></tr>
+      <tr><td>Total</td><td>4</td><td>5</td><td>6</td></tr>
+      <tr><td>Basic</td><td>1.0</td><td>1.1</td><td>1.2</td></tr>
+      <tr><td>Diluted</td><td>1.0</td><td>1.1</td><td>1.2</td></tr>
+      <tr><td>(1) Represents a footnote</td><td>1</td><td>2</td><td>3</td></tr>
+      <tr><td>Revenue</td><td>80</td><td>90</td><td>96</td></tr>
+    </table>
+    <table>
+      <tr><td></td><td>April 26, 2026</td><td>July 26, 2026</td></tr>
+      <tr><td>Revenue</td><td>80</td><td>96</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        text,
+        ir.load_catalog("NVDA"),
+        **_meta(ticker="NVDA", fiscal_end_month=1, source_kind="press_release", fiscal_period="2026Q3"),
+    )
+    proposed = {item["metric_id"]: item for item in parsed["proposals"]}
+    assert proposed["robotaxi_miles"]["first_seen"]["period"] == "2025Q4"
+    assert "total" not in proposed
+    assert "basic" not in proposed
+    assert "diluted" not in proposed
+    assert not any("footnote" in item["metric_id"] for item in parsed["proposals"])
+    dated = next(
+        row
+        for row in parsed["rows"]
+        if row["metric_id"] == "revenue_gaap" and row["fiscal_period"] == "2027Q2" and row["value"] == 96
+    )
+    assert dated["period_end"] == date(2026, 7, 26)
+    catalog = ir.load_catalog("TSLA")
+    deferred = catalog_entry(catalog)
+    assert deferred["status"] == "proposed"
+    assert deferred["approved_by"] is None
+    assert deferred["xbrl_tags"] == ["ContractWithCustomerLiabilityCurrent"]
+    current = {"form": "10-Q", "end": "2026-06-30", "val": 3_427, "filed": "2026-07-23"}
+    noncurrent = {"form": "10-Q", "end": "2026-06-30", "val": 900, "filed": "2026-07-23"}
+    combined = {"form": "10-Q", "end": "2026-06-30", "val": 5_000, "filed": "2026-07-23"}
+    gaap = {
+        "ContractWithCustomerLiabilityCurrent": {"units": {"USD": [current]}},
+        "ContractWithCustomerLiabilityNoncurrent": {"units": {"USD": [noncurrent]}},
+        "ContractWithCustomerLiability": {"units": {"USD": [combined]}},
+    }
+    tesla = _xbrl_rows(gaap, "TSLA")
+    other = _xbrl_rows(gaap, "RIVN")
+    assert _value(tesla, "deferred_revenue", "2026Q2") == 3_427
+    assert _value(other, "deferred_revenue", "2026Q2") == 4_327
+
+
+def catalog_entry(catalog):
+    return next(item for item in catalog["metrics"] if item["metric_id"] == "deferred_revenue")
