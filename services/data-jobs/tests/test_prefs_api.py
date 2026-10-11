@@ -366,6 +366,41 @@ def test_chart_settings_are_saved_per_watchlist_ticker_and_survive_legacy_put(ap
     assert legacy["chart_settings"] == saved["chart_settings"]
 
 
+def test_chart_settings_accept_dynamic_fundamental_overlays(api):
+    mod, _ = api
+    response = mod.handler(
+        _event(
+            "PUT",
+            body={
+                "tickers": ["TSLA"],
+                "pinned": [],
+                "chart_settings": {
+                    "TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending"], "lanes": ["VOL"]},
+                },
+                "version": 0,
+            },
+        ),
+        None,
+    )
+    assert response["statusCode"] == 200
+    saved = json.loads(response["body"])["chart_settings"]["TSLA"]["overlays"]
+    assert saved == ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending"]
+    rejected = mod.handler(
+        _event(
+            "PUT",
+            body={
+                "tickers": ["TSLA"],
+                "pinned": [],
+                "chart_settings": {"TSLA": {"overlays": ["FUNDAMENTAL:../capex"], "lanes": ["VOL"]}},
+                "version": 1,
+            },
+        ),
+        None,
+    )
+    assert rejected["statusCode"] == 400
+    assert "unsupported overlay" in json.loads(rejected["body"])["error"]
+
+
 @pytest.mark.parametrize(
     "settings,msg",
     [
@@ -373,6 +408,8 @@ def test_chart_settings_are_saved_per_watchlist_ticker_and_survive_legacy_put(ap
         ({"TSLA": {"overlays": [{}], "lanes": ["VOL"]}}, "unsupported overlay"),
         ({"TSLA": {"overlays": [], "lanes": ["UNKNOWN"]}}, "unsupported lane"),
         ({"TSLA": {"overlays": ["SPY"] * 6, "lanes": ["VOL"]}}, "at most 5"),
+        ({"TSLA": {"overlays": ["FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
+        ({"TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
     ],
 )
 def test_chart_settings_reject_unknown_or_excess_values(api, settings, msg):

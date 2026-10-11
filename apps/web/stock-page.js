@@ -355,7 +355,7 @@ export function stockPanels(payload, chartData, options = {}) {
     .filter((item) => review === "all" || !isPendingMetric(item))
     .filter((item) => item?.approved !== false || isPendingMetric(item))
     .map(presentUnavailable);
-  const rank = (metric) => (metric.capex ? 0 : 1);
+  const rank = (metric) => (metric.pending ? 2 : 0) + (metric.capex ? 0 : 1);
   const sortCards = (cards) => cards.slice().sort((a, b) => rank(a) - rank(b));
   return {
     operating: sortCards([...operating, ...unavailable.filter((item) => item.category !== "fundamentals" && item.category !== "guidance")]),

@@ -49,32 +49,87 @@ test("sentiment overlays hide without data and use only the selected ticker's hi
   assert.deepEqual(values, [-0.2, null]);
 });
 
-test("proposed company series join Fundamentals and stay labeled pending review", () => {
+test("proposed company series stay beside approved EDGAR rows and are labeled pending review", () => {
   assert.equal(OVERLAYS.filter((overlay) => overlay.kind === "fundamental").length, 7);
   const merged = mergeCompanyFundamentals(
-    { fundamentals: [{ series_id: "revenue_gaap", date: "2026-01-01", value: 1, unit: "USD" }] },
+    { fundamentals: [{ series_id: "revenue_gaap", date: "2026-01-01", value: 1, unit: "USD", approval_state: "approved" }] },
+    [
+      {
+        metric_id: "revenue_gaap",
+        display_name: "Revenue",
+        unit: "USD",
+        approval_state: "proposed",
+        series: [{ fiscal_period: "2025Q4", value: 9, reported: true, period_end: "2025-12-31" }],
+      },
+      {
+        metric_id: "capex",
+        display_name: "Capital expenditures",
+        unit: "USD",
+        approval_state: "proposed",
+        series: [
+          { fiscal_period: "2025Q4", value: 2000, reported: true, period_end: "2025-12-31" },
+          { fiscal_period: "2026Q1", value: 2493, reported: true, period_end: "2026-03-31" },
+        ],
+      },
+    ],
+  );
+  assert.deepEqual(
+    merged.fundamentals.filter((row) => row.series_id === "revenue_gaap").map((row) => row.value),
+    [1],
+  );
+  const pendingRevenue = merged.fundamentals.find((row) => row.series_id === "revenue_gaap_pending");
+  assert.equal(pendingRevenue.approval_state, "proposed");
+  assert.match(pendingRevenue.display_name, /· Pending review/);
+  assert.equal(merged.fundamentals.some((row) => row.series_id === "capex"), false);
+  assert.equal(merged.fundamentals.filter((row) => row.series_id === "capex_pending").every((row) => row.approval_state === "proposed"), true);
+  const approved = mergeCompanyFundamentals(
+    { fundamentals: [{ series_id: "capex", date: "2026-01-01", value: 1, unit: "USD" }] },
     [{
       metric_id: "capex",
       display_name: "Capital expenditures",
       unit: "USD",
-      approval_state: "proposed",
-      series: [
-        { fiscal_period: "2025Q4", value: 2000, reported: true, period_end: "2025-12-31" },
-        { fiscal_period: "2026Q1", value: 2493, reported: true, period_end: "2026-03-31" },
-      ],
+      approval_state: "approved",
+      series: [{ fiscal_period: "2026Q1", value: 4, reported: true, period_end: "2026-03-31" }],
     }],
   );
-  assert.equal(merged.fundamentals.some((row) => row.series_id === "revenue_gaap"), true);
-  assert.equal(merged.fundamentals.filter((row) => row.series_id === "capex").every((row) => row.approval_state === "proposed"), true);
+  assert.deepEqual(approved.fundamentals.map((row) => row.value), [4]);
   const bars = [{ date: "2026-04-01", close: 100 }];
   const groups = overlayGroups({ ticker: "TSLA", price_history: bars }, merged, {});
-  const capex = groups.find((group) => group.id === "Fundamentals").overlays.find((overlay) => overlay.id === "FUNDAMENTAL:capex");
+  const capex = groups.find((group) => group.id === "Fundamentals").overlays.find((overlay) => overlay.id === "FUNDAMENTAL:capex_pending");
   assert.match(capex.label, /Pending review/);
-  assert.equal(overlayDefinition("FUNDAMENTAL:capex").unit, "USD");
+  assert.equal(overlayDefinition("FUNDAMENTAL:capex_pending").unit, "USD");
+  const maxId = `FUNDAMENTAL:${"a".repeat(65)}`;
+  const pendingMax = `FUNDAMENTAL:${"b".repeat(57)}_pending`;
   assert.deepEqual(
-    chartSettingsFor({ chart_settings: { TSLA: { overlays: ["FUNDAMENTAL:capex", "nope"], lanes: ["VOL"] } } }, "TSLA").overlays,
-    ["FUNDAMENTAL:capex"],
+    chartSettingsFor({
+      chart_settings: {
+        TSLA: {
+          overlays: [
+            "FUNDAMENTAL:capex_pending",
+            "FUNDAMENTAL:1capex",
+            "FUNDAMENTAL:capex\n",
+            maxId,
+            `FUNDAMENTAL:${"a".repeat(66)}`,
+            pendingMax,
+            "nope",
+          ],
+          lanes: ["VOL"],
+        },
+      },
+    }, "TSLA").overlays,
+    ["FUNDAMENTAL:capex_pending", maxId, pendingMax],
   );
+  const hidden = overlayGroups(
+    { ticker: "TSLA", price_history: bars },
+    {
+      fundamentals: [
+        { series_id: "1capex", date: "2026-04-01", value: 3, unit: "USD", display_name: "Bad" },
+        { series_id: "a".repeat(66), date: "2026-04-01", value: 3, unit: "USD", display_name: "Too long" },
+      ],
+    },
+    {},
+  );
+  assert.equal(hidden.find((group) => group.id === "Fundamentals"), undefined);
 });
 
 test("empty fundamentals groups are hidden while all seven definitions remain supported", () => {

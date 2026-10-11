@@ -152,6 +152,7 @@ test("collected XBRL metrics and CapEx render as pending charts with revision co
   const panels = stockPanels(payload, { fundamentals: [] });
   assert.equal(panels.fundamentalsSource, "ir");
   assert.equal(panels.fundamentals[0].id, "capex");
+  assert.equal(panels.fundamentals.every((card) => card.pending), true);
   for (const id of ids) {
     const card = panels.fundamentals.find((item) => item.id === id);
     assert.equal(card.panelType, "chart", id);
@@ -175,6 +176,36 @@ test("collected XBRL metrics and CapEx render as pending charts with revision co
   assert.match(app, /review-badge/);
   assert.match(app, /stock-metric-capex/);
   assert.match(app, /Pending review/);
+  assert.match(app, /stock-bar-revised-mark", "Rev"/);
+  assert.match(styles, /\.stock-bar-revised\s*\{[^}]*repeating-linear-gradient/);
+  const mixed = stockPanels({
+    metrics: [
+      {
+        metric_id: "capex",
+        approved: false,
+        approval_state: "proposed",
+        display_name: "Capital expenditures",
+        unit: "USD",
+        category: "fundamentals",
+        latest: { fiscal_period: "2025Q2", value: 3, reported: true },
+        series,
+      },
+      {
+        metric_id: "revenue_gaap",
+        approved: true,
+        approval_state: "approved",
+        display_name: "Revenue",
+        unit: "USD",
+        category: "fundamentals",
+        latest: { fiscal_period: "2025Q2", value: 10, reported: true },
+        series,
+        provenance: { source_kind: "xbrl", approval_state: "approved" },
+      },
+    ],
+  }, { fundamentals: [] });
+  assert.deepEqual(mixed.fundamentals.map((card) => card.id), ["revenue_gaap", "capex"]);
+  assert.equal(mixed.fundamentals[0].pending, false);
+  assert.equal(mixed.fundamentals[1].pending, true);
 });
 
 test("company metric errors stay distinct from an empty catalog", () => {

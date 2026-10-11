@@ -10,6 +10,8 @@ test("Follow overlays, Show all, and Hidden panels share one toolbar row", () =>
   assert.match(toolbar, /node\("div", "panel-toolbar"\)/);
   assert.match(toolbar, /bar\.append\(mode, hidden\)/);
   assert.match(app, /primary\.append\(renderPanelToolbar\("chart"\)\)/);
+  assert.match(app, /renderPanelToolbar\("signals"\), renderPanelToolbar\("calendar"\)/);
+  assert.match(app, /primary\.append\(renderPanelToolbar\("more"\)\)/);
   assert.match(app, /Follow overlays/);
   assert.match(app, /Show all/);
   assert.match(app, /Hidden panels/);
@@ -23,8 +25,12 @@ test("Follow overlays, Show all, and Hidden panels share one toolbar row", () =>
   assert.match(styles, /\.hidden-panels-toggle\s*\{[^}]*min-height:\s*var\(--control-height\)/);
   const phoneAt = styles.indexOf('.dashboard-grid[data-mobile-view="chart"] .panel-toolbar');
   assert.ok(phoneAt > styles.indexOf("@media (max-width: 640px)"));
-  const phone = styles.slice(phoneAt, phoneAt + 500);
+  const phone = styles.slice(phoneAt, phoneAt + 1200);
   assert.match(phone, /display:\s*flex/);
   assert.match(phone, /flex-wrap:\s*wrap/);
   assert.match(phone, /margin-left:\s*auto/);
+  assert.match(styles, /\.panel-toolbar\[data-mobile-panel="signals"\][\s\S]*display:\s*none/);
+  assert.match(styles, /data-mobile-view="signals"\] \.panel-toolbar\[data-mobile-panel="signals"\][\s\S]*display:\s*flex/);
+  assert.match(styles, /data-mobile-view="calendar"\] \.panel-toolbar\[data-mobile-panel="calendar"\]/);
+  assert.match(styles, /data-mobile-view="more"\] \.panel-toolbar\[data-mobile-panel="more"\][\s\S]*display:\s*flex/);
 });

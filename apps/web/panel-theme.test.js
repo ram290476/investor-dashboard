@@ -13,18 +13,30 @@ function slice(start, end) {
   return app.slice(from, to);
 }
 
-test("the chart panel no longer renders an Open company page link", () => {
+test("the chart panel opens the company page from the right of the live price", () => {
   const price = slice("function renderPricePanel", "function renderContracts");
-  assert.doesNotMatch(price, /company-page-link|chart-entry|Open \$\{session\.selected\} page/);
-  assert.doesNotMatch(app, /company-page-link|chart-entry/);
-  assert.doesNotMatch(styles, /\.company-page-link|\.chart-entry/);
+  assert.match(price, /node\("a", "company-page-link", "Open company page"\)/);
+  assert.match(price, /navigateToStock\(session\.selected\)/);
+  assert.match(price, /overview-side/);
+  assert.equal(price.match(/company-page-link/g).length, 1);
+  assert.doesNotMatch(price, /chart-entry|Open \$\{session\.selected\} page/);
+  const watch = slice("function renderWatchlist", "function periodDirection");
+  assert.doesNotMatch(watch, /company-page-link/);
+  assert.match(styles, /\.overview-side\s*\{[^}]*align-items:\s*flex-end/);
+  assert.match(styles, /\.overview-side\s*\{[^}]*margin-left:\s*auto/);
+  assert.match(styles, /\.company-page-link\s*\{[^}]*var\(--blue\)/);
+  assert.doesNotMatch(styles, /\.company-page-link[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
 });
 
-test("the ticker bar keeps its research arrow and does not gain a company-page arrow", () => {
+test("the ticker bar keeps its research arrow and the company-page arrow", () => {
   const watch = slice("function renderWatchlist", "function periodDirection");
   assert.match(watch, /ticker-research/);
   assert.match(watch, /navigateToResearch/);
-  assert.doesNotMatch(watch, /ticker-stock-link|Open \$\{ticker\} page/);
+  assert.match(watch, /ticker-stock-link/);
+  assert.match(watch, /Open \$\{ticker\} page →/);
+  assert.match(watch, /navigateToStock\(ticker\)/);
+  assert.match(styles, /\.ticker-stock-link\s*\{[^}]*color:\s*var\(--blue\)/);
+  assert.doesNotMatch(styles, /\.ticker-stock-link[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
 });
 
 test("government contracts use catalyst rows and month-day dates", () => {
