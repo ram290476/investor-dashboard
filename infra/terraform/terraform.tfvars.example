@@ -1,10 +1,13 @@
 project            = "invdash"
 region             = "us-west-1"
 dr_region          = "us-west-2" # must differ from region
-alert_emails       = ["you@example.com"] # also receive the us-east-1 CloudFront alarm topic
+alert_emails       = ["you@example.com"] # confirm the ops-email topic; CloudFront mail uses this list too
+# security_alert_emails = ["you@example.com"] # optional; confirm the security-email topic
+# email_window_minutes = 60           # fixed Pacific clock buckets from local midnight; 60 is one clock hour
+# email_max_per_window = 1            # emails per issue per window
 # alert_sms_e164     = "+14155552671" # optional; confirm the text, then do not subscribe this number to the alarm topics
-# sms_window_minutes = 60             # fixed Pacific clock buckets from local midnight; 60 is one clock hour
-# sms_max_per_window = 1              # texts per issue per window; email stays uncapped
+# sms_window_minutes = 60             # independent of email_window_minutes
+# sms_max_per_window = 1              # texts per issue per SMS window
 monthly_budget_usd = 40
 
 # Fill in once the dashboard is deployed behind CloudFront:

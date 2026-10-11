@@ -1,18 +1,20 @@
-"""Per-issue hourly cap for SMS alerts.
+"""Per-issue hourly caps for email and SMS alerts.
 
 Windows are fixed clock buckets in America/Los_Angeles, aligned to local
-midnight. The default bucket is 60 minutes, so 14:00-14:59 Pacific is one
-window and 15:00 starts the next. This is not a rolling 60 minutes from the
-first text: an alert at 14:50 and another at 15:05 are different windows even
-though they are 15 minutes apart.
+midnight. They are not a rolling interval from the first send. With the
+default of 60 minutes, 14:00-14:59 Pacific is one window and 15:00 starts the
+next, so an alert at 14:50 and another at 15:05 are different windows.
 
-One issue sends at most ``limit`` texts per window (default 1). The issue key
-is the CloudWatch alarm name, or a job plus its error code. Email is not capped.
+Email and SMS are counted separately. Each channel has its own window length
+and its own maximum (defaults: 60 minutes and 1). One issue can therefore text
+again inside an hour while mail for that issue is still held, when the SMS
+window is shorter or its maximum is higher.
 
-The dedupe item expires at the end of the following window, long enough for
-that window's first text to report how many repeats were held back. If the
-store cannot be read or updated, the text is sent anyway (fail open). A failed
-publish does not consume the window's slot, so a retry can still send.
+The dedupe item for a channel expires at the end of the following window for
+that channel, long enough for the next window's first message to report how
+many repeats were held back. If the store cannot be read or updated, that
+channel is sent anyway (fail open). A failed publish does not consume the
+slot, so a retry can still send.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 _ALARM_SUBJECT = re.compile(r'(?:ALARM|OK|INSUFFICIENT_DATA):\s*"([^"]+)"')
 _ALARM_NAME = re.compile(r"(?m)^-\s*Name:\s+(\S+)")
 _GENERIC_SUBJECTS = {"AWS Notification Message", "AWS Notification"}
+_CHANNELS = frozenset({"email", "sms"})
 
 
 class CapStoreError(Exception):
@@ -42,6 +45,7 @@ class Decision:
     send: bool
     reason: str
     issue_key: str
+    channel: str = "sms"
     window: str = ""
     suppressed_prior: int = 0
     suppressed_in_window: int = 0
@@ -52,30 +56,31 @@ class MemoryStore:
     """In-memory stand-in for the DynamoDB counter. Tests use the failure flags."""
 
     def __init__(self) -> None:
-        self.items: dict[str, dict[str, Any]] = {}
+        self.items: dict[tuple[str, str], dict[str, Any]] = {}
         self.fail_reads = False
         self.fail_record_sent = False
         self.fail_suppress = False
 
-    def get(self, issue_key: str) -> dict[str, Any] | None:
+    def get(self, issue_key: str, channel: str) -> dict[str, Any] | None:
         if self.fail_reads:
             raise CapStoreError("read failed")
-        item = self.items.get(issue_key)
+        item = self.items.get((channel, issue_key))
         return None if item is None else dict(item)
 
-    def record_sent(self, issue_key: str, window: str, ttl: int) -> None:
+    def record_sent(self, issue_key: str, channel: str, window: str, ttl: int) -> None:
         if self.fail_record_sent:
             raise CapStoreError("write failed")
-        current = self.items.get(issue_key)
+        key = (channel, issue_key)
+        current = self.items.get(key)
         if current is None or current["window"] != window:
-            self.items[issue_key] = {"window": window, "sent": 1, "suppressed": 0, "expires_at": ttl}
+            self.items[key] = {"window": window, "sent": 1, "suppressed": 0, "expires_at": ttl}
             return
         current["sent"] = int(current["sent"]) + 1
 
-    def record_suppressed(self, issue_key: str, window: str) -> None:
+    def record_suppressed(self, issue_key: str, channel: str, window: str) -> None:
         if self.fail_suppress:
             raise CapStoreError("suppress failed")
-        current = self.items.get(issue_key)
+        current = self.items.get((channel, issue_key))
         if current is None or current["window"] != window:
             raise CapStoreError("missing cap item")
         current["suppressed"] = int(current.get("suppressed", 0)) + 1
@@ -136,18 +141,31 @@ def issue_key(subject: str, message: str) -> str:
 
 
 def format_sms(subject: str, message: str, suppressed_prior: int) -> str:
-    """One short text. The next window's first text can name how many repeats were held back."""
+    """One short text. The next window's first text names how many repeats were held back."""
     subject = (subject or "").strip()
     if subject and subject not in _GENERIC_SUBJECTS:
         line = subject
     else:
         line = _summary(message) or subject or "alert"
     line = re.sub(r"\s+", " ", line).strip()[:140]
-    if suppressed_prior == 1:
-        line += " (suppressed 1 repeat)"
-    elif suppressed_prior > 1:
-        line += f" (suppressed {suppressed_prior} repeats)"
-    return line[:300]
+    return (line + _repeat_note(suppressed_prior))[:300]
+
+
+def format_email(subject: str, message: str, suppressed_prior: int) -> str:
+    """Original subject and body. The subject stays within SNS's 100-character limit.
+
+    The suppressed count is on the subject and, when any repeats were held, a
+    one-line trailer on the body. The returned string is ``subject\\nbody``.
+    """
+    note = _repeat_note(suppressed_prior)
+    base = re.sub(r"\s+", " ", (subject or "alert")).strip() or "alert"
+    room = 100 - len(note)
+    subj = (base[:room] + note) if room > 0 else note[:100]
+    body = message or ""
+    if suppressed_prior > 0:
+        word = "repeat" if suppressed_prior == 1 else "repeats"
+        body = f"{body}\n\nSuppressed {suppressed_prior} {word} in the previous window."
+    return subj + "\n" + body
 
 
 def plan(
@@ -155,31 +173,37 @@ def plan(
     issue_key_value: str,
     now: datetime,
     *,
+    channel: str,
     window_minutes: int,
     limit: int,
 ) -> Decision:
-    """Read the counter. Does not write, so a failed publish does not consume the slot."""
+    """Read one channel's counter. Does not write, so a failed publish does not consume the slot."""
+    _check_channel(channel)
     window, ttl = window_bounds(now, window_minutes)
     cap = limit if limit >= 1 else 1
-    item = store.get(issue_key_value)
+    item = store.get(issue_key_value, channel)
     if item is None or str(item.get("window")) != window:
         prior = 0 if item is None else int(item.get("suppressed") or 0)
         return Decision(
             send=True,
             reason="sent",
             issue_key=issue_key_value,
+            channel=channel,
             window=window,
             suppressed_prior=prior,
             ttl=ttl,
         )
     sent = int(item.get("sent") or 0)
     if sent < cap:
-        return Decision(send=True, reason="sent", issue_key=issue_key_value, window=window, ttl=ttl)
+        return Decision(
+            send=True, reason="sent", issue_key=issue_key_value, channel=channel, window=window, ttl=ttl
+        )
     suppressed_in_window = int(item.get("suppressed") or 0) + 1
     return Decision(
         send=False,
         reason="suppressed",
         issue_key=issue_key_value,
+        channel=channel,
         window=window,
         suppressed_in_window=suppressed_in_window,
         ttl=ttl,
@@ -193,47 +217,72 @@ def deliver(
     publish: Callable[[str], None],
     *,
     now: datetime,
+    channel: str = "sms",
     window_minutes: int = 60,
     limit: int = 1,
 ) -> Decision:
-    """Send or log one notification. Store errors publish the text and return fail_open."""
+    """Send or log one channel. Store errors publish that channel and return fail_open."""
+    _check_channel(channel)
     key = issue_key(subject, message)
     try:
-        decision = plan(store, key, now, window_minutes=window_minutes, limit=limit)
+        decision = plan(
+            store, key, now, channel=channel, window_minutes=window_minutes, limit=limit
+        )
     except CapStoreError:
-        _log("sms_cap_failed_open", issue_key=key, error="store_read_failed")
-        publish(format_sms(subject, message, 0))
-        return Decision(send=True, reason="fail_open", issue_key=key)
+        _log("alert_cap_failed_open", issue_key=key, channel=channel, error="store_read_failed")
+        publish(_render(channel, subject, message, 0))
+        return Decision(send=True, reason="fail_open", issue_key=key, channel=channel)
 
     if not decision.send:
         try:
-            store.record_suppressed(key, decision.window)
+            store.record_suppressed(key, channel, decision.window)
         except CapStoreError:
-            _log("sms_cap_failed_open", issue_key=key, error="store_suppress_failed")
-            publish(format_sms(subject, message, 0))
-            return Decision(send=True, reason="fail_open", issue_key=key)
+            _log("alert_cap_failed_open", issue_key=key, channel=channel, error="store_suppress_failed")
+            publish(_render(channel, subject, message, 0))
+            return Decision(send=True, reason="fail_open", issue_key=key, channel=channel)
         _log(
-            "sms_suppressed",
+            "alert_suppressed",
             issue_key=key,
-            window=decision.window,
+            channel=channel,
             suppressed=decision.suppressed_in_window,
+            window=decision.window,
         )
         return decision
 
-    publish(format_sms(subject, message, decision.suppressed_prior))
+    publish(_render(channel, subject, message, decision.suppressed_prior))
     try:
-        store.record_sent(key, decision.window, decision.ttl)
+        store.record_sent(key, channel, decision.window, decision.ttl)
     except CapStoreError:
-        _log("sms_cap_record_failed", issue_key=key, window=decision.window)
+        _log("alert_cap_record_failed", issue_key=key, channel=channel, window=decision.window)
     else:
         _log(
-            "sms_sent",
+            "alert_sent",
             issue_key=key,
+            channel=channel,
             window=decision.window,
             suppressed_prior=decision.suppressed_prior,
             reason=decision.reason,
         )
     return decision
+
+
+def _check_channel(channel: str) -> None:
+    if channel not in _CHANNELS:
+        raise ValueError(f"unknown channel {channel}")
+
+
+def _render(channel: str, subject: str, message: str, suppressed_prior: int) -> str:
+    if channel == "email":
+        return format_email(subject, message, suppressed_prior)
+    return format_sms(subject, message, suppressed_prior)
+
+
+def _repeat_note(count: int) -> str:
+    if count == 1:
+        return " (suppressed 1 repeat)"
+    if count > 1:
+        return f" (suppressed {count} repeats)"
+    return ""
 
 
 def _clip(value: str) -> str:

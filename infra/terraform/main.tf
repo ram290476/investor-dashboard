@@ -79,6 +79,8 @@ module "alerting" {
   alert_emails             = var.alert_emails
   security_alert_emails    = local.security_alert_emails
   alert_sms_e164           = var.alert_sms_e164
+  email_window_minutes     = var.email_window_minutes
+  email_max_per_window     = var.email_max_per_window
   sms_window_minutes       = var.sms_window_minutes
   sms_max_per_window       = var.sms_max_per_window
   enable_cloudfront_alarms = var.enable_cloudfront_alarms
@@ -118,7 +120,6 @@ module "us_east_1" {
   }
 
   name                       = local.name
-  alert_emails               = var.alert_emails
   enable_cloudfront_alarms   = var.enable_cloudfront_alarms
   cloudfront_distribution_id = var.cloudfront_distribution_id != "" ? var.cloudfront_distribution_id : module.site_hosting.distribution_id
   primary_region             = var.region

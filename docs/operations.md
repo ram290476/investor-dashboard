@@ -717,13 +717,20 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
   series tokens in 13% increments per cycle and retain at least 3:1 chart contrast. Shadows
   and the settings backdrop use light/dark theme tokens.
 * Deployment-review notifications remain GitHub environment notifications. Ops and security
-  email, including ram.vellamsetti@gmail.com, is a direct SNS subscription and is not capped.
-  SMS is sent only when `alert_sms_e164` is set, by `invdash-sms-notifier`, at most
-  `sms_max_per_window` texts per issue per fixed Pacific clock window (default 60 minutes,
-  one clock hour aligned to local midnight). Repeats in that hour are logged and still
-  emailed. The next window's first text includes how many repeats were suppressed. On October 8,
-  2026 the account was in the SMS sandbox with no sending number. Do not add a direct SMS subscription on the
-  ops, security, or CloudFront topics; that bypasses the cap.
+  email, including ram.vellamsetti@gmail.com, and optional SMS are sent by `invdash-alert-notifier`.
+  Each issue sends at most `email_max_per_window` emails per fixed Pacific clock window
+  (`email_window_minutes`, default 60) and, when `alert_sms_e164` is set, at most
+  `sms_max_per_window` texts per its own window (`sms_window_minutes`, default 60). Both
+  defaults are one clock hour aligned to local midnight (14:00-14:59 Pacific), not a rolling
+  hour from the first send. The channels are counted separately. Set the four values in
+  Terraform (`email_window_minutes`, `email_max_per_window`, `sms_window_minutes`,
+  `sms_max_per_window`). Repeats in the window are not mailed or texted; the log line records
+  the issue key, the channel, and the suppressed count. The next window's first message for
+  that channel includes the count. If the dedupe table errors, that channel still sends.
+  Confirm the ops-email and security-email subscriptions. On October 8, 2026 the account was
+  in the SMS sandbox with no sending number. Do not subscribe the inbox or the phone directly
+  to the ops, security, or CloudFront topics; that bypasses the cap. AWS Budgets mail is not
+  part of this cap.
 * The UI is a zero-build vanilla JavaScript implementation rather than the architecture
   document's proposed TypeScript/Vite/Svelte stack.
 * No public freshness document is currently published, so the external Synthetics canary is

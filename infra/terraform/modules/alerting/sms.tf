@@ -1,7 +1,13 @@
-# SMS is off until alert_sms_e164 is set. Email subscriptions on the ops and
-# security topics stay as they are and are not capped. This Lambda is the only
-# application publisher to the SMS topic, so a phone subscribed directly to an
-# alarm topic would bypass the hourly cap.
+# Email and SMS both go through this Lambda. Alarm topics (ops, security, and
+# the us-east-1 CloudFront topic) invoke it and do not deliver to an inbox or
+# a handset themselves. The Lambda is the only application publisher to the
+# ops-email and security-email topics, and to the SMS topic when a handset is
+# set. A direct subscription on an alarm topic would bypass the hourly cap.
+#
+# Windows are fixed America/Los_Angeles clock buckets aligned to local midnight,
+# not a rolling interval from the first send. Email and SMS keep separate
+# window lengths, maxima, and dedupe items. Each item's TTL is the end of the
+# following window for that channel.
 
 terraform {
   required_providers {
@@ -35,19 +41,31 @@ variable "reserved_concurrency" {
 }
 
 variable "alert_sms_e164" {
-  description = "E.164 handset. Empty leaves the cap resources uncreated."
+  description = "E.164 handset. Empty leaves SMS off. Email stays capped either way."
   type        = string
   default     = ""
 }
 
+variable "email_window_minutes" {
+  description = "Email cap window in minutes. Fixed America/Los_Angeles clock buckets aligned to local midnight. 60 is one clock hour."
+  type        = number
+  default     = 60
+}
+
+variable "email_max_per_window" {
+  description = "Emails per issue per email clock window. Independent of the SMS maximum."
+  type        = number
+  default     = 1
+}
+
 variable "sms_window_minutes" {
-  description = "Fixed America/Los_Angeles clock window, aligned to local midnight. 60 is one clock hour."
+  description = "SMS cap window in minutes. Fixed America/Los_Angeles clock buckets aligned to local midnight. 60 is one clock hour."
   type        = number
   default     = 60
 }
 
 variable "sms_max_per_window" {
-  description = "Texts per issue per clock window. Email is not capped."
+  description = "Texts per issue per SMS clock window. Independent of the email maximum."
   type        = number
   default     = 1
 }
@@ -62,7 +80,7 @@ data "aws_region" "current" {}
 
 locals {
   sms_on = var.alert_sms_e164 != ""
-  sms_fn = "${var.name}-sms-notifier"
+  sms_fn = "${var.name}-alert-notifier"
   region = data.aws_region.current.region
 }
 
@@ -74,18 +92,23 @@ data "archive_file" "notifier" {
 }
 
 resource "aws_dynamodb_table" "cap" {
-  count = local.sms_on ? 1 : 0
-
-  name         = "${var.name}-sms-cap"
+  name         = "${var.name}-alert-cap"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "issue_key"
+  range_key    = "channel"
 
-  # Counters are disposable. Each item's TTL is the end of the next clock window,
-  # long enough for that window's first text to report suppressed repeats.
+  # Counters are disposable. Each item's TTL is the end of the next clock window
+  # for that channel, long enough for that window's first message to report
+  # suppressed repeats.
   deletion_protection_enabled = true
 
   attribute {
     name = "issue_key"
+    type = "S"
+  }
+
+  attribute {
+    name = "channel"
     type = "S"
   }
 
@@ -105,16 +128,12 @@ resource "aws_dynamodb_table" "cap" {
 }
 
 resource "aws_cloudwatch_log_group" "notifier" {
-  count = local.sms_on ? 1 : 0
-
   name              = "/aws/lambda/${local.sms_fn}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
 }
 
 data "aws_iam_policy_document" "notifier_trust" {
-  count = local.sms_on ? 1 : 0
-
   statement {
     actions = ["sts:AssumeRole"]
     principals {
@@ -125,20 +144,16 @@ data "aws_iam_policy_document" "notifier_trust" {
 }
 
 resource "aws_iam_role" "notifier" {
-  count = local.sms_on ? 1 : 0
-
   name                 = local.sms_fn
-  assume_role_policy   = data.aws_iam_policy_document.notifier_trust[0].json
+  assume_role_policy   = data.aws_iam_policy_document.notifier_trust.json
   permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "notifier" {
-  count = local.sms_on ? 1 : 0
-
   statement {
     sid       = "CapItem"
     actions   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
-    resources = [aws_dynamodb_table.cap[0].arn]
+    resources = [aws_dynamodb_table.cap.arn]
   }
 
   statement {
@@ -153,13 +168,16 @@ data "aws_iam_policy_document" "notifier" {
   }
 
   statement {
-    sid       = "PublishSmsTopic"
-    actions   = ["sns:Publish"]
-    resources = [aws_sns_topic.sms[0].arn]
+    sid     = "PublishOutbound"
+    actions = ["sns:Publish"]
+    resources = concat(
+      [for topic in aws_sns_topic.outbound_email : topic.arn],
+      local.sms_on ? [aws_sns_topic.sms[0].arn] : [],
+    )
   }
 
   statement {
-    sid       = "SmsTopicKey"
+    sid       = "OutboundTopicKey"
     actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
     resources = [var.data_key_arn]
     condition {
@@ -183,16 +201,71 @@ data "aws_iam_policy_document" "notifier" {
   statement {
     sid       = "WriteLogs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = ["${aws_cloudwatch_log_group.notifier[0].arn}:*"]
+    resources = ["${aws_cloudwatch_log_group.notifier.arn}:*"]
   }
 }
 
 resource "aws_iam_role_policy" "notifier" {
-  count = local.sms_on ? 1 : 0
+  name   = "alert-notifier"
+  role   = aws_iam_role.notifier.id
+  policy = data.aws_iam_policy_document.notifier.json
+}
 
-  name   = "sms-notifier"
-  role   = aws_iam_role.notifier[0].id
-  policy = data.aws_iam_policy_document.notifier[0].json
+resource "aws_sns_topic" "outbound_email" {
+  for_each = local.topics
+
+  name              = "${var.name}-${each.key}-email"
+  kms_master_key_id = var.data_key_arn
+}
+
+data "aws_iam_policy_document" "outbound_email" {
+  for_each = local.topics
+
+  statement {
+    sid       = "NotifierPublish"
+    actions   = ["SNS:Publish"]
+    resources = [aws_sns_topic.outbound_email[each.key].arn]
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.notifier.arn]
+    }
+  }
+
+  statement {
+    sid = "AccountOwnerManage"
+    actions = [
+      "SNS:GetTopicAttributes", "SNS:SetTopicAttributes", "SNS:Subscribe",
+      "SNS:ListSubscriptionsByTopic", "SNS:Publish",
+    ]
+    resources = [aws_sns_topic.outbound_email[each.key].arn]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${local.account_id}:root"]
+    }
+  }
+
+  statement {
+    sid       = "DenyInsecureTransport"
+    effect    = "Deny"
+    actions   = ["SNS:Publish"]
+    resources = [aws_sns_topic.outbound_email[each.key].arn]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_sns_topic_policy" "outbound_email" {
+  for_each = local.topics
+
+  arn    = aws_sns_topic.outbound_email[each.key].arn
+  policy = data.aws_iam_policy_document.outbound_email[each.key].json
 }
 
 resource "aws_sns_topic" "sms" {
@@ -211,7 +284,7 @@ data "aws_iam_policy_document" "sms_topic" {
     resources = [aws_sns_topic.sms[0].arn]
     principals {
       type        = "AWS"
-      identifiers = [aws_iam_role.notifier[0].arn]
+      identifiers = [aws_iam_role.notifier.arn]
     }
   }
 
@@ -261,14 +334,12 @@ resource "aws_sns_topic_subscription" "handset" {
 }
 
 resource "aws_lambda_function" "notifier" {
-  count = local.sms_on ? 1 : 0
-
   #checkov:skip=CKV_AWS_117:Accepted risk: job and API Lambdas run outside a VPC; see architecture doc, Accepted risk
   #checkov:skip=CKV_AWS_272:Code signing not used; images and zips are built by CI from the protected main branch
-  #checkov:skip=CKV_AWS_116:SNS retries a failed invoke. A dedupe-store error still sends the text (fail open), so a DLQ would only hold texts already decided
+  #checkov:skip=CKV_AWS_116:SNS retries a failed invoke. A dedupe-store error still sends (fail open), so a DLQ would only hold alerts already decided
   function_name                  = local.sms_fn
-  description                    = "Cap SMS to N texts per issue per Pacific clock window; email is not capped"
-  role                           = aws_iam_role.notifier[0].arn
+  description                    = "Cap email and SMS independently to N messages per issue per Pacific clock window"
+  role                           = aws_iam_role.notifier.arn
   runtime                        = "python3.12"
   architectures                  = ["arm64"]
   handler                        = "sms_notifier.handler"
@@ -280,13 +351,20 @@ resource "aws_lambda_function" "notifier" {
   kms_key_arn                    = var.data_key_arn
 
   environment {
-    variables = {
-      CAP_TABLE_NAME        = aws_dynamodb_table.cap[0].name
-      SMS_TOPIC_ARN         = aws_sns_topic.sms[0].arn
-      SMS_WINDOW_MINUTES    = tostring(var.sms_window_minutes)
-      SMS_MAX_PER_WINDOW    = tostring(var.sms_max_per_window)
-      AWS_USE_FIPS_ENDPOINT = "true"
-    }
+    # Lambda rejects an empty value, so SMS_TOPIC_ARN is omitted until a handset is set.
+    variables = merge(
+      {
+        CAP_TABLE_NAME           = aws_dynamodb_table.cap.name
+        OPS_EMAIL_TOPIC_ARN      = aws_sns_topic.outbound_email["ops"].arn
+        SECURITY_EMAIL_TOPIC_ARN = aws_sns_topic.outbound_email["security"].arn
+        EMAIL_WINDOW_MINUTES     = tostring(var.email_window_minutes)
+        EMAIL_MAX_PER_WINDOW     = tostring(var.email_max_per_window)
+        SMS_WINDOW_MINUTES       = tostring(var.sms_window_minutes)
+        SMS_MAX_PER_WINDOW       = tostring(var.sms_max_per_window)
+        AWS_USE_FIPS_ENDPOINT    = "true"
+      },
+      local.sms_on ? { SMS_TOPIC_ARN = aws_sns_topic.sms[0].arn } : {},
+    )
   }
 
   tracing_config {
@@ -297,21 +375,21 @@ resource "aws_lambda_function" "notifier" {
 }
 
 resource "aws_lambda_permission" "topics" {
-  for_each = local.sms_on ? local.topics : {}
+  for_each = local.topics
 
   statement_id  = "AllowSNS-${each.key}"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.notifier[0].function_name
+  function_name = aws_lambda_function.notifier.function_name
   principal     = "sns.amazonaws.com"
   source_arn    = aws_sns_topic.this[each.key].arn
 }
 
 resource "aws_sns_topic_subscription" "notifier" {
-  for_each = local.sms_on ? local.topics : {}
+  for_each = local.topics
 
   topic_arn = aws_sns_topic.this[each.key].arn
   protocol  = "lambda"
-  endpoint  = aws_lambda_function.notifier[0].arn
+  endpoint  = aws_lambda_function.notifier.arn
 
   depends_on = [aws_lambda_permission.topics]
 }
@@ -319,18 +397,18 @@ resource "aws_sns_topic_subscription" "notifier" {
 # The CloudFront alarm topic lives in us-east-1. The subscription is created there;
 # this permission lets that topic invoke the notifier without a module cycle.
 resource "aws_lambda_permission" "cloudfront_topic" {
-  count = local.sms_on && var.enable_cloudfront_alarms ? 1 : 0
+  count = var.enable_cloudfront_alarms ? 1 : 0
 
   statement_id  = "AllowCloudFrontTopic"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.notifier[0].function_name
+  function_name = aws_lambda_function.notifier.function_name
   principal     = "sns.amazonaws.com"
   source_arn    = "arn:${data.aws_partition.current.partition}:sns:us-east-1:${local.account_id}:${var.name}-ops-alerts-us-east-1"
 }
 
 output "sms_notifier_arn" {
-  description = "Notifier Lambda. Empty when alert_sms_e164 is empty."
-  value       = local.sms_on ? aws_lambda_function.notifier[0].arn : ""
+  description = "Notifier Lambda. Caps email and, when alert_sms_e164 is set, SMS."
+  value       = aws_lambda_function.notifier.arn
   depends_on = [
     aws_lambda_permission.topics,
     aws_lambda_permission.cloudfront_topic,

@@ -369,7 +369,7 @@ Every signal carries the same run_id and source_id, so one job run can be follow
 | Configuration history | Every resource change, continuously | AWS Config → config bucket (versioned, KMS, delete-deny; no Object Lock, which Config does not support) | 30 months |
 | Threats and vulnerabilities | GuardDuty findings (incl. malware scans of raw/), Inspector CVEs, Security Hub NIST 800-53 control results | Security Hub | 90 days of findings |
 
-Alerts go to two email topics: **ops** for reliability and **security** for incident response.
+Alarms and EventBridge rules publish to two SNS topics: **ops** for reliability and **security** for incident response. `invdash-alert-notifier` subscribes to both, and to the CloudFront topic in us-east-1, and is the only publisher to the inboxes.
 
 - **Ops (8–11 CloudWatch alarms):** Lambda errors, throttles, dead-letter queue not empty, failed runs, stale P1 source, quota headroom under 20%, freshness SLO burn, canary failing, availability SLO fast and slow burn, CloudFront 5xx (in us-east-1, with its own topic).
 
@@ -377,7 +377,11 @@ Alerts go to two email topics: **ops** for reliability and **security** for inci
 
 - **AWS Health events** go to the ops topic.
 
-- **SMS (optional):** set `alert_sms_e164`. A notifier Lambda texts at most `sms_max_per_window` times per issue per fixed Pacific clock window (default 60 minutes, aligned to local midnight, so one clock hour). The issue is the alarm name, or the job and error code. Repeats in that hour are logged, and the next window's first text says how many were held back. Email is a separate subscription and is not capped.
+- **Email cap:** at most `email_max_per_window` messages per issue per fixed Pacific clock window (`email_window_minutes`, default 60, aligned to local midnight, so 14:00-14:59 Pacific is one window). Ops mail, including CloudFront, goes to `alert_emails` on the ops-email topic. Security mail goes to `security_alert_emails` on the security-email topic. Confirm those subscriptions. Configure the window and the maximum in Terraform; they are separate from the SMS settings.
+
+- **SMS (optional):** set `alert_sms_e164`. The same notifier texts at most `sms_max_per_window` times per issue per its own fixed Pacific clock window (`sms_window_minutes`, default 60). The handset subscribes only to the SMS topic. Email and SMS counters are independent.
+
+- **Repeats:** a repeat inside the window is not mailed or texted. The log line names the issue key, the channel (`email` or `sms`), and how many repeats were suppressed. The next allowed message on that channel includes the count. If the dedupe table errors, that channel still sends. The issue is the alarm name, or the job and error code. Do not subscribe an inbox or the phone directly to the ops, security, or CloudFront topics.
 
 - **Dashboards:** two CloudWatch dashboards, ops and SLO. Data health per source stays in the app's own panel.
 
@@ -555,7 +559,7 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 | data_lake | Lake bucket with versioning, KMS and TLS-only access, replicated to us-west-2; job dead-letter queue; ECR repo with immutable tags |
 | audit_logging | CloudTrail with data events, validation and Insights into an Object-Locked audit bucket; AWS Config into its own versioned config bucket |
 | security_services | GuardDuty with S3, Lambda and malware protection; Security Hub NIST 800-53 Rev 5; Inspector; Access Analyzer; account guardrails |
-| alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes; optional per-issue SMS cap |
+| alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes; per-issue email and optional SMS caps on fixed Pacific clock windows |
 | us_east_1 | CloudFront 5xx alarm with its own encrypted topic and key; forwarding of IAM and root sign-in events to the primary region |
 | observability | Log groups, saved queries, alarms with SLO burn rates, 2 dashboards, canary, \$40 budget |
 | api_keys | 14 SSM SecureStrings with rotation periods (now including FINRA); daily 8:00 PT check that emails reminders |
@@ -579,7 +583,7 @@ Before the first apply:
 
 3.  Run terraform fmt -recursive and terraform validate. I couldn't download the Terraform binary in my workspace, so the code was checked with an HCL parser, a cross-reference script and a smoke test of the Python helper.
 
-4.  Set alert_emails, apply, and confirm the subscription emails. Add health_url once the site is live to turn on the canary.
+4.  Set alert_emails, apply, and confirm the ops-email and security-email subscriptions. Add health_url once the site is live to turn on the canary.
 
 Expect security alerts during your own deploys (key policy and trail updates count as changes); that is the change-control audit trail working.
 

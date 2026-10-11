@@ -50,18 +50,40 @@ variable "use_fips_endpoint" {
 }
 
 variable "alert_emails" {
-  description = "Email addresses that receive ops and security alerts. Each must confirm the SNS subscription."
+  description = "Inboxes for ops alerts, including the CloudFront alarm. The notifier republishes to the ops-email topic; each address must confirm that subscription. Do not also subscribe these addresses to the ops, security, or CloudFront alarm topics."
   type        = list(string)
 }
 
 variable "security_alert_emails" {
-  description = "Optional separate recipients for security alerts. Defaults to alert_emails when empty."
+  description = "Optional separate recipients for security alerts, on the security-email topic. Defaults to alert_emails when empty. Each address must confirm that subscription."
   type        = list(string)
   default     = []
 }
 
+variable "email_window_minutes" {
+  description = "Email cap window in minutes. Windows are fixed America/Los_Angeles clock buckets aligned to local midnight, not a rolling interval from the first email. 60 is one clock hour (14:00-14:59 Pacific). Independent of sms_window_minutes."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.email_window_minutes >= 1 && var.email_window_minutes <= 1440
+    error_message = "email_window_minutes must be from 1 to 1440."
+  }
+}
+
+variable "email_max_per_window" {
+  description = "Maximum emails for one issue (CloudWatch alarm name, or job and error code) per email clock window. Further repeats are logged and not mailed. Independent of sms_max_per_window."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.email_max_per_window >= 1 && var.email_max_per_window <= 100
+    error_message = "email_max_per_window must be from 1 to 100."
+  }
+}
+
 variable "alert_sms_e164" {
-  description = "E.164 mobile number for SMS alerts, for example +14155552671. Empty leaves SMS off. Email subscriptions stay in place and are not capped. Do not also subscribe this number directly to the ops, security, or CloudFront topics; that bypasses the hourly cap."
+  description = "E.164 mobile number for SMS alerts, for example +14155552671. Empty leaves SMS off. Email still goes through the notifier and stays capped. Do not subscribe this number, or an inbox, directly to the ops, security, or CloudFront topics; that bypasses the cap."
   type        = string
   default     = ""
 
@@ -72,7 +94,7 @@ variable "alert_sms_e164" {
 }
 
 variable "sms_window_minutes" {
-  description = "SMS cap window in minutes. Windows are fixed America/Los_Angeles clock buckets aligned to local midnight, not a rolling interval from the first text. 60 is one clock hour (14:00-14:59 Pacific). Repeats inside the window are logged and still emailed."
+  description = "SMS cap window in minutes. Windows are fixed America/Los_Angeles clock buckets aligned to local midnight, not a rolling interval from the first text. 60 is one clock hour (14:00-14:59 Pacific). Independent of email_window_minutes."
   type        = number
   default     = 60
 
@@ -83,7 +105,7 @@ variable "sms_window_minutes" {
 }
 
 variable "sms_max_per_window" {
-  description = "Maximum SMS messages for one issue (CloudWatch alarm name, or job and error code) per clock window. Further repeats are logged. Email is not capped."
+  description = "Maximum SMS messages for one issue (CloudWatch alarm name, or job and error code) per SMS clock window. Further repeats are logged and not texted. Independent of email_max_per_window."
   type        = number
   default     = 1
 
