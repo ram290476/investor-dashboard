@@ -186,6 +186,129 @@ def test_stock_route_serves_proposed_metrics_with_status_and_stays_on_the_watchl
     assert page["freshness_label"] == "No company-specific metrics discovered"
 
 
+def _review_event(path, body, groups="admin", username="owner@example.com", method="PUT"):
+    event = _route_event(method, path, body)
+    event["requestContext"]["authorizer"]["jwt"]["claims"].update({
+        "cognito:groups": groups,
+        "username": username,
+    })
+    return event
+
+
+def _seed_review_lake(mod, monkeypatch):
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="lake")
+    monkeypatch.setattr(mod, "LAKE_BUCKET", "lake")
+    monkeypatch.setattr(mod, "_s3", s3)
+    serving = {
+        "ticker": "TSLA",
+        "generated_at": "2026-10-11T00:00:00Z",
+        "run_status": "ok",
+        "freshness_label": "Pending review",
+        "metrics": [{
+            "metric_id": "total_deliveries",
+            "approved": False,
+            "approval_state": "proposed",
+            "status": "proposed",
+            "display_name": "Deliveries",
+            "latest": {"value": 486532},
+            "provenance": {"approval_state": "proposed", "source_url": "https://www.sec.gov/example"},
+        }],
+    }
+    s3.put_object(
+        Bucket="lake",
+        Key="serving/stock/TSLA.json",
+        Body=json.dumps(serving).encode(),
+        ContentType="application/json",
+    )
+    return s3
+
+
+def _lake_json(s3, key):
+    return json.loads(s3.get_object(Bucket="lake", Key=key)["Body"].read())
+
+
+def test_admin_approval_writes_the_lake_catalog_and_patches_serving(api, monkeypatch):
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+    response = mod.handler(_review_event(
+        "/stock/TSLA/metrics/total_deliveries", {"status": "approved"}, groups=["admin"],
+    ), None)
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["metrics"][0]["metric_id"] == "total_deliveries"
+    assert body["metrics"][0]["approval_state"] == "approved"
+    assert body["freshness_label"] == "IR data approved"
+    catalog = _lake_json(s3, "catalog/TSLA.json")
+    entry = catalog["metrics"][0]
+    assert entry["status"] == "approved"
+    assert entry["approved_by"] == "owner@example.com"
+    assert entry["approved_at"]
+    serving = _lake_json(s3, "serving/stock/TSLA.json")
+    assert serving["metrics"][0]["approval_state"] == "approved"
+    assert serving["metrics"][0]["approved_by"] == "owner@example.com"
+    assert serving["metrics"][0]["provenance"]["approval_state"] == "approved"
+
+    undone = mod.handler(_review_event(
+        "/stock/TSLA/metrics/total_deliveries", {"status": "proposed"}, groups="admin",
+    ), None)
+    assert undone["statusCode"] == 200
+    assert json.loads(undone["body"])["metrics"][0]["approval_state"] == "proposed"
+    cleared = _lake_json(s3, "catalog/TSLA.json")["metrics"][0]
+    assert cleared["status"] == "proposed"
+    assert cleared["approved_by"] is None
+    assert cleared["approved_at"] is None
+    assert _lake_json(s3, "serving/stock/TSLA.json")["freshness_label"] == "Pending review"
+
+
+def test_metric_review_rejects_non_admins_the_demo_account_and_bad_requests(api, monkeypatch):
+    mod, _ = api
+    _seed_review_lake(mod, monkeypatch)
+    path = "/stock/TSLA/metrics/total_deliveries"
+    denied = mod.handler(_review_event(path, {"status": "approved"}, groups=""), None)
+    assert denied["statusCode"] == 403
+    demo = mod.handler(_review_event(
+        path, {"status": "approved"}, groups=["admin"], username="ram.vellamsetti@gmail.com",
+    ), None)
+    assert demo["statusCode"] == 403
+    assert "admin" in json.loads(demo["body"])["error"].lower()
+    missing = mod.handler(_review_event(
+        "/stock/NVDA/metrics/total_deliveries", {"status": "approved"}, groups="admin",
+    ), None)
+    assert missing["statusCode"] == 403
+    unknown = mod.handler(_review_event(
+        "/stock/TSLA/metrics/not_a_metric", {"status": "approved"}, groups="[admin]",
+    ), None)
+    assert unknown["statusCode"] == 404
+    bad = mod.handler(_review_event(path, {"status": "rejected"}, groups="admin"), None)
+    assert bad["statusCode"] == 400
+    other = mod.handler(_review_event(path, None, method="GET"), None)
+    assert other["statusCode"] == 405
+
+
+def test_catalog_write_failure_is_a_named_api_error(api, monkeypatch, capsys):
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+
+    def put_object(**_kwargs):
+        raise _client_error("AccessDenied", "PutObject", f"SecretAccessKey={SECRET}")
+
+    monkeypatch.setattr(s3, "put_object", put_object)
+    body = _assert_error(
+        mod.handler(_review_event("/stock/TSLA/metrics/total_deliveries", {"status": "approved"}), None),
+        502,
+        "CATALOG_WRITE_FAILED",
+    )
+    assert body["error"] == mod._ERROR_MESSAGES["CATALOG_WRITE_FAILED"]
+    _assert_log(
+        _log_lines(capsys)[0],
+        "prefs_api_error",
+        "CATALOG_WRITE_FAILED",
+        "ClientError",
+        "PUT /stock/{ticker}/metrics/{metric_id}",
+    )
+
+
 def test_dashboard_route_reports_not_ready_instead_of_fake_data(api, monkeypatch):
     mod, _ = api
     monkeypatch.setattr(mod, "_read_serving_document", lambda _key: None)
@@ -393,7 +516,57 @@ def test_chart_settings_accept_dynamic_fundamental_overlays(api):
     )
     assert response["statusCode"] == 200
     saved = json.loads(response["body"])["chart_settings"]["TSLA"]["overlays"]
-    assert saved == ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending"]
+    assert saved == ["FUNDAMENTAL:capex"]
+    dropped = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": ["FUNDAMENTAL:capex_pending", "FUNDAMENTAL:capex_pending", "FUNDAMENTAL:opex_pending"],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert dropped["chart_settings"]["TSLA"]["overlays"] == []
+    under_cap = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": [
+                "FUNDAMENTAL:a_pending", "FUNDAMENTAL:b_pending", "FUNDAMENTAL:c_pending",
+                "FUNDAMENTAL:d_pending", "FUNDAMENTAL:e_pending", "FUNDAMENTAL:opex",
+            ],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert under_cap["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:opex"]
+    kept = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": ["SPY", "DIA", "QQQ", "MA20", "DGS10", "FUNDAMENTAL:capex_pending"],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert kept["chart_settings"]["TSLA"]["overlays"] == ["SPY", "DIA", "QQQ", "MA20", "DGS10"]
+    boto3.resource("dynamodb").Table("invdash-user-prefs").put_item(Item={
+        "user_sub": "user-a",
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "display": {},
+        "chart_settings": {
+            "TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending"], "lanes": ["VOL"]},
+        },
+        "version": 4,
+    })
+    loaded = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert loaded["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:capex"]
+    rewritten = json.loads(mod.handler(
+        _event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": loaded["version"]}),
+        None,
+    )["body"])
+    assert rewritten["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:capex"]
     rejected = mod.handler(
         _event(
             "PUT",
@@ -417,6 +590,12 @@ def test_chart_settings_accept_dynamic_fundamental_overlays(api):
         ({"TSLA": {"overlays": [{}], "lanes": ["VOL"]}}, "unsupported overlay"),
         ({"TSLA": {"overlays": [], "lanes": ["UNKNOWN"]}}, "unsupported lane"),
         ({"TSLA": {"overlays": ["SPY"] * 6, "lanes": ["VOL"]}}, "at most 5"),
+        (
+            {"TSLA": {"overlays": [
+                "FUNDAMENTAL:capex", "FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending",
+            ], "lanes": ["VOL"]}},
+            "at most 5",
+        ),
         ({"TSLA": {"overlays": ["FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
         ({"TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
     ],

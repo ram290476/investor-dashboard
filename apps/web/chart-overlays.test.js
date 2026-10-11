@@ -49,10 +49,22 @@ test("sentiment overlays hide without data and use only the selected ticker's hi
   assert.deepEqual(values, [-0.2, null]);
 });
 
-test("proposed company series stay beside approved EDGAR rows and are labeled pending review", () => {
+test("fundamentals overlays keep approved company metrics and drop pending series", () => {
   assert.equal(OVERLAYS.filter((overlay) => overlay.kind === "fundamental").length, 7);
   const merged = mergeCompanyFundamentals(
-    { fundamentals: [{ series_id: "revenue_gaap", date: "2026-01-01", value: 1, unit: "USD", approval_state: "approved" }] },
+    {
+      fundamentals: [
+        { series_id: "revenue_gaap", date: "2026-01-01", value: 1, unit: "USD", approval_state: "approved" },
+        {
+          series_id: "revenue_gaap_pending",
+          date: "2026-01-01",
+          value: 9,
+          unit: "USD",
+          display_name: "Revenue · Pending review",
+          approval_state: "proposed",
+        },
+      ],
+    },
     [
       {
         metric_id: "revenue_gaap",
@@ -73,31 +85,69 @@ test("proposed company series stay beside approved EDGAR rows and are labeled pe
       },
     ],
   );
-  assert.deepEqual(
-    merged.fundamentals.filter((row) => row.series_id === "revenue_gaap").map((row) => row.value),
-    [1],
-  );
-  const pendingRevenue = merged.fundamentals.find((row) => row.series_id === "revenue_gaap_pending");
-  assert.equal(pendingRevenue.approval_state, "proposed");
-  assert.match(pendingRevenue.display_name, /· Pending review/);
-  assert.equal(merged.fundamentals.some((row) => row.series_id === "capex"), false);
-  assert.equal(merged.fundamentals.filter((row) => row.series_id === "capex_pending").every((row) => row.approval_state === "proposed"), true);
+  assert.deepEqual(merged.fundamentals.map((row) => row.series_id), ["revenue_gaap"]);
+  assert.equal(merged.fundamentals.some((row) => String(row.series_id).endsWith("_pending")), false);
+  assert.equal(merged.fundamentals.some((row) => /Pending review/.test(String(row.display_name || ""))), false);
   const approved = mergeCompanyFundamentals(
     { fundamentals: [{ series_id: "capex", date: "2026-01-01", value: 1, unit: "USD" }] },
-    [{
-      metric_id: "capex",
-      display_name: "Capital expenditures",
-      unit: "USD",
-      approval_state: "approved",
-      series: [{ fiscal_period: "2026Q1", value: 4, reported: true, period_end: "2026-03-31" }],
-    }],
+    [
+      {
+        metric_id: "capex",
+        display_name: "Capital expenditures",
+        unit: "USD",
+        approval_state: "approved",
+        series: [{ fiscal_period: "2026Q1", value: 4, reported: true, period_end: "2026-03-31" }],
+      },
+      {
+        metric_id: "robotaxi_rides",
+        display_name: "Robotaxi rides",
+        unit: "rides",
+        status: "approved",
+        series: [{ fiscal_period: "2026Q1", value: 12, reported: true, period_end: "2026-03-31" }],
+      },
+    ],
   );
-  assert.deepEqual(approved.fundamentals.map((row) => row.value), [4]);
+  assert.deepEqual(approved.fundamentals.filter((row) => row.series_id === "capex").map((row) => row.value), [4]);
+  assert.equal(approved.fundamentals.some((row) => row.series_id === "robotaxi_rides"), true);
   const bars = [{ date: "2026-04-01", close: 100 }];
-  const groups = overlayGroups({ ticker: "TSLA", price_history: bars }, merged, {});
-  const capex = groups.find((group) => group.id === "Fundamentals").overlays.find((overlay) => overlay.id === "FUNDAMENTAL:capex_pending");
-  assert.match(capex.label, /Pending review/);
-  assert.equal(overlayDefinition("FUNDAMENTAL:capex_pending").unit, "USD");
+  const groups = overlayGroups({ ticker: "TSLA", price_history: bars }, approved, {});
+  const fundamentalIds = groups.find((group) => group.id === "Fundamentals").overlays.map((overlay) => overlay.id);
+  assert.ok(fundamentalIds.includes("FUNDAMENTAL:capex"));
+  assert.ok(fundamentalIds.includes("FUNDAMENTAL:robotaxi_rides"));
+  assert.equal(fundamentalIds.some((id) => id.endsWith("_pending") || /Pending review/.test(id)), false);
+  assert.equal(overlayDefinition("FUNDAMENTAL:capex").unit, "USD");
+  assert.equal(overlayDefinition("FUNDAMENTAL:capex").label, "Capital expenditures");
+  assert.equal(overlayDefinition("FUNDAMENTAL:robotaxi_rides").label, "Robotaxi rides");
+  assert.equal(overlayDefinition("FUNDAMENTAL:capex_pending"), null);
+  const stale = overlayGroups(
+    { ticker: "TSLA", price_history: bars },
+    {
+      fundamentals: [
+        {
+          series_id: "capex_pending",
+          date: "2026-04-01",
+          value: 3,
+          unit: "USD",
+          display_name: "Capital expenditures · Pending review",
+          approval_state: "proposed",
+        },
+        {
+          series_id: "robotaxi_rides",
+          date: "2026-04-01",
+          value: 3,
+          unit: "rides",
+          display_name: "Robotaxi rides",
+          approval_state: "proposed",
+        },
+      ],
+    },
+    {},
+  );
+  assert.equal(stale.find((group) => group.id === "Fundamentals"), undefined);
+  assert.deepEqual(
+    valuesForOverlay("FUNDAMENTAL:capex_pending", { bars, chartData: approved }),
+    [null],
+  );
   const maxId = `FUNDAMENTAL:${"a".repeat(65)}`;
   const pendingMax = `FUNDAMENTAL:${"b".repeat(57)}_pending`;
   assert.deepEqual(
@@ -117,7 +167,7 @@ test("proposed company series stay beside approved EDGAR rows and are labeled pe
         },
       },
     }, "TSLA").overlays,
-    ["FUNDAMENTAL:capex_pending", maxId, pendingMax],
+    [maxId],
   );
   const hidden = overlayGroups(
     { ticker: "TSLA", price_history: bars },

@@ -7,6 +7,7 @@ import {
   PANEL_IDS,
   PIN_LIMIT_MESSAGE,
   addTicker,
+  canApproveMetrics,
   canRemove,
   drawerControls,
   emailFromIdToken,
@@ -125,6 +126,24 @@ test("a removed selection falls back to the first pin, then the first ticker", (
   assert.equal(fallbackSelection(prefs(["A", "B"], ["B"]), "A"), "A");
   assert.equal(fallbackSelection(prefs(["A", "B"], ["B"]), "GONE"), "B");
   assert.equal(fallbackSelection(prefs(["A", "B"]), null), "A");
+});
+
+function accessToken(claims) {
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  return `header.${payload}.sig`;
+}
+
+test("only a non-demo admin group can approve company metrics", () => {
+  const admin = accessToken({ "cognito:groups": ["admin"], username: "owner@example.com" });
+  assert.equal(canApproveMetrics(admin, "owner@example.com"), true);
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": "admin" })), true);
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": "[admin]" })), true);
+  assert.equal(canApproveMetrics(accessToken({ username: "owner@example.com" })), false);
+  const demo = "ram.vellamsetti@gmail.com";
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": ["admin"], username: demo }), demo), false);
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": "admin", email: demo })), false);
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": ["admin"], "cognito:username": demo })), false);
+  assert.equal(canApproveMetrics(admin, demo), false);
 });
 
 test("the email claim is read from the ID token payload", () => {

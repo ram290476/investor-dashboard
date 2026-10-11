@@ -16,7 +16,8 @@ Item (table user_prefs, partition key user_sub):
                            theme (see THEMES; missing legacy values default to industrial-dark),
                            panels (optional map of bottom-drawer id -> "open"|"closed"; unknown ids
                            are ignored, other values are rejected, omitted key keeps the stored map)
-    chart_settings map     per-ticker overlay IDs and under-chart lane IDs, limited to tickers and allowlists
+    chart_settings map     per-ticker overlay IDs and under-chart lane IDs, limited to tickers and allowlists.
+                           FUNDAMENTAL:<id>_pending overlays are dropped on read and write.
     version       number   optimistic concurrency; PUT must send the version it read
     updated_at    string   ISO-8601 UTC
 
@@ -58,6 +59,10 @@ EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "invdash.prefs")
 MAX_TICKERS = int(os.environ.get("MAX_TICKERS_PER_USER", "25"))
 MAX_PINNED = 6
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+METRIC_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,64}$")
+ADMIN_GROUP = os.environ.get("METRIC_ADMIN_GROUP", "admin")
+# The public demo account is never an admin, even if it is added to the group by mistake.
+DEMO_ACCOUNT = "ram.vellamsetti@gmail.com"
 PALETTES = {"theme", "green-red", "red-green", "blue-orange"}
 THEMES = {
     "industrial-dark", "terminal-amber", "charting-navy",
@@ -82,7 +87,7 @@ CHART_OVERLAYS = {
     "FUNDAMENTAL:shares_outstanding", "FUNDAMENTAL:public_float_usd",
     "NEWS:SENTIMENT",
 }
-# Company metrics beyond the static ids. The id may include a _pending suffix.
+# Company metrics beyond the static ids. Pending-review aliases (`*_pending`) are not selectable.
 # \Z (not $) so a trailing newline is not a second, distinct overlay.
 FUNDAMENTAL_OVERLAY_RE = re.compile(r"\AFUNDAMENTAL:[A-Za-z][A-Za-z0-9_]{0,64}\Z")
 DEFAULTS = {
@@ -142,7 +147,14 @@ def normalize_panels(raw) -> dict:
 
 def overlay_allowed(item: str) -> bool:
     """Static overlays, plus any FUNDAMENTAL:<id> with a safe metric id."""
+    if item.endswith("_pending"):
+        return False
     return item in CHART_OVERLAYS or FUNDAMENTAL_OVERLAY_RE.fullmatch(item) is not None
+
+
+def visible_overlays(overlays: list) -> list:
+    """Drop saved pending-review series. Those ids are no longer chart overlays."""
+    return [item for item in overlays if isinstance(item, str) and not item.endswith("_pending")]
 
 
 def normalize_panel_mode(raw) -> str:
@@ -219,6 +231,7 @@ def validate(body: dict, stored_tickers: list[str] | None = None) -> dict:
             raise ValidationError("chart_settings contains an unsupported overlay")
         if any(not isinstance(item, str) for item in lanes):
             raise ValidationError("chart_settings contains an unsupported lane")
+        overlays = visible_overlays(overlays)
         if len(overlays) > 5 or len(overlays) != len(set(overlays)):
             raise ValidationError("Choose at most 5 unique chart overlays")
         if any(not overlay_allowed(item) for item in overlays):
@@ -294,7 +307,10 @@ def _public(item: dict) -> dict:
         "pinned": list(item.get("pinned", [])),
         "display": _public_display(item),
         "chart_settings": {
-            ticker: {"overlays": list(settings.get("overlays", [])), "lanes": list(settings.get("lanes", []))}
+            ticker: {
+                "overlays": visible_overlays(list(settings.get("overlays", []))),
+                "lanes": list(settings.get("lanes", [])),
+            }
             for ticker, settings in chart_settings.items()
             if isinstance(settings, dict)
         },
@@ -486,6 +502,7 @@ _ERROR_MESSAGES = {
     "SERVING_READ_FAILED": "Dashboard data is being rebuilt; try again in a minute.",
     "PREFS_STORE_UNAVAILABLE": "Preferences could not be reached. Try again in a minute.",
     "SERVING_DOCUMENT_INVALID": "Dashboard data is being rebuilt; try again in a minute.",
+    "CATALOG_WRITE_FAILED": "The metric review could not be saved. Try again in a minute.",
     "INTERNAL": "Something went wrong. Try again in a minute.",
 }
 _TRANSIENT_AWS_CODES = frozenset({
@@ -537,6 +554,8 @@ def _route_label(method: str, path: object) -> str:
         return f"{method} /unknown"
     if path.startswith("/chart/"):
         return f"{method} /chart/{{ticker}}"
+    if path.startswith("/stock/") and "/metrics/" in path:
+        return f"{method} /stock/{{ticker}}/metrics/{{metric_id}}"
     if path.startswith("/stock/"):
         return f"{method} /stock/{{ticker}}"
     if path in _KNOWN_PATHS:
@@ -552,7 +571,9 @@ def _aws_error_code(exc: ClientError) -> str:
 def _client_failure(exc: ClientError) -> tuple[int, str]:
     operation = getattr(exc, "operation_name", "") or ""
     aws_code = _aws_error_code(exc)
-    if operation in _STS_OPERATIONS:
+    if operation == "PutObject":
+        code = "CATALOG_WRITE_FAILED"
+    elif operation in _STS_OPERATIONS:
         code = "STS_UNAVAILABLE"
     elif operation in _SERVING_OPERATIONS or aws_code.startswith("KMS"):
         code = "SERVING_READ_FAILED"
@@ -640,6 +661,181 @@ def _request_parts(event: dict) -> tuple[str | None, str, str, str]:
     return sub, method, path, _route_label(_safe_method(method), path)
 
 
+def _jwt_claims(event: dict) -> dict:
+    context = event.get("requestContext")
+    context = context if isinstance(context, dict) else {}
+    authorizer = context.get("authorizer")
+    authorizer = authorizer if isinstance(authorizer, dict) else {}
+    jwt = authorizer.get("jwt")
+    jwt = jwt if isinstance(jwt, dict) else {}
+    claims = jwt.get("claims")
+    return claims if isinstance(claims, dict) else {}
+
+
+def _claim_groups(claims: dict) -> set[str]:
+    raw = claims.get("cognito:groups")
+    if isinstance(raw, list):
+        parts = raw
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        parts = re.split(r"[\s,]+", text)
+    else:
+        parts = []
+    return {str(part).strip().strip("\"'") for part in parts if str(part).strip()}
+
+
+def _identity_values(claims: dict) -> list[str]:
+    values = []
+    for key in ("email", "username", "cognito:username"):
+        value = claims.get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    return values
+
+
+def _is_demo_account(claims: dict) -> bool:
+    return any(value.lower() == DEMO_ACCOUNT for value in _identity_values(claims))
+
+
+def _is_metric_admin(claims: dict) -> bool:
+    """Cognito group membership. The published demo account is refused."""
+    if _is_demo_account(claims):
+        return False
+    return ADMIN_GROUP in _claim_groups(claims)
+
+
+def _reviewer(claims: dict) -> str:
+    for value in _identity_values(claims):
+        if value.lower() != DEMO_ACCOUNT:
+            return value[:256]
+    sub = claims.get("sub")
+    return sub if isinstance(sub, str) and sub else "admin"
+
+
+def _catalog_key(ticker: str) -> str:
+    return f"catalog/{ticker}.json"
+
+
+def _read_json_object(key: str) -> dict | None:
+    if not LAKE_BUCKET:
+        raise RuntimeError("LAKE_BUCKET is not configured")
+    try:
+        obj = _s3.get_object(Bucket=LAKE_BUCKET, Key=key)
+    except ClientError as exc:
+        if _aws_error_code(exc) in {"NoSuchKey", "404"}:
+            return None
+        raise
+    document = json.loads(obj["Body"].read())
+    if not isinstance(document, dict):
+        raise ServingDocumentError("catalog document must be a JSON object")
+    return document
+
+
+def _write_json_object(key: str, document: dict) -> None:
+    if not LAKE_BUCKET:
+        raise RuntimeError("LAKE_BUCKET is not configured")
+    body = json.dumps(document, separators=(",", ":"), default=str).encode()
+    _s3.put_object(Bucket=LAKE_BUCKET, Key=key, Body=body, ContentType="application/json")
+
+
+def _set_catalog_metric(
+    catalog: dict, ticker: str, metric_id: str, status: str, reviewer: str, approved_at: str,
+) -> dict:
+    updated = dict(catalog)
+    updated["ticker"] = str(updated.get("ticker") or ticker).upper()
+    metrics = [item for item in updated.get("metrics") or [] if isinstance(item, dict)]
+    entry = next((item for item in metrics if item.get("metric_id") == metric_id), None)
+    if entry is None:
+        entry = {"metric_id": metric_id}
+        metrics.append(entry)
+    entry["status"] = status
+    if status == "approved":
+        entry["approved_by"] = reviewer
+        entry["approved_at"] = approved_at
+    else:
+        entry["approved_by"] = None
+        entry["approved_at"] = None
+    updated["metrics"] = metrics
+    return updated
+
+
+def _freshness_label(metrics: list[dict]) -> str:
+    approved = 0
+    proposed = 0
+    for metric in metrics:
+        state = metric.get("approval_state") or metric.get("status")
+        if metric.get("approved") is True and state != "proposed":
+            approved += 1
+        elif state == "proposed":
+            proposed += 1
+    if approved and proposed:
+        return "IR data approved · pending review included"
+    if approved:
+        return "IR data approved"
+    if proposed:
+        return "Pending review"
+    return "No approved company metrics"
+
+
+def _patch_serving_metric(document: dict, metric_id: str, status: str, reviewer: str, approved_at: str) -> dict:
+    """Rewrite one metric in the serving file so the page updates before the next collect."""
+    updated = json.loads(json.dumps(document))
+    metrics = [item for item in updated.get("metrics") or [] if isinstance(item, dict)]
+    for metric in metrics:
+        if metric.get("metric_id") != metric_id:
+            continue
+        approved = status == "approved"
+        metric["approved"] = approved
+        metric["approval_state"] = status
+        metric["status"] = status
+        if approved:
+            metric["approved_by"] = reviewer
+            metric["approved_at"] = approved_at
+        else:
+            metric["approved_by"] = None
+            metric["approved_at"] = None
+        provenance = metric.get("provenance")
+        if isinstance(provenance, dict):
+            provenance["approval_state"] = status
+    metrics.sort(key=lambda metric: (
+        0 if metric.get("approved") is True and metric.get("approval_state") != "proposed" else 1
+    ))
+    updated["metrics"] = metrics
+    if updated.get("run_status") in {None, "ok"}:
+        updated["freshness_label"] = _freshness_label(metrics)
+    return updated
+
+
+def _review_metric(event, sub: str, claims: dict, ticker: str, metric_id: str, respond) -> dict:
+    if not _is_metric_admin(claims):
+        return respond(403, {"error": "Only an admin can change metric review status"})
+    if ticker not in get_prefs(_table_for(sub), sub)["tickers"]:
+        return respond(403, {"error": "Ticker is not in your watchlist"})
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError:
+        return respond(400, {"error": "Body must be a JSON object"})
+    if not isinstance(body, dict):
+        return respond(400, {"error": "Body must be a JSON object"})
+    status = body.get("status")
+    if status not in {"approved", "proposed"}:
+        return respond(400, {"error": "status must be approved or proposed"})
+    document = _read_serving_json(f"serving/stock/{ticker}.json")
+    metrics = document.get("metrics") if isinstance(document, dict) else None
+    if not any(isinstance(metric, dict) and metric.get("metric_id") == metric_id for metric in metrics or []):
+        return respond(404, {"error": "Metric is not on this company page"})
+    reviewer = _reviewer(claims)
+    approved_at = datetime.now(UTC).isoformat(timespec="seconds")
+    catalog = _read_json_object(_catalog_key(ticker)) or {"ticker": ticker, "catalog_version": 1, "metrics": []}
+    catalog = _set_catalog_metric(catalog, ticker, metric_id, status, reviewer, approved_at)
+    patched = _patch_serving_metric(document, metric_id, status, reviewer, approved_at)
+    _write_json_object(_catalog_key(ticker), catalog)
+    _write_json_object(f"serving/stock/{ticker}.json", patched)
+    return respond(200, _public_stock(patched, ticker))
+
+
 def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
     def respond(status: int, body: dict, **kwargs) -> dict:
         return _response(status, body, event, **kwargs)
@@ -695,6 +891,15 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
             gzip_key=chart_key,
             cache_key=f"chart:{ticker}:{_etag_token(etag, raw_bytes)}",
         )
+    review = re.fullmatch(r"/stock/([A-Za-z][A-Za-z0-9.\-]{0,9})/metrics/([A-Za-z][A-Za-z0-9_]{0,64})", path)
+    if review and method == "PUT":
+        ticker = review.group(1).upper()
+        metric_id = review.group(2)
+        if not METRIC_ID_RE.fullmatch(metric_id):
+            return respond(400, {"error": "Metric id is not valid"})
+        return _review_metric(event, sub, _jwt_claims(event), ticker, metric_id, respond)
+    if review:
+        return respond(405, {"error": f"{method} not allowed"})
     if method == "GET" and path.startswith("/stock/"):
         match = re.fullmatch(r"/stock/([A-Za-z][A-Za-z0-9.\-]{0,9})", path)
         if not match:

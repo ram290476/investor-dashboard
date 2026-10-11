@@ -418,6 +418,67 @@ def set_catalog_status(
     return updated
 
 
+def catalog_object_key(ticker: str) -> str:
+    """Lake review record. The packaged catalog stays the metric definitions."""
+    return f"catalog/{str(ticker or '').upper()}.json"
+
+
+def preserve_approved_status(existing: dict | None, incoming: dict) -> dict:
+    """A collect may add proposed metrics. It must not clear an approval already stored."""
+    updated = json.loads(json.dumps(incoming))
+    if not isinstance(existing, dict):
+        return updated
+    saved = {
+        item.get("metric_id"): item
+        for item in existing.get("metrics") or []
+        if isinstance(item, dict) and item.get("status") == "approved"
+    }
+    for entry in updated.get("metrics") or []:
+        prior = saved.get(entry.get("metric_id"))
+        if not prior:
+            continue
+        entry["status"] = "approved"
+        entry["approved_by"] = prior.get("approved_by")
+        entry["approved_at"] = prior.get("approved_at")
+    return updated
+
+
+def review_catalog(packaged: dict, lake: dict | None) -> dict:
+    """Lake review status is the live record, including an undo back to proposed.
+
+    Approved lake rows are applied again so a packaged ``proposed`` copy cannot clear them.
+    """
+    updated = json.loads(json.dumps(packaged))
+    if not isinstance(lake, dict):
+        return updated
+    lake_by_id = {
+        item.get("metric_id"): item
+        for item in lake.get("metrics") or []
+        if isinstance(item, dict) and item.get("metric_id")
+    }
+    for entry in updated.get("metrics") or []:
+        saved = lake_by_id.get(entry.get("metric_id"))
+        if not saved:
+            continue
+        status = saved.get("status")
+        if status not in {"approved", "proposed", "rejected"}:
+            continue
+        entry["status"] = status
+        entry["approved_by"] = saved.get("approved_by") if status == "approved" else None
+        entry["approved_at"] = saved.get("approved_at") if status == "approved" else None
+    return preserve_approved_status(lake, updated)
+
+
+def _read_lake_catalog(read_json, ticker: str) -> dict | None:
+    if read_json is None:
+        return None
+    try:
+        loaded = read_json(catalog_object_key(ticker))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
 def normalize_label(text: str) -> str:
     """Lowercase a row label and drop footnote markers and unit parentheticals."""
     cleaned = str(text).replace("_", " ")
@@ -1949,15 +2010,13 @@ def _fill_gaps(points: list[dict]) -> list[dict]:
 
 
 def _row_servable(row: dict, entry: dict | None) -> bool:
-    """Approved catalog rows must be official. Proposed rows are served except LLM and news."""
+    """Catalog status decides. LLM and news stay out. A stale row flag cannot hide an approval."""
     if entry is None:
         return False
     status = entry.get("status") or "proposed"
     if status not in {"approved", "proposed"}:
         return False
     if row.get("method") == "llm" or row.get("source_kind") in {"llm", "news"}:
-        return False
-    if status == "approved" and row.get("approved") is not True:
         return False
     return True
 
@@ -2240,7 +2299,7 @@ def merge_proposals(catalog: dict, proposals: list[dict]) -> dict:
         proposal["approved_at"] = None
         updated["metrics"].append(proposal)
         known.add(proposal["metric_id"])
-    return updated
+    return preserve_approved_status(catalog, updated)
 
 
 def validate_catalog(document: dict) -> list[str]:
@@ -3800,7 +3859,7 @@ def run_extract(
             failed.append(item.get("key") or ticker)
             continue
         text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
-        catalog = load_catalog(ticker)
+        catalog = review_catalog(load_catalog(ticker), _read_lake_catalog(read_json, ticker))
         fiscal_end_month = int(item.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
         kind = item.get("source_kind") or "deck"
         if kind == "xbrl":
@@ -3844,7 +3903,7 @@ def run_extract(
     tickers = []
     total = 0
     for ticker, rows in by_ticker.items():
-        catalog = load_catalog(ticker)
+        catalog = review_catalog(load_catalog(ticker), _read_lake_catalog(read_json, ticker))
         ir_only = [row for row in rows if row.get("source_kind") != "xbrl"]
         ir_winners, _ignored = dedupe_observations(ir_only)
         for item in reconcile_rows(ir_winners, xbrl_value_map(rows)):
@@ -3900,7 +3959,7 @@ def run_serve(event: dict | None, *, read_json, write_json, now: str | None = No
     mismatches = list(flat.get("mismatches") or [])
     served = []
     for ticker in tickers:
-        catalog = load_catalog(ticker)
+        catalog = review_catalog(load_catalog(ticker), _read_lake_catalog(read_json, ticker))
         payload = read_json(curated_observations_key(ticker)) or {}
         rows = _load_observations(payload.get("rows") or [])
         previous = read_json(serving_stock_key(ticker))

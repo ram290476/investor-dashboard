@@ -146,17 +146,35 @@ export function fallbackSelection(prefs, selected) {
   return prefs.pinned?.[0] || prefs.tickers?.[0] || null;
 }
 
-/** Email claim from a Cognito ID token (display only; the API never trusts this). */
-export function emailFromIdToken(idToken) {
+const DEMO_METRIC_ADMIN = "ram.vellamsetti@gmail.com";
+
+/** JWT payload for display only. The API checks the Cognito group itself. */
+export function jwtClaims(token) {
   try {
-    const payload = String(idToken || "").split(".")[1];
+    const payload = String(token || "").split(".")[1];
     if (!payload) return null;
     const base64 = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
     const claims = JSON.parse(globalThis.atob(base64));
-    return typeof claims.email === "string" ? claims.email : null;
+    return claims && typeof claims === "object" ? claims : null;
   } catch {
     return null;
   }
+}
+
+/** Email claim from a Cognito ID token (display only; the API never trusts this). */
+export function emailFromIdToken(idToken) {
+  const email = jwtClaims(idToken)?.email;
+  return typeof email === "string" ? email : null;
+}
+
+/** True when the access token's Cognito groups include admin. The public demo account is never an admin. */
+export function canApproveMetrics(accessToken, email = "") {
+  const claims = jwtClaims(accessToken) || {};
+  const identities = [email, claims.email, claims.username, claims["cognito:username"]];
+  if (identities.some((value) => String(value || "").trim().toLowerCase() === DEMO_METRIC_ADMIN)) return false;
+  const groups = claims["cognito:groups"];
+  const list = Array.isArray(groups) ? groups : String(groups || "").split(/[\s,]+/);
+  return list.some((group) => String(group).replace(/[[\]"]/g, "").trim() === "admin");
 }
 
 /** Per-ticker history status for a just-added ticker (#33 adds a richer pipeline status later). */

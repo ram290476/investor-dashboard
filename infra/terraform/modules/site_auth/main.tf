@@ -67,6 +67,16 @@ resource "aws_cognito_user_pool" "this" {
   }
 }
 
+# Company-metric approval. Terraform creates the group and does not add anyone.
+# The public demo account ram.vellamsetti@gmail.com must not be added.
+# The owner adds their own account with:
+#   aws cognito-idp admin-add-user-to-group --user-pool-id <user-pool-id> --username <your-email> --group-name admin
+resource "aws_cognito_user_group" "admin" {
+  name         = "admin"
+  user_pool_id = aws_cognito_user_pool.this.id
+  description  = "Approve or undo company-metric review. No members are assigned in Terraform."
+}
+
 # Public SPA client: authorization-code flow with PKCE, no client secret, no Amplify.
 resource "aws_cognito_user_pool_client" "web" {
   name                                 = "${var.name}-web"

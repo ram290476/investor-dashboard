@@ -7,6 +7,7 @@ import {
   callsCopy,
   emptyKpiCopy,
   fillQuarterGaps,
+  fiscalQuarterEnd,
   formatMetricValue,
   freshnessBadge,
   monthDayLabel,
@@ -173,9 +174,13 @@ test("collected XBRL metrics and CapEx render as pending charts with revision co
   const hidden = stockPanels(payload, { fundamentals: [] }, { review: "approved" });
   assert.equal(hidden.pendingCount, 0);
   assert.equal(hidden.fundamentals.length, 0);
-  assert.match(app, /review-badge/);
+  const cardSource = app.slice(app.indexOf("function renderMetricCard"), app.indexOf("async function submitMetricReview"));
+  assert.doesNotMatch(cardSource, /review-badge|renderReviewBadge|Pending review|stock-metric-pending/);
+  const metricsSource = app.slice(app.indexOf("function renderCompanyMetrics"), app.indexOf("function appendMetricGroups"));
+  assert.match(metricsSource, /renderReviewBadge\(\)/);
+  assert.match(metricsSource, /Pending review/);
+  assert.match(app.slice(app.indexOf("function renderReviewBadge"), app.indexOf("function renderMetricTable")), /review-badge/);
   assert.match(app, /stock-metric-capex/);
-  assert.match(app, /Pending review/);
   assert.match(app, /stock-bar-revised-mark", "Rev"/);
   assert.match(styles, /\.stock-bar-revised\s*\{[^}]*repeating-linear-gradient/);
   const mixed = stockPanels({
@@ -323,6 +328,87 @@ test("company header pins Back to dashboard at the top-right", () => {
   assert.doesNotMatch(linkCss, /#[0-9a-fA-F]{3,8}/);
   assert.doesNotMatch(styles, /\.stock-dashboard-link\s*\{[^}]*align-self:\s*flex-end/);
   assert.doesNotMatch(styles, /\.stock-heading-copy\s*\{[^}]*flex-basis:\s*100%/);
+});
+
+function operatingSeries(periods, extra = {}) {
+  return {
+    metrics: [{
+      metric_id: "data_center_revenue",
+      approved: true,
+      approval_state: "approved",
+      display_name: "Data center revenue",
+      unit: "USD",
+      category: "operating",
+      latest: { fiscal_period: periods.at(-1).fiscal_period, value: periods.at(-1).value, reported: true },
+      series: periods,
+    }],
+  };
+}
+
+function fiscalPoints(ticker, fromYear, fromQuarter, toYear, toQuarter) {
+  const points = [];
+  let year = fromYear;
+  let quarter = fromQuarter;
+  let value = 1;
+  while (year < toYear || (year === toYear && quarter <= toQuarter)) {
+    points.push({ fiscal_period: `${year}Q${quarter}`, value, reported: true });
+    value += 1;
+    quarter += 1;
+    if (quarter === 5) {
+      year += 1;
+      quarter = 1;
+    }
+  }
+  return points.map((point) => ({ ...point, ticker }));
+}
+
+test("NVDA and MRVL quarter ends use the fiscal calendar, not the label year", () => {
+  assert.equal(fiscalQuarterEnd("2027Q2", "NVDA"), "2026-07-26");
+  assert.equal(fiscalQuarterEnd("2026Q1", "NVDA"), "2025-04-27");
+  assert.equal(fiscalQuarterEnd("2026Q4", "NVDA"), "2026-01-25");
+  assert.equal(fiscalQuarterEnd("2026Q1", "MRVL"), "2025-05-03");
+  assert.equal(fiscalQuarterEnd("2027Q1", "MRVL"), "2026-05-02");
+  assert.equal(fiscalQuarterEnd("2027Q2", "MRVL"), "2026-08-01");
+  assert.equal(fiscalQuarterEnd("2026Q2", "TSLA"), "2026-06-30");
+});
+
+test("company metric panels follow the chart period by period-end date", () => {
+  const asOf = "2026-10-11";
+  const nvda = fiscalPoints("NVDA", 2026, 1, 2027, 3).map(({ fiscal_period, value, reported }) => ({
+    fiscal_period, value, reported,
+  }));
+  const oneYear = stockPanels(operatingSeries(nvda), null, { ticker: "NVDA", period: "1Y", asOf });
+  const kept = oneYear.operating[0].series.filter((point) => point.reported).map((point) => point.fiscal_period);
+  assert.deepEqual(kept, ["2026Q3", "2026Q4", "2027Q1", "2027Q2"]);
+  assert.equal(oneYear.operating[0].series.find((point) => point.fiscal_period === "2027Q2").period_end, "2026-07-26");
+
+  const overridden = stockPanels(operatingSeries([
+    { fiscal_period: "2024Q1", period_end: "2027-06-30", value: 1, reported: true },
+    { fiscal_period: "2024Q2", period_end: "2026-06-30", value: 2, reported: true },
+  ]), null, { ticker: "NVDA", period: "1Y", asOf });
+  assert.deepEqual(
+    overridden.operating[0].series.filter((point) => point.reported).map((point) => point.fiscal_period),
+    ["2024Q2"],
+  );
+
+  const latest = stockPanels(operatingSeries(nvda), null, { ticker: "NVDA", period: "1M", asOf });
+  assert.deepEqual(latest.operating[0].series.map((point) => point.fiscal_period), ["2027Q3"]);
+
+  const fiveYearPoints = fiscalPoints("NVDA", 2021, 1, 2027, 2).map(({ fiscal_period, value, reported }) => ({
+    fiscal_period, value, reported,
+  }));
+  const fiveYear = stockPanels(operatingSeries(fiveYearPoints), null, { ticker: "NVDA", period: "5Y", asOf });
+  const fiveKept = fiveYear.operating[0].series.filter((point) => point.reported);
+  assert.equal(fiveKept.length, 20);
+  assert.equal(fiveKept[0].fiscal_period, "2022Q3");
+  assert.equal(fiveKept.at(-1).fiscal_period, "2027Q2");
+
+  const empty = stockPanels(operatingSeries([
+    { fiscal_period: "2026Q4", period_end: "2026-01-25", value: 4, reported: true },
+  ]), null, { ticker: "NVDA", period: "3M", asOf });
+  assert.equal(empty.operating[0].emptyPeriod, true);
+  assert.deepEqual(empty.operating[0].series, []);
+  assert.equal(empty.operating[0].latest, "not reported");
 });
 
 test("stock page text and up/down colors stay AA on all six themes", () => {

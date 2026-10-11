@@ -233,8 +233,21 @@ data "aws_iam_policy_document" "api" {
     ]
   }
   statement {
+    sid       = "ReadMetricCatalog"
+    actions   = ["s3:GetObject"]
+    resources = ["${var.lake_bucket_arn}/catalog/*"]
+  }
+  statement {
+    sid     = "WriteMetricReview"
+    actions = ["s3:PutObject"]
+    resources = [
+      "${var.lake_bucket_arn}/catalog/*",
+      "${var.lake_bucket_arn}/serving/stock/*",
+    ]
+  }
+  statement {
     sid       = "DecryptDashboardServingObjects"
-    actions   = ["kms:Decrypt"]
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
     resources = [var.data_key_arn]
     condition {
       test     = "StringEquals"
@@ -347,7 +360,7 @@ resource "aws_apigatewayv2_integration" "prefs" {
 }
 
 resource "aws_apigatewayv2_route" "site" {
-  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /stock/{ticker}"])
+  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /stock/{ticker}", "PUT /stock/{ticker}/metrics/{metric_id}"])
   api_id             = aws_apigatewayv2_api.site.id
   route_key          = each.value
   target             = "integrations/${aws_apigatewayv2_integration.prefs.id}"
@@ -377,11 +390,12 @@ resource "aws_apigatewayv2_stage" "default" {
 
 resource "aws_lambda_permission" "api_route" {
   for_each = {
-    prefs     = "prefs"
-    dashboard = "dashboard"
-    status    = "status"
-    chart     = "chart/*"
-    stock     = "stock/*"
+    prefs        = "prefs"
+    dashboard    = "dashboard"
+    status       = "status"
+    chart        = "chart/*"
+    stock        = "stock/*"
+    stock_metric = "stock/*/metrics/*"
   }
   statement_id  = "AllowApiGateway-${each.key}"
   action        = "lambda:InvokeFunction"
@@ -432,6 +446,10 @@ locals {
     INTERNAL = {
       event       = "prefs_api_error"
       description = "Site API hit an unexpected error"
+    }
+    CATALOG_WRITE_FAILED = {
+      event       = "prefs_api_error"
+      description = "Site API could not save a company-metric review"
     }
     TICKER_ADDED_PUBLISH_FAILED = {
       event       = "ticker_added_publish_failed"

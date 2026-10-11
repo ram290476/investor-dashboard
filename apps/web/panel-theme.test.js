@@ -28,15 +28,14 @@ test("the chart panel opens the company page from the right of the live price", 
   assert.doesNotMatch(styles, /\.company-page-link[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
 });
 
-test("the ticker bar keeps its research arrow and the company-page arrow", () => {
+test("the ticker bar keeps its research arrow and opens the company page from the ticker", () => {
   const watch = slice("function renderWatchlist", "function periodDirection");
   assert.match(watch, /ticker-research/);
   assert.match(watch, /navigateToResearch/);
-  assert.match(watch, /ticker-stock-link/);
-  assert.match(watch, /Open \$\{ticker\} page →/);
   assert.match(watch, /navigateToStock\(ticker\)/);
-  assert.match(styles, /\.ticker-stock-link\s*\{[^}]*color:\s*var\(--blue\)/);
-  assert.doesNotMatch(styles, /\.ticker-stock-link[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
+  assert.doesNotMatch(watch, /ticker-stock-link/);
+  assert.doesNotMatch(watch, /Open \$\{ticker\} page/);
+  assert.doesNotMatch(styles, /\.ticker-stock-link/);
 });
 
 test("government contracts use catalyst rows and month-day dates", () => {
@@ -89,7 +88,42 @@ test("company page panels use panel chrome, month-day dates, and direction marks
   assert.doesNotMatch(styles, /\.stock-section\s*\{[^}]*#[0-9a-fA-F]{3,8}/);
 });
 
-test("filings, news, and the dashboard company panel stay the reference", () => {
+test("chart cards omit review badges and the review toggle sits above Operating KPIs", () => {
+  const card = slice("function renderMetricCard", "async function submitMetricReview");
+  assert.doesNotMatch(card, /renderReviewBadge/);
+  assert.doesNotMatch(card, /Pending review/);
+  assert.doesNotMatch(card, /stock-metric-pending/);
+  assert.doesNotMatch(card, /metric-status/);
+  const groups = slice("function appendMetricGroups", "function renderStockPage");
+  assert.doesNotMatch(groups, /Pending review/);
+  assert.doesNotMatch(groups, /renderReviewBadge/);
+  const page = slice("function renderStockPage", "function renderResearchPage");
+  const heading = page.slice(0, page.indexOf("const page = node"));
+  assert.doesNotMatch(heading, /renderMetricReview/);
+  assert.match(page, /id === "kpis"\) block\.append\(renderMetricReview\(\)\)/);
+  const metricsAt = page.indexOf("renderCompanyMetrics(listed, pageState)");
+  const kpisAt = page.indexOf('section("kpis", "Operating KPIs", charts.operating');
+  assert.match(page, /stockPanels\(payload, chartData, \{ \.\.\.periodOptions, review \}\)/);
+  assert.match(page, /stockPanels\(payload, chartData, \{ \.\.\.periodOptions, review: "all" \}\)/);
+  assert.match(page, /charts\.fundamentals/);
+  assert.match(page, /charts\.guidance/);
+  assert.ok(metricsAt > 0 && kpisAt > metricsAt);
+  const metrics = slice("function renderCompanyMetrics", "function appendMetricGroups");
+  assert.match(metrics, /Pending review/);
+  assert.match(metrics, /renderReviewBadge\(\)/);
+  assert.match(metrics, /"Approve"/);
+  assert.match(metrics, /"Undo"/);
+  assert.match(metrics, /canApproveMetrics/);
+  assert.match(metrics, /stock-section company-metrics/);
+  const dashboard = slice("function renderDashboard()", "async function refreshData");
+  assert.doesNotMatch(dashboard, /renderCompanyPanel/);
+  const research = slice("function renderResearchPage", "function renderNotFoundPage");
+  assert.match(research, /renderCompanyPanel/);
+  const tabs = slice("const TAB_DETAIL_IDS", "function panelLabel");
+  assert.doesNotMatch(tabs, /"company"/);
+});
+
+test("filings, news, and the company themes panel stay the reference", () => {
   const filings = slice("function renderFilings", "function renderCompanyPanel");
   const news = slice("function renderNewsHeadlineGroups", "function filingsSummary");
   const company = slice("function renderCompanyPanel", "function renderAboutData");
