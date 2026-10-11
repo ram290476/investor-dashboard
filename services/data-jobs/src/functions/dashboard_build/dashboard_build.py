@@ -35,6 +35,25 @@ SHORT_COLUMNS = [
 ]
 OPTIONS_COLUMNS = ["ticker", "date", "put_call_volume_ratio", "iv30", "iv_available"]
 MACRO_COLUMNS = ["series_id", "obs_date", "date", "value", "ingested_at"]
+# Same symbols as universe.INDEX_PROXIES. Kept here so this module does not import the prefs client.
+INDEX_PROXIES = ("SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH")
+# Six months of sessions for the correlation-drift sparkline. The dashboard file does not carry it.
+CORRELATION_HISTORY_ROWS = 126
+BETA_WINDOW = 90
+BETA_MIN_PAIRS = 20
+# Session counts match apps/web/chart-period.js. YTD and 5Y use the same availability rules.
+PERIOD_SESSIONS = (
+    ("1D", 1),
+    ("1W", 5),
+    ("1M", 21),
+    ("3M", 63),
+    ("YTD", None),
+    ("1Y", 252),
+    ("3Y", 756),
+    ("5Y", 1259),
+)
+FIVE_YEAR_MIN_SPAN_YEARS = 4.75
+FIVE_YEAR_MIN_BARS = 1000
 
 
 def number(value: object) -> float | None:
@@ -342,6 +361,150 @@ def latest_short_interest(rows: list[dict]) -> dict[str, dict]:
     return latest
 
 
+def _chart_bars(history: list[dict]) -> list[dict]:
+    """Adjusted closes, falling back to close, in stored order. Matches chartValue()."""
+    bars = []
+    for row in history:
+        value = number(row.get("adj_close"))
+        if value is None:
+            value = number(row.get("close"))
+        day = str(row.get("date") or "")[:10]
+        if value is None or not day:
+            continue
+        bars.append({"date": day, "value": value})
+    return bars
+
+
+def _span_years(bars: list[dict]) -> float | None:
+    try:
+        start = date.fromisoformat(bars[0]["date"])
+        end = date.fromisoformat(bars[-1]["date"])
+    except ValueError:
+        return None
+    if end < start:
+        return None
+    return (end - start).days / 365.25
+
+
+def _period_available(bars: list[dict], period: str, sessions: int | None) -> bool:
+    if len(bars) < 2:
+        return False
+    if period == "YTD":
+        year = bars[-1]["date"][:4]
+        return sum(1 for bar in bars if bar["date"].startswith(year)) > 1
+    if period == "5Y":
+        if len(bars) >= MAX_PRICE_ROWS:
+            return True
+        span = _span_years(bars)
+        return span is not None and span >= FIVE_YEAR_MIN_SPAN_YEARS and len(bars) >= FIVE_YEAR_MIN_BARS
+    return sessions is not None and len(bars) > sessions
+
+
+def _period_offset(bars: list[dict], period: str, sessions: int | None) -> int:
+    if period == "YTD":
+        year = bars[-1]["date"][:4]
+        first = next(index for index, bar in enumerate(bars) if bar["date"].startswith(year))
+        return len(bars) - first - 1
+    if period == "5Y":
+        return min(sessions or 0, len(bars) - 1)
+    return sessions or 0
+
+
+def period_returns(history: list[dict]) -> dict[str, float | None]:
+    """One adjusted return per chart period. Missing windows stay null, never zero."""
+    bars = _chart_bars(history)
+    returns: dict[str, float | None] = {}
+    for period, sessions in PERIOD_SESSIONS:
+        if not _period_available(bars, period, sessions):
+            returns[period] = None
+            continue
+        offset = _period_offset(bars, period, sessions)
+        before = bars[-1 - offset]["value"]
+        latest = bars[-1]["value"]
+        returns[period] = None if before == 0 else latest / before - 1
+    return returns
+
+
+def _daily_returns(bars: list[dict]) -> list[tuple[str, float]]:
+    out = []
+    for index in range(1, len(bars)):
+        previous = bars[index - 1]["value"]
+        current = bars[index]["value"]
+        if previous == 0:
+            continue
+        out.append((bars[index]["date"], current / previous - 1))
+    return out
+
+
+def beta_rho(
+    stock_history: list[dict],
+    index_history: list[dict],
+    window: int = BETA_WINDOW,
+    min_pairs: int = BETA_MIN_PAIRS,
+) -> dict[str, float | int | None]:
+    """Pearson correlation and beta of the stock on the index over the newest paired sessions.
+
+    Beta is cov(stock, index) / var(index). Pairs share a date. A flat series, or
+    fewer than min_pairs, leaves both links null and still reports n.
+    """
+    stock = _daily_returns(_chart_bars(stock_history))
+    index = {day: value for day, value in _daily_returns(_chart_bars(index_history))}
+    paired: list[tuple[float, float]] = []
+    for day, stock_return in reversed(stock):
+        index_return = index.get(day)
+        if index_return is None:
+            continue
+        paired.append((index_return, stock_return))
+        if len(paired) == window:
+            break
+    paired.reverse()
+    count = len(paired)
+    empty = {"rho_90d": None, "beta_90d": None, "n": count}
+    if count < min_pairs:
+        return empty
+    mean_x = sum(row[0] for row in paired) / count
+    mean_y = sum(row[1] for row in paired) / count
+    cov = var_x = var_y = 0.0
+    for index_return, stock_return in paired:
+        cov += (index_return - mean_x) * (stock_return - mean_y)
+        var_x += (index_return - mean_x) ** 2
+        var_y += (stock_return - mean_y) ** 2
+    if var_x <= 1e-18 or var_y <= 1e-18:
+        return empty
+    return {"rho_90d": cov / math.sqrt(var_x * var_y), "beta_90d": cov / var_x, "n": count}
+
+
+def market_comparison_block(
+    ticker: str,
+    stock_history: list[dict],
+    index_prices: dict[str, list[dict]],
+) -> dict:
+    """Period returns plus 90-session correlation and beta against each index proxy except itself."""
+    indexes = {}
+    symbol = ticker.upper()
+    for proxy in INDEX_PROXIES:
+        if proxy == symbol:
+            continue
+        history = price_history_for(proxy, index_prices.get(proxy) or [])
+        indexes[proxy] = {"returns": period_returns(history), **beta_rho(stock_history, history)}
+    return {
+        "window_sessions": BETA_WINDOW,
+        "min_pairs": BETA_MIN_PAIRS,
+        "returns": period_returns(stock_history),
+        "indexes": indexes,
+    }
+
+
+def load_index_proxy_prices(read_prices, symbols: tuple[str, ...] = INDEX_PROXIES) -> dict[str, list[dict]]:
+    """Read proxy histories once, before equities are published, so β can be paired by date."""
+    loaded: dict[str, list[dict]] = {}
+    for symbol in symbols:
+        frame = read_prices(symbol)
+        loaded[symbol] = _price_rows(frame)
+        del frame
+    return loaded
+
+
 def build_chart_data(
     ticker: str,
     trend_rows: list[dict],
@@ -350,8 +513,13 @@ def build_chart_data(
     fundamentals: list[dict],
     price_rows: list[dict] | None = None,
     generated_at: str | None = None,
+    index_prices: dict[str, list[dict]] | None = None,
 ) -> dict:
-    """Build one ticker's compact chart-only history document."""
+    """Build one ticker's compact chart-only history document.
+
+    ``index_prices`` adds ``market_comparison`` (period returns, correlation, beta). It stays off
+    this document's caller when omitted, and it is never copied onto dashboard.json.
+    """
     trends_by_series: dict[str, dict[str, float]] = {}
     pressure_by_date: dict[str, float] = {}
     correlation_by_series: dict[str, list[dict]] = {}
@@ -484,12 +652,17 @@ def build_chart_data(
             {"date": day, "value": pressure_by_date[day]} for day in sorted(pressure_by_date)[-MAX_PRICE_ROWS:]
         ],
         "correlation_history": {
-            series: sorted(rows, key=lambda row: row["date"])[-90:]
+            series: sorted(rows, key=lambda row: row["date"])[-CORRELATION_HISTORY_ROWS:]
             for series, rows in sorted(correlation_by_series.items())
         },
         "short_interest": short_interest[-MAX_PRICE_ROWS:],
         "options": options[-MAX_PRICE_ROWS:],
         "fundamentals": sorted(company_series, key=lambda row: (row["date"], row["series_id"])),
+        **(
+            {}
+            if index_prices is None
+            else {"market_comparison": market_comparison_block(ticker, history, index_prices)}
+        ),
     })
 
 
@@ -831,11 +1004,19 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         price_data: dict[str, list[dict]] = {}
         trend_data: dict[str, dict | None] = {}
         hourly_data: dict[str, list[dict]] = {}
+        # Equities are published before the ETF loop reaches their prices. β needs both
+        # calendars, so the proxies are read once up front and reused.
+        index_prices = load_index_proxy_prices(
+            read_prices, tuple(symbol for symbol in INDEX_PROXIES if symbol in tickers),
+        )
 
         def load_chart_inputs(ticker: str) -> dict:
-            price_frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
-            price_rows = _price_rows(price_frame)
-            del price_frame
+            if ticker in index_prices:
+                price_rows = index_prices[ticker]
+            else:
+                price_frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
+                price_rows = _price_rows(price_frame)
+                del price_frame
             price_data[ticker] = price_rows
             trend_data[ticker] = read_json(f"serving/trend_metrics/latest/{ticker}.json")
             trend_frame = read_parquet_prefix(f"serving/trend_metrics/ticker={ticker}/", columns=TREND_COLUMNS)
@@ -850,6 +1031,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 "options_rows": options_by_ticker.get(ticker, []),
                 "fundamentals": fundamental_rows,
                 "price_rows": price_rows,
+                "index_prices": index_prices,
             }
 
         publish_charts_sequentially(tickers, load_chart_inputs, generated_at)

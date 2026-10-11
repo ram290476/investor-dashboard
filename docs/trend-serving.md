@@ -119,10 +119,15 @@ Each ticker adds `release_links`, either null when not supplied or:
 
 `serving/chart_data/<T>.json` keeps existing chart fields, the five-year
 `price_history` (the dashboard keeps the last 64 closes), and
-`correlation_history[series_id]`: up to 90 dated points with nullable 30D/90D
-correlations. Monthly points stay null. Null pressure is excluded from the
-renderable pressure history. UI correlation drift compares the latest 90D link
-with 21 stored linked sessions earlier, requiring 22 finite points.
+`correlation_history[series_id]`: up to 126 dated points (about six months)
+with nullable 30D/90D correlations. Monthly points stay null. Null pressure is
+excluded from the renderable pressure history. The correlation drift panel
+compares the latest 30D link with the 90D link: a sign change, or a shift of
+at least 0.08, is flagged, and the sparkline is the 30D series. The same chart
+file carries `market_comparison` when index prices were available: adjusted
+returns for 1D, 1W, 1M, 3M, YTD, 1Y, 3Y and 5Y, plus ρ and β of the ticker on
+each index proxy over the newest 90 paired sessions (at least 20). A proxy is
+not compared with itself. Those fields are not copied onto `dashboard.json`.
 
 Company context reuses the existing data jobs. Company events retain their
 provider `source` and collection timestamp as `observed_at`; event dates remain
