@@ -351,26 +351,6 @@ a {
   color: var(--blue);
 }
 
-.ticker-stock-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  color: var(--blue);
-  background: var(--surface);
-  font-size: 13px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.ticker-stock-link:hover,
-.ticker-stock-link:focus-visible {
-  border-color: var(--blue);
-  background: var(--hover);
-}
-
 .watchlist-bar {
   display: flex;
   align-items: center;
@@ -3563,10 +3543,6 @@ a.catalyst-edgar-link:hover {
   font-size: 16px;
 }
 
-.stock-metric-pending {
-  box-shadow: inset 3px 0 0 var(--amber);
-}
-
 .review-badge {
   display: inline-flex;
   align-items: center;
@@ -3589,6 +3565,34 @@ a.catalyst-edgar-link:hover {
   color: var(--amber);
   font-size: 13px;
   font-weight: 600;
+}
+
+.company-metrics {
+  display: grid;
+  gap: 8px;
+}
+
+.stock-metric-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.stock-metric-row-name {
+  min-width: 0;
+}
+
+.metric-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.metric-review-action {
+  margin-left: auto;
 }
 
 .stock-kpi-value {

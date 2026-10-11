@@ -617,8 +617,13 @@ Create invite-only Cognito users with the pool ID from `terraform output -json c
 aws cognito-idp admin-create-user --user-pool-id <user-pool-id> --username <email>
 ```
 
-Require the invited user to complete the temporary-password setup. Cognito MFA is **off**
-(password-only sign-in) by design for now; Plus-tier threat protection stays enforced. Never
+Require the invited user to complete the temporary-password setup. Company-metric approval uses the `admin` Cognito group, which Terraform creates with no members. Do not add the public demo account `ram.vellamsetti@gmail.com`. Add your own account with:
+
+```sh
+aws cognito-idp admin-add-user-to-group --user-pool-id <user-pool-id> --username <your-email> --group-name admin
+```
+
+Cognito MFA is **off** (password-only sign-in) by design for now; Plus-tier threat protection stays enforced. Never
 disable the JWT authorizer to troubleshoot a browser sign-in issue.
 
 This is separate from **AWS console / IAM Identity Center MFA**, which remains required. Alerting

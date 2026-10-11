@@ -128,6 +128,93 @@ def test_xbrl_parser_and_mismatch_are_flagged_not_overwritten():
     assert flagged[0]["status"] == "mismatch"
 
 
+def test_a_collect_does_not_clear_an_approved_metric():
+    approved = ir.set_catalog_status(
+        ir.load_catalog("TSLA"), "total_deliveries", "approved", "owner@example.com", "2026-10-09T00:00:00Z",
+    )
+    incoming = ir.load_catalog("TSLA")
+    kept = ir.preserve_approved_status(approved, incoming)
+    entry = ir.catalog_entry(kept, "total_deliveries")
+    assert entry["status"] == "approved"
+    assert entry["approved_by"] == "owner@example.com"
+    assert entry["approved_at"] == "2026-10-09T00:00:00Z"
+
+    proposal = ir.propose_metric(
+        "Total deliveries", unit="vehicles", scale=1, fiscal_period="2026Q3", source="press_release",
+    )
+    proposal["metric_id"] = "total_deliveries"
+    proposal["status"] = "proposed"
+    merged = ir.merge_proposals(approved, [proposal])
+    merged_entry = ir.catalog_entry(merged, "total_deliveries")
+    assert merged_entry["status"] == "approved"
+    assert merged_entry["approved_by"] == "owner@example.com"
+    assert merged_entry["approved_at"] == "2026-10-09T00:00:00Z"
+
+    fresh = ir.propose_metric("Robot count", unit="robots", scale=1, fiscal_period="2026Q3", source="press_release")
+    added = ir.merge_proposals(approved, [fresh])
+    added_entry = ir.catalog_entry(added, fresh["metric_id"])
+    assert added_entry["status"] == "proposed"
+    assert added_entry["approved_by"] is None
+
+
+def test_lake_catalog_approval_is_served_even_when_the_extracted_row_is_unapproved():
+    lake = {
+        "ticker": "TSLA",
+        "metrics": [{
+            "metric_id": "total_deliveries",
+            "status": "approved",
+            "approved_by": "owner@example.com",
+            "approved_at": "2026-10-09T00:00:00Z",
+        }],
+    }
+    packaged = ir.load_catalog("TSLA")
+    assert ir.catalog_entry(packaged, "total_deliveries")["status"] == "proposed"
+    reviewed = ir.review_catalog(packaged, lake)
+    assert ir.catalog_entry(reviewed, "total_deliveries")["status"] == "approved"
+
+    undone = ir.review_catalog(reviewed, {"metrics": [{
+        "metric_id": "total_deliveries", "status": "proposed", "approved_by": None, "approved_at": None,
+    }]})
+    assert ir.catalog_entry(undone, "total_deliveries")["status"] == "proposed"
+    assert ir.catalog_entry(undone, "total_deliveries")["approved_by"] is None
+
+    row = {
+        "metric_id": "total_deliveries",
+        "fiscal_period": "2026Q3",
+        "period_end": "2026-09-30",
+        "value": 486532,
+        "approved": False,
+        "method": "table",
+        "source_kind": "press_release",
+        "source_url": "https://www.sec.gov/Archives/edgar/data/fixture",
+        "confidence": 0.95,
+        "published_date": "2026-10-02",
+    }
+    store = {
+        ir.catalog_object_key("TSLA"): lake,
+        ir.curated_observations_key("TSLA"): {"rows": [row]},
+    }
+
+    def read_json(key):
+        return store.get(key)
+
+    def write_json(key, obj):
+        store[key] = obj
+
+    served = ir.run_serve(
+        {"tickers": ["TSLA"], "run_status": "ok"},
+        read_json=read_json,
+        write_json=write_json,
+        now="2026-10-11T00:00:00Z",
+    )
+    assert served["served"] == 1
+    document = store[ir.serving_stock_key("TSLA")]
+    metric = next(item for item in document["metrics"] if item["metric_id"] == "total_deliveries")
+    assert metric["approval_state"] == "approved"
+    assert metric["approved"] is True
+    assert ir.catalog_entry(ir.load_catalog("TSLA"), "total_deliveries")["status"] == "proposed"
+
+
 def test_catalog_approval_gates_serving_and_llm_values_stay_unapproved():
     catalog = ir.set_catalog_status(
         ir.load_catalog("TSLA"), "supercharger_stations", "approved", "ram", "2026-10-09T00:00:00Z",

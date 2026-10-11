@@ -531,7 +531,7 @@ variable "jobs" {
       triggers       = ["job:Q2C?partial"]
       memory         = 1024
       timeout        = 300
-      read_prefixes  = ["raw/company_ir/", "curated/company_metrics/"]
+      read_prefixes  = ["raw/company_ir/", "curated/company_metrics/", "catalog/"]
       write_prefixes = ["curated/company_metrics/"]
       api_keys       = []
       reads_prefs    = true
@@ -542,7 +542,7 @@ variable "jobs" {
       triggers       = ["job:Q2X?partial"]
       memory         = 512
       timeout        = 120
-      read_prefixes  = ["curated/company_metrics/", "serving/stock/"]
+      read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/"]
       write_prefixes = ["serving/stock/"]
       api_keys       = []
       reads_prefs    = false

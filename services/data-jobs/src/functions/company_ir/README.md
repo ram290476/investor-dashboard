@@ -16,7 +16,13 @@ python services/data-jobs/scripts/approve_metric.py TSLA total_deliveries --by r
 python services/data-jobs/scripts/approve_metric.py TSLA total_deliveries --by ram --status rejected
 ```
 
-Merging the catalog deploys it with the job image. An owner-only approval control and an S3 catalog override are a follow-up, not part of this pipeline.
+Merging the catalog deploys the metric definitions with the job image. Live review status is a separate lake object, `catalog/<TICKER>.json`. An admin changes it with `PUT /stock/{ticker}/metrics/{metric_id}` (`status` of `approved` or `proposed`). The API records `approved_by` and `approved_at`, then patches `serving/stock/<TICKER>.json` so the company page updates before the next collect. A collect may add proposed metrics. It does not clear `approved`, `approved_by` or `approved_at`.
+
+The `admin` Cognito group is created empty. The public demo account `ram.vellamsetti@gmail.com` must not be added. The owner adds their own account with the pool id from `terraform output -json cognito`:
+
+```bash
+aws cognito-idp admin-add-user-to-group --user-pool-id <user-pool-id> --username <your-email> --group-name admin
+```
 
 ## Propose a catalog for another ticker
 

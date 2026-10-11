@@ -16,7 +16,7 @@ import lake
 REPO = Path(__file__).resolve().parents[3]
 JOBS_TF = REPO / "infra" / "terraform" / "variables.tf"
 SRC = REPO / "services" / "data-jobs" / "src"
-LAKE_ROOTS = ("curated/", "serving/", "raw/", "manual/")
+LAKE_ROOTS = ("curated/", "serving/", "raw/", "manual/", "catalog/")
 SKIP_MODULES = {"lake", "observability", "http_client", "api_keys", "collectors"}
 READ_ARG = {
     "read_json": (0, "key"),
@@ -78,7 +78,8 @@ def load_module(name: str) -> Mod:
 
 
 def _is_lake(prefix: str) -> bool:
-    return any(prefix.startswith(root) and len(prefix) > len(root) for root in LAKE_ROOTS)
+    # A dynamic key such as catalog/{ticker}.json keeps only the root. That root is still a read.
+    return any(prefix.startswith(root) and len(prefix) >= len(root) for root in LAKE_ROOTS)
 
 
 def _positional_names(fn: ast.FunctionDef | ast.Lambda) -> list[str]:
@@ -583,5 +584,8 @@ def test_every_handler_read_is_granted_by_that_jobs_read_prefixes():
     assert any(prefix.startswith("raw/company_ir/") for prefix in discovered["q2-company-ir-collect"])
     assert any(prefix.startswith("raw/company_ir/") for prefix in discovered["q2-company-ir-extract"])
     assert any(prefix.startswith("serving/stock/") for prefix in discovered["q2-company-ir-serve"])
+    assert any(prefix.startswith("catalog/") for prefix in discovered["q2-company-ir-extract"])
+    assert any(prefix.startswith("catalog/") for prefix in discovered["q2-company-ir-serve"])
+    assert not any(prefix.startswith("catalog/") for prefix in discovered["q2-company-ir-collect"])
     assert missing == {}, missing
     assert unresolved == {}, unresolved
