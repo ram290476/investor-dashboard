@@ -124,7 +124,10 @@ module "us_east_1" {
   cloudfront_distribution_id = var.cloudfront_distribution_id != "" ? var.cloudfront_distribution_id : module.site_hosting.distribution_id
   primary_region             = var.region
   forward_event_patterns     = module.alerting.global_event_patterns
-  sms_notifier_arn           = module.alerting.sms_notifier_arn
+  # Literal bool. Do not derive this from module.alerting.sms_notifier_arn: the ARN
+  # is unknown until apply and cannot be used in count.
+  alert_notifier_enabled = true
+  sms_notifier_arn       = module.alerting.sms_notifier_arn
 }
 
 # Provider API keys in SSM (encrypted with the data key) plus a daily rotation

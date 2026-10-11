@@ -105,6 +105,18 @@ jobs:
           terraform init -backend=false
           terraform validate
 
+      # validate does not evaluate count. This plans the CloudFront subscription
+      # with an unknown notifier ARN and empty state. An ARN used in count fails CI.
+      - name: Plan notifier subscription with an unknown ARN
+        working-directory: infra/terraform/ci/notifier-count
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          terraform init -backend=false -input=false
+          terraform test
+
       - name: Build the Lambda image for its deployment architecture
         run: |
           docker buildx build --file infra/docker/Dockerfile --platform linux/arm64 --load -t investor-dashboard-jobs:ci .

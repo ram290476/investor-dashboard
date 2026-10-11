@@ -41,8 +41,14 @@ variable "forward_event_patterns" {
   type        = map(string)
 }
 
+variable "alert_notifier_enabled" {
+  description = "Subscribe the CloudFront topic to the notifier when enable_cloudfront_alarms is also true. This must be a value known at plan time. Do not set it from the Lambda ARN: that ARN is unknown until apply, and count cannot use it."
+  type        = bool
+  default     = true
+}
+
 variable "sms_notifier_arn" {
-  description = "Primary-region Lambda that caps email and SMS. Empty skips the subscription, so this alarm would not be mailed."
+  description = "Primary-region notifier Lambda ARN. May be unknown during plan. Used only as the subscription endpoint, never to decide count."
   type        = string
   default     = ""
 }
@@ -170,8 +176,9 @@ resource "aws_sns_topic_policy" "ops" {
 
 # Mail for this alarm is capped by the primary-region notifier, which republishes
 # to the ops-email topic. A direct email subscription here would bypass that cap.
+# count uses alert_notifier_enabled (a bool) because sms_notifier_arn is computed.
 resource "aws_sns_topic_subscription" "sms_notifier" {
-  count = local.alarm_on && var.sms_notifier_arn != "" ? 1 : 0
+  count = local.alarm_on && var.alert_notifier_enabled ? 1 : 0
 
   topic_arn = aws_sns_topic.ops[0].arn
   protocol  = "lambda"

@@ -71,7 +71,7 @@ terraform plan -out tfplan
 terraform apply tfplan
 ```
 
-Then confirm the SNS subscription emails on the ops-email and security-email topics (one confirmation per topic per address).
+The first apply that adds the cap replaces the confirmed email subscriptions on `invdash-ops-alerts` and `invdash-security-alerts` and deletes the direct CloudFront subscription on `invdash-ops-alerts-us-east-1`. That is 3 destroys (2 replacements plus 1 deletion). None of them is a Lambda or a log group, so it stays inside the deploy destroy gate (limit 10). Mail pauses until each address confirms the new `ops-email` and `security-email` topics. The subscriptions move because leaving them on the alarm topics would bypass the cap.
 
 `invdash-alert-notifier` subscribes to the ops, security, and CloudFront alarm topics. It sends at most `email_max_per_window` emails per issue per fixed Pacific clock window (default `email_window_minutes` 60, so 14:00-14:59 Pacific is one window and 15:00 starts the next). Windows are aligned to local midnight, not measured from the first message. SMS stays off until `alert_sms_e164` is set, then uses the same kind of window with its own `sms_window_minutes` and `sms_max_per_window` (defaults 60 and 1). The two channels do not share a counter. Repeats inside a window are logged with the issue key, the channel, and the suppressed count, and the next window's first message on that channel includes the count. The dedupe item expires at the end of the following window. A dedupe-store error still sends that channel. Confirm the handset subscription when SMS is on. Do not subscribe the inbox or the phone directly to the ops, security, or CloudFront topics. AWS Budgets mail is not part of this cap.
 

@@ -92,6 +92,10 @@ resource "aws_sns_topic_policy" "this" {
 
 # Inboxes subscribe to the capped republish topics, not the alarm topics.
 # A direct email subscription here would bypass the hourly cap.
+# topic_arn forces a new subscription, so the first apply replaces the confirmed
+# subscriptions on invdash-ops-alerts and invdash-security-alerts. Each address
+# must confirm ops-email and security-email before mail resumes. A moved block
+# cannot keep the old confirmation, because SNS cannot update topic_arn in place.
 resource "aws_sns_topic_subscription" "email" {
   for_each  = local.subscriptions
   topic_arn = aws_sns_topic.outbound_email[each.value.topic].arn

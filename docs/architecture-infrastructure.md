@@ -377,7 +377,7 @@ Alarms and EventBridge rules publish to two SNS topics: **ops** for reliability 
 
 - **AWS Health events** go to the ops topic.
 
-- **Email cap:** at most `email_max_per_window` messages per issue per fixed Pacific clock window (`email_window_minutes`, default 60, aligned to local midnight, so 14:00-14:59 Pacific is one window). Ops mail, including CloudFront, goes to `alert_emails` on the ops-email topic. Security mail goes to `security_alert_emails` on the security-email topic. Confirm those subscriptions. Configure the window and the maximum in Terraform; they are separate from the SMS settings.
+- **Email cap:** at most `email_max_per_window` messages per issue per fixed Pacific clock window (`email_window_minutes`, default 60, aligned to local midnight, so 14:00-14:59 Pacific is one window). Ops mail, including CloudFront, goes to `alert_emails` on the ops-email topic. Security mail goes to `security_alert_emails` on the security-email topic. The first apply replaces the confirmed subscriptions on the ops and security alarm topics and removes the direct us-east-1 CloudFront email subscription, so each address must confirm the new topics. Configure the window and the maximum in Terraform; they are separate from the SMS settings. The CloudFront topic's Lambda subscription is gated by `alert_notifier_enabled` (a bool known at plan time), not by the notifier ARN.
 
 - **SMS (optional):** set `alert_sms_e164`. The same notifier texts at most `sms_max_per_window` times per issue per its own fixed Pacific clock window (`sms_window_minutes`, default 60). The handset subscribes only to the SMS topic. Email and SMS counters are independent.
 
@@ -583,7 +583,7 @@ Before the first apply:
 
 3.  Run terraform fmt -recursive and terraform validate. I couldn't download the Terraform binary in my workspace, so the code was checked with an HCL parser, a cross-reference script and a smoke test of the Python helper.
 
-4.  Set alert_emails, apply, and confirm the ops-email and security-email subscriptions. Add health_url once the site is live to turn on the canary.
+4.  Set alert_emails and apply. The first cap apply replaces the confirmed alarm-topic email subscriptions; confirm the new ops-email and security-email subscriptions before expecting mail. Add health_url once the site is live to turn on the canary.
 
 Expect security alerts during your own deploys (key policy and trail updates count as changes); that is the change-control audit trail working.
 
