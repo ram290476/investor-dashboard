@@ -46,7 +46,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import boto3
 from botocore.exceptions import ClientError
 
-from universe import INDEX_PROXIES
+# This file is the entire user_prefs Lambda zip (infra/terraform/modules/user_prefs archive_file).
+# Do not import src/app. These are the same symbols as universe.INDEX_PROXIES; GET /chart allows
+# them even when they are not on the caller's watchlist, because the market overlays read them.
+INDEX_PROXIES = ("SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH")
 
 TABLE = os.environ.get("PREFS_TABLE", "invdash-user-prefs")
 LAKE_BUCKET = os.environ.get("LAKE_BUCKET", "")

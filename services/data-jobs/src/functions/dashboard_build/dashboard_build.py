@@ -6,6 +6,8 @@ import math
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import polars as pl
+
 from market_session import market_block
 from yield_curve import CURVE_SERIES_IDS, build_rates
 
@@ -22,6 +24,17 @@ ET = ZoneInfo("America/New_York")
 CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
 # DS-05 is Yahoo consolidated volume. DS-02 is Alpaca's free IEX feed.
 VOLUME_SOURCES = frozenset({"DS-02", "DS-05"})
+_UNSET = object()
+PRICE_COLUMNS = [
+    "ticker", "date", "close", "close_raw", "adj_close", "volume", "volume_source", "volume_iex", "source_id",
+]
+TREND_COLUMNS = ["ticker", "date", "series_id", "value", "net_pressure", "corr_30d", "corr_90d"]
+HOURLY_COLUMNS = ["ticker", "ts_utc", "ts", "close", "volume"]
+SHORT_COLUMNS = [
+    "ticker", "settlement_date", "short_interest", "shares_short", "previous_short_interest", "days_to_cover",
+]
+OPTIONS_COLUMNS = ["ticker", "date", "put_call_volume_ratio", "iv30", "iv_available"]
+MACRO_COLUMNS = ["series_id", "obs_date", "date", "value", "ingested_at"]
 
 
 def number(value: object) -> float | None:
@@ -565,6 +578,7 @@ def build_snapshot(
     rates_observations: dict | None = None,
     rates_fomc: dict | None = None,
     rates_attempts: dict | None = None,
+    rates: dict | object | None = _UNSET,
 ) -> dict:
     """Create a deterministic API document; absent source data remains explicitly unavailable.
 
@@ -633,7 +647,9 @@ def build_snapshot(
             else build_releases(releases or [], release_calendar or [])
         ),
         "status": status,
-        "rates": build_rates(rates_observations, rates_fomc, rates_attempts),
+        "rates": (
+            build_rates(rates_observations, rates_fomc, rates_attempts) if rates is _UNSET else rates
+        ),
         "market": market_block(clock),
     })
 
@@ -668,22 +684,115 @@ def _emit_dashboard_size(raw_bytes: int, gzip_bytes: int) -> None:
     )
 
 
+def _frame_rows(frame: pl.DataFrame, date_column: str | None = None, last_dates: int | None = None) -> list[dict]:
+    """Materialize a frame, keeping only the columns already loaded and the newest dates."""
+    if frame.is_empty():
+        return []
+    if date_column and date_column in frame.columns and last_dates:
+        dated = frame.with_columns(pl.col(date_column).cast(pl.Utf8).str.slice(0, 10).alias("_day"))
+        days = dated.select("_day").drop_nulls().unique().sort("_day")
+        if days.height > last_dates:
+            cutoff = days["_day"][days.height - last_dates]
+            dated = dated.filter(pl.col("_day") >= cutoff)
+        frame = dated.drop("_day")
+    return frame.to_dicts()
+
+
+def _price_rows(frame: pl.DataFrame) -> list[dict]:
+    if frame.is_empty():
+        return []
+    keep = [name for name in PRICE_COLUMNS if name in frame.columns]
+    if keep:
+        frame = frame.select(keep)
+    if "date" in frame.columns:
+        frame = frame.sort("date")
+    return frame.to_dicts()
+
+
+def _hourly_rows(frame: pl.DataFrame) -> list[dict]:
+    column = "ts_utc" if "ts_utc" in frame.columns else "ts" if "ts" in frame.columns else None
+    return _frame_rows(frame, column, 5)
+
+
+def _group_rows(rows: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("ticker") or "").upper(), []).append(row)
+    return grouped
+
+
+def load_rates_block() -> dict | None:
+    """Build rates, or return None when a macro or rates object is missing or forbidden.
+
+    A missing key without ListBucket permission surfaces as AccessDenied. Either that or
+    NoSuchKey must degrade this block instead of failing the dashboard build.
+    """
+    from lake import lake_read_denied_or_missing, read_json, read_parquet_prefix
+    from observability import logger
+
+    observations: dict[str, list[dict]] = {}
+    try:
+        for series_id in CURVE_SERIES_IDS:
+            frame = read_parquet_prefix(
+                f"curated/macro_daily/source=fred/series_id={series_id}/", columns=MACRO_COLUMNS,
+            )
+            observations[series_id] = frame.to_dicts() if not frame.is_empty() else []
+        fomc = read_json("serving/rates/fomc.json")
+        attempts = read_json("serving/rates/attempts.json")
+    except Exception as exc:  # AccessDenied and a missing object are optional
+        if not lake_read_denied_or_missing(exc):
+            raise
+        logger.warning(
+            "rates_input_unavailable",
+            extra={"error_type": type(exc).__name__, "error_code": _rates_error_code(exc)},
+        )
+        return None
+    if fomc is None and attempts is None and not any(observations.values()):
+        logger.warning("rates_input_unavailable", extra={"error_type": "Missing", "error_code": "NoSuchKey"})
+        return None
+    return build_rates(
+        observations,
+        fomc if isinstance(fomc, dict) else None,
+        attempts if isinstance(attempts, dict) else None,
+    )
+
+
+def _rates_error_code(exc: BaseException) -> str:
+    from lake import lake_error_code
+
+    return lake_error_code(exc)
+
+
+def publish_charts_sequentially(tickers: list[str], load_chart_inputs, generated_at: str) -> None:
+    """Build and write one ticker's chart, then drop its inputs before the next read."""
+    from lake import write_json_and_gzip
+
+    for ticker in tickers:
+        inputs = load_chart_inputs(ticker)
+        document = build_chart_data(ticker=ticker, generated_at=generated_at, **inputs)
+        write_json_and_gzip(document, f"serving/chart_data/{ticker}.json", cache_seconds=30)
+        del inputs, document
+
+
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
-    from lake import read_json, read_parquet_prefix, read_prices
+    from lake import read_json, read_parquet_prefix, read_prices, write_json_and_gzip
     from observability import job_handler, logger
     from universe import collection_universe, user_ticker_union
 
-    @job_handler("DASHBOARD", emit_event=False, lease_key="serving/dashboard-build/_lease.json")
+    @job_handler(
+        "DASHBOARD",
+        emit_event=False,
+        lease_key="serving/dashboard-build/_lease.json",
+        skip_when_leased=True,
+    )
     def run(event, context):
         covered = collection_universe(user_ticker_union())
         tickers = covered["equities"] + covered["etfs"]
-        price_data: dict[str, list[dict]] = {}
-        trend_data: dict[str, dict | None] = {}
-        trend_history_data: dict[str, list[dict]] = {}
         article_frame = read_parquet_prefix("curated/news_articles/")
         daily_frame = read_parquet_prefix("curated/news_daily/")
         article_rows = article_frame.to_dicts() if not article_frame.is_empty() else []
         daily_rows = daily_frame.to_dicts() if not daily_frame.is_empty() else []
+        del article_frame, daily_frame
         news_data = {
             ticker: {"daily": [row for row in daily_rows if row.get("ticker") == ticker], "articles": article_rows}
             for ticker in tickers
@@ -692,6 +801,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         event_frame = read_parquet_prefix("curated/events/")
         filing_rows = filing_frame.to_dicts() if not filing_frame.is_empty() else []
         event_rows = event_frame.to_dicts() if not event_frame.is_empty() else []
+        del filing_frame, event_frame
         filings_by_ticker: dict[str, list[dict]] = {ticker: [] for ticker in tickers}
         for row in filing_rows:
             symbol = str(row.get("ticker") or "").upper()
@@ -699,76 +809,80 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 filings_by_ticker[symbol].append(row)
         rollup = read_json("curated/contracts_rollup/latest.json") or []
         contracts_data = {row.get("ticker"): row for row in rollup if isinstance(row, dict)}
-        hourly_data: dict[str, list[dict]] = {}
-        for ticker in tickers:
-            frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
-            price_data[ticker] = frame.to_dicts() if not frame.is_empty() else []
-            trend_data[ticker] = read_json(f"serving/trend_metrics/latest/{ticker}.json")
-            trend_history = read_parquet_prefix(f"serving/trend_metrics/ticker={ticker}/")
-            trend_history_data[ticker] = trend_history.to_dicts() if not trend_history.is_empty() else []
-            hourly = read_parquet_prefix(f"curated/prices_hourly/ticker={ticker}/")
-            hourly_data[ticker] = hourly.to_dicts() if not hourly.is_empty() else []
-        short_frame = read_parquet_prefix("curated/short_interest/")
+        short_frame = read_parquet_prefix("curated/short_interest/", columns=SHORT_COLUMNS)
         short_rows = short_frame.to_dicts() if not short_frame.is_empty() else []
-        short_by_ticker: dict[str, list[dict]] = {}
-        for row in short_rows:
-            short_by_ticker.setdefault(str(row.get("ticker") or "").upper(), []).append(row)
-
-        options_frame = read_parquet_prefix("curated/options_daily/")
+        del short_frame
+        short_by_ticker = _group_rows(short_rows)
+        options_frame = read_parquet_prefix("curated/options_daily/", columns=OPTIONS_COLUMNS)
         options_rows = options_frame.to_dicts() if not options_frame.is_empty() else []
-        options_by_ticker: dict[str, list[dict]] = {}
-        for row in options_rows:
-            options_by_ticker.setdefault(str(row.get("ticker") or "").upper(), []).append(row)
-
+        del options_frame
+        options_by_ticker = _group_rows(options_rows)
         fundamental_doc = read_json("serving/fundamentals_quarterly.json") or {}
         fundamental_rows = fundamental_doc.get("rows", [])
         status = read_json("serving/status.json")
         release_frame = read_parquet_prefix("curated/releases/")
         calendar = read_json("curated/release_calendar/upcoming.json") or []
         links = read_parquet_prefix("curated/release_links/")
-        curve_observations: dict[str, list[dict]] = {}
-        for series_id in CURVE_SERIES_IDS:
-            frame = read_parquet_prefix(f"curated/macro_daily/source=fred/series_id={series_id}/")
-            curve_observations[series_id] = frame.to_dicts() if not frame.is_empty() else []
+        release_rows = release_frame.to_dicts() if not release_frame.is_empty() else []
+        link_rows = links.to_dicts() if not links.is_empty() else []
+        del release_frame, links
+        rates_block = load_rates_block()
+        generated_at = datetime.now(UTC).isoformat(timespec="seconds")
+        price_data: dict[str, list[dict]] = {}
+        trend_data: dict[str, dict | None] = {}
+        hourly_data: dict[str, list[dict]] = {}
+
+        def load_chart_inputs(ticker: str) -> dict:
+            price_frame = read_prices(ticker)  # ~1 GET per year of history (yearly partitions)
+            price_rows = _price_rows(price_frame)
+            del price_frame
+            price_data[ticker] = price_rows
+            trend_data[ticker] = read_json(f"serving/trend_metrics/latest/{ticker}.json")
+            trend_frame = read_parquet_prefix(f"serving/trend_metrics/ticker={ticker}/", columns=TREND_COLUMNS)
+            trend_rows = _frame_rows(trend_frame, "date", MAX_PRICE_ROWS)
+            del trend_frame
+            hourly_frame = read_parquet_prefix(f"curated/prices_hourly/ticker={ticker}/", columns=HOURLY_COLUMNS)
+            hourly_data[ticker] = _hourly_rows(hourly_frame)
+            del hourly_frame
+            return {
+                "trend_rows": trend_rows,
+                "short_interest_rows": short_by_ticker.get(ticker, []),
+                "options_rows": options_by_ticker.get(ticker, []),
+                "fundamentals": fundamental_rows,
+                "price_rows": price_rows,
+            }
+
+        publish_charts_sequentially(tickers, load_chart_inputs, generated_at)
         snapshot = build_snapshot(
             tickers=tickers,
             prices=price_data,
             trends=trend_data,
             fundamentals=fundamental_rows,
             status=status,
+            generated_at=generated_at,
             news=news_data,
             hourly=hourly_data,
             short_interest=short_by_ticker,
             filings=filings_by_ticker,
             events=event_rows,
             contracts=contracts_data,
-            releases=release_frame.to_dicts() if not release_frame.is_empty() else [],
+            releases=release_rows,
             release_calendar=calendar if isinstance(calendar, list) else [],
-            release_links=links.to_dicts() if not links.is_empty() else [],
-            rates_observations=curve_observations,
-            rates_fomc=read_json("serving/rates/fomc.json"),
-            rates_attempts=read_json("serving/rates/attempts.json"),
+            release_links=link_rows,
+            rates=rates_block,
         )
-        charts: dict[str, dict] = {}
-        for ticker in tickers:
-            chart_document = build_chart_data(
-                ticker=ticker,
-                trend_rows=trend_history_data.get(ticker, []),
-                short_interest_rows=short_by_ticker.get(ticker, []),
-                options_rows=options_by_ticker.get(ticker, []),
-                fundamentals=fundamental_rows,
-                price_rows=price_data.get(ticker, []),
-                generated_at=snapshot["generated_at"],
-            )
-            charts[ticker] = chart_document
-        size = publish_serving_documents(snapshot, charts)
+        size = write_json_and_gzip(snapshot, "serving/dashboard.json", cache_seconds=30)
+        _emit_dashboard_size(size["raw_bytes"], size["gzip_bytes"])
         logger.info(
             "dashboard_snapshot_published",
             extra={
                 "tickers": len(tickers),
                 "tickers_with_prices": sum(bool(row["price_history"]) for row in snapshot["tickers"].values()),
-                "fundamentals": sum(len(document.get("fundamentals") or []) for document in charts.values()),
+                "fundamentals": sum(
+                    1 for row in fundamental_rows if row.get("ticker") in tickers and row.get("metric")
+                ),
                 "generated_at": snapshot["generated_at"],
+                "rates": rates_block is not None,
                 "raw_bytes": size["raw_bytes"],
                 "gzip_bytes": size["gzip_bytes"],
             },
@@ -777,6 +891,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             "status": snapshot["data_status"],
             "tickers": len(tickers),
             "tickers_with_prices": sum(bool(row["price_history"]) for row in snapshot["tickers"].values()),
+            "rates": rates_block is not None,
         }
 
     return run(event, context)

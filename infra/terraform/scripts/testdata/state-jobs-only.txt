@@ -1,0 +1,4 @@
+module.jobs.aws_cloudwatch_log_group.job["prices"]
+module.jobs.aws_iam_role.job["prices"]
+module.jobs.aws_lambda_function.job["prices"]
+module.jobs.aws_lambda_function.job["short_interest"]

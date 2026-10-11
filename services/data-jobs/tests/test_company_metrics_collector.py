@@ -1582,7 +1582,7 @@ def test_balance_sheet_dates_do_not_propose_and_keep_column_alignment():
 
 
 def test_restated_nine_months_beats_the_original_and_a_stale_q4_loses_to_the_release():
-    """BYND Q4 is FY minus the 10-K's restated nine months, not the original 10-Q figure."""
+    """A normal Q4 is FY minus the 10-Q nine-month figure. Only a restated nine-month value is stale."""
     quarters = [
         _tagged_fact("2025-01-01", "2025-03-31", 10, "10q", "2025-11-12", fp="Q3", fy=2025),
         _tagged_fact("2025-04-01", "2025-06-30", 20, "10q", "2025-11-12", fp="Q3", fy=2025),
@@ -1624,8 +1624,18 @@ def test_restated_nine_months_beats_the_original_and_a_stale_q4_loses_to_the_rel
         _tagged_fact("2025-01-01", "2025-09-30", 0, "10q", "2025-11-12", form="10-Q", fp="Q3", fy=2025),
         _tagged_fact("2025-01-01", "2025-12-31", -130.18, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
     ]
-    stale = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": stale_facts}}}, "BYND")
-    assert _value(stale, "operating_income", "2025Q4") == pytest.approx(-130.18)
+    normal = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": stale_facts}}}, "BYND")
+    assert _value(normal, "operating_income", "2025Q4") == pytest.approx(-130.18)
+    assert normal[-1].get("derivation") != "stale_ytd"
+    restated_later = [
+        *stale_facts,
+        _tagged_fact("2025-01-01", "2025-09-30", 2.563, "10k-a", "2026-04-20", form="10-K/A", fp="FY", fy=2025),
+    ]
+    revised = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": restated_later}}}, "BYND")
+    revised_q4 = next(
+        row for row in revised if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4"
+    )
+    assert revised_q4["derivation"] == "stale_ytd"
     release = """
     <p>(In thousands)</p>
     <table>
@@ -1639,11 +1649,330 @@ def test_restated_nine_months_beats_the_original_and_a_stale_q4_loses_to_the_rel
         ir.load_catalog("BYND"),
         **_meta(ticker="BYND", source_kind="press_release", fiscal_period="2025Q4"),
     )["rows"]
-    winners, _revisions = ir.dedupe_observations(stale + press)
+    winners, _revisions = ir.dedupe_observations(normal + press)
     chosen = next(row for row in winners if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4")
-    assert chosen["value"] == pytest.approx(-132_743_000)
-    assert chosen["source_kind"] == "press_release"
+    assert chosen["value"] == pytest.approx(-130.18)
+    assert chosen["source_kind"] == "xbrl"
+    replaced, _revisions = ir.dedupe_observations(revised + press)
+    segment_loses = next(
+        row for row in replaced if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4"
+    )
+    assert segment_loses["value"] == pytest.approx(-132_743_000)
+    assert segment_loses["source_kind"] == "press_release"
     fresh, _revisions = ir.dedupe_observations(operating + press)
     kept = next(row for row in fresh if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4")
     assert kept["value"] == pytest.approx(-132.743)
     assert kept["source_kind"] == "xbrl"
+
+
+def test_segment_heading_row_does_not_replace_the_company_total():
+    """Amazon prints 'AWS Segment:' as a row, then the segment's operating income."""
+    html = """
+    <p>(in millions)</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q4 2024</td></tr>
+      <tr><td>Operating income</td><td>24,977</td><td>21,203</td></tr>
+      <tr><td>AWS Segment:</td><td></td><td></td></tr>
+      <tr><td>Operating income</td><td>12,465</td><td>10,632</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        html,
+        ir.load_catalog("AMZN"),
+        **_meta(ticker="AMZN", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    assert _value(parsed["rows"], "operating_income", "2025Q4") == pytest.approx(24_977_000_000)
+    assert _value(parsed["rows"], "operating_income", "2024Q4") == pytest.approx(21_203_000_000)
+    assert not any(row["value"] == pytest.approx(12_465_000_000) for row in parsed["rows"])
+
+
+def test_millions_caption_above_a_long_preamble_scales_revenue():
+    """Alphabet's '(in millions)' caption sits well above the revenue table."""
+    filler = " ".join(["narrative"] * 200)
+    html = f"""
+    <p>(in millions, except per share amounts)</p>
+    <p>{filler}</p>
+    <table>
+      <tr><td></td><td>Q4 2024</td><td>Q4 2025</td></tr>
+      <tr><td>Revenues</td><td>96,469</td><td>113,828</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        html,
+        ir.load_catalog("GOOG"),
+        **_meta(ticker="GOOG", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    assert _value(parsed["rows"], "revenue_gaap", "2025Q4") == pytest.approx(113_828_000_000)
+    assert _value(parsed["rows"], "revenue_gaap", "2024Q4") == pytest.approx(96_469_000_000)
+
+
+def test_footnote_adjusted_and_reconciliation_labels_are_not_proposed():
+    html = """
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Robotaxi miles</td><td>5</td><td>4</td></tr>
+    </table>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Adjusted EBITDA1</td><td>10</td><td>9</td></tr>
+      <tr><td>Adjusted operating income</td><td>8</td><td>7</td></tr>
+      <tr><td>GAAP net loss</td><td>(4)</td><td>(3)</td></tr>
+      <tr><td>GAAP revenue</td><td>20</td><td>18</td></tr>
+    </table>
+    <table>
+      <tr><td>Reconciliation of GAAP to non-GAAP</td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Other operating metric</td><td>1</td><td>2</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        html,
+        ir.load_catalog("EVGO"),
+        **_meta(ticker="EVGO", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    labels = " ".join(item["metric_id"] for item in parsed["proposals"])
+    assert "adjusted" not in labels
+    assert "ebitda" not in labels
+    assert "gaap" not in labels
+    assert "robotaxi_miles" in labels
+    assert "other_operating_metric" not in labels
+    stored = {row["metric_id"] for row in parsed["rows"]}
+    assert stored.isdisjoint({"net_income_gaap", "revenue_gaap", "operating_income"})
+
+
+def test_restated_q1_or_six_months_makes_fy_minus_nine_stale():
+    """Beyond Meat filed 2025 nine-month once. Later 10-Qs restated 2025 Q1 and the six-month total."""
+    original = [
+        _tagged_fact("2025-01-01", "2025-03-31", -56.2, "10q-q1", "2025-05-08", form="10-Q", fp="Q1", fy=2025),
+        _tagged_fact("2025-01-01", "2025-06-30", -91.1, "10q-q2", "2025-08-07", form="10-Q", fp="Q2", fy=2025),
+        _tagged_fact("2025-04-01", "2025-06-30", -34.9, "10q-q2", "2025-08-07", form="10-Q", fp="Q2", fy=2025),
+        _tagged_fact("2025-01-01", "2025-09-30", -120.0, "10q-q3", "2025-11-12", form="10-Q", fp="Q3", fy=2025),
+        _tagged_fact("2025-01-01", "2025-12-31", -250.0, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
+    ]
+    base = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": original}}}, "BYND")
+    base_q4 = next(row for row in base if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4")
+    assert base_q4["value"] == pytest.approx(-130.0)
+    assert base_q4.get("derivation") != "stale_ytd"
+    q1_only = [
+        *original,
+        _tagged_fact("2025-01-01", "2025-03-31", -64.4, "10q-2026q1", "2026-05-07", form="10-Q", fp="Q1", fy=2026),
+        _tagged_fact("2026-01-01", "2026-03-31", -10.0, "10q-2026q1", "2026-05-07", form="10-Q", fp="Q1", fy=2026),
+    ]
+    revised_q1 = _xbrl_rows({"OperatingIncomeLoss": {"units": {"USD": q1_only}}}, "BYND")
+    q1_q4 = next(
+        row for row in revised_q1 if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4"
+    )
+    assert q1_q4["derivation"] == "stale_ytd"
+    restated = [
+        *q1_only,
+        _tagged_fact("2025-01-01", "2025-06-30", -101.9, "10q-2026q2", "2026-08-06", form="10-Q", fp="Q2", fy=2026),
+        _tagged_fact("2025-04-01", "2025-06-30", -37.5, "10q-2026q2", "2026-08-06", form="10-Q", fp="Q2", fy=2026),
+        _tagged_fact("2026-01-01", "2026-06-30", -20.0, "10q-2026q2", "2026-08-06", form="10-Q", fp="Q2", fy=2026),
+        _tagged_fact("2026-04-01", "2026-06-30", -10.0, "10q-2026q2", "2026-08-06", form="10-Q", fp="Q2", fy=2026),
+    ]
+    income = [
+        _tagged_fact("2025-01-01", "2025-06-30", -82.2, "10q-q2", "2025-08-07", form="10-Q", fp="Q2", fy=2025),
+        _tagged_fact("2025-01-01", "2025-09-30", -50.0, "10q-q3", "2025-11-12", form="10-Q", fp="Q3", fy=2025),
+        _tagged_fact("2025-01-01", "2025-12-31", 360.0, "10k", "2026-03-05", form="10-K", fp="FY", fy=2025),
+        _tagged_fact("2025-01-01", "2025-06-30", -92.9, "10q-2026q2", "2026-08-06", form="10-Q", fp="Q2", fy=2026),
+        _tagged_fact("2026-01-01", "2026-06-30", -5.0, "10q-2026q2", "2026-08-06", form="10-Q", fp="Q2", fy=2026),
+    ]
+    operating = _xbrl_rows(
+        {
+            "OperatingIncomeLoss": {"units": {"USD": restated}},
+            "NetIncomeLoss": {"units": {"USD": income}},
+        },
+        "BYND",
+    )
+    for metric_id in ("operating_income", "net_income_gaap"):
+        row = next(item for item in operating if item["metric_id"] == metric_id and item["fiscal_period"] == "2025Q4")
+        assert row["derivation"] == "stale_ytd"
+    release = """
+    <p>Fourth quarter 2025</p>
+    <p>(In thousands)</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Loss from operations</td><td>(132,743)</td><td>(100)</td></tr>
+      <tr><td>Net income</td><td>409,850</td><td>10</td></tr>
+    </table>
+    """
+    press = ir.parse_company_document(
+        release,
+        ir.load_catalog("BYND"),
+        **_meta(ticker="BYND", source_kind="press_release", fiscal_period="2025Q4"),
+    )["rows"]
+    winners, _revisions = ir.dedupe_observations(operating + press)
+    operating_income = next(
+        row for row in winners if row["metric_id"] == "operating_income" and row["fiscal_period"] == "2025Q4"
+    )
+    net_income = next(
+        row for row in winners if row["metric_id"] == "net_income_gaap" and row["fiscal_period"] == "2025Q4"
+    )
+    assert operating_income["value"] == pytest.approx(-132_743_000)
+    assert operating_income["source_kind"] == "press_release"
+    assert net_income["value"] == pytest.approx(409_850_000)
+    assert net_income["source_kind"] == "press_release"
+
+
+def test_reconciliation_cash_flow_and_prose_dates_are_not_proposed():
+    """EBITDA bridges, cash-flow statements, and bond-maturity dates are not new metrics."""
+    html = """
+    <p>Second quarter 2026</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Robotaxi miles</td><td>5</td><td>4</td></tr>
+    </table>
+    <table>
+      <tr><td>Reconciliation of GAAP net loss to Adjusted EBITDA</td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Net loss</td><td>(4)</td><td>(3)</td></tr>
+      <tr><td>Interest expense</td><td>1</td><td>1</td></tr>
+      <tr><td>Accretion</td><td>2</td><td>2</td></tr>
+      <tr><td>Total adjustments</td><td>6</td><td>5</td></tr>
+      <tr><td>Adjusted EBITDA</td><td>10</td><td>9</td></tr>
+    </table>
+    <table>
+      <tr><td>Six Months Ended</td><td>June 30, 2026</td><td>June 30, 2025</td></tr>
+      <tr><td>Net cash used in operating activities</td><td>(12)</td><td>(8)</td></tr>
+      <tr><td>Purchases of property and equipment</td><td>3</td><td>2</td></tr>
+    </table>
+    <table>
+      <tr><td></td><td>Q2 2026</td><td>July 15, 2056</td></tr>
+      <tr><td>Orbital debris</td><td>4</td><td>9</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        html,
+        ir.load_catalog("EVGO"),
+        **_meta(ticker="EVGO", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    labels = " ".join(item["metric_id"] for item in parsed["proposals"])
+    assert "robotaxi_miles" in labels
+    assert "orbital_debris" in labels
+    debris = next(item for item in parsed["proposals"] if item["metric_id"] == "orbital_debris")
+    assert debris["first_seen"]["period"] == "2026Q2"
+    for banned in ("interest", "accretion", "ebitda", "adjustment", "net_cash", "purchases", "net_loss"):
+        assert banned not in labels
+    assert not any(row["metric_id"] == "net_income_gaap" for row in parsed["rows"])
+    prose = """
+    Second quarter 2026
+    Q2-2025 Q3-2025 Q4-2025 Q1-2026 Q2-2026 YoY
+    Robotaxi miles 1 2 3 4 5 10%
+    The notes have five tranches maturing on July 15, 2031, July 15, 2033,
+    July 15, 2036, July 15, 2046, and July 15, 2056.
+    Six Months Ended June 10 11 12 13 14
+    """
+    flowing = ir.parse_company_document(
+        prose,
+        ir.load_catalog("SPCX"),
+        **_meta(ticker="SPCX", source_kind="press_release", fiscal_period="2026Q2"),
+    )
+    flowing_ids = {item["metric_id"] for item in flowing["proposals"]}
+    assert "robotaxi_miles" in flowing_ids
+    assert "six_months_ended_june" not in flowing_ids
+    assert all(item["first_seen"]["period"] <= "2026Q2" for item in flowing["proposals"])
+
+
+def test_bridge_structure_cash_flow_wording_and_gaap_labels_stay_out_of_proposals():
+    """EVgo's bridge has no 'reconciliation' caption. Channel and region KPIs stay."""
+    evgo = """
+    <p>Fourth quarter 2025</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Charging stalls</td><td>1</td><td>1</td></tr>
+      <tr><td>Network throughput</td><td>2</td><td>2</td></tr>
+      <tr><td>Stall utilization</td><td>3</td><td>3</td></tr>
+      <tr><td>Customer accounts</td><td>4</td><td>4</td></tr>
+      <tr><td>Network gigawatt hours</td><td>5</td><td>5</td></tr>
+      <tr><td>Membership fees</td><td>6</td><td>6</td></tr>
+    </table>
+    <table>
+      <tr><td>Non-GAAP measures</td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>GAAP revenue</td><td>20</td><td>18</td></tr>
+      <tr><td>GAAP cost of sales</td><td>8</td><td>7</td></tr>
+      <tr><td>GAAP gross profit</td><td>12</td><td>11</td></tr>
+      <tr><td>GAAP gross margin</td><td>60</td><td>61</td></tr>
+      <tr><td>GAAP capital expenditures</td><td>3</td><td>2</td></tr>
+      <tr><td>GAAP G&amp;A</td><td>4</td><td>3</td></tr>
+      <tr><td>Net loss</td><td>(4)</td><td>(3)</td></tr>
+      <tr><td>Interest expense</td><td>1</td><td>1</td></tr>
+      <tr><td>Total other adjustments</td><td>5</td><td>4</td></tr>
+      <tr><td>Adjusted EBITDA</td><td>10</td><td>9</td></tr>
+    </table>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Cash flows provided by (used in) operating activities</td><td>1</td><td>2</td></tr>
+      <tr><td>Purchases of equipment</td><td>3</td><td>4</td></tr>
+    </table>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Cash flows (used in) provided by investing activities</td><td>5</td><td>6</td></tr>
+      <tr><td>Proceeds from borrowings</td><td>7</td><td>8</td></tr>
+    </table>
+    """
+    parsed = ir.parse_company_document(
+        evgo,
+        ir.load_catalog("EVGO"),
+        **_meta(ticker="EVGO", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    proposed = {item["metric_id"] for item in parsed["proposals"]}
+    assert proposed == {
+        "charging_stalls",
+        "network_throughput",
+        "stall_utilization",
+        "customer_accounts",
+        "network_gigawatt_hours",
+        "membership_fees",
+    }
+    assert not any(
+        row["metric_id"] in {"revenue_gaap", "gross_profit", "net_income_gaap", "operating_income"}
+        for row in parsed["rows"]
+    )
+    bynd = """
+    <p>Fourth quarter 2025</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>Retail channel net revenues</td><td>10</td><td>9</td></tr>
+      <tr><td>Foodservice channel net revenues</td><td>8</td><td>7</td></tr>
+      <tr><td>U.S. net revenues</td><td>12</td><td>11</td></tr>
+      <tr><td>International net revenues</td><td>6</td><td>5</td></tr>
+      <tr><td>Volume of products sold</td><td>4</td><td>3</td></tr>
+      <tr><td>Net loss, as reported</td><td>(1)</td><td>(2)</td></tr>
+      <tr><td>Loss before taxes</td><td>(3)</td><td>(4)</td></tr>
+      <tr><td>Income before taxes</td><td>1</td><td>2</td></tr>
+      <tr><td>Loss before income taxes</td><td>(5)</td><td>(6)</td></tr>
+      <tr><td>Income (Loss) from Operations Space</td><td>5</td><td>6</td></tr>
+    </table>
+    """
+    bynd_parsed = ir.parse_company_document(
+        bynd,
+        ir.load_catalog("BYND"),
+        **_meta(ticker="BYND", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    bynd_ids = {item["metric_id"] for item in bynd_parsed["proposals"]}
+    assert bynd_ids == {
+        "retail_channel_net_revenues",
+        "foodservice_channel_net_revenues",
+        "u_s_net_revenues",
+        "international_net_revenues",
+        "volume_of_products_sold",
+    }
+    goog = """
+    <p>Fourth quarter 2025</p>
+    <table>
+      <tr><td></td><td>Q4 2025</td><td>Q3 2025</td></tr>
+      <tr><td>United States revenues</td><td>40</td><td>38</td></tr>
+      <tr><td>EMEA revenues</td><td>30</td><td>28</td></tr>
+      <tr><td>APAC revenues</td><td>20</td><td>18</td></tr>
+      <tr><td>Other Americas revenues</td><td>10</td><td>9</td></tr>
+    </table>
+    """
+    goog_parsed = ir.parse_company_document(
+        goog,
+        ir.load_catalog("GOOG"),
+        **_meta(ticker="GOOG", source_kind="press_release", fiscal_period="2025Q4"),
+    )
+    assert {item["metric_id"] for item in goog_parsed["proposals"]} == {
+        "united_states_revenues",
+        "emea_revenues",
+        "apac_revenues",
+        "other_americas_revenues",
+    }

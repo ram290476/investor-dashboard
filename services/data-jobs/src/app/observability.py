@@ -76,6 +76,8 @@ _EVENT_FIELDS = (
     "served",
     "run_status",
     "filing",
+    # Backfill: how many tickers reached a terminal success in this run. Dashboard rebuilds on > 0.
+    "tickers_completed",
 )
 
 
@@ -141,12 +143,15 @@ def job_handler(
     persist_runs: Callable[[list[dict[str, Any]]], None] | None = None,
     emit_event: bool = True,
     lease_key: str | None = None,
+    skip_when_leased: bool = False,
 ):
     """Wrap a Lambda handler: correlation ids, tracing, metric flush, run records, job event.
 
     persist_runs receives one dict per source run (the ingestion_runs rows) and
     should append them to the lake, e.g. curated/ingestion_runs/year=/month=/<run_id>.parquet.
     emit_event publishes 'Job Finished' (see emit_job_finished) when the handler returns or raises.
+    skip_when_leased returns a skipped result instead of failing when lease_key is still held,
+    so a coalesced invoke does not retry or land on the dead-letter queue.
     """
 
     def decorator(fn):
@@ -164,11 +169,23 @@ def job_handler(
             outcome = "success"
             result = None
             try:
-                from lake import job_lease
+                from lake import LeaseHeld, job_lease
 
                 with job_lease(lease_key) if lease_key else nullcontext():
                     result = fn(event, context)
                 return result
+            except LeaseHeld:
+                if skip_when_leased:
+                    outcome = "skipped"
+                    result = {"status": "skipped", "reason": "lease held"}
+                    logger.info(
+                        "job_skipped",
+                        extra={"event": "job_run", "outcome": outcome, "reason": "lease held"},
+                    )
+                    return result
+                outcome = "failure"
+                logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})
+                raise
             except Exception:
                 outcome = "failure"
                 logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})

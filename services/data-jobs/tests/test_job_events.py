@@ -128,6 +128,37 @@ def test_job_lease_excludes_concurrent_publishers_and_recovers_after_expiry(monk
             pass
 
 
+def test_leased_job_can_exit_cleanly_instead_of_failing(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    published = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: published.append(outcome),
+    )
+    entered = []
+
+    @observability.job_handler(
+        "DASHBOARD", emit_event=True, lease_key="serving/dashboard-build/_lease.json", skip_when_leased=True,
+    )
+    def run(event, context):
+        entered.append(True)
+        return {"status": "ok"}
+
+    with mock_aws():
+        client = boto3.client("s3")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        with lake.job_lease("serving/dashboard-build/_lease.json"):
+            skipped = run({}, _Context())
+        finished = run({}, _Context())
+    assert skipped == {"status": "skipped", "reason": "lease held"}
+    assert entered == [True]
+    assert finished["status"] == "ok"
+    assert published == ["skipped", "success"]
+
+
 def test_job_lease_is_released_after_exception(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")

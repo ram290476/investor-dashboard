@@ -1,0 +1,4 @@
+module.data_lake.aws_ecr_repository.jobs_policy
+module.jobs.aws_iam_role.job["prices"]
+module.jobs.aws_lambda_function.job_role["prices"]
+module.other.aws_cloudwatch_log_group.job["prices"]
