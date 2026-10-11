@@ -36,7 +36,7 @@ def test_prefs_api_metric_filter_is_a_json_filter():
     assert '($.code = "${each.key}")' in pattern
 
 
-def test_metric_review_writes_are_scoped_and_the_admin_group_has_no_members():
+def test_metric_review_route_cors_integration_and_iam_prefixes():
     main = MAIN_TF.read_text()
     start = main.index('sid     = "WriteMetricReview"')
     block = main[start:main.index("statement {", start)]
@@ -45,8 +45,34 @@ def test_metric_review_writes_are_scoped_and_the_admin_group_has_no_members():
     assert "${var.lake_bucket_arn}/serving/stock/*" in block
     assert "s3:DeleteObject" not in block
     assert "s3:GetObject" not in block
-    assert 'PUT /stock/{ticker}/metrics/{metric_id}' in main
-    assert 'stock_metric = "stock/*/metrics/*"' in main
+    read_catalog = main[main.index('sid       = "ReadMetricCatalog"'):start]
+    assert 'actions   = ["s3:GetObject"]' in read_catalog
+    assert "${var.lake_bucket_arn}/catalog/*" in read_catalog
+    read_serving = main[
+        main.index('sid     = "ReadDashboardServingObjects"'):main.index('sid       = "ReadMetricCatalog"')
+    ]
+    assert "${var.lake_bucket_arn}/serving/stock/*" in read_serving
+    route = _block(main, 'resource "aws_apigatewayv2_route" "site"')
+    assert 'PUT /stock/{ticker}/metrics/{metric_id}' in route
+    assert "route_key          = each.value" in route
+    assert 'authorization_type = "JWT"' in route
+    assert "authorizer_id      = aws_apigatewayv2_authorizer.jwt.id" in route
+    assert 'target             = "integrations/${aws_apigatewayv2_integration.prefs.id}"' in route
+    integration = _block(main, 'resource "aws_apigatewayv2_integration" "prefs"')
+    assert 'integration_type       = "AWS_PROXY"' in integration
+    assert 'payload_format_version = "2.0"' in integration
+    assert "aws_lambda_function.api.invoke_arn" in integration
+    cors = _block(main, 'resource "aws_apigatewayv2_api" "site"')
+    assert 'allow_methods = ["GET", "PUT"]' in cors
+    assert '"authorization"' in cors
+    assert '"content-type"' in cors
+    assert '"accept"' in cors
+    permission = main[
+        main.index('resource "aws_lambda_permission" "api_route"'):
+        main.index('resource "aws_cloudwatch_metric_alarm" "api_5xx"')
+    ]
+    assert 'stock_metric = "stock/*/metrics/*"' in permission
+    assert "source_arn    = \"${aws_apigatewayv2_api.site.execution_arn}/*/*/${each.value}\"" in permission
     assert "CATALOG_WRITE_FAILED" in main
     auth = (MAIN_TF.parents[1] / "site_auth" / "main.tf").read_text()
     assert 'resource "aws_cognito_user_group" "admin"' in auth
@@ -55,7 +81,12 @@ def test_metric_review_writes_are_scoped_and_the_admin_group_has_no_members():
     assert "must not be added" in auth
     assert "admin-add-user-to-group" in auth
     jobs = (MAIN_TF.parents[2] / "variables.tf").read_text()
-    assert '"catalog/"' in jobs
+    serve = jobs[jobs.index("q2-company-ir-serve = {"):jobs.index("short-interest = {")]
+    assert 'read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/"]' in serve
+    assert 'write_prefixes = ["serving/stock/"]' in serve
+    extract = jobs[jobs.index("q2-company-ir-extract = {"):jobs.index("q2-company-ir-serve = {")]
+    assert '"catalog/"' in extract
+    assert "catalog/" not in extract[extract.index("write_prefixes"):]
 
 
 def test_prefs_api_metric_filter_matches_log_event_keys(capsys):

@@ -7,6 +7,12 @@
 // A price trend is used only when it belongs to the ticker being shown.
 
 import { chartValue, validBars } from "./chart-period.js";
+import { formatConsumerDate } from "./panel-dates.js";
+
+function shownDay(value) {
+  if (value == null || value === "") return "";
+  return formatConsumerDate(value) || String(value);
+}
 
 export const TREND_SHORT = 20;
 export const TREND_LONG = 50;
@@ -174,7 +180,7 @@ function sessionPhrase(days) {
 
 export function trendTitle(trend, formatPrice = fallbackPrice, formatPercent = fallbackPercent) {
   if (!trend?.state || trend.days == null) {
-    const start = trend?.historyStarts ? `, history starts ${trend.historyStarts}` : "";
+    const start = trend?.historyStarts ? `, history starts ${shownDay(trend.historyStarts)}` : "";
     const lines = [`Not enough history · trend needs ${trend?.needed} daily closes (have ${trend?.sessionsAvailable}${start})`];
     if (trend?.ma20 != null) {
       const vs = trend.vsMa20 == null ? "" : `   (${formatPercent(trend.vsMa20, 1)} vs 20D)`;
@@ -185,7 +191,7 @@ export function trendTitle(trend, formatPrice = fallbackPrice, formatPercent = f
   const name = trend.state === "uptrend" ? "Uptrend" : trend.state === "downtrend" ? "Downtrend" : "Range";
   const sessions = sessionPhrase(trend.days);
   const held = trend.fromStart ? `at least ${sessions}` : sessions;
-  const since = `since ${trend.since}`;
+  const since = `since ${shownDay(trend.since)}`;
   const unknown = trend.fromStart ? ". Earlier sessions have no 50-day average" : "";
   const relation = trendRelation(trend);
   const lines = [
@@ -198,13 +204,13 @@ export function trendTitle(trend, formatPrice = fallbackPrice, formatPercent = f
   lines.push(`Price      ${formatPrice(trend.close)}${vs}`);
   lines.push(trend.ma20 == null ? "20-day avg unavailable" : `20-day avg ${formatPrice(trend.ma20)}`);
   lines.push(trend.ma50 == null ? "50-day avg unavailable" : `50-day avg ${formatPrice(trend.ma50)}${note ? `   (${note})` : ""}`);
-  lines.push(`Daily closes, as of ${trend.asOf || "the latest close"}`);
+  lines.push(`Daily closes, as of ${trend.asOf ? shownDay(trend.asOf) : "the latest close"}`);
   return lines.join("\n");
 }
 
 export function trendSentence(trend, formatPercent = fallbackPercent) {
   if (!trend?.state || trend.days == null) {
-    const start = trend?.historyStarts ? `, history starts ${trend.historyStarts}` : "";
+    const start = trend?.historyStarts ? `, history starts ${shownDay(trend.historyStarts)}` : "";
     const vs = trend?.vsMa20 == null ? "" : `, ${formatPercent(trend.vsMa20, 1)} versus the 20-day average`;
     return `Not enough history. Trend needs ${trend?.needed} daily closes, ${trend?.sessionsAvailable} available${start}${vs}.`;
   }
@@ -216,7 +222,7 @@ export function trendSentence(trend, formatPercent = fallbackPercent) {
   if (trend.vsMa20 != null) parts.push(`${formatPercent(trend.vsMa20, 1)} versus the 20-day average`);
   const detail = parts.length ? `: ${parts.join(", ")}` : "";
   if (trend.fromStart) {
-    const lead = `Daily closes. ${name} for at least ${sessions} since ${trend.since}. Earlier sessions have no 50-day average`;
+    const lead = `Daily closes. ${name} for at least ${sessions} since ${shownDay(trend.since)}. Earlier sessions have no 50-day average`;
     return parts.length ? `${lead}: ${parts.join(", ")}.` : `${lead}.`;
   }
   return `Daily closes. ${name} for ${sessions}${detail}.`;

@@ -157,6 +157,15 @@ def test_a_collect_does_not_clear_an_approved_metric():
     assert added_entry["approved_by"] is None
 
 
+def test_serve_handler_rewrites_the_stock_json_and_gzip_sibling():
+    import inspect
+
+    source = inspect.getsource(ir.serve_handler)
+    assert "write_json_and_gzip" in source
+    assert "cache_seconds=0" in source
+    assert "write_json(" not in source.split("write_json_and_gzip", 1)[1]
+
+
 def test_lake_catalog_approval_is_served_even_when_the_extracted_row_is_unapproved():
     lake = {
         "ticker": "TSLA",

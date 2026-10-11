@@ -430,8 +430,15 @@ a {
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.8fr);
-  gap: 12px;
+  gap: var(--space-3);
   align-items: start;
+}
+
+.side-column {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: var(--space-3);
 }
 
 .research-heading {
@@ -2252,7 +2259,7 @@ input::placeholder {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 12px;
+  gap: var(--space-3);
   margin: 12px 0;
 }
 
@@ -2728,7 +2735,7 @@ input::placeholder {
 .yield-curve {
   display: block;
   width: 100%;
-  height: 96px;
+  height: 90px;
 }
 
 .yield-curve path {
@@ -2737,12 +2744,19 @@ input::placeholder {
   vector-effect: non-scaling-stroke;
 }
 
+.yield-curve .curve-fill {
+  fill: var(--price);
+  fill-opacity: 0.12;
+  stroke: none;
+}
+
 .yield-curve .curve-today {
   stroke: var(--price);
 }
 
 .yield-curve .curve-ago {
   stroke: var(--muted);
+  stroke-width: 1.25;
   stroke-dasharray: 4 3;
 }
 
@@ -2753,7 +2767,7 @@ input::placeholder {
   gap: 2px;
   overflow-x: auto;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--muted);
 }
 
@@ -2765,12 +2779,124 @@ input::placeholder {
   white-space: nowrap;
 }
 
+.rates-regime {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rates-regime-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.rates-regime-note {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-align: right;
+}
+
+.rates-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.rates-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rates-swatch-today,
+.rates-swatch-ago,
+.cpi-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 0;
+}
+
+.rates-swatch-today {
+  border-top: 2px solid var(--price);
+}
+
+.rates-swatch-ago {
+  border-top: 2px dashed var(--muted);
+}
+
+.cpi-swatch {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--blue);
+  background: color-mix(in srgb, var(--blue) 35%, var(--surface));
+}
+
+.rates-fomc-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--secondary);
+  font-size: 11px;
+}
+
+.rates-spark {
+  display: block;
+  width: 100%;
+  height: 34px;
+}
+
+.rates-spark path {
+  fill: none;
+  stroke: var(--price);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.cpi-prints {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  align-items: end;
+}
+
+.cpi-print {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.cpi-track {
+  position: relative;
+  width: 100%;
+  height: 96px;
+}
+
+.cpi-fill {
+  position: absolute;
+  right: 18%;
+  bottom: 0;
+  left: 18%;
+  border: 1px solid var(--blue);
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--blue) 35%, var(--surface));
+}
+
 .bp-up {
-  color: var(--green);
+  color: var(--amber);
 }
 
 .bp-down {
-  color: var(--red);
+  color: var(--blue);
 }
 
 .bp-flat {
@@ -2793,21 +2919,28 @@ input::placeholder {
 }
 
 .fomc-bar span {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 100%;
   min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .fomc-cut {
-  background: var(--green);
+  background: color-mix(in srgb, var(--blue) 55%, var(--surface));
 }
 
 .fomc-hold {
-  background: var(--amber);
+  background: var(--surface-raised);
 }
 
 .fomc-hike {
-  background: var(--red);
+  background: color-mix(in srgb, var(--amber) 55%, var(--surface));
 }
 
 .fomc-other {
@@ -3328,7 +3461,7 @@ a.catalyst-edgar-link:hover {
   .side-column {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: var(--space-3);
   }
 
   .side-column .panel {
@@ -3517,7 +3650,7 @@ a.catalyst-edgar-link:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2) var(--space-3);
-  margin: 4px 0 12px;
+  margin-block: var(--space-3);
   min-width: 0;
   padding-inline: calc(var(--space-2) * 2);
 }
@@ -3562,7 +3695,7 @@ a.catalyst-edgar-link:hover {
 
 .stock-page {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .stock-section {
@@ -3708,6 +3841,21 @@ a.catalyst-edgar-link:hover {
 
 .metric-review-action {
   margin-left: auto;
+}
+
+.metric-review-action:disabled {
+  opacity: 0.7;
+}
+
+.metric-review-toast {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--error) 14%, var(--surface));
+  color: var(--error);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .stock-kpi-value {

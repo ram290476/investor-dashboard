@@ -64,14 +64,34 @@ test("a served curve draws today and one month ago and skips a missing tenor", (
     curve: { date: "2026-10-08", ref_date_1m: "2026-09-08", regime: "bear steepening", tenors },
   }, "ready");
   assert.equal(view.kind, "ready");
-  assert.equal(view.regime, "bear steepening");
+  assert.equal(view.regime, "Bear steepening");
+  assert.equal(view.note, "2Y +8bp · 10Y +8bp (1M)");
   assert.match(view.todayPath, /^M/);
   assert.match(view.agoPath, /^M/);
+  assert.match(view.fillPath, /^M/);
+  assert.match(view.fillPath, /Z$/);
   assert.equal(view.tenors.find((row) => row.tenor === "3Y").bpText, "--");
   assert.equal(view.tenors.find((row) => row.tenor === "3Y").yieldText, "--");
+  assert.equal(view.tenors.find((row) => row.tenor === "2Y").bpClass, "bp-up");
   const paths = curvePaths(tenors);
   assert.doesNotMatch(paths.today, /NaN/);
+  assert.equal(paths.fill, view.fillPath);
   assert.equal(view.tenors.length, 11);
+});
+
+test("the curve note uses a minus sign for a lower yield", () => {
+  const view = curveView({
+    curve: {
+      date: "2026-10-08",
+      ref_date_1m: "2026-09-08",
+      regime: "bull steepening",
+      tenors: [tenor("2Y", 3.61, 3.83, -22), tenor("10Y", 4.18, 4.18, 0)],
+    },
+  }, "ready");
+  assert.equal(view.regime, "Bull steepening");
+  assert.equal(view.note, "2Y −22bp · 10Y 0bp (1M)");
+  assert.equal(view.tenors.find((row) => row.tenor === "2Y").bpClass, "bp-down");
+  assert.equal(view.tenors.find((row) => row.tenor === "10Y").bpText, "0");
 });
 
 test("FOMC segments keep their own width and a short policy path is not drawn", () => {
@@ -83,7 +103,10 @@ test("FOMC segments keep their own width and a short policy path is not drawn", 
     },
   }, "ready");
   assert.equal(fomc.kind, "ready");
+  assert.equal(fomc.meeting, "Oct 28 FOMC · Kalshi");
   assert.deepEqual(fomc.segments.map((row) => row.width), ["62%", "31%"]);
+  assert.deepEqual(fomc.segments.map((row) => row.text), ["Cut 62%", "Hold 31%"]);
+  assert.equal(fomc.cutTrend, "cut ▲ +7 pts / stored");
   assert.equal(fomc.history.length, 2);
   const policy = policyPathView({ policy_path: [{ meeting: "Oct", implied_rate: 4.1, chg_1m_bp: -12 }] }, "ready");
   assert.equal(policy.kind, "unavailable");
@@ -95,6 +118,10 @@ test("rates block styles use theme tokens and stack under 640px", () => {
   assert.ok(start > 0);
   const block = styles.slice(start, start + 1800);
   assert.equal(block.includes("#"), false);
+  assert.match(block, /\.curve-fill/);
+  assert.match(block, /var\(--price\)/);
+  assert.match(styles, /\.bp-down\s*\{[^}]*var\(--blue\)/);
+  assert.match(styles, /\.bp-up\s*\{[^}]*var\(--amber\)/);
   assert.match(styles, /\.rates-fomc-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 96px/);
   assert.match(styles, /max-width:\s*640px[\s\S]*\.rates-fomc-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
   for (const theme of THEMES) {

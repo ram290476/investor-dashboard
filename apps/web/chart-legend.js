@@ -1,4 +1,5 @@
 import { isNumericValue } from "./chart-period.js";
+import { formatConsumerDate } from "./panel-dates.js";
 
 // One dash definition for the plot and the legend. Averages share the price
 // axis and stay solid. Every other overlay is dashed, including market series
@@ -72,7 +73,8 @@ function macroText(definition, values, correlation) {
 function sentimentText(definition, values, observedOn) {
   const last = lastNumeric(values);
   if (!last) return `${definition.label} · not available`;
-  const when = observedOn ? ` · observed ${observedOn}` : "";
+  const observed = observedOn ? (formatConsumerDate(observedOn) || observedOn) : "";
+  const when = observed ? ` · observed ${observed}` : "";
   return `${definition.label} · ${last.value.toFixed(2)}${when} · own scale`;
 }
 

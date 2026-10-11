@@ -4080,16 +4080,17 @@ def serve_handler(event, context):
 
     from aws_lambda_powertools.metrics import MetricUnit
 
-    from lake import read_json, write_json
+    from lake import read_json, write_json_and_gzip
     from observability import job_handler, metrics
 
     @job_handler("Q2S")
     def run(event, context):
         bucket = os.environ.get("LAKE_BUCKET")
+        # JSON plus the .gz sibling, so a review patch's gzip copy is not left behind.
         result = run_serve(
             event,
             read_json=lambda key: read_json(key, bucket),
-            write_json=lambda key, obj: write_json(obj, key, bucket=bucket),
+            write_json=lambda key, obj: write_json_and_gzip(obj, key, bucket=bucket, cache_seconds=0),
         )
         if result.get("alert"):
             metrics.add_metric(name="FailedRuns", unit=MetricUnit.Count, value=1)

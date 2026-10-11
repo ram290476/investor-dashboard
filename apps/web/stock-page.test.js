@@ -279,6 +279,54 @@ test("edgar fundamentals fill the page only when no approved IR fundamentals exi
   assert.equal(withIr.fundamentals[0].xbrl, "XBRL mismatch");
 });
 
+test("review mode shows or hides operating, guidance, and CapEx panels together", () => {
+  const series = [
+    { fiscal_period: "2025Q1", value: 1, reported: true },
+    { fiscal_period: "2025Q2", value: 2, reported: true },
+  ];
+  const metric = (id, category, approved) => ({
+    metric_id: id,
+    approved,
+    approval_state: approved ? "approved" : "proposed",
+    display_name: id,
+    unit: "USD",
+    category,
+    latest: { fiscal_period: "2025Q2", value: 2, reported: true },
+    series,
+  });
+  const payload = {
+    metrics: [
+      metric("data_center_revenue", "operating", true),
+      metric("robotaxi_rides", "operating", false),
+      metric("outlook", "guidance", false),
+      metric("capex", "fundamentals", false),
+      metric("revenue_gaap", "fundamentals", true),
+    ],
+  };
+  const showingPending = stockPanels(payload, { fundamentals: [] }, { review: "all" });
+  assert.deepEqual(showingPending.operating.map((card) => card.id), ["data_center_revenue", "robotaxi_rides"]);
+  assert.equal(showingPending.guidance.some((card) => card.id === "outlook" && card.pending), true);
+  assert.equal(showingPending.fundamentals.some((card) => card.id === "capex" && card.pending), true);
+  assert.equal(showingPending.fundamentals.some((card) => card.id === "revenue_gaap" && card.pending === false), true);
+  const approvedOnly = stockPanels(payload, { fundamentals: [] }, { review: "approved" });
+  assert.deepEqual(approvedOnly.operating.map((card) => card.id), ["data_center_revenue"]);
+  assert.equal(approvedOnly.guidance.length, 0);
+  assert.equal(approvedOnly.fundamentals.some((card) => card.id === "capex"), false);
+  assert.equal(approvedOnly.fundamentals.some((card) => card.id === "revenue_gaap"), true);
+  const pendingOnly = stockPanels({
+    metrics: [
+      metric("robotaxi_rides", "operating", false),
+      metric("outlook", "guidance", false),
+      metric("capex", "fundamentals", false),
+    ],
+  }, { fundamentals: [] }, { review: "approved" });
+  assert.equal(pendingOnly.operating.length, 0);
+  assert.equal(pendingOnly.guidance.length, 0);
+  assert.equal(pendingOnly.fundamentals.length, 0);
+  const groups = app.slice(app.indexOf("function appendMetricGroups"), app.indexOf("function renderStockPage"));
+  assert.match(groups, /if \(!cards\.length\)[\s\S]*node\("p", "data-state", empty\)/);
+});
+
 test("stock tabs move by keyboard and calls stay unlicensed", () => {
   assert.equal(nextStockTab("overview", "ArrowRight"), "kpis");
   assert.equal(nextStockTab("overview", "End"), "calls");
@@ -325,12 +373,16 @@ test("company header shows only the company name and a centered Back to dashboar
   assert.match(styles, /\.stock-heading\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*align-items:\s*center/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*padding-inline:\s*calc\(var\(--space-2\) \* 2\)/);
+  assert.match(styles, /\.stock-heading\s*\{[^}]*margin-block:\s*var\(--space-3\)/);
+  assert.match(styles, /--space-3:\s*12px/);
+  assert.match(styles, /\.stock-page\s*\{[^}]*gap:\s*var\(--space-3\)/);
   assert.match(styles, /\.overview\s*\{[^}]*padding:\s*14px 16px 12px/);
   assert.match(styles, /\.stock-section\s*\{[^}]*padding:\s*14px 16px 16px/);
   const mobileAt = styles.lastIndexOf(".stock-heading {");
   const mobileHeading = styles.slice(mobileAt, styles.indexOf(".stock-page-tabs {", mobileAt));
   assert.match(mobileHeading, /align-items:\s*center/);
   assert.doesNotMatch(mobileHeading, /padding-inline:\s*0/);
+  assert.doesNotMatch(mobileHeading, /margin-block:\s*0/);
   assert.match(mobileHeading, /\.stock-dashboard-link\s*\{[^}]*align-self:\s*center/);
   const linkCss = styles.slice(styles.indexOf(".stock-dashboard-link {"), styles.indexOf(".stock-dashboard-link:hover"));
   assert.match(linkCss, /justify-self:\s*end/);

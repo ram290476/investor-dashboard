@@ -335,6 +335,7 @@ function applyPeriod(card, options, ticker) {
       emptyPeriod: true,
       latest: "not reported",
       latestPeriod: "",
+      periodEnd: "",
       qoq: null,
       yoy: null,
       qoqValue: null,
@@ -353,6 +354,7 @@ function applyPeriod(card, options, ticker) {
     emptyPeriod: false,
     latest: formatMetricValue(latest.value, card.unit),
     latestPeriod: latest.fiscal_period,
+    periodEnd: latest.period_end || "",
     qoq: same ? card.qoq : formatChange(qoqValue),
     yoy: same ? card.yoy : formatChange(yoyValue),
     qoqValue,
@@ -370,6 +372,8 @@ function presentMetric(metric, ticker = "") {
   }
   const reported = series.filter((point) => point.reported);
   const latest = metric.latest?.reported === false ? null : metric.latest;
+  const fiscal = latest?.fiscal_period || reported.at(-1)?.fiscal_period || "";
+  const matched = series.find((point) => point.fiscal_period === fiscal);
   const pending = isPendingMetric(metric);
   const capex = metric.metric_id === "capex";
   return {
@@ -381,7 +385,8 @@ function presentMetric(metric, ticker = "") {
     panelType: panelType(metric),
     series,
     latest: latest?.value == null ? "not reported" : formatMetricValue(latest.value, metric.unit),
-    latestPeriod: latest?.fiscal_period || reported.at(-1)?.fiscal_period || "",
+    latestPeriod: fiscal,
+    periodEnd: latest?.period_end || matched?.period_end || fiscalQuarterEnd(fiscal, ticker),
     qoq: formatChange(metric.qoq),
     yoy: formatChange(metric.yoy),
     qoqValue: metric.qoq,
@@ -430,6 +435,7 @@ function edgarCards(chartData, ticker = "") {
       series: filled,
       latest: formatMetricValue(latest.value, metric.unit),
       latestPeriod: latest.fiscal_period,
+      periodEnd: latest.period_end || fiscalQuarterEnd(latest.fiscal_period, ticker),
       qoq: formatChange(qoq),
       yoy: null,
       qoqValue: qoq,
@@ -465,6 +471,7 @@ function presentUnavailable(item) {
     series: [],
     latest: "not reported",
     latestPeriod: "",
+    periodEnd: "",
     qoq: null,
     yoy: null,
     qoqValue: null,
@@ -529,7 +536,7 @@ export function stockPanels(payload, chartData, options = {}) {
 
 export function callsCopy() {
   return {
-    guidance: "Proposed outlook stays on these charts and is listed under Company metrics as Pending review. Approved only hides those rows in the list.",
+    guidance: "Show pending review includes proposed series on this page. Approved only hides those panels and list rows.",
     transcripts: "Quarterly call transcripts are not collected. They are added only where the company hosts them or the license explicitly allows it.",
   };
 }

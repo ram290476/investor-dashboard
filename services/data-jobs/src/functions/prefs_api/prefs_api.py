@@ -672,6 +672,66 @@ def _jwt_claims(event: dict) -> dict:
     return claims if isinstance(claims, dict) else {}
 
 
+def _authorization_header(event: dict) -> str:
+    headers = event.get("headers")
+    if not isinstance(headers, dict):
+        return ""
+    for key, value in headers.items():
+        if isinstance(key, str) and key.lower() == "authorization" and isinstance(value, str):
+            return value.strip()
+    return ""
+
+
+def _unsigned_jwt_payload(token: str) -> dict:
+    """Decode a JWT payload. The HTTP API authorizer already checked the signature."""
+    parts = token.split(".")
+    if len(parts) != 3 or not parts[1]:
+        return {}
+    segment = parts[1]
+    padded = segment + ("=" * (-len(segment) % 4))
+    try:
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+        claims = json.loads(decoded)
+    except (ValueError, json.JSONDecodeError, UnicodeError):
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def _bearer_claims(event: dict) -> dict:
+    header = _authorization_header(event)
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token or " " in token:
+        return {}
+    return _unsigned_jwt_payload(token)
+
+
+def _claims_for_review(event: dict) -> dict:
+    """Authorizer claims, plus groups from the same token when the array claim was dropped.
+
+    Approve is shown from the access token's ``cognito:groups`` array. The HTTP API JWT
+    authorizer copies claims into ``authorizer.jwt.claims`` as strings and omits array
+    claims, so a live admin can be missing ``cognito:groups`` here after the authorizer
+    has already accepted the token. The Authorization bearer is that token. Its groups
+    count only when ``sub`` matches the verified sub and ``token_use`` is ``access``
+    (what the page sends) or ``id`` (accepted when ``aud`` is the app client).
+    """
+    claims = dict(_jwt_claims(event))
+    if ADMIN_GROUP in _claim_groups(claims):
+        return claims
+    bearer = _bearer_claims(event)
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub or bearer.get("sub") != sub:
+        return claims
+    if bearer.get("token_use") not in {"access", "id"}:
+        return claims
+    if "cognito:groups" not in claims and bearer.get("cognito:groups") is not None:
+        claims["cognito:groups"] = bearer["cognito:groups"]
+    for key in ("email", "username", "cognito:username"):
+        if key not in claims and isinstance(bearer.get(key), str) and bearer[key].strip():
+            claims[key] = bearer[key].strip()
+    return claims
+
+
 def _claim_groups(claims: dict) -> set[str]:
     raw = claims.get("cognito:groups")
     if isinstance(raw, list):
@@ -733,11 +793,31 @@ def _read_json_object(key: str) -> dict | None:
     return document
 
 
-def _write_json_object(key: str, document: dict) -> None:
+def _write_json_object(key: str, document: dict, *, gzip_sibling: bool = False) -> None:
+    """Write the JSON object GET /stock reads. The serving file also gets a matching .gz sibling.
+
+    Cache-Control is no-store on both objects. The API response already sends no-store, and
+    CloudFront does not proxy this API. A later collect rewrites the JSON and the sibling together.
+    """
     if not LAKE_BUCKET:
         raise RuntimeError("LAKE_BUCKET is not configured")
     body = json.dumps(document, separators=(",", ":"), default=str).encode()
-    _s3.put_object(Bucket=LAKE_BUCKET, Key=key, Body=body, ContentType="application/json")
+    _s3.put_object(
+        Bucket=LAKE_BUCKET,
+        Key=key,
+        Body=body,
+        ContentType="application/json",
+        CacheControl="no-store",
+    )
+    if not gzip_sibling:
+        return
+    _s3.put_object(
+        Bucket=LAKE_BUCKET,
+        Key=f"{key}.gz",
+        Body=gzip.compress(body, compresslevel=GZIP_LEVEL, mtime=0),
+        ContentType="application/gzip",
+        CacheControl="no-store",
+    )
 
 
 def _set_catalog_metric(
@@ -808,7 +888,8 @@ def _patch_serving_metric(document: dict, metric_id: str, status: str, reviewer:
     return updated
 
 
-def _review_metric(event, sub: str, claims: dict, ticker: str, metric_id: str, respond) -> dict:
+def _review_metric(event, sub: str, ticker: str, metric_id: str, respond) -> dict:
+    claims = _claims_for_review(event)
     if not _is_metric_admin(claims):
         return respond(403, {"error": "Only an admin can change metric review status"})
     if ticker not in get_prefs(_table_for(sub), sub)["tickers"]:
@@ -832,7 +913,7 @@ def _review_metric(event, sub: str, claims: dict, ticker: str, metric_id: str, r
     catalog = _set_catalog_metric(catalog, ticker, metric_id, status, reviewer, approved_at)
     patched = _patch_serving_metric(document, metric_id, status, reviewer, approved_at)
     _write_json_object(_catalog_key(ticker), catalog)
-    _write_json_object(f"serving/stock/{ticker}.json", patched)
+    _write_json_object(f"serving/stock/{ticker}.json", patched, gzip_sibling=True)
     return respond(200, _public_stock(patched, ticker))
 
 
@@ -897,7 +978,7 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
         metric_id = review.group(2)
         if not METRIC_ID_RE.fullmatch(metric_id):
             return respond(400, {"error": "Metric id is not valid"})
-        return _review_metric(event, sub, _jwt_claims(event), ticker, metric_id, respond)
+        return _review_metric(event, sub, ticker, metric_id, respond)
     if review:
         return respond(405, {"error": f"{method} not allowed"})
     if method == "GET" and path.startswith("/stock/"):

@@ -32,7 +32,8 @@ test("bottom panels are drawers and the old nested disclosures are gone", () => 
   assert.match(app, /restoreDrawerFocus/);
   assert.doesNotMatch(app, /rememberDrawer|openDrawers/);
   assert.doesNotMatch(app, /signal-drawer panel-body/);
-  assert.match(app, /rememberInner\([\s\S]*"release-calendar"\)/);
+  assert.doesNotMatch(app, /rememberInner\([\s\S]*"release-calendar"\)/);
+  assert.match(app, /title: "Inflation surprise"/);
   assert.match(app, /rememberInner\([\s\S]*"all-drivers"\)/);
 });
 
@@ -44,4 +45,17 @@ test("drawer chrome uses theme tokens and does not animate when motion is reduce
   }
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.drawer-chevron\s*\{[^}]*transition:\s*none/);
   assert.match(styles, /\.macro-panel-grid\s*\{[^}]*align-items:\s*start/);
+  assert.match(styles, /\.macro-panel-grid\s*\{[^}]*gap:\s*var\(--space-3\)/);
+  assert.match(styles, /\.side-column\s*\{[^}]*display:\s*grid/);
+  assert.match(styles, /\.side-column\s*\{[^}]*align-content:\s*start/);
+  assert.match(styles, /\.side-column\s*\{[^}]*gap:\s*var\(--space-3\)/);
+  assert.match(styles, /\.dashboard-grid\s*\{[^}]*gap:\s*var\(--space-3\)/);
+  assert.match(styles, /--space-3:\s*12px/);
+  assert.doesNotMatch(styles, /\.side-column\s*\{[^}]*margin(?:-top|-bottom)?:\s*-/);
+  assert.doesNotMatch(styles, /\.side-column\s*\{[^}]*position:\s*absolute/);
+  const narrow = styles.slice(styles.indexOf("@media (max-width: 930px)"), styles.indexOf("/* Data refresh"));
+  assert.match(narrow, /\.side-column\s*\{[^}]*gap:\s*var\(--space-3\)/);
+  assert.doesNotMatch(narrow, /\.side-column\s*\{[^}]*gap:\s*0/);
+  const phone = styles.slice(styles.lastIndexOf("@media (max-width: 640px)", styles.indexOf(".dashboard-grid .primary-column")), styles.indexOf("@media (max-width: 930px)"));
+  assert.match(phone, /\.dashboard-grid \.side-column\s*\{[^}]*display:\s*contents/);
 });

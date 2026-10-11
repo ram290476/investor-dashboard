@@ -321,9 +321,9 @@ test("fundamental summaries are unit-aware, quarter-labelled and publication-dat
     { series_id: "shares_outstanding", date: "2026-01-01", value: 1234567, unit: "shares", fiscal_quarter: "2025Q4" },
     { series_id: "revenue_gaap", date: "2026-05-01", value: 999, unit: "USD", fiscal_quarter: "2026Q1", source_id: "DS-11" },
   ] };
-  assert.equal(fundamentalSummary("FUNDAMENTAL:revenue_gaap", chart, "2026-02-01"), "$27.0B · 2025Q4");
-  assert.equal(fundamentalSummary("FUNDAMENTAL:gross_margin_gaap", chart, "2026-02-01"), "20.5% · 2025Q4");
-  assert.equal(fundamentalSummary("FUNDAMENTAL:shares_outstanding", chart, "2026-02-01"), "1,234,567 · 2025Q4");
+  assert.equal(fundamentalSummary("FUNDAMENTAL:revenue_gaap", chart, "2026-02-01"), "$27.0B · Q4 2025");
+  assert.equal(fundamentalSummary("FUNDAMENTAL:gross_margin_gaap", chart, "2026-02-01"), "20.5% · Q4 2025");
+  assert.equal(fundamentalSummary("FUNDAMENTAL:shares_outstanding", chart, "2026-02-01"), "1,234,567 · Q4 2025");
   assert.equal(fundamentalSummary("FUNDAMENTAL:revenue_gaap", chart, "2025-12-31"), "not available");
   assert.equal(fundamentalObservation("FUNDAMENTAL:revenue_gaap", chart, "2026-02-01").source_id, "DS-11");
   assert.equal(fundamentalObservation("FUNDAMENTAL:revenue_gaap", chart, "2025-12-31"), undefined);

@@ -17,6 +17,7 @@ export const API_CODE_MESSAGES = {
   SERVING_READ_FAILED: "Dashboard data is being rebuilt; try again in a minute.",
   PREFS_STORE_UNAVAILABLE: "Preferences could not be reached. Try again in a minute.",
   SERVING_DOCUMENT_INVALID: "Dashboard data is being rebuilt; try again in a minute.",
+  CATALOG_WRITE_FAILED: "The metric review could not be saved. Try again in a minute.",
   INTERNAL: "Something went wrong. Try again in a minute.",
 };
 
