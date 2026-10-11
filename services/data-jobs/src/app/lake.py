@@ -29,6 +29,7 @@ import polars as pl
 
 LAKE_BUCKET = os.getenv("LAKE_BUCKET", "")
 PRICES_PREFIX = "curated/prices_daily/"
+_SOFT_LAKE_CODES = frozenset({"AccessDenied", "AccessDeniedException", "NoSuchKey", "NotFound", "404"})
 # daily_prices (D4, Alpaca) rows win over backfill (DS-05, Yahoo) rows for the same ticker and date.
 PREFERRED_PRICE_SOURCE = "DS-02"
 UPSERT_ATTEMPTS = 5
@@ -42,6 +43,24 @@ def s3():
     return _s3
 
 
+class LeaseHeld(RuntimeError):
+    """Another invocation still holds this job's lease."""
+
+
+def lake_error_code(exc: BaseException) -> str:
+    """S3 error code, when this exception came from a lake client call."""
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        return str((response.get("Error") or {}).get("Code") or "")
+    return ""
+
+
+def lake_read_denied_or_missing(exc: BaseException) -> bool:
+    """True for AccessDenied and for a missing object (NoSuchKey, including a 403 on GET)."""
+    code = lake_error_code(exc)
+    return code in _SOFT_LAKE_CODES or type(exc).__name__ in {"NoSuchKey", "AccessDenied"}
+
+
 @contextmanager
 def job_lease(key: str, ttl_seconds: int = 900):
     """Serialize read/build/publish jobs using a lease longer than their Lambda timeout."""
@@ -50,7 +69,7 @@ def job_lease(key: str, ttl_seconds: int = 900):
         stored = client.get_object(Bucket=LAKE_BUCKET, Key=key)
         lease = json.loads(stored["Body"].read())
         if lease["expires_at"] > time.time():
-            raise RuntimeError(f"Job already running ({key}); retry the event")
+            raise LeaseHeld(f"Job already running ({key}); retry the event")
         condition = {"IfMatch": stored["ETag"]}
     except client.exceptions.NoSuchKey:
         condition = {"IfNoneMatch": "*"}
@@ -115,7 +134,28 @@ def write_json_and_gzip(obj, key: str, bucket: str | None = None, cache_seconds:
     return {"raw_bytes": len(raw), "gzip_bytes": len(compressed)}
 
 
-def read_parquet_prefix(prefix: str, bucket: str | None = None) -> pl.DataFrame:
+def _read_parquet_body(body: bytes, columns: list[str] | None) -> pl.DataFrame:
+    """Decode one object, projecting ``columns`` when the file has them."""
+    source = io.BytesIO(body)
+    if not columns:
+        return pl.read_parquet(source)
+    try:
+        schema = pl.read_parquet_schema(source)
+        source.seek(0)
+        selected = [name for name in columns if name in schema]
+        if not selected:
+            return pl.read_parquet(source)
+        return pl.read_parquet(source, columns=selected)
+    except Exception:  # noqa: BLE001 - a schema mismatch should not drop the object
+        source.seek(0)
+        frame = pl.read_parquet(source)
+        keep = [name for name in columns if name in frame.columns]
+        return frame.select(keep) if keep else frame
+
+
+def read_parquet_prefix(
+    prefix: str, bucket: str | None = None, columns: list[str] | None = None,
+) -> pl.DataFrame:
     """Concatenate every Parquet object under a prefix (small curated tables only)."""
     bucket = bucket or LAKE_BUCKET
     frames = []
@@ -123,7 +163,7 @@ def read_parquet_prefix(prefix: str, bucket: str | None = None) -> pl.DataFrame:
         for obj in page.get("Contents", []):
             if obj["Key"].endswith(".parquet"):
                 body = s3().get_object(Bucket=bucket, Key=obj["Key"])["Body"].read()
-                frames.append(pl.read_parquet(io.BytesIO(body)))
+                frames.append(_read_parquet_body(body, columns))
     return pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
 
 

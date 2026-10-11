@@ -2,10 +2,15 @@ import gzip
 import json
 
 import boto3
+import polars as pl
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 import dashboard_build
+import lake
+import observability
+import universe
 
 
 def test_snapshot_includes_prices_trends_status_and_only_matching_fundamentals():
@@ -723,3 +728,126 @@ def test_publish_writes_gzip_siblings_and_size_metrics(monkeypatch):
     assert recorded[0]["value"] == len(raw)
     assert recorded[1]["value"] == len(compressed)
     assert compressed == gzip.compress(raw, compresslevel=6, mtime=0)
+
+
+def test_charts_are_written_one_ticker_at_a_time(monkeypatch):
+    held: list[str] = []
+    written: list[str] = []
+
+    def load(ticker):
+        assert held == []
+        held.append(ticker)
+        return {
+            "trend_rows": [{"date": "2026-10-01", "series_id": "DGS10", "value": 4.0, "ticker": ticker}],
+            "short_interest_rows": [],
+            "options_rows": [],
+            "fundamentals": [],
+            "price_rows": [{"date": "2026-10-01", "close": 1.0, "ticker": ticker}],
+        }
+
+    def write(obj, key, bucket=None, cache_seconds=60):
+        ticker = key.removeprefix("serving/chart_data/").removesuffix(".json")
+        assert held == [ticker]
+        assert obj["ticker"] == ticker
+        held.clear()
+        written.append(ticker)
+        return {"raw_bytes": 1, "gzip_bytes": 1}
+
+    monkeypatch.setattr(lake, "write_json_and_gzip", write)
+    dashboard_build.publish_charts_sequentially(["META", "EVGO"], load, "2026-10-11T00:00:00+00:00")
+    assert written == ["META", "EVGO"]
+    assert held == []
+
+
+def test_access_denied_or_missing_rates_input_serves_null(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(observability.logger, "warning", lambda *args, **kwargs: warnings.append(args[0]))
+
+    def denied(prefix, bucket=None, columns=None):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "ListObjectsV2")
+
+    monkeypatch.setattr(lake, "read_parquet_prefix", denied)
+    assert dashboard_build.load_rates_block() is None
+
+    def empty_prefix(prefix, bucket=None, columns=None):
+        if "DGS10" in prefix:
+            return pl.DataFrame({"obs_date": ["2026-10-08"], "value": [4.2], "series_id": ["DGS10"]})
+        return pl.DataFrame()
+
+    def missing(key, bucket=None):
+        raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "missing"}}, "GetObject")
+
+    monkeypatch.setattr(lake, "read_parquet_prefix", empty_prefix)
+    monkeypatch.setattr(lake, "read_json", missing)
+    assert dashboard_build.load_rates_block() is None
+    assert "rates_input_unavailable" in warnings
+
+
+def test_absent_fomc_file_still_serves_the_curve_when_macro_is_readable(monkeypatch):
+    def read_prefix(prefix, bucket=None, columns=None):
+        if prefix.endswith("series_id=DGS10/"):
+            return pl.DataFrame({"obs_date": ["2026-09-08", "2026-10-08"], "value": [4.1, 4.2]})
+        return pl.DataFrame()
+
+    monkeypatch.setattr(lake, "read_parquet_prefix", read_prefix)
+    monkeypatch.setattr(lake, "read_json", lambda key, bucket=None: None)
+    rates = dashboard_build.load_rates_block()
+    assert rates["fomc"] is None
+    assert rates["curve"]["tenors"]
+
+
+class _Context:
+    function_name = "test"
+    memory_limit_in_mb = 128
+    invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:test"
+    aws_request_id = "test"
+
+
+def test_handler_publishes_charts_before_the_next_ticker_when_rates_are_denied(monkeypatch):
+    events = []
+
+    def read_prefix(prefix, bucket=None, columns=None):
+        if "macro_daily" in str(prefix):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "ListObjectsV2")
+        if "serving/trend_metrics/ticker=" in str(prefix):
+            events.append(("trend", prefix))
+        return pl.DataFrame()
+
+    def read_json(key, bucket=None):
+        if str(key).startswith("serving/rates/"):
+            raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "missing"}}, "GetObject")
+        return None
+
+    real_write = lake.write_json_and_gzip
+
+    def write(obj, key, bucket=None, cache_seconds=60):
+        events.append(("write", key))
+        return real_write(obj, key, bucket=bucket, cache_seconds=cache_seconds)
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setattr(universe, "user_ticker_union", lambda: ["META", "EVGO"])
+    monkeypatch.setattr(lake, "read_parquet_prefix", read_prefix)
+    monkeypatch.setattr(lake, "read_json", read_json)
+    monkeypatch.setattr(lake, "write_json_and_gzip", write)
+    with mock_aws():
+        client = boto3.client("s3", region_name="us-east-1")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        result = dashboard_build.handler({}, _Context())
+        dashboard = json.loads(client.get_object(Bucket="lake", Key="serving/dashboard.json")["Body"].read())
+    trend_writes = [item for item in events if item[0] == "trend" or str(item[1]).startswith("serving/chart_data/")]
+    open_trend = False
+    for kind, _key in trend_writes:
+        if kind == "trend":
+            assert not open_trend
+            open_trend = True
+        else:
+            open_trend = False
+    assert result["rates"] is False
+    assert dashboard["rates"] is None
+    assert "META" in dashboard["tickers"]
+    assert "EVGO" in dashboard["tickers"]
+    assert any(key == "serving/chart_data/META.json" for kind, key in events if kind == "write")
+    assert any(key == "serving/chart_data/EVGO.json" for kind, key in events if kind == "write")
