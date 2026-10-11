@@ -122,6 +122,7 @@ const session = {
   stockPageError: {},
   stockTab: "overview",
   metricReview: readStoredMetricReview(),
+  metricReviewError: "",
   metricSave: false,
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
@@ -574,6 +575,7 @@ async function apiPut(path, body, label) {
         Accept: "application/json",
       },
       body: JSON.stringify(body),
+      cache: "no-store",
     });
   } catch (cause) {
     throw networkError(label, cause);
@@ -3470,9 +3472,23 @@ function renderMetricCard(metric) {
   return card;
 }
 
+function focusMetricReviewError() {
+  requestAnimationFrame(() => {
+    root.querySelector("[data-metric-review-error]")?.scrollIntoView({ block: "nearest" });
+  });
+}
+
 async function submitMetricReview(metricId, status) {
-  if (session.metricSave || !canApproveMetrics(session.accessToken, session.email)) return;
+  if (session.metricSave) return;
+  if (!canApproveMetrics(session.accessToken, session.email)) {
+    session.metricReviewError = "Only an admin can change metric review status.";
+    renderDashboard();
+    focusMetricReviewError();
+    return;
+  }
   session.metricSave = true;
+  session.metricReviewError = "";
+  renderDashboard();
   try {
     const saved = await apiPut(
       `stock/${encodeURIComponent(session.selected)}/metrics/${encodeURIComponent(metricId)}`,
@@ -3481,11 +3497,13 @@ async function submitMetricReview(metricId, status) {
     );
     session.stockPage[session.selected] = saved;
     session.stockPageState[session.selected] = "ready";
-    renderDashboard();
+    session.metricReviewError = "";
   } catch (error) {
-    notify(error.message, true);
+    session.metricReviewError = error.message || "The metric review could not be saved.";
   } finally {
     session.metricSave = false;
+    renderDashboard();
+    if (session.metricReviewError) focusMetricReviewError();
   }
 }
 
@@ -3494,6 +3512,12 @@ function renderCompanyMetrics(panels, pageState) {
   block.dataset.stockPanel = "overview";
   block.id = "stock-panel-metrics";
   block.append(node("h3", "stock-section-title", "Company metrics"));
+  if (session.metricReviewError) {
+    const alert = node("p", "metric-review-toast", session.metricReviewError);
+    alert.setAttribute("role", "alert");
+    alert.dataset.metricReviewError = "true";
+    block.append(alert);
+  }
   if (!pageState || pageState === "loading") {
     block.append(node("p", "data-state", "Loading company metrics"));
     return block;
@@ -3519,6 +3543,9 @@ function renderCompanyMetrics(panels, pageState) {
       const button = node("button", "overlay-chip panel-action metric-review-action", card.pending ? "Approve" : "Undo");
       button.type = "button";
       button.dataset.metricAction = card.pending ? "approve" : "undo";
+      button.disabled = Boolean(session.metricSave);
+      button.setAttribute("aria-busy", String(Boolean(session.metricSave)));
+      if (session.metricSave) button.textContent = "Saving";
       button.setAttribute("aria-label", card.pending ? `Approve ${card.name}` : `Undo approval of ${card.name}`);
       button.addEventListener("click", () => submitMetricReview(card.id, next));
       row.append(button);

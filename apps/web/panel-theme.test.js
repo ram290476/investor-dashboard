@@ -142,7 +142,18 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   assert.match(metrics, /"Approve"/);
   assert.match(metrics, /"Undo"/);
   assert.match(metrics, /canApproveMetrics/);
+  assert.match(metrics, /metric-review-toast/);
+  assert.match(metrics, /role", "alert"/);
+  assert.match(metrics, /dataset\.metricReviewError/);
   assert.match(metrics, /stock-section company-metrics/);
+  const submit = slice("async function submitMetricReview", "function renderCompanyMetrics");
+  assert.match(submit, /method:\s*"PUT"|apiPut\(/);
+  assert.match(submit, /stock\/\$\{encodeURIComponent\(session\.selected\)\}\/metrics\/\$\{encodeURIComponent\(metricId\)\}/);
+  assert.match(submit, /Authorization: `Bearer \$\{session\.accessToken\}`|apiPut\(/);
+  assert.match(submit, /session\.stockPage\[session\.selected\] = saved/);
+  assert.match(submit, /session\.metricReviewError = error\.message/);
+  assert.doesNotMatch(submit, /if \(session\.metricSave \|\| !canApproveMetrics/);
+  assert.match(styles, /\.metric-review-toast\s*\{[^}]*color:\s*var\(--error\)/);
   const dashboard = slice("function renderDashboard()", "async function refreshData");
   assert.doesNotMatch(dashboard, /renderCompanyPanel/);
   const research = slice("function renderResearchPage", "function renderNotFoundPage");

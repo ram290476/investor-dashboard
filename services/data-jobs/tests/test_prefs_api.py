@@ -195,6 +195,18 @@ def _review_event(path, body, groups="admin", username="owner@example.com", meth
     return event
 
 
+def _unsigned_jwt(payload: dict) -> str:
+    segment = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+    return f"eyJhbGciOiJub25lIn0.{segment}.sig"
+
+
+def _bearer_review_event(path, body, payload, sub="user-a"):
+    """Authorizer claims have sub only. Groups live on the bearer the authorizer already accepted."""
+    event = _route_event("PUT", path, body, sub=sub)
+    event["headers"] = {"authorization": f"Bearer {_unsigned_jwt(payload)}"}
+    return event
+
+
 def _seed_review_lake(mod, monkeypatch):
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket="lake")
@@ -248,6 +260,12 @@ def test_admin_approval_writes_the_lake_catalog_and_patches_serving(api, monkeyp
     assert serving["metrics"][0]["approval_state"] == "approved"
     assert serving["metrics"][0]["approved_by"] == "owner@example.com"
     assert serving["metrics"][0]["provenance"]["approval_state"] == "approved"
+    stored = s3.get_object(Bucket="lake", Key="serving/stock/TSLA.json")
+    assert stored["CacheControl"] == "no-store"
+    sibling = s3.get_object(Bucket="lake", Key="serving/stock/TSLA.json.gz")
+    assert sibling["CacheControl"] == "no-store"
+    assert sibling["ContentType"] == "application/gzip"
+    assert gzip.decompress(sibling["Body"].read()) == stored["Body"].read()
 
     undone = mod.handler(_review_event(
         "/stock/TSLA/metrics/total_deliveries", {"status": "proposed"}, groups="admin",
@@ -259,6 +277,69 @@ def test_admin_approval_writes_the_lake_catalog_and_patches_serving(api, monkeyp
     assert cleared["approved_by"] is None
     assert cleared["approved_at"] is None
     assert _lake_json(s3, "serving/stock/TSLA.json")["freshness_label"] == "Pending review"
+
+
+def test_access_token_groups_authorize_when_the_authorizer_omits_the_array(api, monkeypatch):
+    """HTTP API JWT authorizers omit array claims. The page still sends the access token."""
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+    payload = {
+        "sub": "user-a",
+        "token_use": "access",
+        "username": "owner@example.com",
+        "cognito:groups": ["admin"],
+    }
+    response = mod.handler(
+        _bearer_review_event("/stock/TSLA/metrics/total_deliveries", {"status": "approved"}, payload),
+        None,
+    )
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["metrics"][0]["approval_state"] == "approved"
+    assert _lake_json(s3, "catalog/TSLA.json")["metrics"][0]["approved_by"] == "owner@example.com"
+    again = _event("GET")
+    again["rawPath"] = "/stock/TSLA"
+    reloaded = json.loads(mod.handler(again, None)["body"])
+    assert reloaded["metrics"][0]["approval_state"] == "approved"
+
+    string_groups = _review_event(
+        "/stock/TSLA/metrics/total_deliveries", {"status": "proposed"}, groups="[admin users]",
+    )
+    string_groups["requestContext"]["authorizer"]["jwt"]["claims"].pop("username", None)
+    string_groups["headers"] = {"authorization": f"Bearer {_unsigned_jwt(payload)}"}
+    undone = mod.handler(string_groups, None)
+    assert undone["statusCode"] == 200
+    assert json.loads(undone["body"])["metrics"][0]["approval_state"] == "proposed"
+
+
+def test_bearer_groups_are_ignored_for_a_different_sub_or_the_demo_account(api, monkeypatch):
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+    path = "/stock/TSLA/metrics/total_deliveries"
+    other = _bearer_review_event(path, {"status": "approved"}, {
+        "sub": "someone-else", "token_use": "access", "cognito:groups": ["admin"], "username": "owner@example.com",
+    })
+    assert mod.handler(other, None)["statusCode"] == 403
+    unsigned = _bearer_review_event(path, {"status": "approved"}, {
+        "sub": "user-a", "cognito:groups": ["admin"], "username": "owner@example.com",
+    })
+    assert mod.handler(unsigned, None)["statusCode"] == 403
+    demo = _bearer_review_event(path, {"status": "approved"}, {
+        "sub": "user-a",
+        "token_use": "id",
+        "email": "ram.vellamsetti@gmail.com",
+        "cognito:groups": ["admin"],
+    })
+    assert mod.handler(demo, None)["statusCode"] == 403
+    identity = _bearer_review_event(path, {"status": "approved"}, {
+        "sub": "user-a",
+        "token_use": "id",
+        "email": "owner@example.com",
+        "cognito:username": "owner@example.com",
+        "cognito:groups": ["admin"],
+    })
+    assert mod.handler(identity, None)["statusCode"] == 200
+    assert "catalog/TSLA.json" in [item["Key"] for item in s3.list_objects_v2(Bucket="lake").get("Contents", [])]
 
 
 def test_metric_review_rejects_non_admins_the_demo_account_and_bad_requests(api, monkeypatch):

@@ -16,7 +16,7 @@ python services/data-jobs/scripts/approve_metric.py TSLA total_deliveries --by r
 python services/data-jobs/scripts/approve_metric.py TSLA total_deliveries --by ram --status rejected
 ```
 
-Merging the catalog deploys the metric definitions with the job image. Live review status is a separate lake object, `catalog/<TICKER>.json`. An admin changes it with `PUT /stock/{ticker}/metrics/{metric_id}` (`status` of `approved` or `proposed`). The API records `approved_by` and `approved_at`, then patches `serving/stock/<TICKER>.json` so the company page updates before the next collect. A collect may add proposed metrics. It does not clear `approved`, `approved_by` or `approved_at`.
+Merging the catalog deploys the metric definitions with the job image. Live review status is a separate lake object, `catalog/<TICKER>.json`. An admin changes it with `PUT /stock/{ticker}/metrics/{metric_id}` (`status` of `approved` or `proposed`) and `Authorization: Bearer` set to the access token. The HTTP API authorizer may omit the `cognito:groups` array, so the handler also reads that claim from the same token when `sub` matches. The API records `approved_by` and `approved_at`, then patches `serving/stock/<TICKER>.json` and `serving/stock/<TICKER>.json.gz` (`Cache-Control: no-store`). `GET /stock` reads the JSON object, and the response itself is `no-store`. The next collect rewrites both objects and does not clear `approved`, `approved_by` or `approved_at`. A failed save shows an error in the Company metrics panel.
 
 The `admin` Cognito group is created empty. The public demo account `ram.vellamsetti@gmail.com` must not be added. The owner adds their own account with the pool id from `terraform output -json cognito`:
 

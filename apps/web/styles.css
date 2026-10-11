@@ -3843,6 +3843,21 @@ a.catalyst-edgar-link:hover {
   margin-left: auto;
 }
 
+.metric-review-action:disabled {
+  opacity: 0.7;
+}
+
+.metric-review-toast {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--error) 14%, var(--surface));
+  color: var(--error);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .stock-kpi-value {
   margin: 0;
   font-size: 28px;
