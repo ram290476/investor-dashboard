@@ -1149,3 +1149,22 @@ def test_market_comparison_stays_on_the_chart_file_and_correlation_history_keeps
         tickers=["TSLA"], prices={"TSLA": prices}, trends={}, fundamentals=[], status=None,
     )
     assert "market_comparison" not in json.dumps(snapshot)
+
+
+def test_snapshot_carries_sec_company_name_for_every_watchlist_ticker():
+    tickers = ["TSLA", "NVDA", "AAPL", "SPY"]
+    snapshot = dashboard_build.build_snapshot(
+        tickers,
+        {},
+        {},
+        [],
+        None,
+        filings={"AAPL": [{"entity_name": "Apple Inc."}]},
+        served_filings={
+            "TSLA": {"rows": [], "status": "ok", "entity_name": "Tesla, Inc."},
+            "NVDA": {"rows": [], "status": "ok", "entity_name": "NVIDIA CORP"},
+            "SPY": {"rows": [], "status": "ok", "entity_name": "SPY"},
+        },
+    )
+    names = {ticker: snapshot["tickers"][ticker].get("company_name") for ticker in tickers}
+    assert names == {"TSLA": "Tesla, Inc.", "NVDA": "NVIDIA CORP", "AAPL": "Apple Inc.", "SPY": None}
