@@ -29,7 +29,8 @@ document's proposed TypeScript/Vite/Svelte implementation.
 The currently wired data jobs include hourly/daily prices, news/sentiment, regulatory feeds,
 government contracts, daily FRED macro (`D1`), release-day data/calendar (`M1`),
 Yahoo historical prices (`backfill`), trend metrics, quarterly fundamentals, short interest,
-options, status-feed updates and dashboard snapshot building. The key-rotation checker is a
+options, SEC filing metadata for every watchlist ticker, status-feed updates and dashboard
+snapshot building. The key-rotation checker is a
 separate Lambda. The job map and schedules live in `infra/terraform/variables.tf`.
 
 This is not yet the complete source catalog implementation: the architecture lists additional
@@ -476,7 +477,8 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | `macro-daily` | Weekdays 07:00 ET | FRED history/revisions, including the 11 constant-maturity Treasury tenors (`DGS1MO` through `DGS30`); federal holidays skipped. |
 | `release-day` | Weekdays 06:35 ET and release-morning one-offs | Bootstraps the calendar and stores release history. D4, RECONCILE and non-idle BACKFILL events rebuild ticker links without provider calls. |
 | `trend-metrics` | D1, D4, M1, RECONCILE and non-idle BACKFILL events | Publishes shared series metrics plus per-ticker correlation/effect history. |
-| `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill and reconcile events | Publishes `serving/dashboard.json` and `serving/chart_data/<T>.json`, each with a gzip sibling, and records the dashboard document size. |
+| `sec-filings` | Weekdays 06:00 ET and `TickerAdded` | EDGAR filing metadata for every watchlist ticker. A new ticker, and a few incomplete names each morning, get five years. Others stay incremental. `no_sec_filer` and `failed` are explicit. |
+| `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill, reconcile, and SEC filing events | Publishes `serving/dashboard.json` and `serving/chart_data/<T>.json`, each with a gzip sibling, and records the dashboard document size. Recent filings come from `serving/filings/<T>.json`. |
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
 | `kalshi-fomc` | Not scheduled | Collector and status-feed id `KALSHI` exist. Live fetches stay off until the Kalshi terms are accepted. No next run is advertised. |
 

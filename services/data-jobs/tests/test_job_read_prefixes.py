@@ -557,6 +557,17 @@ def test_dashboard_build_can_read_rates_and_runs_with_more_memory():
     assert "curated/macro_daily/source=fred/" in dashboard["read_prefixes"]
     assert "serving/rates/" in dashboard["read_prefixes"]
     assert "ticker-added" in jobs["short-interest"]["triggers"]
+    sec = jobs["sec-filings"]
+    assert sec["handler"] == "sec_filings.handler"
+    assert "ticker-added" in sec["triggers"]
+    assert "raw/sec_filings/" in sec["read_prefixes"]
+    assert "curated/sec_filings/" in sec["read_prefixes"]
+    assert "serving/filings/" in jobs["dashboard-build"]["read_prefixes"]
+    assert "job:SEC?partial" in jobs["dashboard-build"]["triggers"]
+    block = JOBS_TF.read_text()
+    sec_block = block[block.index("    sec-filings = {"):block.index("    status-feed = {")]
+    for prefix in ("raw/sec_filings/", "curated/sec_filings/", "serving/filings/"):
+        assert prefix in sec_block
 
 
 def test_every_handler_read_is_granted_by_that_jobs_read_prefixes():
@@ -565,7 +576,7 @@ def test_every_handler_read_is_granted_by_that_jobs_read_prefixes():
         "trend-metrics", "macro-daily", "daily-prices", "news-sentiment", "hourly-prices",
         "regulatory-feeds", "gov-contracts", "dashboard-build", "q1-fundamentals",
         "q2-company-ir-collect", "q2-company-ir-extract", "q2-company-ir-serve",
-        "short-interest", "options-daily", "backfill", "price-reconcile", "release-day", "status-feed",
+        "short-interest", "options-daily", "backfill", "price-reconcile", "release-day", "sec-filings", "status-feed",
     }
     missing = {}
     unresolved = {}

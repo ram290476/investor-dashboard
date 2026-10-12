@@ -3124,7 +3124,7 @@ function renderFilings(tickerData) {
   const filingRows = { link: true };
   const upcoming = renderCatalystSection(`Upcoming · ${session.selected}`, model.upcoming, tickerData, upcomingEmptyMessage(session.selected), filingRows);
   if (model.earningsNote) upcoming.append(node("p", "signal-note", model.earningsNote));
-  const filings = renderCatalystSection("SEC filings", model.filings, tickerData, filingsEmptyMessage(session.selected, model.filings), filingRows);
+  const filings = renderCatalystSection("SEC filings", model.filings, tickerData, filingsEmptyMessage(session.selected, model.filings, tickerData?.filings_status), filingRows);
   const companyPage = edgarCompanyUrl(model.filings.find((row) => row.url)?.url || tickerData?.filings?.[0]?.url || "");
   if (companyPage) {
     const all = node("a", "catalyst-edgar-link", "All filings on SEC EDGAR ↗");
@@ -3710,6 +3710,11 @@ function renderStockPage() {
     tabs.append(tab);
   });
   page.append(tabs);
+  const filingsPanel = renderFilings(tickerData);
+  if (filingsPanel) {
+    filingsPanel.dataset.stockPanel = "overview";
+    page.append(filingsPanel);
+  }
   root.append(page);
   settings.refresh();
 }

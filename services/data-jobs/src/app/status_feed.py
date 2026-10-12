@@ -44,6 +44,8 @@ JOBS: dict[str, tuple[str, str | None, str, str | None]] = {
     "TREND": ("Trend metrics", None, "nyse", "After market close and release day"),
     "BACKFILL": ("Ticker history backfill", None, "nyse", "When a ticker is added"),
     "RECONCILE": ("Split & dividend adjustment", "15 19 * * 1-5", "nyse", None),
+    # Weekday 06:00 ET. Ticker-added runs are extra; the feed shows the daily cron.
+    "SEC": ("SEC filings", "0 6 * * 1-5", "federal", None),
     # No cron until Ram accepts the Kalshi terms (issue #89). A next_run would advertise a schedule that is not enabled.
     "KALSHI": ("FOMC odds (Kalshi)", None, "federal", None),
 }
@@ -110,6 +112,14 @@ def apply_event(feed: dict | None, detail: dict, now: datetime) -> dict:
                 "failed_sources": failed,
                 "failed_source_ids": list(detail.get("failed_source_ids") or []),
                 "reason": detail.get("reason"),
+            }
+        summary = detail.get("summary")
+        if isinstance(summary, dict):
+            entry["summary"] = {
+                "tickers_processed": int(summary.get("tickers_processed") or 0),
+                "new_filings": int(summary.get("new_filings") or 0),
+                "failures": int(summary.get("failures") or 0),
+                "no_sec_filer": int(summary.get("no_sec_filer") or 0),
             }
         if "dropped" in detail:
             dropped = list(detail.get("dropped") or [])
