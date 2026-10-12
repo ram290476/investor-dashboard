@@ -7,9 +7,14 @@ from regulatory_feeds import (
     JOB_ID,
     PLACEHOLDER_USER_AGENT,
     assert_prod_user_agent,
+    attach_form4,
+    ciks_for_tickers,
     classify_8k,
     classify_form4,
+    combine_filings,
     dedupe_filings,
+    enrich_form4_rows,
+    form4_xml_urls,
     insider_flows,
     parse_form4,
     parse_launches,
@@ -109,6 +114,50 @@ def test_prod_user_agent_rejects_the_placeholder():
     with pytest.raises(RuntimeError):
         assert_prod_user_agent("")
     assert resolve_cik({"0": {"cik_str": 123, "ticker": "SPCX"}}, "SPCX") == "0000000123"
+    tickers = {
+        "0": {"cik_str": 1045810, "ticker": "NVDA"},
+        "1": {"cik_str": 1067983, "ticker": "BRK-B"},
+        "2": {"ticker": "SKIP"},
+    }
+    mapped = ciks_for_tickers(tickers, ["NVDA", "brk.b", "ARKK", "NVDA"])
+    assert mapped == {"NVDA": "0001045810", "BRK.B": "0001067983"}
+    assert "TSLA" not in mapped and "SPCX" not in mapped
+
+
+def test_form4_share_counts_survive_a_later_submissions_copy():
+    parsed = parse_submissions(SUBMISSIONS, "NVDA", date(2026, 10, 6), "2026-10-06T12:00:00+00:00")
+    form4 = next(row for row in parsed if row["form"] == "4")
+    stored = attach_form4(form4, FORM4)
+    assert stored["shares"] == 40
+    assert stored["filing_class"] == "sell"
+    refreshed = parse_submissions(SUBMISSIONS, "NVDA", date(2026, 10, 6), "2026-10-06T18:00:00+00:00")
+    merged = combine_filings([stored], refreshed)
+    kept = next(row for row in merged if row["form"] == "4")
+    assert kept["shares"] == 40
+    assert kept["price"] == 250
+    assert kept["txn_code"] == "S"
+    assert kept["insider_name"] == "Jane Doe"
+    assert insider_flows(merged, date(2026, 10, 6)) == {"net_shares": -40.0, "net_value": -10000.0}
+    urls = form4_xml_urls(
+        "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000004/xslF345X05/wf-form4.xml"
+    )
+    assert urls[1].endswith("/000104581026000004/wf-form4.xml")
+    fetched = []
+
+    def fetch_xml(url):
+        fetched.append(url)
+        return FORM4 if url.endswith(".xml") else "<html></html>"
+
+    filled = enrich_form4_rows(refreshed, set(), fetch_xml)
+    again = enrich_form4_rows(filled, {form4["accession_no"]}, fetch_xml)
+    assert filing_shares(filled) == 40
+    assert fetched
+    assert filing_shares(again) == 40
+    assert len(fetched) == 1
+
+
+def filing_shares(rows):
+    return next(row["shares"] for row in rows if row["form"] == "4")
 
 
 def test_handler_emits_job_h3(monkeypatch):

@@ -3730,8 +3730,9 @@ function renderResearchPage() {
 
   const heading = node("section", "panel research-heading");
   const copy = node("div", "research-heading-copy");
-  const company = session.selected === "TSLA" ? "Tesla" : "SpaceX";
-  const title = node("h2", "", `${company} (${session.selected}) research`);
+  const company = companyName(session.selected);
+  const label = company && company !== session.selected ? `${company} (${session.selected})` : session.selected;
+  const title = node("h2", "", `${label} research`);
   title.id = "research-title";
   title.tabIndex = -1;
   copy.append(title, node("p", "signal-note", "Published and curated data only; unsupported measurements remain unavailable."));
@@ -3794,7 +3795,7 @@ function renderNotFoundPage() {
   root.append(renderAppHeader(), renderWatchlist());
   const message = node("main", "panel research-not-found");
   message.append(node("h2", "", "Research page not found"));
-  message.append(node("p", "signal-note", "Dedicated research pages are currently available for TSLA and SPCX."));
+  message.append(node("p", "signal-note", "That address is not a dashboard, company, or research page."));
   message.append(action("Return to dashboard", "button-primary", () => navigateToDashboard()));
   root.append(message);
   settings.refresh();

@@ -1,4 +1,3 @@
-const RESEARCH_TICKERS = new Set(["SPCX", "TSLA"]);
 const TICKER = /^[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
 
 export function parseStockHash(hash) {
@@ -20,8 +19,8 @@ export function routeFromPath(pathname) {
   const stock = /^\/stock\/([A-Za-z][A-Za-z0-9.\-]{0,9})\/?$/i.exec(path);
   if (stock) return { page: "stock", ticker: stock[1].toUpperCase() };
 
-  const match = /^\/ticker\/(SPCX|TSLA)\/?$/i.exec(path);
-  if (match) return { page: "research", ticker: match[1].toUpperCase() };
+  const research = /^\/ticker\/([A-Za-z][A-Za-z0-9.\-]{0,9})\/?$/i.exec(path);
+  if (research) return { page: "research", ticker: research[1].toUpperCase() };
   return { page: "not-found" };
 }
 
@@ -53,5 +52,5 @@ export function routeStateForLocation(pathname, hash, dashboardSelection, select
 
 export function tickerResearchPath(ticker) {
   const symbol = String(ticker || "").trim().toUpperCase();
-  return RESEARCH_TICKERS.has(symbol) ? `/ticker/${symbol}` : null;
+  return TICKER.test(symbol) ? `/ticker/${symbol}` : null;
 }
