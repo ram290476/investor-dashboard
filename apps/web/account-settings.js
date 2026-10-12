@@ -847,6 +847,14 @@ export function createAccountSettings(ctx) {
           statusCell.append(el("div", "settings-hint error refresh-detail", `Failed: ${job.failed_source_ids.join(", ")}`));
         }
         if (state === "skipped" && job.reason) statusCell.append(el("div", "settings-hint refresh-detail", job.reason));
+        if (job.summary && Number.isFinite(job.summary.tickers_processed)) {
+          const noFiler = job.summary.no_sec_filer ? ` · ${job.summary.no_sec_filer} not SEC filers` : "";
+          statusCell.append(el(
+            "div",
+            "settings-hint refresh-detail",
+            `${job.summary.tickers_processed} tickers · ${job.summary.new_filings || 0} new filings · ${job.summary.failures || 0} failed${noFiler}`,
+          ));
+        }
         row.append(statusCell);
         body.append(row);
       });

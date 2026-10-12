@@ -209,7 +209,9 @@ test("filing titles are readable and panels keep each ticker's own upcoming and 
   assert.equal(tsla.filings.some((row) => row.title.includes("10-Q")), true);
   assert.equal(tsla.company.some((row) => /Starship|Falcon/.test(row.title)), false);
   assert.equal(tsla.company.some((row) => row.title === "Columbus Day"), false);
-  assert.equal(filingsEmptyMessage("AAPL", []), "SEC filings are collected for TSLA and SPCX only.");
+  assert.equal(filingsEmptyMessage("AAPL", []), "No SEC filings in the last 90 days.");
+  assert.equal(filingsEmptyMessage("ARKK", [], "no_sec_filer"), "ARKK has no SEC CIK.");
+  assert.equal(filingsEmptyMessage("AAPL", [], "failed"), "SEC filings could not be collected.");
   const spcx = filingPanelModel({ dashboard, ticker: "SPCX", now, timeZone: "America/Los_Angeles" });
   assert.deepEqual(spcx.upcoming.map((row) => row.title), ["Falcon 9", "Starship flight"]);
   assert.equal(spcx.upcoming.some((row) => row.title === "Falcon 9" && row.date.startsWith("2026-10-11")), true);

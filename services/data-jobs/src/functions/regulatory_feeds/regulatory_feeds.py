@@ -1,5 +1,7 @@
-"""H3: SEC filings and public regulatory events for TSLA and SPCX.
+"""H3: SEC filings and public regulatory events.
 
+Form 4 insider rows cover every watchlist ticker (capped at 25). Share counts from an
+earlier Form 4 XML parse are kept when a later submissions copy does not repeat them.
 EDGAR needs no key. The contact User-Agent is the existing SEC_USER_AGENT env var.
 In production the job refuses to run while that value is missing or still the placeholder.
 """
@@ -8,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from datetime import UTC, date, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree
@@ -17,9 +20,11 @@ import polars as pl
 
 JOB_ID = "H3"
 ET = ZoneInfo("America/New_York")
-TSLA_CIK = "0001318605"
 BACKFILL_DAYS = 90
+FORM4_XML_CAP = 8
 PLACEHOLDER_USER_AGENT = "invdash-collector (contact: set SEC_USER_AGENT)"
+_INSIDER_FIELDS = ("insider_name", "insider_role", "shares", "price", "txn_code", "filing_class")
+_XSL_DIR = re.compile(r"/xsl[^/]+/")
 ITEM_CLASS = {"2.02": "earnings", "5.02": "officer", "1.01": "agreement", "8.01": "other"}
 FORM4_CLASS = {"P": "buy", "S": "sell", "A": "grant"}
 STATE_KEY = "curated/filings/_state.json"
@@ -115,10 +120,136 @@ def _cik(value: str) -> str:
 
 
 def resolve_cik(company_tickers: dict, symbol: str) -> str | None:
+    """Match a watchlist symbol to EDGAR. Class shares use either a dot or a dash."""
+    wanted = symbol.upper().strip()
+    if not wanted or not isinstance(company_tickers, dict):
+        return None
+    aliases = {wanted, wanted.replace(".", "-"), wanted.replace("-", ".")}
     for row in company_tickers.values():
-        if isinstance(row, dict) and str(row.get("ticker", "")).upper() == symbol.upper():
-            return _cik(row.get("cik_str"))
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("ticker", "")).upper() not in aliases:
+            continue
+        raw = row.get("cik_str")
+        if raw is None:
+            continue
+        try:
+            return f"{int(raw):010d}"
+        except (TypeError, ValueError):
+            continue
     return None
+
+
+def ciks_for_tickers(company_tickers: dict, tickers: list[str]) -> dict[str, str]:
+    """Ticker to zero-padded CIK for the symbols EDGAR lists. Names with no CIK are omitted."""
+    found: dict[str, str] = {}
+    for ticker in tickers:
+        symbol = str(ticker or "").upper().strip()
+        if not symbol or symbol in found:
+            continue
+        cik = resolve_cik(company_tickers, symbol)
+        if cik:
+            found[symbol] = cik
+    return found
+
+
+def filing_has_insider_amounts(row: dict | None) -> bool:
+    return bool(row) and row.get("form") == "4" and isinstance(row.get("shares"), (int, float))
+
+
+def merge_filing_rows(prior: dict, incoming: dict) -> dict:
+    """Incoming filing metadata wins. A Form 4 that already has share counts keeps them."""
+    if not filing_has_insider_amounts(prior) or filing_has_insider_amounts(incoming):
+        return incoming
+    kept = dict(incoming)
+    for field in _INSIDER_FIELDS:
+        if prior.get(field) not in (None, ""):
+            kept[field] = prior[field]
+    return kept
+
+
+def combine_filings(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """One row per accession. Later metadata replaces earlier metadata, except stored insider amounts."""
+    by_key: dict[str, dict] = {}
+    for row in existing:
+        accession = row.get("accession_no")
+        if accession:
+            by_key[str(accession)] = row
+    for row in incoming:
+        accession = row.get("accession_no")
+        if not accession:
+            continue
+        key = str(accession)
+        prior = by_key.get(key)
+        by_key[key] = merge_filing_rows(prior, row) if prior else row
+    return list(by_key.values())
+
+
+def form4_xml_urls(primary_url: str) -> list[str]:
+    """Primary document, plus the XML beside an EDGAR XSL wrapper when that is what was filed."""
+    url = str(primary_url or "").strip()
+    if not url:
+        return []
+    found = [url]
+    sibling = _XSL_DIR.sub("/", url)
+    if sibling != url and sibling.endswith(".xml") and sibling not in found:
+        found.append(sibling)
+    return found
+
+
+def form4_rows_needing_xml(rows: list[dict], known: set[str], limit: int = FORM4_XML_CAP) -> list[dict]:
+    """Newest Form 4s that do not already have share counts. The cap keeps an hourly run inside its timeout."""
+    pending = [
+        row
+        for row in rows
+        if row.get("form") == "4"
+        and row.get("accession_no")
+        and str(row.get("accession_no")) not in known
+        and not filing_has_insider_amounts(row)
+        and row.get("primary_doc_url")
+    ]
+    pending.sort(key=lambda row: str(row.get("filed_at") or ""), reverse=True)
+    return pending[:limit]
+
+
+def attach_form4(row: dict, xml_text: str) -> dict:
+    """Copy owner, code, shares and price from a Form 4 XML document onto the filing row."""
+    parsed = parse_form4(xml_text)
+    if parsed.get("shares") is None and not parsed.get("txn_code"):
+        return row
+    updated = dict(row)
+    for field, value in parsed.items():
+        if value is not None:
+            updated[field] = value
+    return updated
+
+
+def stored_insider_accessions(rows: list[dict]) -> set[str]:
+    return {str(row.get("accession_no") or "") for row in rows if filing_has_insider_amounts(row)}
+
+
+def enrich_form4_rows(rows: list[dict], known: set[str], fetch_xml, limit: int = FORM4_XML_CAP) -> list[dict]:
+    """Fill share counts for Form 4 rows that do not already have them. ``fetch_xml`` returns text or None."""
+    pending = {str(row.get("accession_no")) for row in form4_rows_needing_xml(rows, known, limit)}
+    updated = []
+    for row in rows:
+        if str(row.get("accession_no") or "") not in pending:
+            updated.append(row)
+            continue
+        filled = None
+        for url in form4_xml_urls(str(row.get("primary_doc_url") or "")):
+            text = fetch_xml(url)
+            if not text:
+                continue
+            try:
+                filled = attach_form4(row, text)
+            except ElementTree.ParseError:
+                continue
+            if filing_has_insider_amounts(filled):
+                break
+            filled = None
+        updated.append(filled or row)
+    return updated
 
 
 def filing_url(cik: str, accession: str, document: str) -> str:
@@ -325,12 +456,16 @@ def daily_counts(events: list[dict]) -> list[dict]:
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
-    import time
+    from urllib.parse import urlparse
+
+    import httpx
 
     from api_keys import api_key
+    from company_ir import Pace, company_ir_tickers
     from http_client import get_client, request_with_retry
     from lake import read_json, read_parquet_prefix, write_json, write_parquet
     from observability import job_handler, logger, source_run
+    from universe import user_ticker_union, watchlist_universe
 
     @job_handler(JOB_ID)
     def run(event, context):
@@ -347,25 +482,32 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         headers = {"User-Agent": user_agent} if user_agent else None
         filings: list[dict] = []
         events: list[dict] = []
-        companies = {"TSLA": TSLA_CIK}
+        universe = watchlist_universe(user_ticker_union())
+        tickers = company_ir_tickers(list(universe.get("tickers") or []))
+        dropped = [item for item in (universe.get("tickers") or []) if item not in tickers]
+        dropped = list(dict.fromkeys([*(universe.get("dropped") or []), *dropped]))
+        cached = state.get("ciks") if isinstance(state.get("ciks"), dict) else {}
+        companies = {symbol: cik for symbol, cik in cached.items() if symbol in tickers}
+        pace = Pace()
+
+        def sec_get(url, **kwargs):
+            pace.wait((urlparse(url).hostname or "").lower())
+            return request_with_retry(http, "GET", url, **kwargs)
 
         with get_client(headers=headers) as http:
             with source_run("edgar-tickers") as record:
-                payload = request_with_retry(http, "GET", "https://www.sec.gov/files/company_tickers.json").json()
-                spcx = resolve_cik(payload, "SPCX")
-                if spcx:
-                    companies["SPCX"] = spcx
-                record["rows"] = 1 if spcx else 0
-            time.sleep(0.2)
+                payload = sec_get("https://www.sec.gov/files/company_tickers.json").json()
+                mapped = ciks_for_tickers(payload, tickers)
+                companies = mapped
+                state["ciks"] = mapped
+                record["rows"] = len(mapped)
             for ticker, cik in companies.items():
                 with source_run(f"edgar-{ticker}") as record:
                     conditional = {}
                     etag = (state.get("etag") or {}).get(cik)
                     if etag:
                         conditional["headers"] = {"If-None-Match": etag}
-                    response = request_with_retry(
-                        http,
-                        "GET",
+                    response = sec_get(
                         f"https://data.sec.gov/submissions/CIK{cik}.json",
                         **conditional,
                     )
@@ -375,10 +517,19 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                         body = response.json()
                         write_json(body, f"raw/edgar/date={now.date().isoformat()}/{cik}-{run_id}.json")
                         rows = parse_submissions(body, ticker, now.date(), ingested_at)
+                        existing = read_parquet_prefix(f"curated/filings/ticker={ticker}/")
+                        known = stored_insider_accessions(existing.to_dicts() if not existing.is_empty() else [])
+
+                        def fetch_xml(url: str) -> str | None:
+                            try:
+                                return sec_get(url).text
+                            except (httpx.HTTPError, OSError, ValueError):
+                                return None
+
+                        rows = enrich_form4_rows(rows, known, fetch_xml)
                         filings.extend(rows)
                         state.setdefault("etag", {})[cik] = response.headers.get("ETag")
                         record["rows"] = len(rows)
-                time.sleep(0.2)
             with source_run("federal-register") as record:
                 payload = request_with_retry(
                     http,
@@ -431,7 +582,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             ):
                 key = f"curated/filings/ticker={ticker}/year={int(year)}/filings.parquet"
                 existing = read_parquet_prefix(f"curated/filings/ticker={ticker}/year={int(year)}/")
-                merged = dedupe_filings((existing.to_dicts() if not existing.is_empty() else []) + part.to_dicts())
+                prior = existing.to_dicts() if not existing.is_empty() else []
+                merged = combine_filings(prior, part.to_dicts())
                 write_parquet(pl.DataFrame(merged).drop("_year", strict=False), key)
         fresh_events = dedupe_events(events)
         if fresh_events:
@@ -439,7 +591,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             counts_key = f"curated/events_daily/date={now.date().isoformat()}/counts.parquet"
             write_parquet(pl.DataFrame(daily_counts(fresh_events)), counts_key)
         write_json(state, STATE_KEY)
-        result = {"status": "success", "filings": len(fresh_filings), "events": len(fresh_events)}
+        result = {
+            "status": "success",
+            "filings": len(fresh_filings),
+            "events": len(fresh_events),
+            "dropped": dropped,
+        }
         filing = earnings_filing_detail(fresh_filings, now.date())
         if filing:
             result["filing"] = filing

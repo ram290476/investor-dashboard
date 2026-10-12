@@ -203,6 +203,13 @@ def build_filings(rows: list[dict]) -> list[dict]:
                 "title": row.get("title") or row.get("form"),
                 "url": row.get("primary_doc_url"),
                 "class": row.get("filing_class") or row.get("class"),
+                **(
+                    {"report_date": str(row.get("report_date") or "")[:10]}
+                    if row.get("report_date")
+                    else {}
+                ),
+                **({"items": list(row.get("items") or [])} if row.get("items") else {}),
+                **({"fiscal_period": row.get("fiscal_period")} if row.get("fiscal_period") else {}),
             }
         )
         if len(latest) == 10:
@@ -802,6 +809,7 @@ def build_snapshot(
     hourly: dict[str, list[dict]] | None = None,
     short_interest: dict[str, list[dict]] | None = None,
     filings: dict[str, list[dict]] | None = None,
+    served_filings: dict[str, dict] | None = None,
     events: list[dict] | None = None,
     contracts: dict[str, dict] | None = None,
     releases: list[dict] | None = None,
@@ -827,6 +835,13 @@ def build_snapshot(
         history = full_history[-SUMMARY_PRICE_ROWS:]
         bundle = None if news is None else news.get(ticker) or {}
         filing_rows = None if filings is None else filings.get(ticker) or []
+        served = None if served_filings is None else served_filings.get(ticker)
+        if isinstance(served, dict):
+            display_rows = list(served.get("rows") or [])
+            filing_status = served.get("status") if isinstance(served.get("status"), str) else None
+        else:
+            display_rows = filing_rows
+            filing_status = None
         award = None
         if contracts is not None and ticker in CONTRACT_TICKERS:
             award = contracts.get(ticker)
@@ -857,12 +872,14 @@ def build_snapshot(
             else build_news(ticker, bundle.get("daily") or [], bundle.get("articles") or [], clock),
             "intraday": build_intraday((hourly or {}).get(ticker, []), full_history),
             "short_interest": interest.get(ticker),
-            "filings": None if filing_rows is None else build_filings(filing_rows),
+            "filings": None if display_rows is None else build_filings(display_rows),
             "insider_30d": None if filing_rows is None else build_insider(filing_rows, clock.date()),
             "contracts": award,
             "price_status": "available" if history else "unavailable",
             "price_as_of": history[-1]["date"] if history else None,
         }
+        if filing_status:
+            instruments[ticker]["filings_status"] = filing_status
 
     # Quarterly fundamentals are per ticker on chart_data. They are not repeated here.
     del fundamentals
@@ -1039,6 +1056,15 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             symbol = str(row.get("ticker") or "").upper()
             if symbol in filings_by_ticker:
                 filings_by_ticker[symbol].append(row)
+        from sec_filings import dashboard_rows_from_serving
+
+        served_filings: dict[str, dict] = {}
+        for ticker in tickers:
+            document = read_json(f"serving/filings/{ticker}.json")
+            if not isinstance(document, dict):
+                continue
+            rows, status = dashboard_rows_from_serving(document)
+            served_filings[ticker] = {"rows": rows, "status": status}
         rollup = read_json("curated/contracts_rollup/latest.json") or []
         contracts_data = {row.get("ticker"): row for row in rollup if isinstance(row, dict)}
         short_frame = read_parquet_prefix("curated/short_interest/", columns=SHORT_COLUMNS)
@@ -1105,6 +1131,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             hourly=hourly_data,
             short_interest=short_by_ticker,
             filings=filings_by_ticker,
+            served_filings=served_filings,
             events=event_rows,
             contracts=contracts_data,
             releases=release_rows,

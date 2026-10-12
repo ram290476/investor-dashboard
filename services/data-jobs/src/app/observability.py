@@ -78,6 +78,8 @@ _EVENT_FIELDS = (
     "filing",
     # Backfill: how many tickers reached a terminal success in this run. Dashboard rebuilds on > 0.
     "tickers_completed",
+    # SEC filings run: tickers processed, new filings, failures, no_sec_filer.
+    "summary",
 )
 
 

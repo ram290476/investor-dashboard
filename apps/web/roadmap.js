@@ -695,16 +695,16 @@ function withinUpcomingDays(event, days, now, timeZone) {
   return diff != null && diff >= 0 && diff <= days;
 }
 
-export const EDGAR_FILING_TICKERS = ["TSLA", "SPCX"];
 export const EARNINGS_UNPUBLISHED = "Earnings date not published yet.";
 export const UPCOMING_DAYS = 45;
 export const PAST_DAYS = 14;
 export const COMPANY_EVENT_DAYS = 30;
 export const FILING_DAYS = 90;
 
-export function filingsEmptyMessage(ticker, filings) {
+export function filingsEmptyMessage(ticker, filings, status) {
   if (filings.length) return "";
-  if (!EDGAR_FILING_TICKERS.includes(ticker)) return "SEC filings are collected for TSLA and SPCX only.";
+  if (status === "no_sec_filer") return `${ticker} has no SEC CIK.`;
+  if (status === "failed") return "SEC filings could not be collected.";
   return "No SEC filings in the last 90 days.";
 }
 

@@ -483,7 +483,7 @@ variable "jobs" {
       handler  = "dashboard_build.handler"
       schedule = ""
       # Rebuild when a backfill ticker finishes (tickers_completed > 0), not after every batch.
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1", "job:SEC?partial"]
       memory   = 2048
       timeout  = 300
       read_prefixes = [
@@ -507,6 +507,7 @@ variable "jobs" {
         "curated/release_links/",
         "curated/macro_daily/source=fred/",
         "serving/rates/",
+        "serving/filings/",
       ]
       write_prefixes = ["serving/dashboard.json", "serving/chart_data/", "serving/dashboard-build/"]
       api_keys       = []
@@ -637,6 +638,21 @@ variable "jobs" {
       api_keys          = ["bls", "bea", "census", "fred"]
       reads_prefs       = true
       manages_schedules = true
+    }
+    # Weekday 06:00 ET, plus ticker-added. Five-year backfill for a new ticker and for
+    # watchlist names that do not yet have a complete EDGAR history. SEC_USER_AGENT is
+    # already in the shared job environment. Fair access: company_ir Pace (<=10 req/s)
+    # and backoff on 403/429. A partial run still rebuilds the dashboard.
+    sec-filings = {
+      handler        = "sec_filings.handler"
+      schedule       = "cron(0 6 ? * MON-FRI *)"
+      triggers       = ["ticker-added"]
+      memory         = 1024
+      timeout        = 600
+      read_prefixes  = ["raw/sec_filings/", "curated/sec_filings/"]
+      write_prefixes = ["raw/sec_filings/", "curated/sec_filings/", "serving/filings/"]
+      api_keys       = []
+      reads_prefs    = true
     }
     # Rebuilds serving/status.json after every job
     status-feed = {

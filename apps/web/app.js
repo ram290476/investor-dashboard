@@ -3124,7 +3124,7 @@ function renderFilings(tickerData) {
   const filingRows = { link: true };
   const upcoming = renderCatalystSection(`Upcoming · ${session.selected}`, model.upcoming, tickerData, upcomingEmptyMessage(session.selected), filingRows);
   if (model.earningsNote) upcoming.append(node("p", "signal-note", model.earningsNote));
-  const filings = renderCatalystSection("SEC filings", model.filings, tickerData, filingsEmptyMessage(session.selected, model.filings), filingRows);
+  const filings = renderCatalystSection("SEC filings", model.filings, tickerData, filingsEmptyMessage(session.selected, model.filings, tickerData?.filings_status), filingRows);
   const companyPage = edgarCompanyUrl(model.filings.find((row) => row.url)?.url || tickerData?.filings?.[0]?.url || "");
   if (companyPage) {
     const all = node("a", "catalyst-edgar-link", "All filings on SEC EDGAR ↗");
@@ -3710,6 +3710,11 @@ function renderStockPage() {
     tabs.append(tab);
   });
   page.append(tabs);
+  const filingsPanel = renderFilings(tickerData);
+  if (filingsPanel) {
+    filingsPanel.dataset.stockPanel = "overview";
+    page.append(filingsPanel);
+  }
   root.append(page);
   settings.refresh();
 }
@@ -3725,8 +3730,9 @@ function renderResearchPage() {
 
   const heading = node("section", "panel research-heading");
   const copy = node("div", "research-heading-copy");
-  const company = session.selected === "TSLA" ? "Tesla" : "SpaceX";
-  const title = node("h2", "", `${company} (${session.selected}) research`);
+  const company = companyName(session.selected);
+  const label = company && company !== session.selected ? `${company} (${session.selected})` : session.selected;
+  const title = node("h2", "", `${label} research`);
   title.id = "research-title";
   title.tabIndex = -1;
   copy.append(title, node("p", "signal-note", "Published and curated data only; unsupported measurements remain unavailable."));
@@ -3789,7 +3795,7 @@ function renderNotFoundPage() {
   root.append(renderAppHeader(), renderWatchlist());
   const message = node("main", "panel research-not-found");
   message.append(node("h2", "", "Research page not found"));
-  message.append(node("p", "signal-note", "Dedicated research pages are currently available for TSLA and SPCX."));
+  message.append(node("p", "signal-note", "That address is not a dashboard, company, or research page."));
   message.append(action("Return to dashboard", "button-primary", () => navigateToDashboard()));
   root.append(message);
   settings.refresh();
