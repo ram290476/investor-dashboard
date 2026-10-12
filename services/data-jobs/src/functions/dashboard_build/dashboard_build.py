@@ -798,6 +798,17 @@ def price_history_for(ticker: str, rows: list[dict]) -> list[dict]:
     return [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
 
 
+def company_name_for(ticker: str, served: dict | None, filing_rows: list[dict] | None) -> str | None:
+    """SEC entity name for any watchlist ticker: served filings doc, then curated filing rows."""
+    symbol = str(ticker or "").upper()
+    candidates = [(served or {}).get("entity_name")] + [row.get("entity_name") for row in filing_rows or []]
+    for value in candidates:
+        name = " ".join(str(value or "").split())
+        if name and name.upper() != symbol:
+            return name
+    return None
+
+
 def build_snapshot(
     tickers: list[str],
     prices: dict[str, list[dict]],
@@ -863,6 +874,11 @@ def build_snapshot(
         interest = latest_short_interest((short_interest or {}).get(ticker, []))
         instruments[ticker] = {
             "ticker": ticker,
+            "company_name": company_name_for(
+                ticker,
+                (served_filings or {}).get(ticker),
+                (filings or {}).get(ticker),
+            ),
             "price_history": history,
             "volume_source_changes": volume_source_changes(history),
             "trend": trends.get(ticker),
@@ -1064,7 +1080,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             if not isinstance(document, dict):
                 continue
             rows, status = dashboard_rows_from_serving(document)
-            served_filings[ticker] = {"rows": rows, "status": status}
+            served_filings[ticker] = {"rows": rows, "status": status, "entity_name": document.get("entity_name")}
         rollup = read_json("curated/contracts_rollup/latest.json") or []
         contracts_data = {row.get("ticker"): row for row in rollup if isinstance(row, dict)}
         short_frame = read_parquet_prefix("curated/short_interest/", columns=SHORT_COLUMNS)
