@@ -3621,7 +3621,7 @@ function renderStockPage() {
   const heading = node("section", "panel stock-heading");
   heading.dataset.stockPanel = "overview";
   const copy = node("div", "stock-heading-copy");
-  const title = node("h2", "", companyName(session.selected, payload));
+  const title = node("h2", "", companyName(session.selected, payload, tickerData));
   title.id = "stock-title";
   title.tabIndex = -1;
   copy.append(title);

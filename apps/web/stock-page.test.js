@@ -18,6 +18,7 @@ import {
   safeHttpUrl,
   stockPanels,
   STOCK_TABS,
+  companyName,
 } from "./stock-page.js";
 
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
@@ -363,7 +364,8 @@ test("company header shows only the company name and a centered Back to dashboar
   const copyAt = heading.indexOf('node("div", "stock-heading-copy")');
   const linkAt = heading.indexOf('node("a", "stock-dashboard-link", "Back to dashboard")');
   assert.ok(copyAt > 0 && linkAt > copyAt);
-  assert.match(heading, /node\("h2", "", companyName\(session\.selected, payload\)\)/);
+  assert.match(heading, /node\("h2", "", companyName\(session\.selected, payload, tickerData\)\)/);
+  assert.doesNotMatch(heading, /\$\{session\.selected\}/);
   assert.match(heading, /copy\.append\(title\)/);
   assert.doesNotMatch(heading, /stock-price|stock-freshness|overview-meta|formatPrice|monthDay|session\.selected\} ·/);
   assert.match(header, /back\.href = "\/"/);
@@ -372,6 +374,7 @@ test("company header shows only the company name and a centered Back to dashboar
   assert.match(styles, /\.stock-heading\s*\{[^}]*display:\s*grid/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*align-items:\s*center/);
+  assert.match(styles, /\.stock-heading\s*\{[^}]*padding-block:\s*var\(--space-3\)/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*padding-inline:\s*calc\(var\(--space-2\) \* 2\)/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*margin-block:\s*var\(--space-3\)/);
   assert.match(styles, /--space-3:\s*12px/);
@@ -382,18 +385,36 @@ test("company header shows only the company name and a centered Back to dashboar
   const mobileHeading = styles.slice(mobileAt, styles.indexOf(".stock-page-tabs {", mobileAt));
   assert.match(mobileHeading, /align-items:\s*center/);
   assert.doesNotMatch(mobileHeading, /padding-inline:\s*0/);
+  assert.doesNotMatch(mobileHeading, /padding-block:\s*0/);
   assert.doesNotMatch(mobileHeading, /margin-block:\s*0/);
-  assert.match(mobileHeading, /\.stock-dashboard-link\s*\{[^}]*align-self:\s*center/);
+  assert.doesNotMatch(mobileHeading, /\.stock-dashboard-link\s*\{[^}]*align-self:/);
+  assert.doesNotMatch(mobileHeading, /\.stock-dashboard-link\s*\{[^}]*height:\s*100%/);
   const linkCss = styles.slice(styles.indexOf(".stock-dashboard-link {"), styles.indexOf(".stock-dashboard-link:hover"));
   assert.match(linkCss, /justify-self:\s*end/);
-  assert.match(linkCss, /align-self:\s*center/);
   assert.match(linkCss, /margin-left:\s*auto/);
-  assert.match(linkCss, /min-height:\s*44px/);
+  assert.match(linkCss, /height:\s*auto/);
+  assert.match(linkCss, /padding:\s*6px 14px/);
   assert.match(linkCss, /var\(--/);
+  assert.doesNotMatch(linkCss, /align-self:/);
+  assert.doesNotMatch(linkCss, /height:\s*100%/);
+  assert.doesNotMatch(linkCss, /min-height:\s*44px/);
   assert.doesNotMatch(linkCss, /#[0-9a-fA-F]{3,8}/);
-  assert.doesNotMatch(styles, /\.stock-dashboard-link\s*\{[^}]*align-self:\s*(?:start|flex-end)/);
+  assert.doesNotMatch(styles, /\.stock-dashboard-link\s*\{[^}]*align-self:/);
+  assert.doesNotMatch(styles, /\.stock-dashboard-link\s*\{[^}]*height:\s*100%/);
   assert.doesNotMatch(styles, /\.stock-heading\s*\{[^}]*align-items:\s*start/);
   assert.doesNotMatch(styles, /\.stock-heading-copy\s*\{[^}]*flex-basis:\s*100%/);
+});
+
+test("company header uses the company name and falls back to the ticker only when no name exists", () => {
+  assert.equal(companyName("TSLA", { company_name: "Tesla, Inc." }), "Tesla, Inc.");
+  assert.equal(companyName("TSLA", { company_name: "Tesla" }), "Tesla");
+  assert.equal(companyName("NVDA", null, { company_name: "NVIDIA Corporation" }), "NVIDIA Corporation");
+  assert.equal(companyName("NVDA", { entityName: "NVIDIA CORP" }), "NVIDIA CORP");
+  assert.equal(companyName("NVDA", { company_name: "NVDA" }, { name: "NVIDIA" }), "NVIDIA");
+  assert.equal(companyName("TSLA", null, null), "Tesla, Inc.");
+  assert.equal(companyName("SPCX", {}, {}), "SpaceX");
+  assert.equal(companyName("ABCD", { company_name: "ABCD" }, { name: "ABCD" }), "ABCD");
+  assert.equal(companyName("ABCD", null, {}), "ABCD");
 });
 
 function operatingSeries(periods, extra = {}) {

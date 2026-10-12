@@ -224,6 +224,35 @@ def test_lake_catalog_approval_is_served_even_when_the_extracted_row_is_unapprov
     assert ir.catalog_entry(ir.load_catalog("TSLA"), "total_deliveries")["status"] == "proposed"
 
 
+def test_serve_publishes_the_sec_company_name_without_the_ticker():
+    store = {
+        ir.curated_observations_key("NVDA"): {"rows": [], "company_name": "NVIDIA CORP"},
+        ir.serving_stock_key("TSLA"): {"ticker": "TSLA", "company_name": "Tesla, Inc.", "metrics": []},
+    }
+
+    def read_json(key):
+        return store.get(key)
+
+    def write_json(key, obj):
+        store[key] = obj
+
+    served = ir.run_serve(
+        {"tickers": ["NVDA", "TSLA"], "run_status": "ok"},
+        read_json=read_json,
+        write_json=write_json,
+        now="2026-10-11T00:00:00Z",
+    )
+    assert served["tickers"] == ["NVDA", "TSLA"]
+    nvidia = store[ir.serving_stock_key("NVDA")]
+    tesla = store[ir.serving_stock_key("TSLA")]
+    assert nvidia["company_name"] == "NVIDIA CORP"
+    assert nvidia["ticker"] == "NVDA"
+    assert "NVDA" not in nvidia["company_name"]
+    assert tesla["company_name"] == "Tesla, Inc."
+    assert ir.sec_entity_name({"entityName": "Tesla, Inc."}) == "Tesla, Inc."
+    assert ir.sec_entity_name({"facts": {}}) == ""
+
+
 def test_catalog_approval_gates_serving_and_llm_values_stay_unapproved():
     catalog = ir.set_catalog_status(
         ir.load_catalog("TSLA"), "supercharger_stations", "approved", "ram", "2026-10-09T00:00:00Z",

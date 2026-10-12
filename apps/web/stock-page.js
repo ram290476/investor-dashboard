@@ -140,8 +140,24 @@ export function quartersInPeriod(series, periodId, options = {}) {
     .sort((a, b) => a.period_end.localeCompare(b.period_end));
 }
 
-export function companyName(ticker, payload) {
-  return payload?.company_name || COMPANY_NAMES[ticker] || ticker;
+const COMPANY_NAME_FIELDS = ["company_name", "sec_company_name", "entity_name", "entityName", "name"];
+
+function recordCompanyName(record, ticker) {
+  if (!record || typeof record !== "object") return "";
+  const symbol = String(ticker || "").trim().toUpperCase();
+  for (const field of COMPANY_NAME_FIELDS) {
+    const value = String(record[field] ?? "").replace(/\s+/g, " ").trim();
+    if (value && value.toUpperCase() !== symbol) return value;
+  }
+  return "";
+}
+
+/** Full company name. Stock payload, then dashboard or SEC metadata, then the ticker. */
+export function companyName(ticker, payload, tickerData) {
+  return recordCompanyName(payload, ticker)
+    || recordCompanyName(tickerData, ticker)
+    || COMPANY_NAMES[ticker]
+    || ticker;
 }
 
 export function nextStockTab(current, key) {
