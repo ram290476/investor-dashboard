@@ -3497,6 +3497,17 @@ def curated_observations_key(ticker: str) -> str:
     return f"curated/company_metrics/ticker={ticker.upper()}/observations.json"
 
 
+def sec_entity_name(document: dict | None) -> str:
+    """Company name already on an SEC companyfacts document or a curated observations file."""
+    if not isinstance(document, dict):
+        return ""
+    for key in ("entityName", "company_name", "entity_name"):
+        value = " ".join(str(document.get(key) or "").split())
+        if value:
+            return value
+    return ""
+
+
 def curated_proposals_key(ticker: str) -> str:
     return f"curated/company_metrics/ticker={ticker.upper()}/proposals.json"
 
@@ -3847,6 +3858,7 @@ def run_extract(
     llm_enabled = bool(llm_secret_id())
     by_ticker: dict[str, list[dict]] = {}
     proposals: dict[str, list[dict]] = {}
+    entity_names: dict[str, str] = {}
     scale_flags: list[dict] = []
     failed = []
     for item in flat.get("manifests") or []:
@@ -3878,6 +3890,9 @@ def run_extract(
                 published_date=item.get("published_date"),
                 fiscal_end_month=fiscal_end_month,
             )
+            entity = sec_entity_name(facts)
+            if entity:
+                entity_names[ticker] = entity
             by_ticker.setdefault(ticker, []).extend(rows)
             scale_flags.extend(flags)
             continue
@@ -3911,7 +3926,11 @@ def run_extract(
         winners, revisions = dedupe_observations(rows)
         frame = metrics_frame(winners)
         write_parquet(frame, curated_parquet_key(ticker))
-        write_json(curated_observations_key(ticker), {"rows": [_jsonable(row) for row in winners]})
+        observations = {"rows": [_jsonable(row) for row in winners]}
+        entity = entity_names.get(ticker) or ""
+        if entity:
+            observations["company_name"] = entity
+        write_json(curated_observations_key(ticker), observations)
         merged = merge_proposals(catalog, proposals.get(ticker) or [])
         new_items = [item for item in merged.get("metrics") or [] if catalog_entry(catalog, item["metric_id"]) is None]
         write_json(curated_proposals_key(ticker), {"ticker": ticker, "metrics": new_items})
@@ -3963,6 +3982,7 @@ def run_serve(event: dict | None, *, read_json, write_json, now: str | None = No
         payload = read_json(curated_observations_key(ticker)) or {}
         rows = _load_observations(payload.get("rows") or [])
         previous = read_json(serving_stock_key(ticker))
+        company_name = sec_entity_name(payload) or sec_entity_name(previous)
         own_mismatches = mismatches_for_ticker(ticker, mismatches)
         document = build_serving(
             ticker,
@@ -3973,6 +3993,8 @@ def run_serve(event: dict | None, *, read_json, write_json, now: str | None = No
             previous=previous,
             mismatches=own_mismatches,
         )
+        if company_name:
+            document["company_name"] = company_name
         public = public_stock_document(document, ticker)
         write_json(serving_stock_key(ticker), json.loads(visible_html(public)))
         served.append(ticker)

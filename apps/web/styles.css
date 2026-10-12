@@ -3652,6 +3652,7 @@ a.catalyst-edgar-link:hover {
   gap: var(--space-2) var(--space-3);
   margin-block: var(--space-3);
   min-width: 0;
+  padding-block: var(--space-3);
   padding-inline: calc(var(--space-2) * 2);
 }
 
@@ -3673,11 +3674,10 @@ a.catalyst-edgar-link:hover {
   align-items: center;
   justify-content: center;
   justify-self: end;
-  align-self: center;
   margin-left: auto;
   box-sizing: border-box;
-  min-height: 44px;
-  padding: 0 14px;
+  height: auto;
+  padding: 6px 14px;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--surface);
@@ -4129,8 +4129,8 @@ a.catalyst-edgar-link:hover {
   }
 
   .stock-dashboard-link {
-    align-self: center;
     justify-self: end;
+    height: auto;
     margin-left: auto;
   }
 

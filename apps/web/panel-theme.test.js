@@ -75,7 +75,7 @@ test("company page panels use panel chrome and direction marks", () => {
   const card = slice("function renderMetricCard", "function renderStockPage");
   const mark = slice("function renderDirectionMark", "function renderMetricCard");
   assert.match(page, /panel stock-section/);
-  assert.match(page, /companyName\(session\.selected, payload\)/);
+  assert.match(page, /companyName\(session\.selected, payload, tickerData\)/);
   assert.doesNotMatch(page, /monthDay\(session\.dashboard\?\.generated_at\)/);
   assert.doesNotMatch(page, /stockFreshnessText\(/);
   assert.match(page, /overlay-chip stock-tab/);
