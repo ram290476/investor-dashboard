@@ -145,3 +145,100 @@ def test_handler_emits_job_h2(monkeypatch):
     assert run({}, Context())["status"] == "success"
     assert emitted["job"] == "H2"
     assert emit_job_finished.__name__ == "emit_job_finished"
+
+
+# --- every watchlist ticker gets news -------------------------------------------------
+
+from news_sentiment import (  # noqa: E402
+    build_aliases,
+    keep_company_rows,
+    massive_rotation,
+    mentions_company,
+    rss_feeds,
+    short_company_name,
+    tag_mentions,
+    ticker_rss_query,
+    watchlist_names,
+)
+from universe import watchlist_universe  # noqa: E402
+
+WATCHLIST = ["TSLA", "SPCX", "NVDA", "AMZN", "GOOG", "AAPL", "PLTR", "QS", "BYND", "META", "MRVL"]
+NAMES = {
+    "TSLA": "Tesla, Inc.",
+    "SPCX": None,
+    "NVDA": "NVIDIA CORP",
+    "AMZN": "AMAZON COM INC",
+    "GOOG": "Alphabet Inc.",
+    "AAPL": "Apple Inc.",
+    "PLTR": "Palantir Technologies Inc.",
+    "QS": "QuantumScape Corp",
+    "BYND": "Beyond Meat, Inc.",
+    "META": "Meta Platforms, Inc.",
+    "MRVL": "Marvell Technology, Inc.",
+}
+
+
+def test_short_company_name_drops_corporate_suffixes():
+    assert short_company_name("NVIDIA CORP") == "Nvidia"
+    assert short_company_name("AMAZON COM INC") == "Amazon"
+    assert short_company_name("Alphabet Inc.") == "Alphabet"
+    assert short_company_name("Beyond Meat, Inc.") == "Beyond Meat"
+    assert short_company_name(None) == ""
+
+
+def test_watchlist_comes_from_prefs_not_a_hard_coded_list():
+    tickers = watchlist_universe(["NVDA", "AAPL", "TSLA", "MRVL"])["tickers"]
+    assert tickers == ["TSLA", "SPCX", "NVDA", "AAPL", "MRVL"]
+    assert len(watchlist_universe([f"T{i}" for i in range(40)])["tickers"]) == 27  # 2 base + cap 25
+
+
+def test_rss_feed_per_watchlist_ticker_uses_company_name():
+    feeds = rss_feeds(WATCHLIST, NAMES)
+    names = [feed[0] for feed in feeds]
+    for symbol in WATCHLIST:
+        if symbol not in ("TSLA", "SPCX"):
+            assert f"ticker-{symbol.lower()}" in names
+    nvda = next(feed for feed in feeds if feed[0] == "ticker-nvda")
+    assert nvda[1] == '"Nvidia" OR "NVDA stock"' and nvda[2] == ["NVDA"] and nvda[3] == ["company"]
+    assert ticker_rss_query("XYZ", None) == '"XYZ stock"'
+
+
+def test_name_matching_built_from_watchlist_names():
+    aliases = build_aliases(NAMES)
+    assert mentions_company("Nvidia earnings beat estimates", "NVDA", aliases)
+    assert mentions_company("QuantumScape ships samples", "QS", aliases)
+    assert not mentions_company("QS rankings released", "QS", aliases)  # two-letter ticker alone is not a match
+    assert mentions_company("Palantir wins Army deal", "PLTR", aliases)
+    assert mentions_company("SpaceX Starship flies", "SPCX", aliases)
+
+
+def test_tag_mentions_and_company_filter():
+    aliases = build_aliases(NAMES)
+    rows = [
+        {"title": "Apple and Nvidia lead a tech rally", "summary": "", "tickers": ["AAPL"]},
+        {"title": "Weather update", "summary": "", "tickers": ["AAPL"]},
+    ]
+    tagged = tag_mentions(rows, aliases)
+    assert tagged[0]["tickers"] == ["AAPL", "NVDA"]
+    assert keep_company_rows(rows, "AAPL", aliases) == [rows[0]]
+
+
+def test_massive_rotation_respects_rate_limit_and_covers_all():
+    seen = set()
+    for hour in range(len(WATCHLIST)):
+        batch = massive_rotation(WATCHLIST, hour)
+        assert len(batch) <= 4
+        seen.update(batch)
+    assert seen == set(WATCHLIST)
+    assert massive_rotation([], 3) == []
+
+
+def test_watchlist_names_reads_serving_filings():
+    docs = {"serving/filings/NVDA.json": {"entity_name": "NVIDIA CORP"}}
+
+    def fake_read(key):
+        if key == "serving/filings/BAD.json":
+            raise RuntimeError("denied")
+        return docs.get(key)
+
+    assert watchlist_names(["NVDA", "AAPL", "BAD"], fake_read) == {"NVDA": "NVIDIA CORP", "AAPL": None, "BAD": None}
