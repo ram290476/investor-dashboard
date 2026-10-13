@@ -506,3 +506,10 @@ test("stock page text and up/down colors stay AA on all six themes", () => {
     assert.ok(contrastRatio(properties["--red"], properties["--surface"]) >= 4.5, `${theme.id} down`);
   }
 });
+
+test("company description comes from the stock payload, then dashboard data, and is empty when absent", async () => {
+  const { companyDescription } = await import("./stock-page.js");
+  assert.equal(companyDescription({ company_description: "  Designs  GPUs. " }, { company_description: "x" }), "Designs GPUs.");
+  assert.equal(companyDescription({}, { company_description: "Builds EV chargers." }), "Builds EV chargers.");
+  assert.equal(companyDescription(null, { company_description: null }), "");
+});

@@ -34,6 +34,7 @@ import {
 import { canApproveMetrics, drawerControls, emailFromIdToken, fallbackSelection, isPanelOpen, panelState, parseSettingsHash, stripOrder, withPanelState } from "./settings-model.js";
 import {
   callsCopy,
+  companyDescription,
   companyName,
   emptyKpiCopy,
   formatMetricValue,
@@ -3625,6 +3626,12 @@ function renderStockPage() {
   title.id = "stock-title";
   title.tabIndex = -1;
   copy.append(title);
+  const description = companyDescription(payload, tickerData);
+  if (description) {
+    const about = node("p", "stock-company-description", description);
+    about.title = description;
+    copy.append(about);
+  }
   const back = node("a", "stock-dashboard-link", "Back to dashboard");
   back.href = "/";
   back.dataset.stockBack = "dashboard";
@@ -3730,7 +3737,7 @@ function renderResearchPage() {
 
   const heading = node("section", "panel research-heading");
   const copy = node("div", "research-heading-copy");
-  const company = companyName(session.selected);
+  const company = companyName(session.selected, session.stockPage[session.selected] || null, tickerData);
   const label = company && company !== session.selected ? `${company} (${session.selected})` : session.selected;
   const title = node("h2", "", `${label} research`);
   title.id = "research-title";

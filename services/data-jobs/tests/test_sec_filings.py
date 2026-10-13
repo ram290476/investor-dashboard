@@ -371,3 +371,54 @@ def test_collector_source_is_not_limited_to_two_tickers():
     source = Path(sec.__file__).read_text()
     assert "TSLA" not in source
     assert "SPCX" not in source
+
+
+_TEN_K = "".join(
+    [
+        "<html><body><p>Table of Contents</p><p>Item 1. Business</p><p>Item 1A. Risk Factors</p>",
+        "<p>PART I</p><p>ITEM 1. BUSINESS</p><p>Overview</p>",
+        "<p>This Annual Report on Form 10-K contains forward-looking statements under the securities laws.</p>",
+        "<p>Acme Charging, Inc. operates one of the largest public fast-charging networks for electric",
+        " vehicles in the United States. We own and operate stations in more than 40 states.</p>",
+        "<p>Item 1A. Risk Factors</p>",
+        "<p>Investing is risky and you could lose everything you put in, so read this section carefully.</p>",
+        "</body></html>",
+    ]
+)
+
+
+def test_description_parses_item_1_business_and_skips_table_of_contents():
+    text = sec.description_from_annual_report(_TEN_K, "10-K")
+    assert text.startswith("Acme Charging, Inc. operates one of the largest")
+    assert "forward-looking" not in text and "Risk" not in text
+
+
+def test_description_is_empty_without_business_section():
+    assert sec.description_from_annual_report("<p>Nothing here.</p>", "10-K") == ""
+
+
+def test_latest_annual_filing_and_cached_description_reuse():
+    rows = [
+        {"form": "10-K", "filed_at": "2025-02-20", "accession_number": "a1", "primary_doc_url": "https://www.sec.gov/a1.htm"},
+        {"form": "10-K", "filed_at": "2026-02-20", "accession_number": "a2", "primary_doc_url": "https://www.sec.gov/a2.htm"},
+        {"form": "8-K", "filed_at": "2026-05-01", "accession_number": "a3", "primary_doc_url": "https://www.sec.gov/a3.htm"},
+    ]
+    annual = sec.latest_annual_filing(rows)
+    assert annual["accession_number"] == "a2"
+    calls = []
+    fetched = sec.resolve_description(annual, None, lambda url: calls.append(url) or _TEN_K)
+    assert calls == ["https://www.sec.gov/a2.htm"] and fetched["accession_number"] == "a2"
+    again = sec.resolve_description(annual, fetched, lambda url: calls.append(url) or "")
+    assert again is fetched and len(calls) == 1
+
+
+def test_serving_document_carries_description_only_when_present():
+    with_text = sec.serving_document(
+        "EVGO", status="ok", reason=None, cik="1", entity_name="EVgo Inc.", filings=[], as_of=CHECKED,
+        description={"description": "Fast charging.", "form": "10-K", "filed_at": "2026-02-20",
+                     "accession_number": "a2", "source_url": "https://www.sec.gov/a2.htm"},
+    )
+    assert with_text["description"] == "Fast charging." and with_text["description_source"]["form"] == "10-K"
+    empty = sec.serving_document("SPY", status="no_sec_filer", reason=None, cik=None, entity_name=None,
+                                 filings=[], as_of=CHECKED)
+    assert empty["description"] is None and empty["description_source"] is None
