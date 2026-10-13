@@ -306,6 +306,12 @@ variable "lambda_reserved_concurrency" {
   default     = null
 }
 
+variable "prefs_api_reserved_concurrency" {
+  description = "Reserved concurrency for invdash-prefs-api. Null = fall back to lambda_reserved_concurrency (unreserved). Set to 3 only after the Lambda concurrent-executions quota increase: it cannot be set while the account cap is 10 (AWS keeps 10 unreserved)."
+  type        = number
+  default     = null
+}
+
 variable "max_user_tickers" {
   description = "Cap on the union of users' tickers that collectors cover (beyond TSLA, SPCX). Keeps Finnhub and Massive inside free limits."
   type        = number

@@ -181,9 +181,9 @@ def test_stock_route_serves_proposed_metrics_with_status_and_stays_on_the_watchl
     mod.handler(_event("PUT", body={"tickers": ["TSLA", "NVDA"], "pinned": [], "version": 1}), None)
     empty = _event("GET")
     empty["rawPath"] = "/stock/NVDA"
-    page = json.loads(mod.handler(empty, None)["body"])
-    assert page["metrics"] == []
-    assert page["freshness_label"] == "No company-specific metrics discovered"
+    unpublished = mod.handler(empty, None)
+    assert unpublished["statusCode"] == 404
+    assert json.loads(unpublished["body"])["code"] == "STOCK_NOT_READY"
 
 
 def _review_event(path, body, groups="admin", username="owner@example.com", method="PUT"):
@@ -1374,3 +1374,35 @@ def test_unreadable_catalog_reports_review_failure_not_rebuild(api, monkeypatch,
     assert response["statusCode"] == 502
     assert body["code"] == "CATALOG_READ_FAILED"
     assert "rebuilt" not in body["error"]
+
+
+@pytest.mark.parametrize("aws_code", ["NoSuchKey", "404", "AccessDenied"])
+def test_missing_stock_page_is_clean_404(api, monkeypatch, capsys, aws_code):
+    """A ticker whose serving/stock/<T>.json is not built yet is a 404, not SERVING_READ_FAILED."""
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error(aws_code, "GetObject", "missing")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    body = _assert_error(mod.handler(_route_event("GET", "/stock/TSLA"), None), 404, "STOCK_NOT_READY")
+    assert "rebuilt" not in body["error"]
+    assert not any(line.get("code") == "SERVING_READ_FAILED" for line in _log_lines(capsys))
+
+
+@pytest.mark.parametrize("aws_code", ["NoSuchKey", "AccessDenied"])
+def test_review_on_missing_stock_page_is_404(api, monkeypatch, capsys, aws_code):
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error(aws_code, "GetObject", "missing")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    event = _bearer_review_event(
+        "/stock/TSLA/metrics/gross_margin",
+        {"status": "approved"},
+        {"sub": "user-a", "token_use": "access", "cognito:groups": ["admin"]},
+    )
+    response = mod.handler(event, None)
+    assert response["statusCode"] == 404
+    assert not any(line.get("code") == "SERVING_READ_FAILED" for line in _log_lines(capsys))
