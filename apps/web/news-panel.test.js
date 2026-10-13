@@ -78,7 +78,7 @@ test("coverage empty states name who is collected, and the drawer summary stays 
   assert.equal(newsEmptyMessage("SPCX", []), "No SPCX headlines in the last 7 days.");
   assert.equal(
     newsEmptyMessage("AAPL", []),
-    "Company news is collected for TSLA and SPCX. AAPL gets Alpha Vantage headlines on rotation, every few days.",
+    "No AAPL headlines in the last 7 days.",
   );
   assert.equal(newsEmptyMessage("AAPL", [{ title: "On rotation" }]), "");
   const news = {

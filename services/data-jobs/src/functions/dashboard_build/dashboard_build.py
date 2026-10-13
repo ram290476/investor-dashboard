@@ -22,7 +22,6 @@ DASHBOARD_RAW_BUDGET_BYTES = 2_000_000
 SCHEMA_VERSION = 3
 HEADLINE_LIMIT = 30
 ET = ZoneInfo("America/New_York")
-CONTRACT_TICKERS = frozenset({"TSLA", "SPCX"})
 # DS-05 is Yahoo consolidated volume. DS-02 is Alpaca's free IEX feed.
 VOLUME_SOURCES = frozenset({"DS-02", "DS-05"})
 _UNSET = object()
@@ -909,7 +908,7 @@ def build_snapshot(
             display_rows = filing_rows
             filing_status = None
         award = None
-        if contracts is not None and ticker in CONTRACT_TICKERS:
+        if contracts is not None and ticker in contracts:
             award = contracts.get(ticker)
             if award is not None:
                 award_count = award.get("ttm_awards_count")

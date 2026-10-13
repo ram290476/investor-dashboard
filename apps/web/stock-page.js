@@ -13,6 +13,8 @@ export const STOCK_TABS = [
   { id: "calls", label: "Calls" },
 ];
 
+// Last resort only: companyName() uses the API company_name / SEC entity name first.
+// SPCX has no SEC entity name, so it keeps a display name here.
 export const COMPANY_NAMES = {
   TSLA: "Tesla, Inc.",
   SPCX: "SpaceX",

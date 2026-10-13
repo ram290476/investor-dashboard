@@ -308,7 +308,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from http_client import get_client
     from lake import job_lease, read_json, read_parquet_prefix, s3, write_json, write_parquet
     from observability import job_handler, logger, source_run
-    from universe import BASE_TICKERS, user_ticker_union
+    from universe import watchlist_tickers
 
     @job_handler("Q1")
     def run(event, context):
@@ -319,7 +319,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         bucket = os.environ["LAKE_BUCKET"]
         xbrl: list[dict] = []
         ticker_status = {}
-        tickers = list(dict.fromkeys([*BASE_TICKERS, *user_ticker_union()]))
+        tickers = watchlist_tickers()  # base + prefs, capped at MAX_USER_TICKERS like every collector
         with get_client() as http:
             response = http.get("https://www.sec.gov/files/company_tickers.json")
             response.raise_for_status()

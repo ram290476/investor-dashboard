@@ -20,6 +20,8 @@ from zoneinfo import ZoneInfo
 
 import polars as pl
 
+from universe import short_company_name, watchlist_names
+
 JOB_ID = "H2"
 ET = ZoneInfo("America/New_York")
 BACKFILL_DAYS = 7
@@ -85,12 +87,6 @@ COMPANY_ALIASES = {
 }
 # Tickers whose company news already comes from the curated _RSS feeds above.
 RSS_COVERED = frozenset({"TSLA", "SPCX"})
-_CORP_SUFFIXES = frozenset(
-    {
-        "inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "llc",
-        "lp", "sa", "nv", "ag", "se", "holdings", "holding", "group", "class", "a", "b", "c", "the", "com",
-    }
-)
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -141,16 +137,6 @@ def strip_publisher_suffix(title: str, publisher: str) -> str:
     if source and text.lower().endswith(suffix.lower()):
         return text[: -len(suffix)].rstrip()
     return text
-
-
-def short_company_name(name: str | None) -> str:
-    """'NVIDIA CORP' -> 'Nvidia', 'Alphabet Inc.' -> 'Alphabet', 'Amazon.com, Inc.' -> 'Amazon'."""
-    words = re.sub(r"[^A-Za-z0-9&' ]+", " ", str(name or "")).split()
-    while words and words[-1].lower() in _CORP_SUFFIXES:
-        words.pop()
-    while words and words[0].lower() == "the":
-        words.pop(0)
-    return " ".join(word if not word.isupper() or len(word) <= 3 else word.title() for word in words)
 
 
 def company_aliases(ticker: str, name: str | None = None) -> tuple[str, ...]:
@@ -223,19 +209,6 @@ def massive_rotation(tickers: list[str], hour_index: int, per_run: int = MASSIVE
     count = min(per_run, len(tickers))
     start = (hour_index * count) % len(tickers)
     return [tickers[(start + i) % len(tickers)] for i in range(count)]
-
-
-def watchlist_names(tickers: list[str], read_json) -> dict[str, str | None]:
-    """SEC entity name per ticker from serving/filings/<T>.json, the same name the dashboard shows."""
-    names: dict[str, str | None] = {}
-    for symbol in tickers:
-        try:
-            document = read_json(f"serving/filings/{symbol}.json") or {}
-        except Exception:  # noqa: BLE001 - a missing or unreadable doc falls back to the ticker
-            document = {}
-        value = document.get("entity_name") if isinstance(document, dict) else None
-        names[symbol] = str(value) if value else None
-    return names
 
 
 def headline_relevance(row: dict, ticker: str, aliases: dict[str, tuple[str, ...]] | None = None) -> str:

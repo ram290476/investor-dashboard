@@ -468,8 +468,8 @@ variable "jobs" {
       schedule      = "cron(45 17 ? * MON-FRI *)"
       triggers      = []
       memory        = 512
-      timeout       = 300
-      read_prefixes = ["curated/contracts/", "curated/contracts_rollup/"]
+      timeout       = 600 # one USAspending recipient search per watchlist ticker
+      read_prefixes = ["curated/contracts/", "curated/contracts_rollup/", "serving/filings/"]
       write_prefixes = [
         "raw/contracts/",
         "curated/contracts/",

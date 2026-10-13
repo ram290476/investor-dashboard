@@ -15,6 +15,7 @@ Free-tier budget per extra ticker (one run each):
 from __future__ import annotations
 
 import os
+import re
 from datetime import date
 
 import boto3
@@ -103,3 +104,39 @@ def sentiment_plan(equities: list[str], day: date) -> list[str]:
     for i, t in enumerate(rotation):
         plan.insert(min(len(plan), i * step + step // 2), t)
     return plan[:SENTIMENT_CALLS_PER_DAY]
+
+
+_CORP_SUFFIXES = frozenset(
+    {
+        "inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "llc",
+        "lp", "sa", "nv", "ag", "se", "holdings", "holding", "group", "class", "a", "b", "c", "the", "com",
+    }
+)
+
+
+def short_company_name(name: str | None) -> str:
+    """'NVIDIA CORP' -> 'Nvidia', 'Alphabet Inc.' -> 'Alphabet', 'Amazon.com, Inc.' -> 'Amazon'."""
+    words = re.sub(r"[^A-Za-z0-9&' ]+", " ", str(name or "")).split()
+    while words and words[-1].lower() in _CORP_SUFFIXES:
+        words.pop()
+    while words and words[0].lower() == "the":
+        words.pop(0)
+    return " ".join(word if not word.isupper() or len(word) <= 3 else word.title() for word in words)
+
+
+def watchlist_names(tickers: list[str], read_json) -> dict[str, str | None]:
+    """SEC entity name per ticker from serving/filings/<T>.json, the same name the dashboard shows."""
+    names: dict[str, str | None] = {}
+    for symbol in tickers:
+        try:
+            document = read_json(f"serving/filings/{symbol}.json") or {}
+        except Exception:  # noqa: BLE001 - a missing or unreadable doc falls back to the ticker
+            document = {}
+        value = document.get("entity_name") if isinstance(document, dict) else None
+        names[symbol] = str(value) if value else None
+    return names
+
+
+def watchlist_tickers() -> list[str]:
+    """Base tickers plus every prefs ticker, capped at MAX_USER_TICKERS (the dashboard watchlist)."""
+    return list(watchlist_universe(user_ticker_union()).get("tickers") or [])
