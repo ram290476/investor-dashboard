@@ -1353,3 +1353,24 @@ def test_prefs_index_proxies_match_the_collector_universe():
     import universe
 
     assert prefs_api.INDEX_PROXIES == universe.INDEX_PROXIES
+
+
+def test_unreadable_catalog_reports_review_failure_not_rebuild(api, monkeypatch, capsys):
+    """Without s3:ListBucket a missing catalog/<T>.json reads as AccessDenied. Do not say 'rebuilt'."""
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+    real_get = s3.get_object
+
+    def get_object(**kwargs):
+        if kwargs["Key"].startswith("catalog/"):
+            raise _client_error("AccessDenied", "GetObject", "denied")
+        return real_get(**kwargs)
+
+    monkeypatch.setattr(mod._s3, "get_object", get_object)
+    response = mod.handler(_review_event(
+        "/stock/TSLA/metrics/total_deliveries", {"status": "approved"}, groups=["admin"],
+    ), None)
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 502
+    assert body["code"] == "CATALOG_READ_FAILED"
+    assert "rebuilt" not in body["error"]
