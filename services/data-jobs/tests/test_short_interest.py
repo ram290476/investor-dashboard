@@ -179,3 +179,73 @@ def test_catchup_merges_full_history_without_duplicate_partitions(monkeypatch):
     assert all(body.get("compareFilters") for body in bodies)
     assert all("META" in body["domainFilters"][0]["values"] or "TSLA" in body["domainFilters"][0]["values"]
                for body in bodies)
+
+
+def _finra_setup(monkeypatch, data_responses):
+    calls = []
+
+    def respond(request):
+        if "access_token" in request.url.path:
+            return httpx.Response(200, json={"access_token": "test-token"})
+        calls.append(request)
+        return data_responses[min(len(calls), len(data_responses)) - 1]
+
+    client = httpx.Client(transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(http_client, "get_client", lambda: client)
+    monkeypatch.setattr(api_keys, "api_key", lambda name: "test")
+    monkeypatch.setattr(universe, "user_ticker_union", lambda: [])
+    monkeypatch.setattr(
+        lake, "read_json",
+        lambda key: {"settlement_dates": ["2026-09-30"], "history_complete": ["TSLA", "SPCX"]},
+    )
+    writes = []
+    monkeypatch.setattr(lake, "upsert_ranked", lambda *args, **kwargs: writes.append(args) or 0)
+    monkeypatch.setattr(lake, "write_json", lambda *args: writes.append(args))
+    emitted = []
+    monkeypatch.setattr(observability, "emit_job_finished",
+                        lambda job, run, outcome, detail: emitted.append(outcome))
+    monkeypatch.setattr(short_interest.time, "sleep", lambda _s: None)
+    return calls, writes, emitted
+
+
+def test_finra_204_no_new_settlement_is_success(monkeypatch):
+    """FINRA answers 'nothing newer than the watermark' with 204 and an empty body (verified live)."""
+    calls, writes, emitted = _finra_setup(monkeypatch, [httpx.Response(204, headers={"record-total": "0"})])
+    result = short_interest.handler({}, Context())
+    assert result["new_settlement_dates"] == []
+    assert not writes
+    assert emitted == ["success"]
+    assert len(calls) == 1
+
+
+def test_finra_non_json_page_is_retried_then_succeeds(monkeypatch):
+    good = httpx.Response(200, json=[{"settlementDate": "2026-10-15", "symbolCode": "TSLA",
+                                      "currentShortPositionQuantity": 1}])
+    calls, _writes, emitted = _finra_setup(
+        monkeypatch, [httpx.Response(200, text="<html>maintenance</html>", headers={"content-type": "text/html"}), good]
+    )
+    result = short_interest.handler({}, Context())
+    assert result["new_settlement_dates"] == ["2026-10-15"]
+    assert len(calls) == 2
+    assert emitted == ["success"]
+
+
+def test_finra_non_json_page_fails_after_retries(monkeypatch, caplog):
+    bad = httpx.Response(200, text="<html>maintenance " + "x" * 500, headers={"content-type": "text/html"})
+    calls, writes, emitted = _finra_setup(monkeypatch, [bad])
+    with pytest.raises(RuntimeError, match="FinraResponseError"):
+        short_interest.handler({}, Context())
+    assert len(calls) == short_interest.NON_JSON_ATTEMPTS
+    assert not writes
+    assert emitted == ["failure"]
+
+
+def test_decode_records_truncates_body_to_200_chars():
+    from collectors import finra
+
+    with pytest.raises(finra.FinraResponseError) as err:
+        finra.decode_records(200, "text/html", b"y" * 1000)
+    assert "y" * 200 in str(err.value)
+    assert "y" * 201 not in str(err.value)
+    assert finra.decode_records(204, "", b"") == []
+    assert finra.decode_records(200, "application/json", b"") == []

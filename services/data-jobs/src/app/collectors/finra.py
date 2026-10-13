@@ -15,6 +15,34 @@ from __future__ import annotations
 TOKEN_URL = "https://ews.fip.finra.org/fip/rest/ews/oauth2/access_token?grant_type=client_credentials"
 DATA_URL = "https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest"
 
+class FinraResponseError(RuntimeError):
+    """FINRA answered 2xx with a body that is not JSON (maintenance page, truncated body)."""
+
+
+def decode_records(status_code: int, content_type: str, body: bytes) -> list[dict]:
+    """Records from one FINRA data page.
+
+    FINRA answers a query with no matching rows (e.g. no settlement date newer than the
+    watermark, the normal case on most evenings) with ``204 No Content`` and an empty body,
+    and ``record-total: 0``. That is an empty page, not an error. Anything else that is not
+    JSON raises FinraResponseError with the first 200 characters of the body.
+    """
+    if status_code == 204 or not body.strip():
+        return []
+    if "json" not in (content_type or "").lower():
+        head = body[:200].decode("utf-8", "replace")
+        raise FinraResponseError(f"FINRA returned {status_code} {content_type or 'no content-type'}: {head!r}")
+    import json
+
+    try:
+        payload = json.loads(body)
+    except ValueError as exc:
+        raise FinraResponseError(
+            f"FINRA returned invalid JSON ({status_code}): {body[:200].decode('utf-8', 'replace')!r}"
+        ) from exc
+    return payload if isinstance(payload, list) else []
+
+
 # FINRA has used two field-name sets over time; accept either.
 FIELDS = {
     "settlement_date": ("settlementDate",),

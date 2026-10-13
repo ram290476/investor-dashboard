@@ -8,13 +8,18 @@ merged into the existing settlement_date partitions. Later runs stay incremental
 from __future__ import annotations
 
 import base64
+import logging
 import os
+import random
+import time
 from datetime import UTC, datetime
 
 import polars as pl
 
 STATE_KEY = "curated/short_interest/_state.json"
 PAGE_LIMIT = 5000
+NON_JSON_ATTEMPTS = 3
+logger = logging.getLogger(__name__)
 
 
 def tickers_needing_history(tickers: list[str], state: dict) -> list[str]:
@@ -61,19 +66,43 @@ def fetch_short_interest(http, token: str, tickers: list[str], after: str | None
     rows: list[dict] = []
     offset = 0
     while True:
-        response = http.post(
-            finra.DATA_URL,
-            json=finra.query_body(tickers, after, offset=offset, limit=PAGE_LIMIT),
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-        records = payload if isinstance(payload, list) else []
+        records = _fetch_page(http, token, finra.query_body(tickers, after, offset=offset, limit=PAGE_LIMIT))
         rows.extend(finra.parse(records))
         if len(records) < PAGE_LIMIT:
             break
         offset += PAGE_LIMIT
     return rows
+
+
+def _fetch_page(http, token: str, body: dict, *, sleep=time.sleep) -> list[dict]:
+    """One FINRA page. 204/empty is an empty page; a non-JSON 2xx is retried with backoff."""
+    from collectors import finra
+
+    for attempt in range(NON_JSON_ATTEMPTS):
+        response = http.post(
+            finra.DATA_URL,
+            json=body,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+        response.raise_for_status()
+        try:
+            return finra.decode_records(
+                response.status_code, response.headers.get("content-type", ""), response.content
+            )
+        except finra.FinraResponseError:
+            logger.warning(
+                "finra_non_json_response",
+                extra={
+                    "status": response.status_code,
+                    "content_type": response.headers.get("content-type"),
+                    "body_head": response.content[:200].decode("utf-8", "replace"),
+                    "attempt": attempt + 1,
+                },
+            )
+            if attempt + 1 == NON_JSON_ATTEMPTS:
+                raise
+            sleep(min(2.0 * (2**attempt) * (0.5 + random.random()), 20.0))
+    return []  # pragma: no cover - loop always returns or raises
 
 
 def store_settlement_partition(rows: list[dict], day: str) -> None:
