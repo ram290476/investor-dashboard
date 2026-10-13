@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -798,14 +799,62 @@ def price_history_for(ticker: str, rows: list[dict]) -> list[dict]:
     return [unique[day] for day in sorted(unique)][-MAX_PRICE_ROWS:]
 
 
+# Display names for SEC conformed names that title-casing cannot fix.
+COMPANY_NAME_OVERRIDES = {
+    "AMZN": "Amazon.com, Inc.",
+    "SPCX": "SpaceX",
+}
+# Words kept upper case when an all-caps SEC name is title-cased.
+NAME_ACRONYMS = frozenset(
+    {"NVIDIA", "AMD", "IBM", "ASML", "TSMC", "AT&T", "USA", "US", "UK", "AI", "ETF", "SPDR", "ADR", "REIT"}
+    | {"II", "III", "IV"}
+)
+NAME_SUFFIXES = {
+    "CORP": "Corp.", "CORPORATION": "Corporation", "INC": "Inc.", "INCORPORATED": "Incorporated", "CO": "Co.",
+    "COMPANY": "Company", "LTD": "Ltd.", "LIMITED": "Limited", "LLC": "LLC", "LP": "LP", "PLC": "plc",
+    "NV": "N.V.", "SA": "S.A.", "AG": "AG", "SE": "SE", "HOLDINGS": "Holdings",
+}
+NAME_SMALL_WORDS = frozenset({"OF", "AND", "THE", "FOR", "IN", "ON", "AT", "DE"})
+
+
+def display_company_name(ticker: str, name: str | None) -> str | None:
+    """Readable display name from an SEC entity name.
+
+    Ticker overrides win. Names that already contain lower-case letters are left as filed. All-caps names are
+    title-cased word by word, keeping known acronyms upper case and normalizing legal suffixes (CORP -> Corp.,
+    INC -> Inc.).
+    """
+    symbol = str(ticker or "").upper()
+    if symbol in COMPANY_NAME_OVERRIDES:
+        return COMPANY_NAME_OVERRIDES[symbol]
+    text = re.sub(r"\s*/[A-Za-z]{2,3}/?$", "", " ".join(str(name or "").split()))  # SEC state tag, e.g. /DE/
+    if not text or any(char.islower() for char in text):
+        return text or None
+    words = []
+    for index, raw in enumerate(text.split(" ")):
+        core = raw.rstrip(",.")
+        trail = raw[len(core):].replace(".", "")
+        key = core.upper()
+        if key in NAME_ACRONYMS:
+            word = key
+        elif key in NAME_SUFFIXES and index > 0:
+            word = NAME_SUFFIXES[key]
+        elif key in NAME_SMALL_WORDS and index > 0:
+            word = key.lower()
+        else:
+            word = "-".join(part[:1].upper() + part[1:].lower() for part in core.split("-"))
+        words.append(word + trail)
+    return " ".join(words)
+
+
 def company_name_for(ticker: str, served: dict | None, filing_rows: list[dict] | None) -> str | None:
-    """SEC entity name for any watchlist ticker: served filings doc, then curated filing rows."""
+    """Display name for any watchlist ticker from the SEC entity name: served filings doc, then curated rows."""
     symbol = str(ticker or "").upper()
     candidates = [(served or {}).get("entity_name")] + [row.get("entity_name") for row in filing_rows or []]
     for value in candidates:
         name = " ".join(str(value or "").split())
         if name and name.upper() != symbol:
-            return name
+            return display_company_name(symbol, name)
     return None
 
 

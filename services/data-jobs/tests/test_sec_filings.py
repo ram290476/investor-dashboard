@@ -412,6 +412,29 @@ def test_latest_annual_filing_and_cached_description_reuse():
     assert again is fetched and len(calls) == 1
 
 
+QS_TEN_K = (Path(__file__).parent / "fixtures" / "sec_filings" / "qs_10k_2026_item1_trimmed.htm").read_text()
+
+
+def test_description_from_real_quantumscape_10k_with_split_heading_and_toc():
+    # Real inline-XBRL 10-K: the TOC splits "Item 1." / "Business" into table cells and the body heading is
+    # "Item 1. Bu</span><span>siness." which previously parsed as "Bu siness" and yielded "".
+    text = sec.description_from_annual_report(QS_TEN_K, "10-K")
+    assert text.startswith("QuantumScape is a leader in developing next-generation solid-state lithium-metal battery")
+    assert "sample" not in text.lower()  # glossary entries between the TOC and Item 1 are not used
+
+
+def test_empty_cached_description_is_retried():
+    annual = {"form": "10-K", "filed_at": "2026-02-25", "accession_number": "0001193125-26-071556",
+              "primary_doc_url": "https://www.sec.gov/qs.htm"}
+    stale = {"description": "", "accession_number": "0001193125-26-071556", "form": "10-K"}
+    calls = []
+    fresh = sec.resolve_description(annual, stale, lambda url: calls.append(url) or QS_TEN_K)
+    assert calls == ["https://www.sec.gov/qs.htm"]
+    assert fresh["description"].startswith("QuantumScape is a leader")
+    again = sec.resolve_description(annual, fresh, lambda url: calls.append(url) or "")
+    assert again is fresh and len(calls) == 1
+
+
 def test_serving_document_carries_description_only_when_present():
     with_text = sec.serving_document(
         "EVGO", status="ok", reason=None, cik="1", entity_name="EVgo Inc.", filings=[], as_of=CHECKED,

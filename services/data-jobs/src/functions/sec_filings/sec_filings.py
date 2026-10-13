@@ -569,6 +569,9 @@ DESCRIPTION_MAX_CHARS = 600
 _BLOCK_TAG = re.compile(r"(?is)<\s*/?\s*(p|div|br|tr|li|h[1-6]|table|section)\b[^>]*>")
 _DROP_TAG = re.compile(r"(?is)<(script|style|head|title|ix:header)\b.*?</\1\s*>")
 _ANY_TAG = re.compile(r"(?s)<[^>]+>")
+# Inline formatting and inline-XBRL tags can split a word mid-way ("Bu</span><span>siness"); drop them without
+# inserting whitespace so headings and prose stay intact.
+_INLINE_TAG = re.compile(r"(?is)<\s*/?\s*(span|a|b|i|u|em|strong|font|sup|sub|small|ix:[a-z]+)\b[^>]*>")
 _SECTION_START = {
     "10-K": r"item\s*1\s*[.:\-\u2014\u2013]?\s*business\b",
     "20-F": r"item\s*4\s*[.:\-\u2014\u2013]?\s*information\s+on\s+the\s+company\b",
@@ -601,6 +604,7 @@ def html_paragraphs(html: str) -> list[str]:
 
     text = _DROP_TAG.sub(" ", str(html or ""))
     text = _BLOCK_TAG.sub("\n", text)
+    text = _INLINE_TAG.sub("", text)
     text = html_lib.unescape(_ANY_TAG.sub(" ", text)).replace("\xa0", " ")
     return [" ".join(line.split()) for line in text.split("\n") if line.strip()]
 
@@ -626,14 +630,43 @@ def description_from_annual_report(html: str, form: str = "10-K") -> str:
     end = re.compile(_SECTION_END[kind], re.I)
     paragraphs = html_paragraphs(html)
     best: list[str] = []
-    for index, paragraph in enumerate(paragraphs):
-        if len(paragraph) > 200 or not start.search(paragraph):
+    compact_start = re.compile(_SECTION_START[kind].replace(r"\s*", "").replace(r"\s+", ""), re.I)
+    compact_end = re.compile(_SECTION_END[kind].replace(r"\s*", "").replace(r"\s+", ""), re.I)
+
+    def is_end(index: int) -> bool:
+        current = paragraphs[index]
+        if len(current) >= 200:
+            return False
+        if end.search(current) or compact_end.search("".join(current.split())):
+            return True
+        if index + 1 < len(paragraphs) and len(paragraphs[index + 1]) < 200:
+            joined = "".join(f"{current}{paragraphs[index + 1]}".split())
+            return bool(re.match(r"(?i)item", joined) and compact_end.match(joined))
+        return False
+
+    def heading_span(index: int) -> int:
+        """Paragraphs taken by an Item heading at index (0 if none). Tolerates a heading split across two
+        short paragraphs or table cells ("Item 1." / "Business") and stray whitespace inside words."""
+        first = paragraphs[index]
+        if len(first) > 200:
+            return 0
+        if start.search(first) or compact_start.search("".join(first.split())):
+            return 1
+        if index + 1 < len(paragraphs) and len(paragraphs[index + 1]) <= 200:
+            joined = f"{first} {paragraphs[index + 1]}"
+            if start.search(joined) or compact_start.search("".join(joined.split())):
+                return 2
+        return 0
+
+    for index in range(len(paragraphs)):
+        taken = heading_span(index)
+        if not taken:
             continue
         section: list[str] = []
-        for later in paragraphs[index + 1 :]:
-            if end.search(later) and len(later) < 200:
+        for later_index in range(index + taken, len(paragraphs)):
+            if is_end(later_index):
                 break
-            section.append(later)
+            section.append(paragraphs[later_index])
         if sum(len(item) for item in section) > sum(len(item) for item in best):
             best = section
     chosen: list[str] = []
@@ -651,8 +684,9 @@ def resolve_description(annual: dict | None, cached: dict | None, fetch_document
     if annual is None:
         return cached if isinstance(cached, dict) and cached.get("description") else None
     accession = str(annual.get("accession_number") or "")
-    if isinstance(cached, dict) and cached.get("accession_number") == accession and "description" in cached:
+    if isinstance(cached, dict) and cached.get("accession_number") == accession and cached.get("description"):
         return cached
+    # An empty cached result for the same filing is retried on every run rather than kept permanently.
     html = fetch_document(str(annual.get("primary_doc_url") or ""))
     if html is None:
         return cached if isinstance(cached, dict) and cached.get("description") else None
