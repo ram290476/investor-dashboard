@@ -505,6 +505,7 @@ _ERROR_MESSAGES = {
     "PREFS_STORE_UNAVAILABLE": "Preferences could not be reached. Try again in a minute.",
     "SERVING_DOCUMENT_INVALID": "Dashboard data is being rebuilt; try again in a minute.",
     "CATALOG_WRITE_FAILED": "The metric review could not be saved. Try again in a minute.",
+    "CATALOG_READ_FAILED": "The metric review could not be saved: the review record could not be read.",
     "INTERNAL": "Something went wrong. Try again in a minute.",
 }
 _TRANSIENT_AWS_CODES = frozenset({
@@ -911,7 +912,15 @@ def _review_metric(event, sub: str, ticker: str, metric_id: str, respond) -> dic
         return respond(404, {"error": "Metric is not on this company page"})
     reviewer = _reviewer(claims)
     approved_at = datetime.now(UTC).isoformat(timespec="seconds")
-    catalog = _read_json_object(_catalog_key(ticker)) or {"ticker": ticker, "catalog_version": 1, "metrics": []}
+    try:
+        catalog = _read_json_object(_catalog_key(ticker))
+    except ClientError as exc:
+        # The first approval for a ticker reads a catalog object that does not exist yet. Without
+        # s3:ListBucket on catalog/, S3 answers AccessDenied instead of NoSuchKey; that used to be
+        # reported as SERVING_READ_FAILED ("being rebuilt"). Report the review failure honestly.
+        _log_event("prefs_api_error", f"PUT /stock/{{ticker}}/metrics/{{metric_id}}", "PUT", exc, "CATALOG_READ_FAILED")
+        return _failure_response(502, "CATALOG_READ_FAILED")
+    catalog = catalog or {"ticker": ticker, "catalog_version": 1, "metrics": []}
     catalog = _set_catalog_metric(catalog, ticker, metric_id, status, reviewer, approved_at)
     patched = _patch_serving_metric(document, metric_id, status, reviewer, approved_at)
     _write_json_object(_catalog_key(ticker), catalog)
