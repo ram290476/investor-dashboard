@@ -809,6 +809,12 @@ def company_name_for(ticker: str, served: dict | None, filing_rows: list[dict] |
     return None
 
 
+def company_description_for(served: dict | None) -> str | None:
+    """Short business description from the latest annual report, or None."""
+    text = " ".join(str((served or {}).get("description") or "").split())
+    return text or None
+
+
 def build_snapshot(
     tickers: list[str],
     prices: dict[str, list[dict]],
@@ -879,6 +885,7 @@ def build_snapshot(
                 (served_filings or {}).get(ticker),
                 (filings or {}).get(ticker),
             ),
+            "company_description": company_description_for((served_filings or {}).get(ticker)),
             "price_history": history,
             "volume_source_changes": volume_source_changes(history),
             "trend": trends.get(ticker),
@@ -1080,7 +1087,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             if not isinstance(document, dict):
                 continue
             rows, status = dashboard_rows_from_serving(document)
-            served_filings[ticker] = {"rows": rows, "status": status, "entity_name": document.get("entity_name")}
+            served_filings[ticker] = {
+                "rows": rows,
+                "status": status,
+                "entity_name": document.get("entity_name"),
+                "description": document.get("description"),
+            }
         rollup = read_json("curated/contracts_rollup/latest.json") or []
         contracts_data = {row.get("ticker"): row for row in rollup if isinstance(row, dict)}
         short_frame = read_parquet_prefix("curated/short_interest/", columns=SHORT_COLUMNS)

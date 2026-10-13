@@ -388,6 +388,8 @@ def _public_stock(document: dict | None, ticker: str) -> dict:
         "metrics": metrics,
         "unavailable": source.get("unavailable") or [],
         "mismatches": source.get("mismatches") or [],
+        "company_name": source.get("company_name") or None,
+        "company_description": source.get("company_description") or None,
     }
 
 

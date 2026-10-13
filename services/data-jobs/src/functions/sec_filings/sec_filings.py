@@ -85,6 +85,10 @@ def serving_filings_key(ticker: str) -> str:
     return f"serving/filings/{ticker.upper()}.json"
 
 
+def description_key(ticker: str) -> str:
+    return f"raw/sec_filings/ticker={ticker.upper()}/description.json"
+
+
 def ticker_status_key(ticker: str) -> str:
     return f"raw/sec_filings/ticker={ticker.upper()}/status.json"
 
@@ -560,6 +564,107 @@ def public_filing(row: dict) -> dict:
     }
 
 
+ANNUAL_FORMS = ("10-K", "20-F", "40-F", "10-KT", "10-K405")
+DESCRIPTION_MAX_CHARS = 600
+_BLOCK_TAG = re.compile(r"(?is)<\s*/?\s*(p|div|br|tr|li|h[1-6]|table|section)\b[^>]*>")
+_DROP_TAG = re.compile(r"(?is)<(script|style|head|title|ix:header)\b.*?</\1\s*>")
+_ANY_TAG = re.compile(r"(?s)<[^>]+>")
+_SECTION_START = {
+    "10-K": r"item\s*1\s*[.:\-\u2014\u2013]?\s*business\b",
+    "20-F": r"item\s*4\s*[.:\-\u2014\u2013]?\s*information\s+on\s+the\s+company\b",
+}
+_SECTION_END = {
+    "10-K": r"item\s*1\s*a\s*[.:\-\u2014\u2013]?\s*risk\s+factors|item\s*2\s*[.:\-\u2014\u2013]?\s*properties",
+    "20-F": r"item\s*4\s*a\b|item\s*5\s*[.:\-\u2014\u2013]?\s*operating",
+}
+_SKIP_PARAGRAPH = re.compile(
+    r"(?i)^(item\s*\d|part\s+[iv]+\b|table of contents|overview$|general$|our company$|business$)"
+    r"|forward-looking|incorporated (herein )?by reference|unless the context|as used in this"
+)
+
+
+def latest_annual_filing(rows: list[dict]) -> dict | None:
+    """Most recent original annual report (10-K, 20-F, 40-F) with a primary document URL."""
+    candidates = [
+        row
+        for row in rows or []
+        if str(row.get("form") or "").upper() in ANNUAL_FORMS
+        and str(row.get("primary_doc_url") or "").startswith("http")
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda row: (str(row.get("filed_at") or ""), str(row.get("accession_number") or "")))
+
+
+def html_paragraphs(html: str) -> list[str]:
+    import html as html_lib
+
+    text = _DROP_TAG.sub(" ", str(html or ""))
+    text = _BLOCK_TAG.sub("\n", text)
+    text = html_lib.unescape(_ANY_TAG.sub(" ", text)).replace("\xa0", " ")
+    return [" ".join(line.split()) for line in text.split("\n") if line.strip()]
+
+
+def _trim_sentences(text: str, limit: int = DESCRIPTION_MAX_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    stop = max(cut.rfind(". "), cut.rfind(".\u201d "))
+    if stop >= 80:
+        return cut[: stop + 1]
+    return cut.rsplit(" ", 1)[0].rstrip(",;:") + "\u2026"
+
+
+def description_from_annual_report(html: str, form: str = "10-K") -> str:
+    """First prose of Item 1 (10-K/40-F) or Item 4 (20-F), trimmed to whole sentences.
+
+    The table-of-contents entry is skipped by choosing the heading whose section holds the
+    most prose before the next item. Empty when no business section is found.
+    """
+    kind = "20-F" if str(form or "").upper().startswith("20-F") else "10-K"
+    start = re.compile(_SECTION_START[kind], re.I)
+    end = re.compile(_SECTION_END[kind], re.I)
+    paragraphs = html_paragraphs(html)
+    best: list[str] = []
+    for index, paragraph in enumerate(paragraphs):
+        if len(paragraph) > 200 or not start.search(paragraph):
+            continue
+        section: list[str] = []
+        for later in paragraphs[index + 1 :]:
+            if end.search(later) and len(later) < 200:
+                break
+            section.append(later)
+        if sum(len(item) for item in section) > sum(len(item) for item in best):
+            best = section
+    chosen: list[str] = []
+    for paragraph in best:
+        if len(paragraph) < 80 or "." not in paragraph or _SKIP_PARAGRAPH.search(paragraph):
+            continue
+        chosen.append(paragraph)
+        if sum(len(item) + 1 for item in chosen) >= DESCRIPTION_MAX_CHARS or len(chosen) >= 2:
+            break
+    return _trim_sentences(" ".join(chosen)) if chosen else ""
+
+
+def resolve_description(annual: dict | None, cached: dict | None, fetch_document) -> dict | None:
+    """Reuse the cached description while the latest annual report is unchanged; else parse it."""
+    if annual is None:
+        return cached if isinstance(cached, dict) and cached.get("description") else None
+    accession = str(annual.get("accession_number") or "")
+    if isinstance(cached, dict) and cached.get("accession_number") == accession and "description" in cached:
+        return cached
+    html = fetch_document(str(annual.get("primary_doc_url") or ""))
+    if html is None:
+        return cached if isinstance(cached, dict) and cached.get("description") else None
+    return {
+        "description": description_from_annual_report(html, str(annual.get("form") or "10-K")),
+        "accession_number": accession,
+        "form": str(annual.get("form") or ""),
+        "filed_at": str(annual.get("filed_at") or ""),
+        "source_url": str(annual.get("primary_doc_url") or ""),
+    }
+
+
 def serving_document(
     ticker: str,
     *,
@@ -569,11 +674,17 @@ def serving_document(
     entity_name: str | None,
     filings: list[dict],
     as_of: str,
+    description: dict | None = None,
 ) -> dict:
+    described = description if isinstance(description, dict) and description.get("description") else None
     return {
         "ticker": ticker.upper(),
         "cik": cik,
         "entity_name": entity_name,
+        "description": described["description"] if described else None,
+        "description_source": None
+        if described is None
+        else {key: described.get(key) for key in ("form", "filed_at", "accession_number", "source_url")},
         "status": status,
         "reason": reason,
         "as_of": as_of,
@@ -775,6 +886,7 @@ def collect_ticker(
         "cik": cik,
         "entity_name": entity,
         "touched": chosen,
+        "annual_report": latest_annual_filing([*parsed, *merged]),
     }
 
 
@@ -811,6 +923,7 @@ def run_collection(
     today: date,
     checked_at: str,
     now: datetime,
+    cached_description_for=None,
 ) -> dict:
     """Fetch CIKs and submissions, then return per-ticker results. Callers write the lake."""
     document = cached_ciks if isinstance(cached_ciks, dict) else None
@@ -891,6 +1004,14 @@ def run_collection(
             fetch_index=fetch_index if entry is not None and fetch_error is None else None,
             map_error=None if cik_map else map_error,
         )
+        if result["status"] == "ok":
+
+            def fetch_document(url: str, _fetch=fetch, _pace=pace, _sleep=sleep) -> str | None:
+                response, _reason = fetch_sec(url, _fetch, _pace, _sleep)
+                return None if response is None else str(getattr(response, "text", "") or "")
+
+            cached = cached_description_for(ticker) if cached_description_for is not None else None
+            result["description"] = resolve_description(result.get("annual_report"), cached, fetch_document)
         if result["status"] == "no_sec_filer":
             result["history_complete"] = True
         elif ticker in backfill and result["status"] == "ok" and older_complete:
@@ -926,9 +1047,12 @@ def publish_ticker(result: dict, *, write_json, write_frame, checked_at: str, ba
             entity_name=result.get("entity_name"),
             filings=rows,
             as_of=checked_at,
+            description=result.get("description"),
         ),
         serving_filings_key(ticker),
     )
+    if isinstance(result.get("description"), dict):
+        write_json(result["description"], description_key(ticker))
     if result["status"] == "ok" and rows:
         write_frame(ticker, rows)
         cap = RAW_INDEX_CAP_BACKFILL if backfill else RAW_INDEX_CAP
@@ -996,6 +1120,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 today=today,
                 checked_at=now.isoformat(timespec="seconds"),
                 now=now,
+                cached_description_for=lambda ticker: read_json(description_key(ticker)),
             )
         for result in collected["results"]:
             publish_ticker(

@@ -1168,3 +1168,15 @@ def test_snapshot_carries_sec_company_name_for_every_watchlist_ticker():
     )
     names = {ticker: snapshot["tickers"][ticker].get("company_name") for ticker in tickers}
     assert names == {"TSLA": "Tesla, Inc.", "NVDA": "NVIDIA CORP", "AAPL": "Apple Inc.", "SPY": None}
+
+
+def test_snapshot_carries_company_description_for_every_watchlist_ticker():
+    snapshot = dashboard_build.build_snapshot(
+        ["NVDA", "EVGO", "SPY"], {}, {}, [], None,
+        served_filings={
+            "NVDA": {"rows": [], "status": "ok", "description": " Accelerated  computing. "},
+            "EVGO": {"rows": [], "status": "ok", "description": "Fast charging."},
+        },
+    )
+    got = {t: snapshot["tickers"][t]["company_description"] for t in ["NVDA", "EVGO", "SPY"]}
+    assert got == {"NVDA": "Accelerated computing.", "EVGO": "Fast charging.", "SPY": None}

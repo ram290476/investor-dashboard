@@ -3668,6 +3668,23 @@ a.catalyst-edgar-link:hover {
   overflow-wrap: anywhere;
 }
 
+.stock-company-description {
+  display: -webkit-box;
+  margin: var(--space-1) 0 0;
+  max-width: 72ch;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.stock-company-description:empty {
+  display: none;
+}
+
 .stock-dashboard-link {
   position: relative;
   display: inline-flex;

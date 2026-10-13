@@ -160,6 +160,20 @@ export function companyName(ticker, payload, tickerData) {
     || ticker;
 }
 
+const COMPANY_DESCRIPTION_FIELDS = ["company_description", "description"];
+
+/** Short business description for the header. Stock payload, then dashboard data; "" when absent. */
+export function companyDescription(payload, tickerData) {
+  for (const record of [payload, tickerData]) {
+    if (!record || typeof record !== "object") continue;
+    for (const field of COMPANY_DESCRIPTION_FIELDS) {
+      const value = String(record[field] ?? "").replace(/\s+/g, " ").trim();
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
 export function nextStockTab(current, key) {
   const ids = STOCK_TABS.map((tab) => tab.id);
   const index = Math.max(0, ids.indexOf(current));
