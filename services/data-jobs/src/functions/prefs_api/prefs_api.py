@@ -918,7 +918,7 @@ def _review_metric(event, sub: str, ticker: str, metric_id: str, respond) -> dic
         # The first approval for a ticker reads a catalog object that does not exist yet. Without
         # s3:ListBucket on catalog/, S3 answers AccessDenied instead of NoSuchKey; that used to be
         # reported as SERVING_READ_FAILED ("being rebuilt"). Report the review failure honestly.
-        _log_event("prefs_api_error", f"PUT /stock/{{ticker}}/metrics/{{metric_id}}", "PUT", exc, "CATALOG_READ_FAILED")
+        _log_event("prefs_api_error", "PUT /stock/{ticker}/metrics/{metric_id}", "PUT", exc, "CATALOG_READ_FAILED")
         return _failure_response(502, "CATALOG_READ_FAILED")
     catalog = catalog or {"ticker": ticker, "catalog_version": 1, "metrics": []}
     catalog = _set_catalog_metric(catalog, ticker, metric_id, status, reviewer, approved_at)
