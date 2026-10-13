@@ -145,15 +145,17 @@ def job_handler(
     persist_runs: Callable[[list[dict[str, Any]]], None] | None = None,
     emit_event: bool = True,
     lease_key: str | None = None,
-    skip_when_leased: bool = False,
+    skip_when_leased: bool = True,
 ):
     """Wrap a Lambda handler: correlation ids, tracing, metric flush, run records, job event.
 
     persist_runs receives one dict per source run (the ingestion_runs rows) and
     should append them to the lake, e.g. curated/ingestion_runs/year=/month=/<run_id>.parquet.
     emit_event publishes 'Job Finished' (see emit_job_finished) when the handler returns or raises.
-    skip_when_leased returns a skipped result instead of failing when lease_key is still held,
-    so a coalesced invoke does not retry or land on the dead-letter queue.
+    skip_when_leased (default True) returns a skipped result instead of failing when lease_key is
+    still held, so an overlapping invoke logs ``job_skipped`` and exits cleanly rather than raising
+    LeaseHeld, which counted as a Lambda error, got retried twice and landed on the dead-letter
+    queue. Pass False only for a job whose event must not be dropped while another run is active.
     """
 
     def decorator(fn):
