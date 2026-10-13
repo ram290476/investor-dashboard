@@ -1167,7 +1167,7 @@ def test_snapshot_carries_sec_company_name_for_every_watchlist_ticker():
         },
     )
     names = {ticker: snapshot["tickers"][ticker].get("company_name") for ticker in tickers}
-    assert names == {"TSLA": "Tesla, Inc.", "NVDA": "NVIDIA CORP", "AAPL": "Apple Inc.", "SPY": None}
+    assert names == {"TSLA": "Tesla, Inc.", "NVDA": "NVIDIA Corp.", "AAPL": "Apple Inc.", "SPY": None}
 
 
 def test_snapshot_carries_company_description_for_every_watchlist_ticker():
@@ -1180,3 +1180,31 @@ def test_snapshot_carries_company_description_for_every_watchlist_ticker():
     )
     got = {t: snapshot["tickers"][t]["company_description"] for t in ["NVDA", "EVGO", "SPY"]}
     assert got == {"NVDA": "Accelerated computing.", "EVGO": "Fast charging.", "SPY": None}
+
+
+SEC_NAMES = {
+    "TSLA": ("Tesla, Inc.", "Tesla, Inc."),
+    "AAPL": ("Apple Inc.", "Apple Inc."),
+    "AMZN": ("AMAZON COM INC", "Amazon.com, Inc."),
+    "GOOG": ("Alphabet Inc.", "Alphabet Inc."),
+    "NVDA": ("NVIDIA CORP", "NVIDIA Corp."),
+    "BYND": ("BEYOND MEAT, INC.", "Beyond Meat, Inc."),
+    "EVGO": ("EVgo Inc.", "EVgo Inc."),
+    "META": ("Meta Platforms, Inc.", "Meta Platforms, Inc."),
+    "MRVL": ("Marvell Technology, Inc.", "Marvell Technology, Inc."),
+    "PLTR": ("Palantir Technologies Inc.", "Palantir Technologies Inc."),
+    "QS": ("QuantumScape Corp", "QuantumScape Corp"),
+    "SPCX": ("SPACE EXPLORATION TECHNOLOGIES CORP", "SpaceX"),
+}
+
+
+def test_display_company_name_for_every_company_ticker():
+    for ticker, (sec_name, expected) in SEC_NAMES.items():
+        assert dashboard_build.display_company_name(ticker, sec_name) == expected, ticker
+
+
+def test_display_company_name_title_cases_all_caps_and_keeps_mixed_case():
+    assert dashboard_build.display_company_name("XYZ", "GENERAL MOTORS CO") == "General Motors Co."
+    assert dashboard_build.display_company_name("XYZ", "BANK OF AMERICA CORP /DE/") == "Bank of America Corp."
+    assert dashboard_build.display_company_name("XYZ", "eBay Inc.") == "eBay Inc."
+    assert dashboard_build.display_company_name("XYZ", None) is None
