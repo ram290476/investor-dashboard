@@ -205,11 +205,7 @@ const TAB_DETAIL_IDS = {
 };
 
 function panelLabel(id) {
-  if (id === "company") {
-    if (session.selected === "TSLA") return "Tesla · robotaxi & company themes";
-    if (session.selected === "SPCX") return "SpaceX · operations & contracts";
-    return `${session.selected} · company themes`;
-  }
+  if (id === "company") return companyPanelTitle(session.selected, session.dashboard?.tickers?.[session.selected]);
   return {
     rates: "Rates & yields",
     inflation: "Inflation surprise",
@@ -1273,7 +1269,7 @@ function catalystSummary(model) {
 
 function companySummary(tickerData, events) {
   if (session.dashboardState === "loading") return "Loading…";
-  if (session.selected === "SPCX" && isNumericValue(tickerData?.contracts?.ttm_obligated)) {
+  if (isNumericValue(tickerData?.contracts?.ttm_obligated)) {
     return `TTM obligations ${formatPrice(tickerData.contracts.ttm_obligated)}`;
   }
   if (session.dashboardState === "error" && !events.length) return "Unavailable";
@@ -3179,11 +3175,29 @@ function renderMetricReview() {
   return bar;
 }
 
+// Per-ticker theme catalog. Any other watchlist ticker gets the generic company panel,
+// which shows its own ticker-tagged events and federal awards when the snapshot has them.
+const COMPANY_THEMES = {
+  TSLA: { title: "Tesla · robotaxi & company themes", categories: ["robotaxi"] },
+  SPCX: { title: "SpaceX · operations & contracts", categories: ["space"] },
+};
+
+function companyPanelTitle(ticker, tickerData) {
+  if (COMPANY_THEMES[ticker]) return COMPANY_THEMES[ticker].title;
+  const name = companyName(ticker, null, tickerData);
+  const suffix = tickerData?.contracts ? "company events & contracts" : "company themes";
+  return `${name && name !== ticker ? name : ticker} · ${suffix}`;
+}
+
+function companyEvents(rows, ticker) {
+  const theme = COMPANY_THEMES[ticker];
+  if (theme) return rows.filter(event => theme.categories.includes(event.category));
+  return rows.filter(event => event.kind === "event" && (event.tickers || []).includes(ticker));
+}
+
 function renderCompanyPanel(tickerData, chartData, chartDataState) {
-  const events = catalystRows(session.dashboard, session.selected)
-    .filter(event => event.category === (session.selected === "SPCX" ? "space" : "robotaxi"));
-  const title = session.selected === "TSLA" ? "Tesla · robotaxi & company themes"
-    : session.selected === "SPCX" ? "SpaceX · operations & contracts" : `${session.selected} · company themes`;
+  const events = companyEvents(catalystRows(session.dashboard, session.selected), session.selected);
+  const title = companyPanelTitle(session.selected, tickerData);
   const panel = renderDrawer({
     id: "company",
     title,
@@ -3216,6 +3230,11 @@ function renderCompanyPanel(tickerData, chartData, chartDataState) {
     if (!tickerData?.contracts) body.append(node("p", "data-state", "Government-award data is unavailable in this snapshot; no zero or trend is inferred."));
   } else {
     body.append(node("p", "signal-note", "No company-specific operating-metrics feed is configured for this symbol. Available SEC financial series remain in the Fundamentals overlays."));
+  }
+  if (session.selected !== "SPCX" && isNumericValue(tickerData?.contracts?.ttm_obligated)) {
+    const count = tickerData.contracts.ttm_awards_count;
+    body.append(node("p", "signal-note",
+      `Federal awards · TTM obligations ${formatPrice(tickerData.contracts.ttm_obligated)}${Number.isInteger(count) ? ` across ${count} award${count === 1 ? "" : "s"}` : ""} · USAspending`));
   }
   if (!events.length) body.append(node("p", "data-state", "No matching company operating events are available."));
   events.slice(-5).reverse().forEach(event => {

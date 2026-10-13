@@ -584,7 +584,7 @@ def test_filings_events_and_insider_flow_are_served():
     assert snapshot["events"][0]["observed_at"] == "2026-10-05T15:00:00+00:00"
 
 
-def test_contracts_are_served_only_for_mapped_tickers():
+def test_contracts_are_served_for_every_watchlist_ticker_with_data():
     award = {
         "ttm_obligated": 1200.0,
         "ttm_awards_count": 1,
@@ -619,7 +619,8 @@ def test_contracts_are_served_only_for_mapped_tickers():
     assert snapshot["tickers"]["SPCX"]["contracts"]["observed_at"] == "2026-10-06T18:00:00+00:00"
     assert snapshot["tickers"]["SPCX"]["contracts"]["freshness"] == "fresh"
     assert snapshot["tickers"]["TSLA"]["contracts"] is None
-    assert snapshot["tickers"]["AAPL"]["contracts"] is None
+    assert snapshot["tickers"]["AAPL"]["contracts"]["ttm_obligated"] == 1200.0
+    assert snapshot["tickers"]["AAPL"]["contracts"]["coverage"] == "available"
 
 
 def test_stale_and_undated_contract_rollups_are_distinguishable():

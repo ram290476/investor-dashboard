@@ -69,3 +69,11 @@ test("each ticker keeps its own filings, and the SEC index is built from the acc
   assert.match(edgarCompanyUrl(index), /CIK=0001318605/);
   assert.equal(String(calendar.upcoming[0].title).includes("null"), false);
 });
+
+test("company panel is generic for any watchlist ticker", () => {
+  assert.match(app, /const COMPANY_THEMES = \{/);
+  assert.doesNotMatch(app, /session\.selected === "SPCX" && isNumericValue\(tickerData\?\.contracts/);
+  assert.doesNotMatch(app, /event\.category === \(session\.selected === "SPCX"/);
+  assert.match(app, /function companyEvents\(rows, ticker\)/);
+  assert.match(app, /Federal awards · TTM obligations/);
+});

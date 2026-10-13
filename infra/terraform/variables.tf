@@ -432,8 +432,8 @@ variable "jobs" {
       schedule       = "cron(15 * ? * MON-FRI *)"
       triggers       = []
       memory         = 512
-      timeout        = 180
-      read_prefixes  = ["curated/news_articles/", "curated/news_daily/"]
+      timeout        = 300 # per-ticker Finnhub + Google News for up to 27 tickers, paced
+      read_prefixes  = ["curated/news_articles/", "curated/news_daily/", "serving/filings/"]
       write_prefixes = ["raw/news/", "curated/news_articles/", "curated/news_daily/"]
       api_keys       = ["finnhub", "alpha-vantage", "massive"]
       reads_prefs    = true
@@ -468,8 +468,8 @@ variable "jobs" {
       schedule      = "cron(45 17 ? * MON-FRI *)"
       triggers      = []
       memory        = 512
-      timeout       = 300
-      read_prefixes = ["curated/contracts/", "curated/contracts_rollup/"]
+      timeout       = 600 # one USAspending recipient search per watchlist ticker
+      read_prefixes = ["curated/contracts/", "curated/contracts_rollup/", "serving/filings/"]
       write_prefixes = [
         "raw/contracts/",
         "curated/contracts/",

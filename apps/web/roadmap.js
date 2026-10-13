@@ -451,7 +451,6 @@ export function newsRowView(headline, { bars = [], timeZone = "UTC", now } = {})
   };
 }
 
-export const COMPANY_NEWS_TICKERS = ["TSLA", "SPCX"];
 export const NEWS_ROW_LIMIT = 5;
 
 export function visibleHeadlines(headlines, ticker) {
@@ -528,9 +527,6 @@ export function newsHeader(news, { timeZone = "UTC", now } = {}) {
 
 export function newsEmptyMessage(ticker, headlines) {
   if (headlines.length) return "";
-  if (!COMPANY_NEWS_TICKERS.includes(ticker)) {
-    return `Company news is collected for TSLA and SPCX. ${ticker} gets Alpha Vantage headlines on rotation, every few days.`;
-  }
   return `No ${ticker} headlines in the last 7 days.`;
 }
 

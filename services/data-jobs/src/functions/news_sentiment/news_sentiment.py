@@ -1,7 +1,9 @@
 """H2: company news and a bounded sentiment score for the watchlist.
 
-Finnhub company-news covers TSLA and SPCX. Alpha Vantage NEWS_SENTIMENT is the only
-provider score, one ticker per run, and never more than 16 calls in a day. Massive is
+Finnhub company-news and a per-ticker Google News RSS query cover every watchlist ticker
+(the same watchlist_universe() list sec_filings and company_ir use, capped at 25).
+Alpha Vantage NEWS_SENTIMENT is the only provider score, one ticker per run,
+and never more than 16 calls in a day. Massive is
 the backup when Finnhub fails. RSS fills the gaps without a key.
 """
 
@@ -9,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 from datetime import UTC, date, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse, urlunparse
@@ -16,6 +19,8 @@ from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 import polars as pl
+
+from universe import short_company_name, watchlist_names
 
 JOB_ID = "H2"
 ET = ZoneInfo("America/New_York")
@@ -26,7 +31,10 @@ AV_CLOSE = (21, 15)
 BULLISH_ABOVE = 0.15
 BEARISH_BELOW = -0.15
 STATE_KEY = "curated/news_articles/_state.json"
-COMPANY_SYMBOLS = ("TSLA", "SPCX")
+FINNHUB_PAUSE_S = 1.1  # Finnhub free tier: 60 calls/min
+RSS_PAUSE_S = 0.5
+MASSIVE_PER_RUN = 4  # Massive free tier: 5 calls/min; the fallback rotates through the watchlist
+TIME_RESERVE_MS = 45_000  # stop optional per-ticker calls with this much Lambda time left for writes
 
 _POSITIVE = frozenset(
     {
@@ -77,6 +85,8 @@ COMPANY_ALIASES = {
     "TSLA": ("tesla", "tsla"),
     "SPCX": ("spacex", "starlink", "starship", "spcx"),
 }
+# Tickers whose company news already comes from the curated _RSS feeds above.
+RSS_COVERED = frozenset({"TSLA", "SPCX"})
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -129,20 +139,86 @@ def strip_publisher_suffix(title: str, publisher: str) -> str:
     return text
 
 
-def mentions_company(text: str, ticker: str) -> bool:
+def company_aliases(ticker: str, name: str | None = None) -> tuple[str, ...]:
+    """Lower-case match terms: curated aliases, the ticker, the short name, and its first word when distinctive."""
+    symbol = str(ticker or "").upper()
+    aliases = list(COMPANY_ALIASES.get(symbol, ()))
+    # Two-letter tickers ("QS") collide with ordinary words; match those by name only.
+    for alias in (symbol.lower() if len(symbol) >= 3 else "", short_company_name(name).lower()):
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    short = short_company_name(name).lower().split()
+    if len(short) > 1 and len(short[0]) >= 5 and short[0] not in aliases:
+        aliases.append(short[0])
+    return tuple(aliases)
+
+
+def build_aliases(names: dict[str, str | None]) -> dict[str, tuple[str, ...]]:
+    return {symbol.upper(): company_aliases(symbol, name) for symbol, name in names.items()}
+
+
+def mentions_company(text: str, ticker: str, aliases: dict[str, tuple[str, ...]] | None = None) -> bool:
     haystack = f" {re.sub(r'[^a-z0-9]+', ' ', plain_text(text).lower())} "
-    aliases = COMPANY_ALIASES.get(str(ticker or "").upper(), (str(ticker or "").lower(),))
-    return any(alias and f" {alias} " in haystack for alias in aliases)
+    symbol = str(ticker or "").upper()
+    terms = (aliases or {}).get(symbol) or COMPANY_ALIASES.get(symbol, (symbol.lower(),))
+    return any(alias and f" {re.sub(r'[^a-z0-9]+', ' ', alias).strip()} " in haystack for alias in terms)
 
 
-def headline_relevance(row: dict, ticker: str) -> str:
+def tag_mentions(rows: list[dict], aliases: dict[str, tuple[str, ...]]) -> list[dict]:
+    """Add every watchlist ticker a headline names, so a story about two companies shows on both."""
+    tagged = []
+    for row in rows:
+        blob = f"{row.get('title') or ''} {row.get('summary') or ''}"
+        current = row.get("tickers") or []
+        extra = [symbol for symbol in aliases if symbol not in current and mentions_company(blob, symbol, aliases)]
+        tagged.append({**row, "tickers": [*(row.get("tickers") or []), *extra]} if extra else row)
+    return tagged
+
+
+def ticker_rss_query(ticker: str, name: str | None) -> str:
+    """Google News query for one watchlist company: the short name in quotes, or the ticker plus 'stock'."""
+    short = short_company_name(name)
+    if short and short.upper() != ticker.upper():
+        return f'"{short}" OR "{ticker.upper()} stock"'
+    return f'"{ticker.upper()} stock"'
+
+
+def rss_feeds(tickers: list[str], names: dict[str, str | None]) -> list[tuple[str, str, list[str], list[str]]]:
+    """The curated feeds plus one company feed per watchlist ticker not already covered."""
+    feeds = list(_RSS)
+    for symbol in tickers:
+        if symbol in RSS_COVERED:
+            continue
+        feeds.append((f"ticker-{symbol.lower()}", ticker_rss_query(symbol, names.get(symbol)), [symbol], ["company"]))
+    return feeds
+
+
+def keep_company_rows(rows: list[dict], ticker: str, aliases: dict[str, tuple[str, ...]]) -> list[dict]:
+    """A per-ticker search can return loose matches; keep headlines that actually name the company."""
+    return [
+        row
+        for row in rows
+        if mentions_company(f"{row.get('title') or ''} {row.get('summary') or ''}", ticker, aliases)
+    ]
+
+
+def massive_rotation(tickers: list[str], hour_index: int, per_run: int = MASSIVE_PER_RUN) -> list[str]:
+    """Fallback slice for this run so 5 calls/min holds; every ticker comes up within a few hours."""
+    if not tickers:
+        return []
+    count = min(per_run, len(tickers))
+    start = (hour_index * count) % len(tickers)
+    return [tickers[(start + i) % len(tickers)] for i in range(count)]
+
+
+def headline_relevance(row: dict, ticker: str, aliases: dict[str, tuple[str, ...]] | None = None) -> str:
     """Topic-only queries keep the ticker tag only when the company is actually mentioned."""
     topics = {str(topic).lower() for topic in (row.get("topics") or [])}
     topic_only = bool(topics & TOPIC_QUERY_TOPICS) and not bool(topics & COMPANY_TOPICS)
     if not topic_only:
         return "ticker"
     blob = " ".join(str(row.get(key) or "") for key in ("title", "snippet", "summary"))
-    return "ticker" if mentions_company(blob, ticker) else "sector"
+    return "ticker" if mentions_company(blob, ticker, aliases) else "sector"
 
 
 def label_for(score: float | None) -> str:
@@ -445,7 +521,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from http_client import get_client, request_with_retry
     from lake import read_json, read_parquet_prefix, upsert_parquet, write_json, write_parquet
     from observability import job_handler, logger, source_run
-    from universe import collection_universe, sentiment_plan, user_ticker_union
+    from universe import collection_universe, sentiment_plan, user_ticker_union, watchlist_universe
 
     @job_handler(JOB_ID)
     def run(event, context):
@@ -460,7 +536,18 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         since = catch_up_since(state.get("watermark"), now)
         since_day = since[:10]
         today = now.date().isoformat()
-        equities = collection_universe(user_ticker_union())["equities"]
+        user_tickers = user_ticker_union()
+        equities = collection_universe(user_tickers)["equities"]
+        # Same symbol list as sec_filings and company_ir: base tickers plus every prefs ticker, capped.
+        watchlist = list(watchlist_universe(user_tickers).get("tickers") or [])
+        names = watchlist_names(watchlist, read_json)
+        aliases = build_aliases(names)
+
+        def time_left() -> bool:
+            remaining = getattr(context, "get_remaining_time_in_millis", None)
+            return remaining is None or remaining() > TIME_RESERVE_MS
+
+        skipped: list[str] = []
         plan = sentiment_plan(equities, now.date())
         ticker, state = next_av_ticker(state, today, plan, now)
         collected: list[dict] = []
@@ -468,7 +555,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
 
         with get_client() as http:
             finnhub_failed = False
-            for symbol in COMPANY_SYMBOLS:
+            for position, symbol in enumerate(watchlist):
+                if not time_left():
+                    skipped.append(f"finnhub-{symbol}")
+                    continue
+                if position:
+                    time.sleep(FINNHUB_PAUSE_S)
                 with source_run("DS-41") as record:
                     payload = request_with_retry(
                         http,
@@ -483,7 +575,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 if record["outcome"] == "failure":
                     finnhub_failed = True
             if finnhub_failed:
-                for symbol in COMPANY_SYMBOLS:
+                for symbol in massive_rotation(watchlist, now.toordinal() * 24 + now.hour):
                     with source_run("DS-42") as record:
                         payload = request_with_retry(
                             http,
@@ -509,7 +601,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                     record["rows"] = len(rows)
             else:
                 state["av_index"] = int(state.get("av_index") or 0)
-            for name, query, symbols, topics in _RSS:
+            for position, (name, query, symbols, topics) in enumerate(rss_feeds(watchlist, names)):
+                if not time_left():
+                    skipped.append(f"rss-{name}")
+                    continue
+                if position:
+                    time.sleep(RSS_PAUSE_S)
                 with source_run(f"rss-{name}") as record:
                     payload = request_with_retry(
                         http,
@@ -518,6 +615,8 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                         params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
                     ).text
                     rows = parse_rss(payload, f"google-{name}", symbols, topics, ingested_at)
+                    if name.startswith("ticker-"):
+                        rows = keep_company_rows(rows, symbols[0], aliases)
                     collected.extend(rows)
                     raw[f"rss-{name}"] = payload[:2000]
                     record["rows"] = len(rows)
@@ -553,7 +652,9 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 raw["spaceflight"] = payload
                 record["rows"] = len(rows)
 
-        fresh = dedupe_articles(collected)
+        if skipped:
+            logger.warning("news_time_budget_skip", extra={"job": JOB_ID, "skipped": skipped})
+        fresh = dedupe_articles(tag_mentions(collected, aliases))
         existing = read_parquet_prefix("curated/news_articles/")
         seen: set[str] = set()
         if not existing.is_empty() and "url_hash" in existing.columns:
@@ -578,6 +679,13 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 upsert_parquet(part.drop("_year"), key)
         state["watermark"] = ingested_at
         write_json(state, STATE_KEY)
-        return {"status": "success", "rows_stored": stored, "av_index": state.get("av_index"), "date": today}
+        return {
+            "status": "success",
+            "rows_stored": stored,
+            "av_index": state.get("av_index"),
+            "date": today,
+            "tickers": len(watchlist),
+            "skipped": skipped,
+        }
 
     return run(event, context)

@@ -182,3 +182,49 @@ def test_handler_emits_job_d5(monkeypatch):
     assert run({}, Context())["status"] == "success"
     assert emitted["job"] == "D5"
     assert emit_job_finished.__name__ == "emit_job_finished"
+
+
+# --- watchlist-driven name matching and rollup --------------------------------------
+
+import gov_contracts  # noqa: E402
+
+WATCH_NAMES = {"TSLA": "Tesla, Inc.", "SPCX": None, "PLTR": "Palantir Technologies Inc.", "AMZN": "AMAZON COM INC"}
+
+
+def test_name_map_built_from_watchlist_entity_names():
+    entries = gov_contracts.name_map_from_watchlist(WATCH_NAMES)
+    assert ("palantir technologies", "PLTR") in entries
+    assert ("amazon", "AMZN") in entries
+    assert entries[:3] == list(gov_contracts.NAME_OVERRIDES)
+    saved = list(gov_contracts.NAME_TO_TICKER)
+    try:
+        gov_contracts.use_watchlist_names(WATCH_NAMES)
+        assert ticker_for("PALANTIR TECHNOLOGIES INC.", None) == "PLTR"
+        assert ticker_for("Amazon Web Services, Inc.", None) == "AMZN"
+        assert ticker_for("Space Exploration Technologies Corp", None) == "SPCX"
+        assert ticker_for("Teslaco Holdings", None) is None  # word boundary, not substring
+    finally:
+        gov_contracts.NAME_TO_TICKER[:] = saved
+
+
+def test_recipient_searches_and_sam_rotation_cover_the_watchlist():
+    searches = gov_contracts.recipient_searches(["TSLA", "SPCX", "PLTR", "NONAME"], {**WATCH_NAMES, "NONAME": None})
+    assert searches == [
+        ("TSLA", "Tesla"),
+        ("SPCX", "Space Exploration Technologies"),
+        ("PLTR", "Palantir Technologies"),
+    ]
+    picked = {gov_contracts.sam_query_for(searches, date(2026, 10, d)) for d in range(1, 4)}
+    assert picked == {"Tesla", "Space Exploration Technologies", "Palantir Technologies"}
+    assert gov_contracts.sam_query_for([], date(2026, 10, 1)) == "SpaceX"
+
+
+def test_rollup_covers_every_watchlist_ticker_with_awards():
+    rows = [
+        {"ticker": t, "award_id": f"A-{t}", "agency": "DoD", "action_date": "2026-09-30", "obligated_amount": 10,
+         "source": "usaspending", "ingested_at": "2026-10-02T12:00:00+00:00"}
+        for t in ("PLTR", "TSLA", "XYZ")
+    ] + [{"ticker": None, "award_id": "N", "action_date": "2026-09-30", "obligated_amount": 5}]
+    rolled = rollup_contracts(rows, date(2026, 10, 6), ["TSLA", "SPCX", "PLTR"])
+    assert [row["ticker"] for row in rolled] == ["PLTR", "TSLA"]
+    assert [row["ticker"] for row in rollup_contracts(rows, date(2026, 10, 6))] == ["PLTR", "TSLA", "XYZ"]
