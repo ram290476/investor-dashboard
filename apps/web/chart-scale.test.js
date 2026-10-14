@@ -156,12 +156,11 @@ test("axis labels only the quarters the selected chip covers, not edge slivers (
   for (const tick of chartTicks(year, "1Y")) assert.equal(tick.x, plotX(tick.index, year.length));
 });
 
-test("the compact company chart keeps the time axis as wide as the plot (#195)", () => {
+test("no page shrinks the chart separately from its time axis (#195, #203)", () => {
   const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-  const compact = styles.match(/\.price-panel-compact \.price-chart,\s*\.price-panel-compact \.chart-time-axis\s*\{[^}]*\}/g) || [];
-  assert.ok(compact.length >= 2, "chart and axis share one compact width rule (desktop and phone)");
-  assert.ok(compact.every((rule) => /max-width:\s*calc\(180px \* 940 \/ (210|340)\)/.test(rule)));
-  // A max-height letterboxes the SVG, so the HTML axis no longer lines up with the plot.
-  assert.doesNotMatch(styles, /\.price-panel-compact \.price-chart\s*\{[^}]*max-height/);
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // A max-height letterboxes the SVG (preserveAspectRatio meet), so the HTML axis no longer lines up with the plot.
+  assert.doesNotMatch(styles, /\.price-chart\s*\{[^}]*max-height/);
+  assert.doesNotMatch(styles + app, /price-panel-compact/);
   assert.equal(CHART_PLOT.width, 940);
 });
