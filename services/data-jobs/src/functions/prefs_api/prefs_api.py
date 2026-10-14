@@ -644,6 +644,23 @@ def _read_serving_json(key: str) -> dict | None:
     return None if loaded is None else loaded[2]
 
 
+def _read_stock_document(ticker: str) -> dict | None:
+    """serving/stock/<TICKER>.json, or None when it has not been published.
+
+    Without s3:ListBucket on serving/stock/, S3 answers a missing key with plain AccessDenied
+    instead of NoSuchKey. Treat that as missing (a clean 404), not SERVING_READ_FAILED. KMS
+    denials still surface as SERVING_READ_FAILED.
+    """
+    key = f"serving/stock/{ticker}.json"
+    try:
+        return _read_serving_json(key)
+    except ClientError as exc:
+        if _aws_error_code(exc) == "AccessDenied":
+            logger.warning("serving_stock_access_denied_as_missing", extra={"key": key})
+            return None
+        raise
+
+
 def _request_parts(event: dict) -> tuple[str | None, str, str, str]:
     context = event.get("requestContext")
     context = context if isinstance(context, dict) else {}
@@ -906,7 +923,7 @@ def _review_metric(event, sub: str, ticker: str, metric_id: str, respond) -> dic
     status = body.get("status")
     if status not in {"approved", "proposed"}:
         return respond(400, {"error": "status must be approved or proposed"})
-    document = _read_serving_json(f"serving/stock/{ticker}.json")
+    document = _read_stock_document(ticker)
     metrics = document.get("metrics") if isinstance(document, dict) else None
     if not any(isinstance(metric, dict) and metric.get("metric_id") == metric_id for metric in metrics or []):
         return respond(404, {"error": "Metric is not on this company page"})
@@ -1000,7 +1017,9 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
         prefs = get_prefs(_table_for(sub), sub)
         if ticker not in prefs["tickers"]:
             return respond(403, {"error": "Ticker is not in your watchlist"})
-        document = _read_serving_json(f"serving/stock/{ticker}.json")
+        document = _read_stock_document(ticker)
+        if document is None:
+            return respond(404, {"error": "Company page has not been published yet", "code": "STOCK_NOT_READY"})
         return respond(200, _public_stock(document, ticker))
 
     table = _table_for(sub)

@@ -185,7 +185,8 @@ module "user_prefs" {
   lake_bucket_name     = module.data_lake.lake_bucket_name
   lake_bucket_arn      = module.data_lake.lake_bucket_arn
   ops_topic_arn        = module.alerting.ops_topic_arn
-  reserved_concurrency = var.lambda_reserved_concurrency
+  reserved_concurrency = var.prefs_api_reserved_concurrency != null ? var.prefs_api_reserved_concurrency : var.lambda_reserved_concurrency
+  # TODO(after Lambda quota increase): set prefs_api_reserved_concurrency = 3.
 }
 
 # Container-image jobs: trend metrics, quarterly fundamentals, short interest, options,
