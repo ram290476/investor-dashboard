@@ -35,7 +35,8 @@ from zoneinfo import ZoneInfo
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
-_ALARM_SUBJECT = re.compile(r'(?:ALARM|OK|INSUFFICIENT_DATA):\s*"([^"]+)"')
+_ALARM_SUBJECT = re.compile(r'(ALARM|OK|INSUFFICIENT_DATA):\s*"([^"]+)"')
+_STATE_LINE = re.compile(r"(?mi)^-\s*State Change:\s*\S+\s*->\s*(ALARM|OK|INSUFFICIENT_DATA)")
 _ALARM_NAME = re.compile(r"(?m)^-\s*Name:\s+(\S+)")
 _GENERIC_SUBJECTS = {"AWS Notification Message", "AWS Notification"}
 _CHANNELS = frozenset({"email", "sms"})
@@ -114,18 +115,21 @@ def window_bounds(now: datetime, window_minutes: int) -> tuple[str, int]:
 
 
 def issue_key(subject: str, message: str) -> str:
-    """Stable id for one problem. Alarm state (ALARM vs OK) is not part of the key."""
+    """Stable id for one problem. For alarms the new state (ALARM/OK/INSUFFICIENT_DATA) is part of
+    the key, so a recovery is never suppressed by the ALARM email sent minutes earlier (#182).
+    Repeats of the same state inside a window are still capped."""
     subject = subject or ""
     message = message or ""
     match = _ALARM_SUBJECT.search(subject)
     if match:
-        return _clip(f"alarm:{match.group(1)}")
+        return _clip(f"alarm:{match.group(2)}:{match.group(1)}")
 
     payload = _parse_payload(message)
     if payload is not None:
         alarm = payload.get("AlarmName")
         if alarm:
-            return _clip(f"alarm:{alarm}")
+            state = str(payload.get("NewStateValue") or "").strip().upper()
+            return _clip(f"alarm:{alarm}:{state}" if state else f"alarm:{alarm}")
         job = _job_key(payload)
         if job:
             return job
@@ -136,7 +140,8 @@ def issue_key(subject: str, message: str) -> str:
     if "State Change" in message or "Alarm Description" in message:
         named = _ALARM_NAME.search(message)
         if named:
-            return _clip(f"alarm:{named.group(1)}")
+            state = _STATE_LINE.search(message)
+            return _clip(f"alarm:{named.group(1)}:{state.group(1)}" if state else f"alarm:{named.group(1)}")
 
     if "API key rotation" in subject:
         return "key-rotation"
