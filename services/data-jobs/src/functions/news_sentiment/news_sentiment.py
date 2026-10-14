@@ -279,6 +279,17 @@ def catch_up_since(watermark: str | None, now: datetime) -> str:
     return watermark
 
 
+def finnhub_window(since_day: str, now: datetime) -> tuple[str, str]:
+    """Finnhub company-news from/to: at least yesterday through today in America/New_York.
+
+    A single-day window (from == to == today ET) returns empty lists in the evening (#184).
+    An older catch-up watermark still widens the window further back.
+    """
+    today = now.astimezone(ET).date()
+    yesterday = (today - timedelta(days=1)).isoformat()
+    return min(since_day, yesterday), today.isoformat()
+
+
 def _iso(stamp: datetime) -> str:
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=UTC)
@@ -553,6 +564,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         collected: list[dict] = []
         raw: dict[str, object] = {}
 
+        finnhub_from, finnhub_to = finnhub_window(since_day, now)
         with get_client() as http:
             finnhub_failed = False
             for position, symbol in enumerate(watchlist):
@@ -566,9 +578,13 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                         http,
                         "GET",
                         "https://finnhub.io/api/v1/company-news",
-                        params={"symbol": symbol, "from": since_day, "to": today, "token": api_key("finnhub")},
+                        params={"symbol": symbol, "from": finnhub_from, "to": finnhub_to, "token": api_key("finnhub")},
                     ).json()
                     rows = parse_finnhub(payload, symbol, ingested_at)
+                    logger.info(
+                        "finnhub_fetch",
+                        extra={"ticker": symbol, "rows": len(rows), "from": finnhub_from, "to": finnhub_to},
+                    )
                     collected.extend(rows)
                     raw[f"finnhub-{symbol}"] = payload
                     record["rows"] = len(rows)
