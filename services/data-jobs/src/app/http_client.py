@@ -75,6 +75,7 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         "www.nasa.gov",
         "www.ssc.spaceforce.mil",
         "www.defense.gov",
+        "www.war.gov",  # DoD Contracts RSS (defense.gov redirects here)
         "www.gao.gov",
         "api.usaspending.gov",
         "api.sam.gov",

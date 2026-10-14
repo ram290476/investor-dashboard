@@ -113,13 +113,57 @@ def sam_budget(calls_today: int, wanted: int = SAM_CALLS_PER_RUN) -> int:
     return max(0, min(SAM_CALLS_PER_RUN, wanted, remaining))
 
 
-def sam_status(status_code: int) -> str:
-    """An expired or rejected SAM key is partial. Other HTTP errors still surface."""
+SAM_OPPORTUNITIES_WINDOW_DAYS = 30
+# The Department of Defense site moved to war.gov. The HTML Contracts pages sit behind an
+# Akamai bot rule (403 for non-browser clients); the RSS feed is served to collectors.
+DOD_CONTRACTS_FEED = "https://www.war.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=400&Site=945&max=10"
+
+
+def redact(text: str | None) -> str:
+    """Strip api_key values from URLs or bodies before they reach logs or errors."""
+    return re.sub(r"(api_key=)[^&\s\"']+", r"\1REDACTED", text or "")
+
+
+def sam_status(status_code: int, body: str | None = None) -> str:
+    """An expired or rejected SAM key is partial. Other HTTP errors still surface, with the body."""
     if status_code in {401, 403}:
         return "partial"
     if status_code >= 400:
-        raise RuntimeError(f"SAM.gov returned HTTP {status_code}")
+        detail = " ".join(redact(body).split())[:300]
+        raise RuntimeError(f"SAM.gov returned HTTP {status_code}" + (f": {detail}" if detail else ""))
     return "ok"
+
+
+def sam_opportunities_params(query: str, day: date, key: str) -> dict:
+    """Get Opportunities v2: postedFrom and postedTo are mandatory (MM/dd/yyyy, at most a year apart).
+
+    Without them SAM.gov answers HTTP 400.
+    """
+    start = day - timedelta(days=SAM_OPPORTUNITIES_WINDOW_DAYS)
+    return {
+        "api_key": key,
+        "title": query,
+        "postedFrom": start.strftime("%m/%d/%Y"),
+        "postedTo": day.strftime("%m/%d/%Y"),
+        "limit": 10,
+    }
+
+
+def parse_dod_feed(xml_text: str) -> list[dict]:
+    """Items of the war.gov Contracts RSS feed: title, link, pubDate."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml_text)
+    items = []
+    for item in root.iter("item"):
+        items.append(
+            {
+                "title": (item.findtext("title") or "").strip(),
+                "link": (item.findtext("link") or "").strip(),
+                "published": (item.findtext("pubDate") or "").strip(),
+            }
+        )
+    return items
 
 
 def catch_up_start(watermark: str | None, today: date) -> str:
@@ -427,7 +471,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                         params={"api_key": api_key("sam-gov"), "q": sam_query, "limit": 10},
                     )
                     used += 1
-                    outcome = sam_status(response.status_code)
+                    outcome = sam_status(response.status_code, response.text)
                     if outcome == "partial":
                         partial = True
                         logger.warning("sam_key_rejected", extra={"hint": "rotate sam-gov"})
@@ -442,10 +486,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 with source_run("sam-opportunities") as record:
                     response = http.get(
                         "https://api.sam.gov/opportunities/v2/search",
-                        params={"api_key": api_key("sam-gov"), "title": sam_query, "limit": 10},
+                        params=sam_opportunities_params(sam_query, now.date(), api_key("sam-gov")),
                     )
                     used += 1
-                    if sam_status(response.status_code) == "partial":
+                    if sam_status(response.status_code, response.text) == "partial":
                         partial = True
                         logger.warning("sam_key_rejected", extra={"hint": "rotate sam-gov"})
                         raise RuntimeError("SAM.gov rejected the key")
@@ -454,10 +498,21 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                     opportunities.extend(found)
                     record["rows"] = len(found)
             with source_run("dod") as record:
-                text = request_with_retry(http, "GET", "https://www.defense.gov/News/Contracts/").text
-                found = parse_dod(text, ingested_at, now.date())
-                awards.extend(found)
-                record["rows"] = len(found)
+                feed = parse_dod_feed(request_with_retry(http, "GET", DOD_CONTRACTS_FEED).text)
+                latest = feed[0] if feed else None
+                if latest and latest["link"]:
+                    article = http.get(latest["link"])
+                    if article.status_code == 403:
+                        # Article HTML is bot-blocked; USAspending still carries these awards.
+                        logger.warning(
+                            "dod_article_blocked",
+                            extra={"job": JOB_ID, "url": latest["link"], "status": 403},
+                        )
+                    else:
+                        article.raise_for_status()
+                        found = parse_dod(article.text, ingested_at, now.date())
+                        awards.extend(found)
+                        record["rows"] = len(found)
             with source_run("nasa") as record:
                 text = request_with_retry(http, "GET", "https://www.nasa.gov/news/releases/latest/feed/").text
                 found = parse_dod(text, ingested_at, now.date()) if "contract" in text.lower() else []
