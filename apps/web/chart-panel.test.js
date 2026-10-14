@@ -28,7 +28,7 @@ test("page options differ only in links and placement, never in chart features",
   assert.deepEqual(keys, ["companyLink", "id", "mobilePanel", "page", "stockPanel", "ticker"]);
 });
 
-test("the dashboard and research pages render the one shared chart panel (#203, #207)", () => {
+test("every page renders the one shared chart panel (#203)", () => {
   assert.equal((app.match(/renderPricePanel\(/g) || []).length, 2, "defined once, called only from renderChartPanel");
   const entry = slice("function renderChartPanel", "function renderPricePanel");
   assert.match(entry, /chartPanelOptions\(page, ticker\)/);
@@ -37,10 +37,12 @@ test("the dashboard and research pages render the one shared chart panel (#203, 
   const research = slice("function renderResearchPage", "async function selectChartPeriod");
   assert.ok(dashboardAt > 0);
   assert.match(research, /renderChartPanel\("research", session\.selected\)/);
-  // The company page has no chart panel (#207).
   const stock = slice("function renderStockPage", "function renderResearchPage");
-  assert.doesNotMatch(stock, /renderChartPanel\(|renderPricePanel\(/);
+  assert.match(stock, /renderChartPanel\("company", session\.selected\)/);
+  assert.doesNotMatch(stock, /classList\.add\(/);
   assert.doesNotMatch(styles, /price-panel-compact/);
+  // Technical Summary stays directly below the chart on the company page.
+  assert.match(stock, /page\.append\(\s*chart,\s*renderTechnicalSummary\(/);
 });
 
 test("the shared panel keeps every control and gates only the company link", () => {

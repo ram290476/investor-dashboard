@@ -190,7 +190,20 @@ test("rendered metric and dashboard panel text has no ISO dates", () => {
   assert.match(rendered, /Company metrics/);
 });
 
-test("panel renderers call the shared date formatter", () => {
+test("metric panel renderers call the shared date formatter", () => {
+  const card = app.slice(app.indexOf("function renderMetricCard"), app.indexOf("function focusMetricReviewError"));
+  const table = app.slice(app.indexOf("function renderMetricTable"), app.indexOf("function renderMetricCard"));
+  const list = app.slice(app.indexOf("function renderCompanyMetrics"), app.indexOf("function appendMetricGroups"));
+  assert.match(card, /metricBarTitle\(/);
+  assert.match(card, /metricLatestCopy\(/);
+  assert.match(card, /metricSourceBits\(/);
+  assert.match(card, /readablePanelText\(/);
+  assert.match(table, /tableCellCopy\(/);
+  assert.match(card, /formatMetricPeriod\(/);
+  assert.doesNotMatch(card, /\$\{point\.fiscal_period\}/);
+  assert.doesNotMatch(card, /metric\.published/);
+  assert.match(list, /companyMetricLine\(/);
+  assert.doesNotMatch(list, /latestPeriod/);
   assert.match(app, /function snapshotLabel/);
   assert.doesNotMatch(app, /Snapshot \$\{session\.dashboard/);
   assert.match(app, /const asOf = formatPanelStamp\(/);

@@ -73,8 +73,8 @@ test("missing provider data never throws", () => {
   assert.equal(technicalSummaryView({ example: false, horizons: [] }).example, false);
 });
 
-test("the panel sits directly below the company header, uses theme tokens and has no hard-coded tickers", () => {
-  assert.match(app, /page\.append\(renderTechnicalSummary\(session\.selected, history\)\);/);
+test("the panel sits directly below the chart, uses theme tokens and has no hard-coded tickers", () => {
+  assert.match(app, /page\.append\(\s*chart,\s*renderTechnicalSummary\(session\.selected, history\),/);
   const render = app.slice(app.indexOf("function technicalSummaryFor"), app.indexOf("function renderStockPage"));
   assert.match(render, /Example data/);
   assert.match(render, /view\.disclaimer/);
@@ -196,4 +196,44 @@ test("each horizon lists only bullish or bearish indicators; neutrals still coun
   const render = app.slice(app.indexOf("function renderTechnicalSummary"), app.indexOf("function renderStockPage"));
   assert.match(render, /else if \(row\.indicatorsNote\)/);
   assert.match(render, /technical-no-signals/);
+});
+
+test("macro and pricing signals hide only signals neutral on both effect and vs rating (#210)", () => {
+  const signal = (label, effect, relation, extra = {}) => ({ label, effect, relation, status: "live", value: "1", direction: "↑", ...extra });
+  const view = macroView({
+    net: "net headwind",
+    summary: "Macro/pricing signals: net headwind.",
+    groups: [{
+      id: "rates", label: "Rates & Fed", status: "live", effect: "neutral", relation: "neutral",
+      signals: [
+        signal("2Y yield", "neutral", "neutral"),
+        signal("10Y yield", "headwind", "neutral"),
+        signal("Real yield", "neutral", "contradicts"),
+        signal("Fed path", "tailwind", "supports"),
+        signal("SOFR", "neutral", undefined),
+        signal("Credit spreads", undefined, undefined, { status: "no_data" }),
+      ],
+    }],
+  });
+  assert.deepEqual(view.groups[0].signals.map((item) => item.label), ["10Y yield", "Real yield", "Fed path", "Credit spreads"]);
+  assert.equal(view.groups[0].signals.some((item) => item.effect === "Neutral" && item.relation === "Neutral"), false);
+  // The group row itself and the horizon summary are unchanged.
+  assert.equal(view.groups.length, 1);
+  assert.equal(view.groups[0].effect, "Neutral");
+  assert.equal(view.tone, "sell");
+});
+
+test("panel layout follows the issue 191 design: counts and chevron in the row, full-width breakdown band (#210)", () => {
+  const render = app.slice(app.indexOf("function renderTechnicalSummary"), app.indexOf("function renderStockPage"));
+  assert.match(render, /node\("span", "technical-chevron", "▸"\)/);
+  assert.match(render, /const expanded = node\("div", "technical-expanded"\)/);
+  assert.match(render, /item\.append\(name, ratingCell, body, details, expanded\)/);
+  assert.match(render, /expanded\.append\(groups\)/);
+  assert.match(styles, /\.technical-row\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 200px\) 130px minmax\(0, 1fr\) 180px/);
+  assert.match(styles, /\.technical-row\s*\{[^}]*padding:\s*14px 18px/);
+  assert.match(styles, /\.technical-row:has\(> \.technical-details\[open\]\) > \.technical-expanded\s*\{[^}]*display:\s*block/);
+  assert.match(styles, /\.technical-expanded\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*background:\s*var\(--surface-raised\)/);
+  assert.match(styles, /\.technical-details\[open\] \.technical-chevron\s*\{[^}]*rotate\(90deg\)/);
+  const css = styles.slice(styles.indexOf(".technical-summary {"));
+  assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/);
 });
