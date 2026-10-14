@@ -3477,10 +3477,12 @@ function renderTechnicalSummary(ticker, history) {
       row.indicators.forEach((indicator) => {
         const tr = node("tr");
         tr.append(node("td", "", indicator.name), node("td", "technical-mono", indicator.value),
-          node("td", `technical-${indicator.tone === "buy" ? "up" : indicator.tone === "sell" ? "down" : "muted"}`, indicator.vote));
+          node("td", `technical-${indicator.tone === "buy" ? "up" : "down"}`, indicator.vote));
         indicators.append(tr);
       });
       details.append(indicators);
+    } else if (row.indicatorsNote) {
+      details.append(node("p", "technical-note technical-no-signals", row.indicatorsNote));
     }
     if (row.support.length || row.resistance.length) {
       details.append(node("p", "technical-note technical-mono",

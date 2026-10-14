@@ -189,12 +189,17 @@ export function horizonView(horizon, ticker = "", unavailable = "") {
       ...(horizon.groups || []).map(groupView),
       { ...groupView({ id: "summary", label: "Summary", ...horizon.summary }) },
     ],
-    indicators: (horizon.indicators || []).map((item) => ({
+    // Only bullish or bearish indicators are listed (#207). Neutral votes still count in
+    // horizon.summary, so the tallies, split and verdict above are unchanged.
+    indicators: (horizon.indicators || []).filter((item) => item.vote > 0 || item.vote < 0).map((item) => ({
       name: item.name,
       value: item.value ?? "--",
-      vote: item.vote > 0 ? "Buy" : item.vote < 0 ? "Sell" : "Neutral",
-      tone: item.vote > 0 ? "buy" : item.vote < 0 ? "sell" : "neutral",
+      vote: item.vote > 0 ? "Buy" : "Sell",
+      tone: item.vote > 0 ? "buy" : "sell",
     })),
+    indicatorsNote: (horizon.indicators || []).length && !(horizon.indicators || []).some((item) => item.vote > 0 || item.vote < 0)
+      ? "No directional signals"
+      : "",
     support: (horizon.support || []).filter(Number.isFinite).map((value) => value.toFixed(2)),
     resistance: (horizon.resistance || []).filter(Number.isFinite).map((value) => value.toFixed(2)),
     macro: macroView(horizon.macro),
