@@ -1127,6 +1127,8 @@ function renderDrawer({ id, title, subtitle, summary, mobilePanel, panelId, keys
   button.addEventListener("click", () => {
     setPanelOpen(id, !isPanelOpen(session.prefs.display?.panels, id));
     renderDashboard();
+    // Middle panels regroup by open state (#204); keep focus on the same toggle.
+    root.querySelector(`[data-drawer-toggle="${id}"]`)?.focus();
   });
   panel.append(header, body);
   return panel;
@@ -2798,10 +2800,30 @@ function renderMacroPanels(tickerData, chartData, chartDataState) {
   }, (drawer) => {
   renderCorrelationBody(drawer, rows, chartData, chartDataState);
   });
-  grid.append(...[
+  grid.append(...packMiddlePanels([
     ratesPanel, inflation, ...renderDetailPanels(tickerData, chartData, chartDataState), drift, renderCatalystCalendar(tickerData),
-  ].filter(Boolean));
+  ].filter(Boolean)));
   return grid;
+}
+
+// Middle panels under the chart (#204). Open drawers flow into two balanced columns so a
+// short panel no longer leaves a gap beside a tall one; collapsed drawers are one-line
+// headers packed two per row after them. Both groups keep the canonical panel order, the
+// saved open/closed/dismissed state and each panel's mobile tab. The catalyst calendar is
+// wide, so when open it gets its own full-width row between the two groups.
+function packMiddlePanels(panels) {
+  const wide = (panel) => panel.dataset.drawer === "catalyst-calendar";
+  const isOpen = (panel) => panel.classList.contains("is-open");
+  const open = node("div", "middle-panels-open");
+  open.append(...panels.filter((panel) => isOpen(panel) && !wide(panel)));
+  open.dataset.count = String(open.childElementCount);
+  const collapsed = node("div", "middle-panels-collapsed");
+  collapsed.append(...panels.filter((panel) => !isOpen(panel)));
+  return [
+    open.childElementCount ? open : null,
+    ...panels.filter((panel) => isOpen(panel) && wide(panel)),
+    collapsed.childElementCount ? collapsed : null,
+  ].filter(Boolean);
 }
 
 function renderCorrelationSpark(spark, tone, label) {

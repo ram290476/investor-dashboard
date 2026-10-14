@@ -2257,10 +2257,41 @@ input::placeholder {
 
 .macro-panel-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: var(--space-3);
-  margin: 12px 0;
+  margin: var(--space-3) 0;
+}
+
+/* #204: open middle panels fill two balanced columns (no row tracks, so no gap beside a
+   short panel); collapsed headers pack two per row with one shared height. */
+.middle-panels-open {
+  columns: 2;
+  column-gap: var(--space-3);
+}
+
+.middle-panels-open[data-count="1"] {
+  columns: 1;
+}
+
+.middle-panels-open > .panel {
+  display: block;
+  margin: 0 0 var(--space-3);
+  break-inside: avoid;
+}
+
+.middle-panels-open > .panel:last-child {
+  margin-bottom: 0;
+}
+
+.middle-panels-collapsed {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.middle-panels-collapsed > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .panel-drawer .drawer-header {
@@ -2515,12 +2546,6 @@ input::placeholder {
   background: var(--hover);
 }
 
-.macro-panel-grid > .panel-mode,
-.macro-panel-grid > .panel-empty,
-.macro-panel-grid > .hidden-panels,
-.macro-panel-grid > [data-drawer="catalyst-calendar"] {
-  grid-column: 1 / -1;
-}
 
 .panel-empty {
   margin: 12px 0;
@@ -2529,9 +2554,6 @@ input::placeholder {
 }
 /* end detail panel dismiss and follow mode (#94) */
 
-.macro-panel-grid > :last-child {
-  grid-column: 1 / -1;
-}
 
 .rate-entry,
 .release-block {
@@ -3403,7 +3425,11 @@ a.catalyst-edgar-link:hover {
     grid-row: 1;
   }
 
-  .macro-panel-grid {
+  .middle-panels-open {
+    columns: 1;
+  }
+
+  .middle-panels-collapsed {
     grid-template-columns: minmax(0, 1fr);
   }
 
