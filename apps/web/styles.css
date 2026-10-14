@@ -4254,3 +4254,191 @@ a.catalyst-edgar-link:hover {
     font-size: 11px;
   }
 }
+
+/* Technical Summary panel, issue 191 */
+.technical-summary {
+  color: var(--text);
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+.technical-example-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--amber);
+  color: var(--page);
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.technical-method {
+  color: var(--blue);
+  cursor: help;
+  text-decoration: none;
+}
+
+.technical-asof,
+.technical-mono,
+.technical-counts {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.technical-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 200px) 130px minmax(0, 1fr) minmax(170px, auto);
+  gap: 8px 16px;
+  align-items: start;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.technical-horizon {
+  display: grid;
+  gap: 2px;
+}
+
+.technical-horizon .panel-subtitle {
+  margin: 0;
+}
+
+.technical-rating {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.technical-pill {
+  display: inline-block;
+  justify-self: start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.technical-pill.buy {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+}
+
+.technical-pill.sell {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  color: var(--red);
+}
+
+.technical-pill.neutral {
+  background: var(--surface-raised);
+  color: var(--muted);
+}
+
+.technical-bar {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--red);
+}
+
+.technical-bar i {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}
+
+.technical-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.technical-up {
+  color: var(--green);
+}
+
+.technical-down {
+  color: var(--red);
+}
+
+.technical-muted {
+  color: var(--muted);
+}
+
+.technical-note {
+  margin: 6px 0 0;
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.technical-warn {
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.technical-agreement {
+  padding: 10px 16px 0;
+}
+
+.technical-details > summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.technical-details[open] {
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+
+.technical-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.technical-table th,
+.technical-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.technical-table th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.technical-strong {
+  font-weight: 600;
+}
+
+.technical-nodata {
+  grid-column: 3 / -1;
+  margin: 0;
+  color: var(--subtle);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.technical-disclaimer {
+  margin: 0;
+  padding: 12px 16px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .technical-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .technical-body,
+  .technical-details,
+  .technical-nodata {
+    grid-column: 1 / -1;
+  }
+}
