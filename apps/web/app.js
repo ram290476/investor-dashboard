@@ -58,6 +58,7 @@ import {
   tableCellCopy,
 } from "./panel-dates.js";
 import { inflationSurpriseView } from "./inflation-panel.js";
+import { chartPanelOptions } from "./chart-panel.js";
 import { liveTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
@@ -2045,7 +2046,29 @@ function legendKey(item, color) {
   return svg;
 }
 
-function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, onSettingsChange) {
+// The one chart panel every page renders (#203). Page differences come from chartPanelOptions.
+function renderChartPanel(page, ticker = session.selected) {
+  const options = chartPanelOptions(page, ticker);
+  const symbol = options.ticker || session.selected;
+  const chartData = session.chartData[symbol] || null;
+  const chartDataState = session.chartDataState[symbol] || "loading";
+  const tickerData = withChartHistory(session.dashboard?.tickers?.[symbol] || null, chartData, chartDataState);
+  const panel = renderPricePanel(
+    tickerData,
+    chartData,
+    chartDataState,
+    selectChartPeriod,
+    (next) => updateChartSettings(symbol, next),
+    options,
+  );
+  panel.dataset.chartPage = options.page;
+  if (options.stockPanel) panel.dataset.stockPanel = options.stockPanel;
+  if (options.mobilePanel) panel.dataset.mobilePanel = options.mobilePanel;
+  if (options.id) panel.id = options.id;
+  return panel;
+}
+
+function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, onSettingsChange, options = chartPanelOptions("dashboard")) {
   chartData = mergeCompanyFundamentals(
     chartData,
     metricsForReview(session.stockPage[session.selected], session.metricReview || "all"),
@@ -2084,7 +2107,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   }
   quoteBlock.append(meta);
   const side = node("div", "overview-side");
-  if (session.route.page === "dashboard" && stockHash(session.selected)) {
+  if (options.companyLink && stockHash(session.selected)) {
     const openPage = node("a", "company-page-link", "Open company page");
     openPage.href = `/${stockHash(session.selected)}`;
     openPage.dataset.companyPage = session.selected;
@@ -3803,15 +3826,7 @@ function renderStockPage() {
   page.dataset.stockTab = session.stockTab;
   page.setAttribute("aria-label", `${session.selected} company page`);
 
-  const chart = renderPricePanel(
-    tickerData,
-    chartData,
-    chartDataState,
-    selectChartPeriod,
-    (next) => updateChartSettings(session.selected, next),
-  );
-  chart.classList.add("price-panel-compact");
-  chart.dataset.stockPanel = "overview";
+  const chart = renderChartPanel("company", session.selected);
 
   const section = (id, label, cards, empty) => {
     const block = node("section", "panel stock-section");
@@ -3920,14 +3935,7 @@ function renderResearchPage() {
   const main = node("main", "research-grid");
   main.setAttribute("aria-label", `${session.selected} research`);
   const primary = node("div", "research-column");
-  const price = renderPricePanel(
-    tickerData,
-    chartData,
-    chartDataState,
-    selectChartPeriod,
-    (next) => updateChartSettings(session.selected, next),
-  );
-  primary.append(price);
+  primary.append(renderChartPanel("research", session.selected));
   const researchCompany = renderCompanyPanel(tickerData, chartData, chartDataState);
   if (researchCompany) primary.append(researchCompany);
   const contracts = renderContracts(tickerData);
@@ -4093,10 +4101,7 @@ function renderDashboard() {
   const mainGrid = node("main", "dashboard-grid");
   mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
   const primary = node("div", "primary-column");
-  const price = renderPricePanel(tickerData, chartData, chartDataState, selectChartPeriod, (next) => updateChartSettings(session.selected, next));
-  price.dataset.mobilePanel = "chart";
-  price.id = "mobile-panel-chart";
-  primary.append(price);
+  primary.append(renderChartPanel("dashboard", session.selected));
   primary.append(renderPanelToolbar("chart"));
   primary.append(renderMacroPanels(tickerData, chartData, chartDataState));
   const contracts = renderContracts(tickerData);
