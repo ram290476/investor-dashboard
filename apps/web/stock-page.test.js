@@ -175,6 +175,15 @@ test("collected XBRL metrics and CapEx render as pending charts with revision co
   const hidden = stockPanels(payload, { fundamentals: [] }, { review: "approved" });
   assert.equal(hidden.pendingCount, 0);
   assert.equal(hidden.fundamentals.length, 0);
+  const cardSource = app.slice(app.indexOf("function renderMetricCard"), app.indexOf("async function submitMetricReview"));
+  assert.doesNotMatch(cardSource, /review-badge|renderReviewBadge|Pending review|stock-metric-pending/);
+  const metricsSource = app.slice(app.indexOf("function renderCompanyMetrics"), app.indexOf("function appendMetricGroups"));
+  assert.match(metricsSource, /renderReviewBadge\(\)/);
+  assert.match(metricsSource, /Pending review/);
+  assert.match(app.slice(app.indexOf("function renderReviewBadge"), app.indexOf("function renderMetricTable")), /review-badge/);
+  assert.match(app, /stock-metric-capex/);
+  assert.match(app, /stock-bar-revised-mark", "Rev"/);
+  assert.match(styles, /\.stock-bar-revised\s*\{[^}]*repeating-linear-gradient/);
   const mixed = stockPanels({
     metrics: [
       {
@@ -315,6 +324,8 @@ test("review mode shows or hides operating, guidance, and CapEx panels together"
   assert.equal(pendingOnly.operating.length, 0);
   assert.equal(pendingOnly.guidance.length, 0);
   assert.equal(pendingOnly.fundamentals.length, 0);
+  const groups = app.slice(app.indexOf("function appendMetricGroups"), app.indexOf("function renderStockPage"));
+  assert.match(groups, /if \(!cards\.length\)[\s\S]*node\("p", "data-state", empty\)/);
 });
 
 test("stock tabs move by keyboard and calls stay unlicensed", () => {
@@ -329,6 +340,22 @@ test("stock tabs move by keyboard and calls stay unlicensed", () => {
   ]);
   assert.equal(gap[1].reported, false);
   assert.equal(gap[1].value, null);
+});
+
+test("stock page panels are two-up on desktop and one-up below 1024px", () => {
+  assert.match(styles, /\.stock-metric-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /@media \(max-width: 1023px\)[\s\S]*?\.stock-metric-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(styles, /\.stock-chart\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/);
+  assert.match(styles, /\.stock-chart\s*\{[^}]*width:\s*100%/);
+  assert.match(styles, /\.stock-bars\s*\{[^}]*grid-column:\s*2/);
+  assert.match(styles, /\.stock-quarters\s*\{[^}]*grid-column:\s*2/);
+  assert.match(styles, /\.stock-bar\s*\{[^}]*min-width:\s*0/);
+  assert.match(styles, /\.stock-metric[\s\S]*var\(--/);
+  assert.doesNotMatch(styles, /\.stock-metric[^{]*\{[^}]*#[0-9a-fA-F]{3,8}/);
+  assert.match(app, /class="stock-chart"|node\("div", "stock-chart"\)/);
+  assert.match(app, /node\("div", "stock-axis stock-quarters"\)/);
+  const card = app.slice(app.indexOf("function renderMetricCard"), app.indexOf("function renderStockPage"));
+  assert.doesNotMatch(card, /stock-provenance|stock-xbrl|DS-11/);
 });
 
 test("company header shows only the company name and a centered Back to dashboard link", () => {
@@ -353,8 +380,9 @@ test("company header shows only the company name and a centered Back to dashboar
   assert.match(styles, /--space-3:\s*12px/);
   assert.match(styles, /\.stock-page\s*\{[^}]*gap:\s*var\(--space-3\)/);
   assert.match(styles, /\.overview\s*\{[^}]*padding:\s*14px 16px 12px/);
+  assert.match(styles, /\.stock-section\s*\{[^}]*padding:\s*14px 16px 16px/);
   const mobileAt = styles.lastIndexOf(".stock-heading {");
-  const mobileHeading = styles.slice(mobileAt, styles.indexOf("\n}\n", mobileAt));
+  const mobileHeading = styles.slice(mobileAt, styles.indexOf(".stock-page-tabs {", mobileAt));
   assert.match(mobileHeading, /align-items:\s*center/);
   assert.doesNotMatch(mobileHeading, /padding-inline:\s*0/);
   assert.doesNotMatch(mobileHeading, /padding-block:\s*0/);
@@ -486,23 +514,14 @@ test("company description comes from the stock payload, then dashboard data, and
   assert.equal(companyDescription(null, { company_description: null }), "");
 });
 
-test("the company page is only the header and the Technical Summary (#207)", () => {
+test("company page order: header, shared chart, Technical Summary, then the metric sections (#210)", () => {
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
-  const body = page.slice(page.indexOf('const page = node("main", "stock-page")'));
-  assert.equal((body.match(/page\.append\(/g) || []).length, 1);
-  assert.match(body, /page\.append\(renderTechnicalSummary\(session\.selected, history\)\);/);
-  for (const gone of [/renderChartPanel\(/, /renderFilings\(/, /stockPanels\(/, /renderCompanyMetrics\(/, /stock-page-tabs/, /stock-section/, /Quarterly call notes/, /dataset\.stockTab/]) {
-    assert.doesNotMatch(page, gone);
-  }
-  // Order: app header, watchlist, company heading, then the Technical Summary.
+  assert.match(page, /const chart = renderChartPanel\("company", session\.selected\)/);
+  const order = ["chart,", "renderTechnicalSummary(session.selected, history)", 'section("kpis"', 'section(\n      "fundamentals"', "renderCompanyMetrics(charts, pageState)", "callsBlock,"]
+    .map((piece) => page.indexOf(piece, page.indexOf("page.append(")));
+  assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), order.join(","));
   assert.ok(page.indexOf("root.append(heading)") < page.indexOf("root.append(page)"));
-  assert.match(page, /companyDescription\(payload, tickerData\)/);
-  // Chart data still loads: the Technical Summary is computed from it.
-  const nav = app.slice(app.indexOf("function navigateToStock"), app.indexOf("function navigateToStock") + 600);
-  assert.match(nav, /loadChartData\(symbol\)/);
-  assert.match(nav, /loadStockPage\(symbol\)/);
-  assert.doesNotMatch(styles, /data-stock-tab|stock-page-tabs|\.stock-section|\.stock-metric/);
-  // The dashboard and research pages keep the shared chart panel.
-  assert.match(app, /renderChartPanel\("dashboard", session\.selected\)/);
-  assert.match(app, /renderChartPanel\("research", session\.selected\)/);
+  assert.match(page, /page\.append\(tabs\)/);
+  assert.match(app, /async function submitMetricReview/);
+  assert.match(app, /"Approved only"/);
 });
