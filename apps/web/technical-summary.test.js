@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   DISCLAIMER, agreementNote, consensus, exampleTechnicalSummary, formatScore, horizonView, liveTechnicalSummary,
-  macroView, ratingLabel, technicalSummaryView, voteScore,
+  macroView, noConfidenceChange, ratingLabel, technicalSummaryView, voteScore,
 } from "./technical-summary.js";
 
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
@@ -236,4 +236,33 @@ test("panel layout follows the issue 191 design: counts and chevron in the row, 
   assert.match(styles, /\.technical-details\[open\] \.technical-chevron\s*\{[^}]*rotate\(90deg\)/);
   const css = styles.slice(styles.indexOf(".technical-summary {"));
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/);
+});
+
+test("macro signals with no change to confidence are dropped (#212)", () => {
+  const sig = (label, extra) => ({ label, value: "1", direction: "rising", effect: "headwind", relation: "contradicts",
+    confidence: "Contradicts the Buy; lowers confidence", impact: -1, ...extra });
+  const macro = macroView({ net: "net headwind", events: [], groups: [
+    { id: "rates", label: "Rates & Fed", status: "live", effect: "headwind", relation: "contradicts", confidence: "x",
+      signals: [sig("10Y"), sig("2Y", { confidence: "No change to confidence", relation: "supports" }),
+        sig("30Y", { impact: 0, confidence: "" }), { label: "FOMC path", status: "no_data", note: "n/a" }] },
+    { id: "usd", label: "USD", status: "live", effect: "neutral", relation: "neutral",
+      confidence: "No change to confidence", signals: [sig("DXY", { confidence: "no change to confidence" })] },
+    { id: "credit", label: "Credit", status: "no_data", reason: "none", signals: [] },
+  ] });
+  assert.deepEqual(macro.groups.map((g) => g.id), ["rates", "credit"]);
+  assert.deepEqual(macro.groups[0].signals.map((s) => s.label), ["10Y", "FOMC path"]);
+  assert.equal(macro.empty, "");
+  assert.equal(noConfidenceChange({ status: "no_data", confidence: "No change to confidence" }), false);
+  const quiet = macroView({ groups: [{ id: "usd", label: "USD", status: "live", confidence: "No change to confidence",
+    signals: [sig("DXY", { impact: 0 })] }, { id: "credit", label: "Credit", status: "no_data", signals: [] }] });
+  assert.equal(quiet.empty, "No directional macro signals");
+  assert.deepEqual(quiet.groups.map((g) => g.id), ["credit"]);
+});
+
+test("every horizon renders the macro section with the empty line (#212)", () => {
+  assert.match(app, /if \(macro\.empty\) details\.append\(node\("p", "technical-note technical-no-signals", macro\.empty\)\);\s*else details\.append\(table\);/);
+  assert.equal((app.match(/= renderMacroSignals\(row\)/g) || []).length, 2, "rated and not-enough-data rows both render it");
+  const feed = { ...liveFeed, horizons: liveFeed.horizons.map((h) => ({ ...h, macro: liveFeed.horizons[0].macro })) };
+  const view = technicalSummaryView(feed);
+  assert.deepEqual(view.rows.map((row) => Boolean(row.macro)), [true, true, true]);
 });

@@ -113,45 +113,63 @@ const RELATION_TEXT = { supports: "Supports", contradicts: "Contradicts", neutra
 /** True when a live macro/pricing signal is neutral on both effect and relation to the rating. */
 export function neutralSignal(signal) {
   if (!signal || signal.status === "no_data") return false;
+  if (noConfidenceChange(signal)) return true;
   return !EFFECT_TONE[signal.effect] && (RELATION_TEXT[signal.relation] || "Neutral") === "Neutral";
+}
+
+// macro_signals._relation() writes `confidence` = "No change to confidence" exactly when
+// the signal's `impact` is 0 (#212). Either marks a signal that does not move the rating.
+export const NO_CONFIDENCE_CHANGE = "No change to confidence";
+
+export function noConfidenceChange(item) {
+  if (!item || item.status === "no_data") return false;
+  return String(item.confidence || "").trim().toLowerCase().startsWith(NO_CONFIDENCE_CHANGE.toLowerCase())
+    || item.impact === 0;
 }
 
 /** Display rows for one horizon's macro & pricing-impact block; null when absent. */
 export function macroView(macro) {
   if (!macro || !Array.isArray(macro.groups)) return null;
   const tone = macro.net === "net tailwind" ? "buy" : macro.net === "net headwind" ? "sell" : "neutral";
+  const groups = macro.groups.map((group) => {
+    const live = group.status === "live";
+    return {
+      id: group.id,
+      label: group.label,
+      live,
+      effect: live ? effectText(group.effect) : "No data",
+      tone: live ? EFFECT_TONE[group.effect] || "neutral" : "neutral",
+      relation: live ? RELATION_TEXT[group.relation] || "Neutral" : "—",
+      confidence: live ? group.confidence || "" : group.reason || "No source collected yet.",
+      events: (group.events || []).map((event) => `${event.name} ${event.date}`),
+      // Only directional signals (#210): drop a signal whose effect and "vs rating" are
+      // both neutral. A no-data signal is not neutral and stays listed as missing.
+      signals: (group.signals || []).filter((signal) => !neutralSignal(signal)).map((signal) => {
+        const noData = signal.status === "no_data";
+        return {
+          label: signal.label,
+          value: noData ? "No data" : signal.value ?? "--",
+          direction: noData ? "—" : signal.direction || "—",
+          effect: noData ? "No data" : effectText(signal.effect),
+          tone: noData ? "neutral" : EFFECT_TONE[signal.effect] || "neutral",
+          relation: noData ? "—" : RELATION_TEXT[signal.relation] || "Neutral",
+          note: noData ? signal.note || "No source collected yet." : signal.confidence || signal.note || "",
+          title: signal.note || "",
+        };
+      }),
+    };
+  });
+  // #212: drop a group whose own confidence is "No change to confidence" once none of
+  // its signals remain; no-data groups stay so missing sources are still named.
+  const kept = groups.filter((group, index) => group.signals.length
+    || !group.live || !noConfidenceChange(macro.groups[index]));
+  const directional = kept.some((group) => group.signals.some((signal) => signal.effect !== "No data"));
   return {
     tone,
     summary: macro.summary || "Macro/pricing signals: No data for this horizon.",
     events: (macro.events || []).map((event) => `${event.name} ${event.date}`),
-    groups: macro.groups.map((group) => {
-      const live = group.status === "live";
-      return {
-        id: group.id,
-        label: group.label,
-        live,
-        effect: live ? effectText(group.effect) : "No data",
-        tone: live ? EFFECT_TONE[group.effect] || "neutral" : "neutral",
-        relation: live ? RELATION_TEXT[group.relation] || "Neutral" : "—",
-        confidence: live ? group.confidence || "" : group.reason || "No source collected yet.",
-        events: (group.events || []).map((event) => `${event.name} ${event.date}`),
-        // Only directional signals (#210): drop a signal whose effect and "vs rating" are
-        // both neutral. A no-data signal is not neutral and stays listed as missing.
-        signals: (group.signals || []).filter((signal) => !neutralSignal(signal)).map((signal) => {
-          const noData = signal.status === "no_data";
-          return {
-            label: signal.label,
-            value: noData ? "No data" : signal.value ?? "--",
-            direction: noData ? "—" : signal.direction || "—",
-            effect: noData ? "No data" : effectText(signal.effect),
-            tone: noData ? "neutral" : EFFECT_TONE[signal.effect] || "neutral",
-            relation: noData ? "—" : RELATION_TEXT[signal.relation] || "Neutral",
-            note: noData ? signal.note || "No source collected yet." : signal.confidence || signal.note || "",
-            title: signal.note || "",
-          };
-        }),
-      };
-    }),
+    groups: kept,
+    empty: directional ? "" : "No directional macro signals",
   };
 }
 
