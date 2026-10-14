@@ -190,6 +190,54 @@ def test_bea_and_census_parse_into_release_rows():
     assert next(row for row in trade if row["series_id"] == "CENSUS_IMPG")["actual"] == 280000
 
 
+def test_census_eits_long_format():
+    """EITS ftd has no IMPG/EXPG variables (that query is a 400); goods are BOPG IMP/EXP cell_values."""
+    params = release_day.census_params(2021, "k")
+    assert "IMPG" not in params["get"] and "cell_value" in params["get"]
+    assert params["category_code"] == "BOPG"
+    payload = [
+        ["cell_value", "data_type_code", "category_code", "seasonally_adj", "time_slot_id", "time"],
+        ["280,000", "IMP", "BOPG", "yes", "0", "2026-08"],
+        ["170000", "EXP", "BOPG", "yes", "0", "2026-08"],
+        ["999", "IMP", "BOPG", "no", "0", "2026-08"],
+        ["888", "IMP", "BOPGS", "yes", "0", "2026-08"],
+        ["-1", "BAL", "BOPG", "yes", "0", "2026-08"],
+    ]
+    trade = release_day.parse_census(payload, "2026-10-06T12:30:00+00:00")
+    assert {(row["series_id"], row["period"], row["actual"]) for row in trade} == {
+        ("CENSUS_IMPG", "2026-08", 280000.0),
+        ("CENSUS_EXPG", "2026-08", 170000.0),
+    }
+
+
+def test_bls_ics_feed_filters_cpi_from_all_releases():
+    assert release_day.BLS_ICS_URL.endswith("/bls.ics")
+    text = """BEGIN:VEVENT
+DTSTART:20261014T083000
+SUMMARY:Consumer Price Index for September 2026
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20261015T083000
+SUMMARY:Producer Price Index for September 2026
+END:VEVENT"""
+    assert release_day.parse_ics(text) == ["2026-10-14"]
+
+
+def test_nowcast_uses_month_over_month_row_for_the_pending_period():
+    rows = [
+        {"series_id": "CUSR0000SA0", "period": "2026-08", "actual": 320.0},
+        {"series_id": "CUSR0000SA0", "period": "2026-09", "actual": 321.2},
+    ]
+    nowcast = [
+        {"table": 0, "measure": "CPI", "period": "October 2026", "value": 0.27},
+        {"table": 0, "measure": "CPI", "period": "September 2026", "value": 0.53},
+        {"table": 1, "measure": "CPI", "period": "September 2026", "value": 3.60},
+        {"table": 2, "measure": "CPI", "period": "2026:Q4", "value": 4.50},
+    ]
+    release_day.apply_nowcast(rows, nowcast)
+    assert rows[-1]["consensus"] == release_day.consensus_index(320.0, 0.53)
+
+
 def test_stopgap_calendar_prefers_bls_ics_and_keeps_fred_pce_and_trade():
     rows = release_day.calendar_rows(release_day.parse_ics(ICS), release_day.parse_fred_dates(FRED))
     by_series = {row["series"]: row for row in rows}
