@@ -28,6 +28,19 @@ _XSL_DIR = re.compile(r"/xsl[^/]+/")
 ITEM_CLASS = {"2.02": "earnings", "5.02": "officer", "1.01": "agreement", "8.01": "other"}
 FORM4_CLASS = {"P": "buy", "S": "sell", "A": "grant"}
 STATE_KEY = "curated/filings/_state.json"
+# Text columns that are None on most rows (non-Form 4 filings) and a person's name on a few.
+# polars infers the type from the first 100 rows, so a name after 100 Nones raised
+# ComputeError: could not append value: "Liu Teyin M" of type: str (#182).
+_TEXT_COLUMNS = ("insider_name", "insider_role", "txn_code", "filing_class")
+
+
+def rows_frame(rows: list[dict]):
+    """DataFrame over every row (no 100-row inference window), name columns forced to Utf8."""
+    import polars as pl
+
+    frame = pl.DataFrame(rows, infer_schema_length=None)
+    present = [col for col in _TEXT_COLUMNS if col in frame.columns]
+    return frame.with_columns([pl.col(col).cast(pl.Utf8) for col in present]) if present else frame
 
 
 def is_business_day(day: date) -> bool:
@@ -574,7 +587,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
 
         fresh_filings = dedupe_filings(filings)
         if fresh_filings:
-            frame = pl.DataFrame(fresh_filings)
+            frame = rows_frame(fresh_filings)
             for (ticker, year), part in (
                 frame.with_columns(pl.col("filed_at").str.slice(0, 4).alias("_year"))
                 .partition_by(["ticker", "_year"], as_dict=True)
@@ -584,10 +597,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 existing = read_parquet_prefix(f"curated/filings/ticker={ticker}/year={int(year)}/")
                 prior = existing.to_dicts() if not existing.is_empty() else []
                 merged = combine_filings(prior, part.to_dicts())
-                write_parquet(pl.DataFrame(merged).drop("_year", strict=False), key)
+                write_parquet(rows_frame(merged).drop("_year", strict=False), key)
         fresh_events = dedupe_events(events)
         if fresh_events:
-            write_parquet(pl.DataFrame(fresh_events), f"curated/events/date={now.date().isoformat()}/{run_id}.parquet")
+            write_parquet(rows_frame(fresh_events), f"curated/events/date={now.date().isoformat()}/{run_id}.parquet")
             counts_key = f"curated/events_daily/date={now.date().isoformat()}/counts.parquet"
             write_parquet(pl.DataFrame(daily_counts(fresh_events)), counts_key)
         write_json(state, STATE_KEY)

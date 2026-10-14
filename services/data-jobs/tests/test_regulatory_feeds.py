@@ -181,3 +181,31 @@ def test_handler_emits_job_h3(monkeypatch):
     assert run({}, Context())["status"] == "success"
     assert emitted["job"] == "H3"
     assert emit_job_finished.__name__ == "emit_job_finished"
+
+
+@pytest.mark.parametrize("name", ["Liu Teyin M", "Stat Lauren Elaina Friedman"])
+def test_insider_name_after_many_null_rows_builds_a_frame(name):
+    """#182: >100 rows with insider_name=None, then a Form 4 name, raised polars ComputeError."""
+    import polars as pl
+
+    import regulatory_feeds
+
+    base = {"ticker": "TSLA", "filed_at": "2026-10-13", "accession_no": "", "insider_name": None,
+            "insider_role": None, "shares": None, "price": None, "txn_code": None, "filing_class": None}
+    rows = [{**base, "accession_no": f"a{i}"} for i in range(150)]
+    rows.append({**base, "accession_no": "form4", "insider_name": name, "insider_role": "Director",
+                 "shares": 1000.0, "price": 250.5, "txn_code": "S", "filing_class": "sell"})
+    with pytest.raises(Exception, match="could not append value"):
+        pl.DataFrame(rows)  # the old behavior, so this test proves the regression
+    frame = regulatory_feeds.rows_frame(rows)
+    assert frame.schema["insider_name"] == pl.Utf8
+    assert frame.filter(pl.col("accession_no") == "form4")["insider_name"].to_list() == [name]
+
+
+def test_rows_frame_all_null_name_column_is_still_utf8():
+    import polars as pl
+
+    import regulatory_feeds
+
+    frame = regulatory_feeds.rows_frame([{"ticker": "TSLA", "insider_name": None}])
+    assert frame.schema["insider_name"] == pl.Utf8
