@@ -122,8 +122,19 @@ Evidence for an assessor: the daily `key_rotation_status` log lines (kept 400 da
 | SEC filings | `curated/sec_filings/ticker=<T>/filings.parquet`; recent rows on `serving/filings/<T>.json`; a short copy on `serving/dashboard.json` `tickers.<T>.filings` | Accession, form, 8-K items, filed and accepted dates, period of report, fiscal period, primary document URL, exhibits, XBRL flag. Tickers without a CIK are `filings_status=no_sec_filer`. The five-year set stays off `dashboard.json`. |
 | Refresh status | `serving/status.json` | `generated_at`, `jobs[]: job, name, status (ok, partial, failed, never_run), last_run, last_outcome, failed_sources, next_run, trigger`. SEC filings adds `summary` (tickers processed, new filings, failures, no_sec_filer) for the Data refresh pop-up. |
 
-Sign-in is invite-only: create users with
-`aws cognito-idp admin-create-user --user-pool-id <id> --username you@example.com`.
+Sign-in is invite-only. Create the user in `us-west-1` and mark the email verified so
+Forgot password can send a recovery code. An AWS CLI profile often defaults to `us-east-1`,
+which is not this pool. Cognito MFA is off (password-only sign-in). To repair an existing
+unverified user, see [Fix an existing user](../../docs/operations.md#fix-an-existing-user).
+
+```sh
+aws cognito-idp admin-create-user \
+  --region us-west-1 \
+  --user-pool-id <user-pool-id> \
+  --username <email> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true \
+  --desired-delivery-mediums EMAIL
+```
 
 ## Accepted risk: job Lambdas run outside a VPC
 
