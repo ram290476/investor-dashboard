@@ -741,6 +741,7 @@ a {
 
 .chart-readout {
   min-height: 18px;
+  overflow-wrap: anywhere;
   margin: 0 0 6px;
   color: var(--secondary);
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
@@ -822,6 +823,10 @@ a {
   padding: 9px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+  /* Pinned in place (#218): stays put while the page scrolls or the chart is dragged. */
+  position: sticky;
+  top: 0;
+  z-index: 4;
 }
 
 .overlay-tabs,
@@ -4532,4 +4537,17 @@ a.catalyst-edgar-link:hover {
   .technical-expanded {
     padding-left: 18px;
   }
+}
+
+.chart-readout-overlay {
+  white-space: nowrap;
+}
+
+.chart-readout-overlay .overlay-swatch {
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.chart-readout-label {
+  font-weight: 600;
 }
