@@ -120,6 +120,7 @@ const session = {
   chartSaveError: "",
   watchlistScroll: 0,
   catalystCategories: CATALYST_CATEGORIES.map(category => category.id),
+  companyChart: null,
   focusCatalyst: null,
   showOtherEvents: false,
   newsExpanded: {},
@@ -232,14 +233,14 @@ function drawerShown(id) {
   return panelVisible(id, {
     mode: normalizePanelMode(session.prefs.display?.panel_mode),
     state,
-    groups: activeOverlayGroups(chartSettingsFor(session.prefs, session.selected).overlays),
+    groups: activeOverlayGroups(chartSettingsView(session.prefs, session.selected).overlays),
   });
 }
 
 function drawerKeys(id) {
   const groups = detailPanelGroups(id);
   if (!groups) return [];
-  return chartSettingsFor(session.prefs, session.selected).overlays
+  return chartSettingsView(session.prefs, session.selected).overlays
     .map((overlayId) => overlayDefinition(overlayId))
     .filter((definition) => definition && groups.includes(definition.group));
 }
@@ -405,7 +406,7 @@ function claimMobileId(mainGrid, view) {
 
 function selectCatalyst(event) {
   session.focusCatalyst = event.id;
-  if (!session.catalystCategories.includes(event.category)) session.catalystCategories.push(event.category);
+  if (!activeCatalysts().includes(event.category)) setActiveCatalysts([...activeCatalysts(), event.category]);
   setPanelOpen("catalyst-calendar", true);
   session.mobileView = "calendar";
   renderDashboard();
@@ -682,8 +683,43 @@ async function loadStockPage(ticker, force = false) {
   if (session.selected === ticker) renderDashboard();
 }
 
+// Company page chart state (#212). Every chart toggle (overlays, under-chart lanes such as
+// Volume, short interest, macro pressure and options, and catalyst markers) starts OFF each
+// time a company page opens. It lives in this session only, so the dashboard and research
+// pages keep their saved per-ticker settings and catalyst choices untouched.
+function companyChartState(ticker = session.selected) {
+  if (session.route?.page !== "stock") return null;
+  if (!session.companyChart || session.companyChart.ticker !== ticker) {
+    session.companyChart = { ticker, overlays: [], lanes: [], catalysts: [] };
+  }
+  return session.companyChart;
+}
+
+function chartSettingsView(prefs, ticker) {
+  const saved = chartSettingsFor(prefs, ticker);
+  const company = companyChartState(ticker);
+  return company ? { ...saved, overlays: company.overlays, lanes: company.lanes } : saved;
+}
+
+function activeCatalysts() {
+  return companyChartState()?.catalysts || session.catalystCategories;
+}
+
+function setActiveCatalysts(categories) {
+  const company = companyChartState();
+  if (company) session.companyChart = { ...company, catalysts: categories };
+  else session.catalystCategories = categories;
+}
+
 function updateChartSettings(ticker, settings) {
-  const previous = chartSettingsFor(session.prefs, ticker).overlays;
+  const company = companyChartState(ticker);
+  if (company) {
+    // Company page toggles are session-only (#212) and never write saved preferences.
+    session.companyChart = { ...company, overlays: [...(settings.overlays || [])], lanes: [...(settings.lanes || [])] };
+    renderDashboard();
+    return;
+  }
+  const previous = chartSettingsView(session.prefs, ticker).overlays;
   const nextOverlays = settings.overlays || [];
   const mode = normalizePanelMode(session.prefs.display?.panel_mode);
   const panels = session.prefs.display?.panels;
@@ -1010,7 +1046,7 @@ function drawChart(history, ticker, periodId = "1M", overlayIds = [], chartConte
   });
 
   const catalysts = catalystRows(chartContext.dashboard, ticker)
-    .filter(event => session.catalystCategories.includes(event.category) && markerIndex(event, bars) >= 0);
+    .filter(event => activeCatalysts().includes(event.category) && markerIndex(event, bars) >= 0);
   const occupied = new Map();
   catalysts.forEach(event => {
     const index = markerIndex(event, bars);
@@ -1188,7 +1224,7 @@ function indexLabels() {
 
 function marketView(chartData, chartDataState) {
   const ticker = session.selected;
-  const settings = chartSettingsFor(session.prefs, ticker);
+  const settings = chartSettingsView(session.prefs, ticker);
   const histories = {};
   for (const id of MARKET_OVERLAY_IDS) {
     histories[id] = servedPriceHistory(session.dashboard?.tickers?.[id], session.chartData?.[id]);
@@ -1536,7 +1572,7 @@ function chartControlsFor(tickerData, chartData, chartDataState, bars) {
     chartAvailability.set(key, { groups, lanes });
     return { groups, lanes };
   }
-  const saved = chartSettingsFor(session.prefs, session.selected);
+  const saved = chartSettingsView(session.prefs, session.selected);
   const previous = chartAvailability.get(key);
   const pending = previous?.groups.flatMap(group => group.overlays).filter(historyBacked)
     || OVERLAYS.filter(overlay => saved.overlays.includes(overlay.id) && historyBacked(overlay));
@@ -1557,7 +1593,7 @@ function chartControlsFor(tickerData, chartData, chartDataState, bars) {
 
 function renderOverlayControls(groups, chartDataState, onSettingsChange) {
   const panel = node("section", "chart-controls");
-  const settings = chartSettingsFor(session.prefs, session.selected);
+  const settings = chartSettingsView(session.prefs, session.selected);
   const activeGroup = groups.find((group) => group.id === session.overlayGroup) || groups[0];
   const tabs = node("div", "overlay-tabs");
   tabs.setAttribute("role", "tablist");
@@ -2077,7 +2113,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   );
   const history = servedPriceHistory(tickerData, chartDataState === "ready" ? chartData : null);
   const bars = validBars(history);
-  const chartSettings = chartSettingsFor(session.prefs, session.selected);
+  const chartSettings = chartSettingsView(session.prefs, session.selected);
   const requested = normalizePeriod(session.prefs.display?.chart_period);
   const waiting = chartDataState === "loading" && !periodQuote(history, requested).available;
   const activeId = waiting ? requested : resolveChartPeriod(requested, history);
@@ -2137,7 +2173,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   filters.append(node("span", "signal-note", "Catalysts"));
   const categories = catalystCategoriesInWindow(session.dashboard, session.selected, chartHistory);
   categories.forEach(category => {
-    const enabled = session.catalystCategories.includes(category.id);
+    const enabled = activeCatalysts().includes(category.id);
     const color = overlayColor(category.slot, session.prefs.display.theme);
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -2150,21 +2186,21 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
     swatch.setAttribute("aria-hidden", "true");
     toggle.append(swatch, document.createTextNode(category.label));
     toggle.addEventListener("click", () => {
-      session.catalystCategories = enabled ? session.catalystCategories.filter(id => id !== category.id)
-        : [...session.catalystCategories, category.id];
+      setActiveCatalysts(enabled ? activeCatalysts().filter(id => id !== category.id)
+        : [...activeCatalysts(), category.id]);
       renderDashboard();
       root.querySelector(`[data-catalyst-category="${category.id}"]`)?.focus();
     });
     filters.append(toggle);
   });
   const clearCatalysts = action("Clear all", "overlay-chip bulk-control", () => {
-    session.catalystCategories = [];
+    setActiveCatalysts([]);
     renderDashboard();
     (root.querySelector("[data-catalyst-category]") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus();
   });
   clearCatalysts.dataset.clear = "catalysts";
   clearCatalysts.setAttribute("aria-label", "Clear all catalyst markers");
-  clearCatalysts.disabled = !session.catalystCategories.length;
+  clearCatalysts.disabled = !activeCatalysts().length;
   filters.append(clearCatalysts);
   if (chartDataState === "error") {
     const error = node("p", "data-state error chart-data-error", "Historical overlay data could not be loaded. Use Refresh data to retry.");
@@ -3117,7 +3153,7 @@ function renderNews(tickerData) {
     body.append(signalSparkline(sentiment, "var(--series-3)", `${session.selected} rolling seven-day news sentiment`));
   }
   body.append(node("p", "signal-note", header.sourceNote));
-  const chartSettings = chartSettingsFor(session.prefs, session.selected);
+  const chartSettings = chartSettingsView(session.prefs, session.selected);
   const overlaySelected = chartSettings.overlays.includes("NEWS:SENTIMENT");
   const toggle = action(overlaySelected ? "Remove sentiment from chart" : "Overlay sentiment on chart", "overlay-chip panel-action", () => {
     const overlays = overlaySelected ? chartSettings.overlays.filter(id => id !== "NEWS:SENTIMENT")
@@ -3702,7 +3738,8 @@ function renderMacroSignals(row) {
       table.append(sr);
     });
   });
-  details.append(table);
+  if (macro.empty) details.append(node("p", "technical-note technical-no-signals", macro.empty));
+  else details.append(table);
   block.append(details, node("p", `technical-macro-summary ${macro.tone}`, macro.summary));
   return block;
 }
@@ -4008,6 +4045,7 @@ function navigateToStock(ticker) {
   session.route = routeFromLocation(location.pathname, hash);
   session.selected = symbol;
   session.stockTab = "overview";
+  session.companyChart = null;
   renderDashboard();
   loadChartData(symbol);
   loadStockPage(symbol);
@@ -4037,6 +4075,7 @@ function navigateToDashboard(ticker = session.dashboardSelection || session.sele
 
 function handleRoutePopstate() {
   const state = routeStateForLocation(location.pathname, location.hash, session.dashboardSelection, session.selected);
+  if (state.route.page !== "stock" || state.selected !== session.selected) session.companyChart = null;
   session.route = state.route;
   session.dashboardSelection = state.dashboardSelection
     || fallbackSelection(session.prefs, session.selected);
