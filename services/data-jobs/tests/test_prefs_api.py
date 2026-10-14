@@ -1072,16 +1072,22 @@ def _log_lines(capsys):
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def _assert_log(entry, event_name, code, error_class, route):
+def _assert_log(entry, event_name, code, error_class, route, ticker=None):
     raw = json.dumps(entry)
-    assert set(entry) == _LOG_KEYS
-    assert entry == {
+    if ticker is None and route == "GET /chart/{ticker}":
+        ticker = "TSLA"  # every chart-route error test requests /chart/TSLA
+    expected = {
         "event": event_name,
         "route": route,
         "method": route.split()[0],
         "error_class": error_class,
         "code": code,
     }
+    if ticker:
+        expected["ticker"] = ticker
+    assert set(entry) == set(expected)
+    assert set(entry) - {"ticker"} == _LOG_KEYS
+    assert entry == expected
     assert f'"event": "{event_name}"' in raw
     assert f'"code": "{code}"' in raw
     assert SECRET not in raw
@@ -1406,3 +1412,45 @@ def test_review_on_missing_stock_page_is_404(api, monkeypatch, capsys, aws_code)
     response = mod.handler(event, None)
     assert response["statusCode"] == 404
     assert not any(line.get("code") == "SERVING_READ_FAILED" for line in _log_lines(capsys))
+
+
+@pytest.mark.parametrize("aws_code", ["NoSuchKey", "404", "AccessDenied"])
+def test_missing_chart_is_clean_404(api, monkeypatch, capsys, aws_code):
+    """Issue #183: a ticker whose serving/chart_data/<T>.json is not built yet is a 404, not SERVING_READ_FAILED."""
+    mod, _ = api
+    reads = []
+
+    def get_object(**kwargs):
+        reads.append(kwargs["Key"])
+        raise _client_error(aws_code, "GetObject", "missing")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    body = _assert_error(mod.handler(_route_event("GET", "/chart/TSLA"), None), 404, "CHART_NOT_READY")
+    assert "rebuilt" not in body["error"]
+    assert reads == ["serving/chart_data/TSLA.json"]
+    assert not any(line.get("code") == "SERVING_READ_FAILED" for line in _log_lines(capsys))
+
+
+def test_chart_kms_denial_still_serving_read_failed_and_logs_ticker(api, monkeypatch, capsys):
+    """Only a missing key maps to 404; a KMS denial is a real read failure and the log names the ticker."""
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error("KMS.AccessDeniedException", "GetObject", "kms denied")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    _assert_error(mod.handler(_route_event("GET", "/chart/tsla"), None), 502, "SERVING_READ_FAILED")
+    entry = _log_lines(capsys)[0]
+    _assert_log(entry, "prefs_api_error", "SERVING_READ_FAILED", "ClientError", "GET /chart/{ticker}", "TSLA")
+    assert entry["ticker"] == "TSLA"
+
+
+def test_non_chart_errors_do_not_log_a_ticker(api, monkeypatch, capsys):
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error("SlowDown", "GetObject")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    mod.handler(_route_event("GET", "/dashboard"), None)
+    assert "ticker" not in _log_lines(capsys)[0]

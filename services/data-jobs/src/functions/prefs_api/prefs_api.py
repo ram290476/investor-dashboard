@@ -534,15 +534,23 @@ def _error_class(exc: BaseException) -> str:
     return type(cause).__name__ if cause is not None else type(exc).__name__
 
 
-def _log_event(event_name: str, route: str, method: str, exc: BaseException, code: str) -> None:
-    """Structured CloudWatch line. Fixed keys only: no body, token, or exception text."""
-    print(json.dumps({
+def _log_event(
+    event_name: str, route: str, method: str, exc: BaseException, code: str, ticker: str | None = None
+) -> None:
+    """Structured CloudWatch line. Fixed keys only: no body, token, or exception text.
+
+    ticker is added only for per-ticker routes (GET /chart/{ticker}) so a failing ticker is visible.
+    """
+    entry = {
         "event": event_name,
         "route": route,
         "method": method,
         "error_class": _error_class(exc),
         "code": code,
-    }))
+    }
+    if ticker:
+        entry["ticker"] = ticker
+    print(json.dumps(entry))
 
 
 def _safe_method(method: object) -> str:
@@ -659,6 +667,33 @@ def _read_stock_document(ticker: str) -> dict | None:
             logger.warning("serving_stock_access_denied_as_missing", extra={"key": key})
             return None
         raise
+
+
+def _read_chart_document(ticker: str) -> tuple[bytes, str, dict] | None:
+    """serving/chart_data/<TICKER>.json, or None when it has not been published.
+
+    Same pattern as _read_stock_document: without s3:ListBucket on serving/chart_data/, S3
+    answers a missing key with AccessDenied instead of NoSuchKey. Treat that as missing (a clean
+    404 / CHART_NOT_READY). KMS denials still surface as SERVING_READ_FAILED.
+    """
+    key = f"serving/chart_data/{ticker}.json"
+    try:
+        return _read_serving_document(key)
+    except ClientError as exc:
+        if _aws_error_code(exc) == "AccessDenied":
+            logger.warning("serving_chart_access_denied_as_missing", extra={"key": key, "ticker": ticker})
+            return None
+        raise
+
+
+_CHART_PATH_RE = re.compile(r"/chart/([A-Za-z][A-Za-z0-9.\-]{0,9})")
+
+
+def _chart_ticker(path: object) -> str | None:
+    if not isinstance(path, str):
+        return None
+    match = _CHART_PATH_RE.fullmatch(path)
+    return match.group(1).upper() if match else None
 
 
 def _request_parts(event: dict) -> tuple[str | None, str, str, str]:
@@ -981,17 +1016,16 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
         raw_bytes, etag, status_doc = loaded
         return respond(200, status_doc, raw=raw_bytes, cache_key=f"status:{_etag_token(etag, raw_bytes)}")
     if method == "GET" and path.startswith("/chart/"):
-        match = re.fullmatch(r"/chart/([A-Za-z][A-Za-z0-9.\-]{0,9})", path)
-        if not match:
+        ticker = _chart_ticker(path)
+        if not ticker:
             return respond(404, {"error": "Chart data not found"})
-        ticker = match.group(1).upper()
         prefs = get_prefs(_table_for(sub), sub)
         if ticker not in prefs["tickers"] and ticker not in INDEX_PROXIES:
             return respond(403, {"error": "Ticker is not in your watchlist"})
         chart_key = f"serving/chart_data/{ticker}.json"
-        loaded = _read_serving_document(chart_key)
+        loaded = _read_chart_document(ticker)
         if loaded is None:
-            return respond(503, {"error": "Chart data has not been published yet", "code": "CHART_NOT_READY"})
+            return respond(404, {"error": "Chart data has not been published yet", "code": "CHART_NOT_READY"})
         raw_bytes, etag, chart = loaded
         return respond(
             200,
@@ -1055,20 +1089,22 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
 def handler(event, context):
     method = "GET"
     route = "UNKNOWN"
+    ticker = None
     try:
         if not isinstance(event, dict):
             return _response(401, {"error": "Not signed in"})
         sub, method, path, route = _request_parts(event)
+        ticker = _chart_ticker(path) if _safe_method(method) == "GET" else None
         if not sub:
             return _response(401, {"error": "Not signed in"})
         return _dispatch(event, sub, method, path, route)
     except ClientError as exc:
         status, code = _client_failure(exc)
-        _log_event("prefs_api_error", route, _safe_method(method), exc, code)
+        _log_event("prefs_api_error", route, _safe_method(method), exc, code, ticker)
         return _failure_response(status, code)
     except ServingDocumentError as exc:
-        _log_event("prefs_api_error", route, _safe_method(method), exc, "SERVING_DOCUMENT_INVALID")
+        _log_event("prefs_api_error", route, _safe_method(method), exc, "SERVING_DOCUMENT_INVALID", ticker)
         return _failure_response(503, "SERVING_DOCUMENT_INVALID")
     except Exception as exc:  # noqa: BLE001 - API Gateway must receive JSON, never an uncaught error
-        _log_event("prefs_api_error", route, _safe_method(method), exc, "INTERNAL")
+        _log_event("prefs_api_error", route, _safe_method(method), exc, "INTERNAL", ticker)
         return _failure_response(500, "INTERNAL")

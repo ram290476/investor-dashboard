@@ -237,8 +237,8 @@ data "aws_iam_policy_document" "api" {
     actions   = ["s3:GetObject"]
     resources = ["${var.lake_bucket_arn}/catalog/*"]
   }
-  # A missing catalog/<TICKER>.json (first approval for a ticker) or serving/stock/<TICKER>.json
-  # (ticker not built yet) must read as NoSuchKey, not
+  # A missing catalog/<TICKER>.json (first approval for a ticker), serving/stock/<TICKER>.json or
+  # serving/chart_data/<TICKER>.json (ticker not built yet) must read as NoSuchKey, not
   # AccessDenied. S3 only returns 404 when the caller may list the prefix.
   statement {
     sid       = "ListMetricCatalog"
@@ -247,7 +247,7 @@ data "aws_iam_policy_document" "api" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["catalog/*", "serving/stock/*"]
+      values   = ["catalog/*", "serving/stock/*", "serving/chart_data/*"]
     }
   }
   statement {
