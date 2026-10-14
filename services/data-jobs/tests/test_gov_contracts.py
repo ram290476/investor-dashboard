@@ -228,3 +228,41 @@ def test_rollup_covers_every_watchlist_ticker_with_awards():
     rolled = rollup_contracts(rows, date(2026, 10, 6), ["TSLA", "SPCX", "PLTR"])
     assert [row["ticker"] for row in rolled] == ["PLTR", "TSLA"]
     assert [row["ticker"] for row in rollup_contracts(rows, date(2026, 10, 6))] == ["PLTR", "TSLA", "XYZ"]
+
+
+def test_sam_opportunities_params_include_mandatory_posted_window():
+    from gov_contracts import sam_opportunities_params
+
+    params = sam_opportunities_params("SpaceX", date(2026, 10, 14), "k")
+    # Get Opportunities v2 answers HTTP 400 without postedFrom/postedTo (MM/dd/yyyy).
+    assert params["postedFrom"] == "09/14/2026"
+    assert params["postedTo"] == "10/14/2026"
+    assert params["title"] == "SpaceX" and params["limit"] == 10
+
+
+def test_sam_error_carries_the_body_with_the_key_redacted():
+    body = '{"errorMessage":"PostedFrom and PostedTo are mandatory","url":"/search?api_key=SECRET123&limit=10"}'
+    with pytest.raises(RuntimeError) as excinfo:
+        sam_status(400, body)
+    message = str(excinfo.value)
+    assert "HTTP 400" in message and "PostedFrom and PostedTo are mandatory" in message
+    assert "SECRET123" not in message and "api_key=REDACTED" in message
+
+
+def test_dod_feed_points_at_war_gov_and_parses_items():
+    from urllib.parse import urlparse
+
+    from gov_contracts import DOD_CONTRACTS_FEED, parse_dod_feed
+    from http_client import ALLOWED_HOSTS
+
+    assert urlparse(DOD_CONTRACTS_FEED).hostname in ALLOWED_HOSTS
+    xml = """<?xml version="1.0"?><rss version="2.0"><channel><title>Contracts</title>
+      <item><title>Contracts for Oct. 14, 2026</title>
+      <link>https://www.war.gov/News/Contracts/Contract/Article/4625668/contracts-for-oct-14-2026/</link>
+      <pubDate>Wed, 14 Oct 2026 21:04:17 GMT</pubDate></item></channel></rss>"""
+    items = parse_dod_feed(xml)
+    assert items == [{
+        "title": "Contracts for Oct. 14, 2026",
+        "link": "https://www.war.gov/News/Contracts/Contract/Article/4625668/contracts-for-oct-14-2026/",
+        "published": "Wed, 14 Oct 2026 21:04:17 GMT",
+    }]
