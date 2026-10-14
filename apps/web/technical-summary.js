@@ -110,6 +110,12 @@ function effectText(effect) {
 
 const RELATION_TEXT = { supports: "Supports", contradicts: "Contradicts", neutral: "Neutral" };
 
+/** True when a live macro/pricing signal is neutral on both effect and relation to the rating. */
+export function neutralSignal(signal) {
+  if (!signal || signal.status === "no_data") return false;
+  return !EFFECT_TONE[signal.effect] && (RELATION_TEXT[signal.relation] || "Neutral") === "Neutral";
+}
+
 /** Display rows for one horizon's macro & pricing-impact block; null when absent. */
 export function macroView(macro) {
   if (!macro || !Array.isArray(macro.groups)) return null;
@@ -129,7 +135,9 @@ export function macroView(macro) {
         relation: live ? RELATION_TEXT[group.relation] || "Neutral" : "—",
         confidence: live ? group.confidence || "" : group.reason || "No source collected yet.",
         events: (group.events || []).map((event) => `${event.name} ${event.date}`),
-        signals: (group.signals || []).map((signal) => {
+        // Only directional signals (#210): drop a signal whose effect and "vs rating" are
+        // both neutral. A no-data signal is not neutral and stays listed as missing.
+        signals: (group.signals || []).filter((signal) => !neutralSignal(signal)).map((signal) => {
           const noData = signal.status === "no_data";
           return {
             label: signal.label,

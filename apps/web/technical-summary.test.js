@@ -197,3 +197,28 @@ test("each horizon lists only bullish or bearish indicators; neutrals still coun
   assert.match(render, /else if \(row\.indicatorsNote\)/);
   assert.match(render, /technical-no-signals/);
 });
+
+test("macro and pricing signals hide only signals neutral on both effect and vs rating (#210)", () => {
+  const signal = (label, effect, relation, extra = {}) => ({ label, effect, relation, status: "live", value: "1", direction: "↑", ...extra });
+  const view = macroView({
+    net: "net headwind",
+    summary: "Macro/pricing signals: net headwind.",
+    groups: [{
+      id: "rates", label: "Rates & Fed", status: "live", effect: "neutral", relation: "neutral",
+      signals: [
+        signal("2Y yield", "neutral", "neutral"),
+        signal("10Y yield", "headwind", "neutral"),
+        signal("Real yield", "neutral", "contradicts"),
+        signal("Fed path", "tailwind", "supports"),
+        signal("SOFR", "neutral", undefined),
+        signal("Credit spreads", undefined, undefined, { status: "no_data" }),
+      ],
+    }],
+  });
+  assert.deepEqual(view.groups[0].signals.map((item) => item.label), ["10Y yield", "Real yield", "Fed path", "Credit spreads"]);
+  assert.equal(view.groups[0].signals.some((item) => item.effect === "Neutral" && item.relation === "Neutral"), false);
+  // The group row itself and the horizon summary are unchanged.
+  assert.equal(view.groups.length, 1);
+  assert.equal(view.groups[0].effect, "Neutral");
+  assert.equal(view.tone, "sell");
+});
