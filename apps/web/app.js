@@ -22,7 +22,7 @@ import {
   catalystSensitivityRows, markerIndex, movingAverageRows, newsEmptyMessage, newsGroups, newsHeader, newsRowView, newsSummary,
   sortedDrivers, upcomingEmptyMessage,
 } from "./roadmap.js";
-import { legendItems, overlayCorrelation, seriesLineStyle } from "./chart-legend.js";
+import { legendItems, overlayCorrelation, overlayReadoutItems, seriesLineStyle } from "./chart-legend.js";
 import { sparkline, sparklineModel, sparklineSummary } from "./sparkline.js";
 import {
   driverChange, driverLabel, driverRows, driverTrend, driverValue,
@@ -1617,7 +1617,7 @@ function renderOverlayControls(groups, chartDataState, onSettingsChange) {
     button.addEventListener("click", () => {
       session.overlayGroup = group.id;
       renderDashboard();
-      root.querySelector(`[data-overlay-tab="${group.id}"]`)?.focus();
+      root.querySelector(`[data-overlay-tab="${group.id}"]`)?.focus({ preventScroll: true });
     });
     button.dataset.overlayTab = group.id;
     button.addEventListener("keydown", event => {
@@ -1646,7 +1646,7 @@ function renderOverlayControls(groups, chartDataState, onSettingsChange) {
       let next = [...selected];
       if (!allSelected) available.forEach(overlay => { next = addOverlay(next, overlay.id, groups.flatMap(group => group.overlays).filter(item => item.available).map(item => item.id)); });
       onSettingsChange({ ...settings, overlays: next });
-      root.querySelector(".overlay-all")?.focus();
+      root.querySelector(".overlay-all")?.focus({ preventScroll: true });
     });
     group.append(allButton);
   }
@@ -1670,7 +1670,7 @@ function renderOverlayControls(groups, chartDataState, onSettingsChange) {
       const next = selected ? settings.overlays.filter((id) => id !== overlay.id)
         : addOverlay(settings.overlays, overlay.id, groups.flatMap(group => group.overlays).filter(item => item.available).map(item => item.id));
       onSettingsChange({ ...settings, overlays: next });
-      root.querySelector(`[data-overlay="${overlay.id}"]`)?.focus();
+      root.querySelector(`[data-overlay="${overlay.id}"]`)?.focus({ preventScroll: true });
     });
     if (overlay.kind === "market") {
       const choice = node("span", "overlay-choice");
@@ -1707,7 +1707,7 @@ function renderOverlayControls(groups, chartDataState, onSettingsChange) {
   const tabsRow = node("div", "overlay-groups-row");
   const clear = action("Clear all", "overlay-chip", () => {
     onSettingsChange({ ...settings, overlays: [] });
-    (root.querySelector(".overlay-tab[aria-selected='true']") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus();
+    (root.querySelector(".overlay-tab[aria-selected='true']") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus({ preventScroll: true });
   });
   clear.dataset.clear = "overlays";
   clear.setAttribute("aria-label", "Clear all chart overlays");
@@ -1782,7 +1782,34 @@ function renderTimeAxis(bars, periodId) {
   return axis;
 }
 
-function attachSharedCrosshair(stack, bars, periodId, lanes) {
+// The date readout lists the bar, the active lanes and then every active overlay at
+// the crosshair date, each with the overlay's label and line colour (#218).
+function renderReadout(readout, text, overlayItems = []) {
+  readout.replaceChildren(node("span", "chart-readout-base", text));
+  overlayItems.forEach((item) => {
+    const part = node("span", "chart-readout-overlay");
+    part.dataset.overlay = item.id;
+    const swatch = node("span", "overlay-swatch");
+    swatch.setAttribute("aria-hidden", "true");
+    swatch.style.setProperty("--overlay-color", item.color);
+    const label = node("span", "chart-readout-label", item.label);
+    label.style.color = item.color;
+    part.append(document.createTextNode(" · "), swatch, label, document.createTextNode(` ${item.text}`));
+    readout.append(part);
+  });
+}
+
+// The readout sticks just below the pinned overlay groups panel (#218). The panel's height
+// changes with the active group and the screen width, so it is measured into a CSS variable.
+function pinReadoutBelowControls(panel) {
+  const controls = panel.querySelector(".chart-controls");
+  if (!controls) return;
+  const update = () => panel.style.setProperty("--chart-controls-height", `${Math.ceil(controls.getBoundingClientRect().height)}px`);
+  requestAnimationFrame(update);
+  if (typeof ResizeObserver === "function") new ResizeObserver(update).observe(controls);
+}
+
+function attachSharedCrosshair(stack, bars, periodId, lanes, overlays = []) {
   const layers = [...stack.querySelectorAll("[data-chart-layer]")];
   const readout = stack.querySelector(".chart-readout");
   let index = null;
@@ -1803,7 +1830,7 @@ function attachSharedCrosshair(stack, bars, periodId, lanes) {
         marker.style.left = `${(x / CHART_PLOT.width) * 100}%`;
       }
     });
-    if (readout) readout.textContent = crosshairText(bars[index], index, periodId, lanes);
+    if (readout) renderReadout(readout, crosshairText(bars[index], index, periodId, lanes), overlayReadoutItems(overlays, index, formatPrice));
   };
   const clear = () => {
     index = null;
@@ -2055,7 +2082,7 @@ function renderLaneControls(settings, available, chartDataState, onSettingsChang
     button.append(swatch, document.createTextNode(lane.label));
     button.addEventListener("click", () => {
       onSettingsChange({ ...settings, lanes: selected ? settings.lanes.filter(id => id !== lane.id) : [...settings.lanes, lane.id] });
-      root.querySelector(`.lane-toggle[data-lane="${lane.id}"]`)?.focus();
+      root.querySelector(`.lane-toggle[data-lane="${lane.id}"]`)?.focus({ preventScroll: true });
     });
     button.dataset.lane = lane.id;
     button.setAttribute("aria-pressed", String(selected));
@@ -2064,7 +2091,7 @@ function renderLaneControls(settings, available, chartDataState, onSettingsChang
   });
   const hide = action("Hide all", "lane-toggle bulk-control", () => {
     onSettingsChange({ ...settings, lanes: [] });
-    (root.querySelector(".lane-controls [data-lane]:not(:disabled)") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus();
+    (root.querySelector(".lane-controls [data-lane]:not(:disabled)") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus({ preventScroll: true });
   });
   hide.dataset.clear = "lanes";
   hide.setAttribute("aria-label", "Hide all under-chart lanes");
@@ -2196,14 +2223,14 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       setActiveCatalysts(enabled ? activeCatalysts().filter(id => id !== category.id)
         : [...activeCatalysts(), category.id]);
       renderDashboard();
-      root.querySelector(`[data-catalyst-category="${category.id}"]`)?.focus();
+      root.querySelector(`[data-catalyst-category="${category.id}"]`)?.focus({ preventScroll: true });
     });
     filters.append(toggle);
   });
   const clearCatalysts = action("Clear all", "overlay-chip bulk-control", () => {
     setActiveCatalysts([]);
     renderDashboard();
-    (root.querySelector("[data-catalyst-category]") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus();
+    (root.querySelector("[data-catalyst-category]") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus({ preventScroll: true });
   });
   clearCatalysts.dataset.clear = "catalysts";
   clearCatalysts.setAttribute("aria-label", "Clear all catalyst markers");
@@ -2237,9 +2264,24 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
         values: lane.id === "VOL" || chartDataState === "ready" ? laneValues(lane.id, chartHistory, chartData) : [],
         percent: lane.id === "SI" && alignedLaneValues(chartData?.short_interest, chartHistory, "short_pct_denominator").some(isNumericValue),
       }));
+      const theme = session.prefs.display.theme;
+      const overlaySeries = visibleOverlays.map((id) => ({
+        id,
+        definition: overlayDefinition(id),
+        unit: overlayUnit(id),
+        color: overlayColor(overlayDefinition(id)?.color, theme),
+        values: valuesForOverlay(id, {
+          bars: chartHistory,
+          tickerData: { ...tickerData, price_history: history },
+          chartData,
+          dashboard: session.dashboard,
+          charts: session.chartData,
+        }),
+      })).filter((overlay) => overlay.definition);
       stack.append(readout, chart, lanes, renderTimeAxis(chartHistory, activeId));
-      attachSharedCrosshair(stack, chartHistory, activeId, laneSeries);
+      attachSharedCrosshair(stack, chartHistory, activeId, laneSeries, overlaySeries);
       panel.append(stack);
+      pinReadoutBelowControls(panel);
       placedLanes = true;
       const legend = node("div", "chart-legend");
       const values = chartHistory.map(chartValue);
@@ -2254,21 +2296,12 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       if (chart.dataset.scaleMode === "percent") {
         legend.append(node("span", "chart-legend-summary", "Price and market overlays · percent change from period start"));
       }
-      const theme = session.prefs.display.theme;
       legendItems({
         ticker: session.selected,
         prices: values,
         adjustedMin: numericValues.length ? Math.min(...numericValues) : null,
         adjustedMax: numericValues.length ? Math.max(...numericValues) : null,
-        overlays: visibleOverlays.map((id) => {
-          const definition = overlayDefinition(id);
-          const series = valuesForOverlay(id, {
-            bars: chartHistory,
-            tickerData: { ...tickerData, price_history: history },
-            chartData,
-            dashboard: session.dashboard,
-            charts: session.chartData,
-          });
+        overlays: overlaySeries.map(({ id, definition, values: series }) => {
           const lastObservationIndex = series.findLastIndex(isNumericValue);
           return {
             definition,
@@ -4119,7 +4152,27 @@ function restoreDrawerFocus(id) {
   root.querySelector(`[data-drawer-toggle="${id}"]`)?.focus();
 }
 
+// Keep the chart overlay groups panel pinned across redraws (#218). Toggling an overlay,
+// lane or catalyst, a data refresh or a chart reload rebuilds the page; without this the
+// rebuilt page could clamp or reset the scroll position and the panel would jump.
+function chartControlsTop() {
+  const controls = root.querySelector(".price-panel .chart-controls, .chart-controls");
+  return controls ? controls.getBoundingClientRect().top : null;
+}
+
+function keepChartControlsPinned(before) {
+  if (before == null) return;
+  const after = chartControlsTop();
+  if (after != null && Math.abs(after - before) >= 1) window.scrollBy(0, after - before);
+}
+
 function renderDashboard() {
+  const before = chartControlsTop();
+  renderDashboardNow();
+  keepChartControlsPinned(before);
+}
+
+function renderDashboardNow() {
   const restoreDrawer = session.focusAfterDismiss || session.revealPanel
     ? null
     : document.activeElement?.dataset?.drawerToggle || null;
