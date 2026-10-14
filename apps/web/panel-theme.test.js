@@ -117,8 +117,8 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   const toggle = slice("function readStoredMetricReview", "function renderCompanyPanel");
   assert.match(toggle, /setAttribute\("aria-pressed", String\(mode === id\)\)/);
   assert.match(toggle, /storeMetricReview\(id\)/);
-  assert.match(toggle, /localStorage\.getItem\("investor-dashboard\.metric-review"\)/);
-  assert.match(toggle, /localStorage\.setItem\("investor-dashboard\.metric-review"/);
+  assert.match(toggle, /localPrefs\.getItem\("investor-dashboard\.metric-review"\)/);
+  assert.match(toggle, /localPrefs\.setItem\("investor-dashboard\.metric-review"/);
   const price = slice("function renderPricePanel", "function renderContracts");
   assert.match(price, /mergeCompanyFundamentals\(/);
   const appended = page.slice(page.indexOf("page.append("));

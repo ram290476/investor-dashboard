@@ -14,6 +14,7 @@ import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiR
 import { createAccountSettings } from "./account-settings.js";
 import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAmount, indexAtPlotX, niceAmountTicks, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
+import { createSafeStorage } from "./safe-storage.js";
 import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
@@ -89,6 +90,10 @@ import {
 const root = document.querySelector("#app");
 const chartAvailability = new Map();
 const svgNS = "http://www.w3.org/2000/svg";
+// Private / incognito browsing can make Web Storage throw. These wrappers never throw,
+// so sign-in, prefs (and with them the saved theme) still load (#214).
+const authStorage = createSafeStorage("sessionStorage", { cookieFallback: true });
+const localPrefs = createSafeStorage("localStorage");
 const authKeys = {
   state: "oauth_state",
   verifier: "oauth_verifier",
@@ -477,16 +482,16 @@ async function beginSignIn() {
   try {
     const verifier = randomBase64Url();
     const state = randomBase64Url(32);
-    sessionStorage.setItem(authKeys.verifier, verifier);
-    sessionStorage.setItem(authKeys.state, state);
+    authStorage.setItem(authKeys.verifier, verifier);
+    authStorage.setItem(authKeys.state, state);
     if (parseSettingsHash(location.hash) || parseStockHash(location.hash)) {
-      sessionStorage.setItem(authKeys.hash, location.hash);
+      authStorage.setItem(authKeys.hash, location.hash);
     }
-    sessionStorage.setItem(
+    authStorage.setItem(
       authKeys.path,
       session.route.page === "research" ? tickerResearchPath(session.selected) : "/",
     );
-    sessionStorage.setItem(
+    authStorage.setItem(
       authKeys.dashboardTicker,
       session.route.page === "research"
         ? session.dashboardSelection || ""
@@ -512,12 +517,14 @@ async function completeSignIn() {
   const query = new URLSearchParams(location.search);
   const code = query.get("code");
   if (!code) return false;
-  const expectedState = sessionStorage.getItem(authKeys.state);
-  const verifier = sessionStorage.getItem(authKeys.verifier);
-  sessionStorage.removeItem(authKeys.state);
-  sessionStorage.removeItem(authKeys.verifier);
+  const expectedState = authStorage.getItem(authKeys.state);
+  const verifier = authStorage.getItem(authKeys.verifier);
+  authStorage.removeItem(authKeys.state);
+  authStorage.removeItem(authKeys.verifier);
   if (!expectedState || query.get("state") !== expectedState || !verifier) {
-    throw new Error("The sign-in state did not match. Start sign-in again.");
+    throw new Error(authStorage.backend === "memory"
+      ? "This browser is blocking site storage and cookies (private browsing), so the sign-in state was lost. Allow site data for this site and sign in again."
+      : "The sign-in state did not match. Start sign-in again.");
   }
 
   const response = await fetch(new URL("/oauth2/token", session.config.cognitoDomain), {
@@ -537,10 +544,10 @@ async function completeSignIn() {
   }
   session.accessToken = tokens.access_token;
   session.email = emailFromIdToken(tokens.id_token);
-  const pendingPath = sessionStorage.getItem(authKeys.path) || "/";
-  sessionStorage.removeItem(authKeys.path);
-  const pendingHash = sessionStorage.getItem(authKeys.hash) || "";
-  sessionStorage.removeItem(authKeys.hash);
+  const pendingPath = authStorage.getItem(authKeys.path) || "/";
+  authStorage.removeItem(authKeys.path);
+  const pendingHash = authStorage.getItem(authKeys.hash) || "";
+  authStorage.removeItem(authKeys.hash);
   history.replaceState({}, "", pendingPath + pendingHash);
   return true;
 }
@@ -3221,20 +3228,13 @@ function renderFilings(tickerData) {
 }
 
 function readStoredMetricReview() {
-  try {
-    return localStorage.getItem("investor-dashboard.metric-review") === "approved" ? "approved" : "all";
-  } catch {
-    return "all";
-  }
+  return localPrefs.getItem("investor-dashboard.metric-review") === "approved" ? "approved" : "all";
 }
 
 function storeMetricReview(mode) {
   const value = mode === "approved" ? "approved" : "all";
-  try {
-    localStorage.setItem("investor-dashboard.metric-review", value);
-  } catch {
-    // Storage can be unavailable. The choice still applies until reload.
-  }
+  // Storage can be unavailable. The choice then still applies until reload.
+  localPrefs.setItem("investor-dashboard.metric-review", value);
 }
 
 function renderMetricReview() {
@@ -4308,8 +4308,8 @@ async function start() {
 
   try {
     session.prefs = await apiGet("prefs");
-    const returnTicker = sessionStorage.getItem(authKeys.dashboardTicker);
-    sessionStorage.removeItem(authKeys.dashboardTicker);
+    const returnTicker = authStorage.getItem(authKeys.dashboardTicker);
+    authStorage.removeItem(authKeys.dashboardTicker);
     session.dashboardSelection = fallbackSelection(session.prefs, returnTicker);
     const routeState = routeStateForLocation(
       location.pathname,
