@@ -40,11 +40,27 @@ def test_same_issue_twice_within_the_hour_sends_one(channel):
     store = MemoryStore()
     sent: list[str] = []
     first = deliver(SITE, "alarm", store, sent.append, now=_pt(11, 14, 10), channel=channel)
-    second = deliver(SITE_OK, "recovered", store, sent.append, now=_pt(11, 14, 50), channel=channel)
+    second = deliver(SITE, "alarm again", store, sent.append, now=_pt(11, 14, 50), channel=channel)
     assert first.send and first.reason == "sent" and first.channel == channel
     assert not second.send and second.reason == "suppressed"
     assert len(sent) == 1
-    assert issue_key(SITE, "") == issue_key(SITE_OK, "") == "alarm:invdash-site-api-5xx"
+
+
+@pytest.mark.parametrize("channel", ["email", "sms"])
+def test_recovery_after_alarm_in_the_same_hour_is_sent(channel):
+    """#182: OK emails were suppressed because the key ignored ALARM vs OK."""
+    store = MemoryStore()
+    sent: list[str] = []
+    deliver(SITE, "alarm", store, sent.append, now=_pt(11, 14, 10), channel=channel)
+    ok = deliver(SITE_OK, "recovered", store, sent.append, now=_pt(11, 14, 13), channel=channel)
+    again = deliver(SITE_OK, "recovered", store, sent.append, now=_pt(11, 14, 20), channel=channel)
+    assert ok.send and ok.reason == "sent"
+    assert not again.send
+    assert len(sent) == 2
+    assert issue_key(SITE, "") == "alarm:invdash-site-api-5xx:ALARM"
+    assert issue_key(SITE_OK, "") == "alarm:invdash-site-api-5xx:OK"
+    payload = '{"AlarmName": "invdash-lambda-errors", "NewStateValue": "OK"}'
+    assert issue_key("", payload) == "alarm:invdash-lambda-errors:OK"
 
 
 @pytest.mark.parametrize("channel", ["email", "sms"])
@@ -317,7 +333,7 @@ def test_dynamodb_store_caps_each_channel_per_hour(monkeypatch):
         assert "suppressed 1 repeat" in texts[2]
         table = boto3.resource("dynamodb").Table("invdash-alert-cap")
         for channel in ("email", "sms"):
-            item = table.get_item(Key={"issue_key": "alarm:invdash-site-api-5xx", "channel": channel})["Item"]
+            item = table.get_item(Key={"issue_key": "alarm:invdash-site-api-5xx:ALARM", "channel": channel})["Item"]
             assert int(item["sent"]) == 1
             assert str(item["window"]) == "2026-10-11T10:00-0700"
             # TTL reaches the end of the next window (12:00 PT), not a multi-day hold.
