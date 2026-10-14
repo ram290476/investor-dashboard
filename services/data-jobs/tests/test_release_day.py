@@ -194,20 +194,26 @@ def test_census_eits_long_format():
     """EITS ftd has no IMPG/EXPG variables (that query is a 400); goods are BOPG IMP/EXP cell_values."""
     params = release_day.census_params(2021, "k")
     assert "IMPG" not in params["get"] and "cell_value" in params["get"]
-    assert params["category_code"] == "BOPG"
+    assert params["category_code"] == "BOPGS"
     payload = [
         ["cell_value", "data_type_code", "category_code", "seasonally_adj", "time_slot_id", "time"],
-        ["280,000", "IMP", "BOPG", "yes", "0", "2026-08"],
-        ["170000", "EXP", "BOPG", "yes", "0", "2026-08"],
-        ["999", "IMP", "BOPG", "no", "0", "2026-08"],
-        ["888", "IMP", "BOPGS", "yes", "0", "2026-08"],
-        ["-1", "BAL", "BOPG", "yes", "0", "2026-08"],
+        ["280,000", "IMP", "BOPGS", "yes", "0", "2026-08"],
+        ["170000", "EXP", "BOPGS", "yes", "0", "2026-08"],
+        ["999", "IMP", "BOPGS", "no", "0", "2026-08"],
+        ["888", "IMP", "BOPG", "yes", "0", "2026-08"],
+        ["-1", "BAL", "BOPGS", "yes", "0", "2026-08"],
     ]
     trade = release_day.parse_census(payload, "2026-10-06T12:30:00+00:00")
     assert {(row["series_id"], row["period"], row["actual"]) for row in trade} == {
         ("CENSUS_IMPG", "2026-08", 280000.0),
         ("CENSUS_EXPG", "2026-08", 170000.0),
     }
+
+
+def test_census_empty_body_is_no_data_not_a_failure():
+    assert release_day.census_payload(204, b"") == []
+    assert release_day.census_payload(200, b"") == []
+    assert release_day.census_payload(200, b"   ") == []
 
 
 def test_bls_ics_feed_filters_cpi_from_all_releases():

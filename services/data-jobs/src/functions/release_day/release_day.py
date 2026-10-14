@@ -32,17 +32,31 @@ FOLLOW_UP_MINUTES = (0, 4, 8, 12, 16)
 BLS_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BEA_URL = "https://apps.bea.gov/api/data"
 CENSUS_URL = "https://api.census.gov/data/timeseries/eits/ftd"
-# EITS has no IMPG/EXPG variables (asking for them is a 400). Goods trade is long-format:
+# EITS has no IMPG/EXPG variables (asking for them is a 400). Trade is long-format:
 # cell_value per (category_code, data_type_code, seasonally_adj, time), in millions of USD.
-CENSUS_GOODS_CATEGORY = "BOPG"
+# Verified with a keyed query on 2026-10-14: BOPG (goods) exists only with seasonally_adj=no,
+# BOPGS (goods and services) only with seasonally_adj=yes. BOPG+yes matches nothing and the
+# API answers with an empty body (#182). Use BOPGS SA, which also matches the FRED IMPGS
+# vintage series these rows are dated by.
+CENSUS_GOODS_CATEGORY = "BOPGS"
 CENSUS_TYPES = {"IMP": "CENSUS_IMPG", "EXP": "CENSUS_EXPG"}
+
+
+def census_payload(status_code: int, body: bytes):
+    """Census answers a query that matches no rows with an empty body (often 204). That is no data, not a failure."""
+    if status_code == 204 or not body.strip():
+        from observability import logger
+
+        logger.info("census_no_data", extra={"status": status_code, "body_bytes": len(body)})
+        return []
+    return json.loads(body)
 
 
 def census_params(start_year: int, key: str) -> dict:
     return {
         "get": "cell_value,data_type_code,category_code,seasonally_adj,time_slot_id",
         "category_code": CENSUS_GOODS_CATEGORY,
-        "seasonally_adj": "yes",
+        "seasonally_adj": "yes",  # required for BOPGS; BOPG is only published unadjusted
         "time": f"from {start_year}-01",
         "key": key,
     }
@@ -219,8 +233,8 @@ def parse_census(payload, release_ts: str) -> list[dict]:
             if (
                 not series_id
                 or len(period) != 7
-                or str(record.get("category_code") or CENSUS_GOODS_CATEGORY).upper() != CENSUS_GOODS_CATEGORY
-                or str(record.get("seasonally_adj") or "yes").lower() != "yes"
+                or str(record.get("category_code") or "").upper() != CENSUS_GOODS_CATEGORY
+                or str(record.get("seasonally_adj") or "").lower() != "yes"
             ):
                 continue
             actual = _number(record.get("cell_value"))
@@ -810,12 +824,13 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 rec["rows"] = len(parsed)
                 found.extend(parsed)
             with source_run("census") as rec, get_client() as http:
-                payload = request_with_retry(
+                response = request_with_retry(
                     http,
                     "GET",
                     CENSUS_URL,
                     params=census_params(start_year, api_key("census")),
-                ).json()
+                )
+                payload = census_payload(response.status_code, response.content)
                 write_json(payload, f"raw/releases/census/date={day}/{run_key}.json")
                 parsed = parse_census(payload, release_ts)
                 rec["rows"] = len(parsed)
