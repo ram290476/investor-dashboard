@@ -35,3 +35,7 @@ if ! bash "${script_dir}/check-plan-destroys.sh" "${plan_json}"; then
   rm -f "${plan_path}"
   exit 1
 fi
+if ! bash "${script_dir}/check-self-policy.sh" "${plan_json}"; then
+  rm -f "${plan_path}"
+  exit 1
+fi

@@ -34,6 +34,7 @@ jobs:
             infra/terraform/scripts/decide-bootstrap.sh \
             infra/terraform/scripts/check-plan-destroys.sh \
             infra/terraform/scripts/plan-guard.sh \
+            infra/terraform/scripts/check-self-policy.sh \
             infra/terraform/scripts/test-deploy-guards.sh
           bash infra/terraform/scripts/test-deploy-guards.sh
 

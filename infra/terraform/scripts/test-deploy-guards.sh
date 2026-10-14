@@ -240,4 +240,29 @@ MAX_DESTROY=100 expect_gate 1 testdata/plan-lambda-delete.json
 MAX_DESTROY=08 expect_gate 1 "${tmp}/normal-deploy.json"
 unset MAX_DESTROY
 
+expect_self() {
+  local want="$1"
+  local file="$2"
+  local status
+  set +e
+  bash ./check-self-policy.sh "${file}" >/dev/null 2>&1
+  status=$?
+  set -e
+  if [[ "${status}" -ne "${want}" ]]; then
+    echo "self-policy ${file}: want exit ${want}, got ${status}" >&2
+    exit 1
+  fi
+}
+
+self_plan() {
+  jq -n --arg a "$1" '{resource_changes: [{address: "module.github_deploy[0].aws_iam_role_policy.iam_for_stack", mode: "managed", type: "aws_iam_role_policy", change: {actions: [$a]}}]}' > "$2"
+}
+self_plan update "${tmp}/self-update.json"
+self_plan no-op "${tmp}/self-noop.json"
+expect_self 1 "${tmp}/self-update.json"
+expect_self 0 "${tmp}/self-noop.json"
+expect_self 0 "${tmp}/empty-object.json"
+expect_self 0 testdata/plan-lambda-delete.json
+expect_self 1 "${tmp}/invalid.json"
+
 echo "deploy guard fixtures passed"
