@@ -4108,8 +4108,21 @@ a.catalyst-edgar-link:hover {
   display: none;
 }
 
-.price-panel-compact .price-chart {
-  max-height: 180px;
+/* The compact chart is capped at 180px tall by width, not max-height. A max-height
+   letterboxed the SVG (preserveAspectRatio meet), so the plot shrank to the middle
+   while the HTML time axis kept the full width and its quarter labels ran past both
+   plot edges (#195). Width = 180px × viewBox aspect (940 × 210 desktop, 940 × 340 phone). */
+.price-panel-compact .price-chart,
+.price-panel-compact .chart-time-axis {
+  max-width: calc(180px * 940 / 210);
+  margin-inline: auto;
+}
+
+@media (max-width: 640px) {
+  .price-panel-compact .price-chart,
+  .price-panel-compact .chart-time-axis {
+    max-width: calc(180px * 940 / 340);
+  }
 }
 
 .stock-page-tabs {
