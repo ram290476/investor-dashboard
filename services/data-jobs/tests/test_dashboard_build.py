@@ -1209,3 +1209,21 @@ def test_display_company_name_title_cases_all_caps_and_keeps_mixed_case():
     assert dashboard_build.display_company_name("XYZ", "BANK OF AMERICA CORP /DE/") == "Bank of America Corp."
     assert dashboard_build.display_company_name("XYZ", "eBay Inc.") == "eBay Inc."
     assert dashboard_build.display_company_name("XYZ", None) is None
+
+
+def test_chart_data_carries_the_live_technical_summary():
+    from dashboard_build import build_chart_data
+
+    rows = [{"ticker": "ANYCO", "date": f"2025-{1 + i // 28:02d}-{1 + i % 28:02d}", "close": 20 + i * 0.1,
+             "volume": 1000} for i in range(220)]
+    context = {"trend_doc": {"rows": [{"series_id": "DGS10", "value": 4.5, "z_1w": 0, "z_1m": 1.2, "z_3m": 1.0}]},
+               "rates": None, "releases": [], "calendar": [], "contracts": None, "news": {}}
+    doc = build_chart_data("ANYCO", [], [], [], [], price_rows=rows, technical_context=context)
+    summary = doc["technical_summary"]
+    assert summary["example"] is False and summary["ticker"] == "ANYCO"
+    assert summary["as_of_date"] == rows[-1]["date"]
+    assert [h["id"] for h in summary["horizons"]] == ["short", "intermediate", "long"]
+    assert all("summary" in h and "macro" in h for h in summary["horizons"])
+    assert summary["horizons"][1]["macro"]["groups"][1]["effect"] == "headwind"
+    bare = build_chart_data("ANYCO", [], [], [], [], price_rows=rows[:10])
+    assert all("summary" not in h and "macro" not in h for h in bare["technical_summary"]["horizons"])

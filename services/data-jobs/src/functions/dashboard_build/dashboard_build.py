@@ -580,8 +580,12 @@ def build_chart_data(
     price_rows: list[dict] | None = None,
     generated_at: str | None = None,
     index_prices: dict[str, list[dict]] | None = None,
+    technical_context: dict | None = None,
 ) -> dict:
     """Build one ticker's compact chart-only history document.
+
+    ``technical_summary`` (#196, #198) is computed from the full served price history. When
+    ``technical_context`` is given, each horizon also carries its macro/pricing-impact block.
 
     ``index_prices`` adds ``market_comparison`` (period returns, correlation, beta). It stays off
     this document's caller when omitted, and it is never copied onto dashboard.json.
@@ -729,7 +733,30 @@ def build_chart_data(
             if index_prices is None
             else {"market_comparison": market_comparison_block(ticker, history, index_prices)}
         ),
+        "technical_summary": technical_summary_block(ticker, history, technical_context),
     })
+
+
+def technical_summary_block(ticker: str, history: list[dict], context: dict | None) -> dict:
+    """Live indicator summary for the company page; macro signals attach when context is given."""
+    from macro_signals import attach_macro
+    from technicals import build_technical_summary
+
+    summary = build_technical_summary(ticker, history)
+    if context is not None and summary.get("as_of_date"):
+        summary = attach_macro(summary, context)
+    return summary
+
+
+def news_sentiment_context(daily_rows: list[dict], as_of: date) -> dict:
+    """7-day mean sentiment and the prior 7 days, from curated/news_daily rows of one ticker."""
+    from news_sentiment import rolling_mean
+
+    rows = [row for row in daily_rows if number(row.get("mean_sentiment")) is not None]
+    return {
+        "sentiment_7d": rolling_mean(rows, as_of),
+        "sentiment_7d_prior": rolling_mean(rows, as_of - timedelta(days=7)),
+    }
 
 
 def volume_source_of(row: dict) -> str | None:
@@ -1186,7 +1213,17 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             hourly_frame = read_parquet_prefix(f"curated/prices_hourly/ticker={ticker}/", columns=HOURLY_COLUMNS)
             hourly_data[ticker] = _hourly_rows(hourly_frame)
             del hourly_frame
+            today = datetime.now(ET).date()
+            technical_context = {
+                "trend_doc": trend_data[ticker],
+                "rates": rates_block,
+                "releases": release_rows,
+                "calendar": calendar if isinstance(calendar, list) else [],
+                "contracts": contracts_data.get(ticker),
+                "news": news_sentiment_context(news_data.get(ticker, {}).get("daily", []), today),
+            }
             return {
+                "technical_context": technical_context,
                 "trend_rows": trend_rows,
                 "short_interest_rows": short_by_ticker.get(ticker, []),
                 "options_rows": options_by_ticker.get(ticker, []),

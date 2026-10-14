@@ -2,9 +2,14 @@
  * Technical Summary panel (#191): view model and data interface.
  *
  * The panel renders whatever a provider returns in the TechnicalSummary shape
- * below. Today the only provider is `exampleTechnicalSummary`, which returns
- * clearly labelled EXAMPLE data that matches the issue mockups. A serving-layer
- * feed can replace it by returning the same shape with `example: false`.
+ * below. The live provider is `liveTechnicalSummary` (#196): dashboard_build
+ * computes every indicator from real daily closes and publishes it on
+ * serving/chart_data/<T>.json as `technical_summary`. `exampleTechnicalSummary`
+ * remains for tests and design captures only; the "Example data" badge shows
+ * only when a feed is explicitly `example: true` (#193).
+ *
+ * Each horizon may carry `macro` (#198): macro and pricing-impact signal groups
+ * (context only; they do not change the vote counts) and a net roll-up line.
  *
  * TechnicalSummary = {
  *   ticker, example: boolean, asOf: string (display text), delayed: boolean,
@@ -15,12 +20,14 @@
  *     groups: [{id: "ma" | "osc", label, buy, neutral, sell}],
  *     indicators: [{name, value, vote: 1 | 0 | -1}],
  *     explanation, support: number[], resistance: number[], eventRisk: string,
+ *     macro?: {net, summary, events: [{name, date}], groups: [{id, label, status, effect, relation,
+ *       confidence, reason, signals: [{label, value, direction, effect, relation, confidence, note, status}]}]},
  *   }]
  * }
  */
 
 export const HORIZONS = [
-  { id: "short", label: "Short-term", window: "Next week", requiredBars: 30 },
+  { id: "short", label: "Short-term", window: "Next week", requiredBars: 35 },
   { id: "intermediate", label: "Intermediate-term", window: "3 weeks – 1 month", requiredBars: 60 },
   { id: "long", label: "Long-term", window: "Next 3 months", requiredBars: 200 },
 ];
@@ -32,7 +39,7 @@ export const CONSENSUS_NOTE =
   "Percentages are the share of indicator signals that are bullish vs bearish (neutral excluded), not probabilities of a price move.";
 
 export const METHOD_NOTE =
-  "Each indicator votes Buy (+1), Neutral (0) or Sell (-1); the score is the mean. Strong Sell < -0.5 ≤ Sell < -0.1 ≤ Neutral ≤ 0.1 < Buy ≤ 0.5 < Strong Buy. Short-term: price vs 10/20-day MAs, RSI(14), Stochastic(14,3,3), MACD(12,26,9). Intermediate: price vs 50-day SMA, MA crossovers, ADX(14), Bollinger(20,2), OBV. Long-term: price vs 100/150/200-day SMA, 50/200 and 100/200 crosses, 3M/6M performance.";
+  "Each indicator votes Buy (+1), Neutral (0) or Sell (-1); the score is the mean. Strong Sell < -0.5 ≤ Sell < -0.1 ≤ Neutral ≤ 0.1 < Buy ≤ 0.5 < Strong Buy. Short-term: price vs 10/20-day MAs, RSI(14), Stochastic(14,3,3), MACD(12,26,9). Intermediate: price vs 50-day SMA, MA crossovers, ADX(14), Bollinger(20,2), OBV. Long-term: price vs 100/150/200-day SMA, 50/200 and 100/200 crosses, 3M/6M performance. Computed from daily closes at the last bar close; Stochastic, ADX and support/resistance use close-only forms (no intraday high/low is collected). Macro & pricing signals are context only and do not change the rating.";
 
 const finiteCount = (value) => (Number.isFinite(value) && value >= 0 ? value : 0);
 
@@ -95,7 +102,52 @@ function groupView(group) {
 }
 
 /** Turns one provider horizon into display rows; never throws on missing data. */
-export function horizonView(horizon, ticker = "") {
+const EFFECT_TONE = { tailwind: "buy", headwind: "sell" };
+
+function effectText(effect) {
+  return effect === "tailwind" ? "Tailwind" : effect === "headwind" ? "Headwind" : "Neutral";
+}
+
+const RELATION_TEXT = { supports: "Supports", contradicts: "Contradicts", neutral: "Neutral" };
+
+/** Display rows for one horizon's macro & pricing-impact block; null when absent. */
+export function macroView(macro) {
+  if (!macro || !Array.isArray(macro.groups)) return null;
+  const tone = macro.net === "net tailwind" ? "buy" : macro.net === "net headwind" ? "sell" : "neutral";
+  return {
+    tone,
+    summary: macro.summary || "Macro/pricing signals: No data for this horizon.",
+    events: (macro.events || []).map((event) => `${event.name} ${event.date}`),
+    groups: macro.groups.map((group) => {
+      const live = group.status === "live";
+      return {
+        id: group.id,
+        label: group.label,
+        live,
+        effect: live ? effectText(group.effect) : "No data",
+        tone: live ? EFFECT_TONE[group.effect] || "neutral" : "neutral",
+        relation: live ? RELATION_TEXT[group.relation] || "Neutral" : "—",
+        confidence: live ? group.confidence || "" : group.reason || "No source collected yet.",
+        events: (group.events || []).map((event) => `${event.name} ${event.date}`),
+        signals: (group.signals || []).map((signal) => {
+          const noData = signal.status === "no_data";
+          return {
+            label: signal.label,
+            value: noData ? "No data" : signal.value ?? "--",
+            direction: noData ? "—" : signal.direction || "—",
+            effect: noData ? "No data" : effectText(signal.effect),
+            tone: noData ? "neutral" : EFFECT_TONE[signal.effect] || "neutral",
+            relation: noData ? "—" : RELATION_TEXT[signal.relation] || "Neutral",
+            note: noData ? signal.note || "No source collected yet." : signal.confidence || signal.note || "",
+            title: signal.note || "",
+          };
+        }),
+      };
+    }),
+  };
+}
+
+export function horizonView(horizon, ticker = "", unavailable = "") {
   const base = HORIZONS.find((item) => item.id === horizon?.id) || {};
   const label = horizon?.label || base.label || "Horizon";
   const window = horizon?.window || base.window || "";
@@ -103,6 +155,9 @@ export function horizonView(horizon, ticker = "") {
   const available = horizon?.availableBars;
   const score = voteScore(horizon?.summary);
   const rating = ratingLabel(score);
+  if (unavailable) {
+    return { id: horizon?.id || base.id, label, window, enoughData: false, message: unavailable, macro: null };
+  }
   if ((Number.isFinite(available) && available < required) || !rating) {
     const have = Number.isFinite(available) ? ` (${ticker || "this ticker"} has ${available})` : "";
     return {
@@ -111,6 +166,7 @@ export function horizonView(horizon, ticker = "") {
       window,
       enoughData: false,
       message: `Not enough data — needs ≥ ${required} trading days of history${have}.`,
+      macro: macroView(horizon?.macro),
     };
   }
   const split = consensus(horizon.summary);
@@ -141,6 +197,7 @@ export function horizonView(horizon, ticker = "") {
     })),
     support: (horizon.support || []).filter(Number.isFinite).map((value) => value.toFixed(2)),
     resistance: (horizon.resistance || []).filter(Number.isFinite).map((value) => value.toFixed(2)),
+    macro: macroView(horizon.macro),
   };
 }
 
@@ -156,11 +213,14 @@ export function agreementNote(rows) {
 
 export function technicalSummaryView(summary) {
   const ticker = summary?.ticker || "";
-  const rows = (summary?.horizons?.length ? summary.horizons : HORIZONS).map((horizon) => horizonView(horizon, ticker));
+  const unavailable = typeof summary?.unavailable === "string" ? summary.unavailable : "";
+  const rows = (summary?.horizons?.length ? summary.horizons : HORIZONS)
+    .map((horizon) => horizonView(horizon, ticker, unavailable));
   const agreement = agreementNote(rows);
   return {
     ticker,
-    example: summary?.example !== false,
+    // #193: the badge only appears when a feed is explicitly marked as example data.
+    example: summary?.example === true,
     asOf: summary?.asOf ? `As of ${summary.asOf}${summary.delayed === false ? "" : " · data delayed"}` : "As of --",
     rows: rows.map((row, index) => ({ ...row, lowAgreement: Boolean(agreement) && index === 0 && row.enoughData })),
     agreement,
@@ -168,6 +228,21 @@ export function technicalSummaryView(summary) {
     consensusNote: CONSENSUS_NOTE,
     method: METHOD_NOTE,
   };
+}
+
+/**
+ * LIVE provider (#196): the serving-layer `technical_summary` on the ticker's chart_data
+ * document. While chart data loads, or when a build predates the feed, every horizon shows
+ * a plain status line instead of a rating. Never falls back to example values.
+ */
+export function liveTechnicalSummary(ticker, chartData, state = "ready") {
+  const symbol = String(ticker || "");
+  const served = chartData?.technical_summary;
+  if (served && Array.isArray(served.horizons)) return { ...served, ticker: served.ticker || symbol };
+  const unavailable = state === "loading"
+    ? "Loading live indicators…"
+    : `Live indicators are not published for ${symbol || "this ticker"} yet.`;
+  return { ticker: symbol, example: false, asOf: null, unavailable, horizons: HORIZONS.map((base) => ({ ...base })) };
 }
 
 const EXAMPLE_FULL = [

@@ -58,7 +58,7 @@ import {
   tableCellCopy,
 } from "./panel-dates.js";
 import { inflationSurpriseView } from "./inflation-panel.js";
-import { exampleTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
+import { liveTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
@@ -3618,13 +3618,52 @@ function appendMetricGroups(block, cards, empty) {
   block.append(grid);
 }
 
-// Technical Summary (#191). The data source is swappable: today it is EXAMPLE data.
-function technicalSummaryFor(ticker, history) {
-  return exampleTechnicalSummary(ticker, { history });
+// Technical Summary (#191). Live indicators from serving/chart_data/<T>.json (#196).
+function technicalSummaryFor(ticker) {
+  const state = session.chartDataState[ticker] || "loading";
+  return liveTechnicalSummary(ticker, session.chartData[ticker] || null, state);
+}
+
+function renderMacroSignals(row) {
+  const macro = row.macro;
+  if (!macro) return null;
+  const block = node("div", "technical-macro");
+  block.dataset.macroHorizon = row.id;
+  const details = rememberInner(node("details", "technical-details technical-macro-details"), `technical-macro:${row.id}`);
+  details.append(node("summary", "technical-counts", "Macro & pricing signals"));
+  if (macro.events.length) {
+    details.append(node("p", "technical-note technical-warn", `⚠ Upcoming in this window: ${macro.events.join(" · ")}`));
+  }
+  const table = node("table", "technical-table technical-macro-table");
+  const head = node("tr");
+  ["Signal", "Direction", "Effect", "vs rating", "Confidence"].forEach((label) => head.append(node("th", "", label)));
+  table.append(head);
+  macro.groups.forEach((group) => {
+    const tr = node("tr", `technical-macro-group${group.live ? "" : " is-empty"}`);
+    tr.dataset.macroGroup = group.id;
+    const effect = node("td");
+    effect.append(node("span", `technical-pill ${group.tone}`, group.effect));
+    const confidence = group.confidence;
+    tr.append(node("td", "technical-strong", group.label), node("td", "technical-muted", ""), effect,
+      node("td", "", group.relation), node("td", group.live ? "technical-note" : "technical-nodata-cell", confidence));
+    table.append(tr);
+    group.signals.forEach((signal) => {
+      const sr = node("tr", "technical-macro-signal");
+      const name = node("td", "technical-macro-name", signal.label);
+      if (signal.title) name.title = signal.title;
+      sr.append(name, node("td", "technical-mono", `${signal.direction} · ${signal.value}`),
+        node("td", `technical-${signal.tone === "buy" ? "up" : signal.tone === "sell" ? "down" : "muted"}`, signal.effect),
+        node("td", "", signal.relation), node("td", "technical-note", signal.note));
+      table.append(sr);
+    });
+  });
+  details.append(table);
+  block.append(details, node("p", `technical-macro-summary ${macro.tone}`, macro.summary));
+  return block;
 }
 
 function renderTechnicalSummary(ticker, history) {
-  const view = technicalSummaryView(technicalSummaryFor(ticker, history));
+  const view = technicalSummaryView(technicalSummaryFor(ticker));
   const panel = node("section", "panel technical-summary");
   panel.id = "stock-panel-technical";
   panel.dataset.stockPanel = "overview";
@@ -3653,6 +3692,8 @@ function renderTechnicalSummary(ticker, history) {
     name.append(node("strong", "", row.label), node("span", "panel-subtitle", row.window));
     if (!row.enoughData) {
       item.append(name, node("span", "technical-pill neutral", "—"), node("p", "technical-nodata", row.message));
+      const macroOnly = renderMacroSignals(row);
+      if (macroOnly) item.append(macroOnly);
       panel.append(item);
       return;
     }
@@ -3704,6 +3745,8 @@ function renderTechnicalSummary(ticker, history) {
         `Support ${row.support.join(" · ") || "--"}   Resistance ${row.resistance.join(" · ") || "--"}`));
     }
     item.append(name, ratingCell, body, details);
+    const macroBlock = renderMacroSignals(row);
+    if (macroBlock) item.append(macroBlock);
     panel.append(item);
   });
   if (view.agreement) panel.append(node("p", "technical-note technical-warn technical-agreement", `⚠ ${view.agreement}`));
