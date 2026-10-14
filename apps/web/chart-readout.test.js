@@ -50,3 +50,10 @@ test("the overlay groups panel stays pinned during scroll, drag and redraws (#21
   }
   assert.match(styles, /\.chart-stack \{[^}]*touch-action: pan-y;/, "a horizontal drag on the chart scrubs instead of panning");
 });
+
+test("the crosshair readout is pinned right below the overlay groups panel (#218)", () => {
+  assert.match(styles, /\.chart-readout \{[^}]*position: sticky;[^}]*top: var\(--chart-controls-height, 0px\);[^}]*background: var\(--surface\);/);
+  assert.match(app, /panel\.style\.setProperty\("--chart-controls-height"/);
+  assert.match(app, /new ResizeObserver\(update\)\.observe\(controls\)/);
+  assert.match(app, /panel\.append\(stack\);\n\s*pinReadoutBelowControls\(panel\);/);
+});

@@ -740,6 +740,12 @@ a {
 }
 
 .chart-readout {
+  /* Pinned below the overlay groups panel while scrolling past the chart (#218). */
+  position: sticky;
+  top: var(--chart-controls-height, 0px);
+  z-index: 3;
+  padding: 4px 0;
+  background: var(--surface);
   min-height: 18px;
   overflow-wrap: anywhere;
   margin: 0 0 6px;

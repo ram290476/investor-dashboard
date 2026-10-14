@@ -1799,6 +1799,16 @@ function renderReadout(readout, text, overlayItems = []) {
   });
 }
 
+// The readout sticks just below the pinned overlay groups panel (#218). The panel's height
+// changes with the active group and the screen width, so it is measured into a CSS variable.
+function pinReadoutBelowControls(panel) {
+  const controls = panel.querySelector(".chart-controls");
+  if (!controls) return;
+  const update = () => panel.style.setProperty("--chart-controls-height", `${Math.ceil(controls.getBoundingClientRect().height)}px`);
+  requestAnimationFrame(update);
+  if (typeof ResizeObserver === "function") new ResizeObserver(update).observe(controls);
+}
+
 function attachSharedCrosshair(stack, bars, periodId, lanes, overlays = []) {
   const layers = [...stack.querySelectorAll("[data-chart-layer]")];
   const readout = stack.querySelector(".chart-readout");
@@ -2271,6 +2281,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
       stack.append(readout, chart, lanes, renderTimeAxis(chartHistory, activeId));
       attachSharedCrosshair(stack, chartHistory, activeId, laneSeries, overlaySeries);
       panel.append(stack);
+      pinReadoutBelowControls(panel);
       placedLanes = true;
       const legend = node("div", "chart-legend");
       const values = chartHistory.map(chartValue);
