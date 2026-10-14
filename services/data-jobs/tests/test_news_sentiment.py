@@ -7,6 +7,7 @@ from news_sentiment import (
     catch_up_since,
     curated_row,
     dedupe_articles,
+    finnhub_window,
     headline_relevance,
     label_for,
     lexicon_score,
@@ -242,3 +243,17 @@ def test_watchlist_names_reads_serving_filings():
         return docs.get(key)
 
     assert watchlist_names(["NVDA", "AAPL", "BAD"], fake_read) == {"NVDA": "NVIDIA CORP", "AAPL": None, "BAD": None}
+
+
+def test_finnhub_window_is_yesterday_through_today_in_new_york():
+    # 7:30 PM PT Oct 13 = 02:30 UTC Oct 14 = 10:30 PM ET Oct 13: still Oct 13 in New York.
+    evening = datetime(2026, 10, 14, 2, 30, tzinfo=UTC)
+    assert finnhub_window("2026-10-13", evening) == ("2026-10-12", "2026-10-13")
+    # Just after midnight ET the window rolls forward and still covers the prior day.
+    after_midnight = datetime(2026, 10, 14, 4, 5, tzinfo=UTC)
+    assert finnhub_window("2026-10-14", after_midnight) == ("2026-10-13", "2026-10-14")
+
+
+def test_finnhub_window_keeps_an_older_catch_up_watermark():
+    monday = datetime(2026, 10, 12, 14, 0, tzinfo=UTC)
+    assert finnhub_window("2026-10-09", monday) == ("2026-10-09", "2026-10-12")
