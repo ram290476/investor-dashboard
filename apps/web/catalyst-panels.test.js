@@ -77,3 +77,14 @@ test("company panel is generic for any watchlist ticker", () => {
   assert.match(app, /function companyEvents\(rows, ticker\)/);
   assert.match(app, /Federal awards · TTM obligations/);
 });
+
+test("the company page has no Filings & events panel; the dashboard and research pages keep theirs (#194)", () => {
+  const stock = slice("function renderStockPage", "function renderResearchPage");
+  assert.doesNotMatch(stock, /renderFilings\(/);
+  assert.doesNotMatch(stock, /filings-events/);
+  const research = app.slice(app.indexOf("function renderResearchPage"));
+  assert.match(research.slice(0, research.indexOf("\n}\n")), /renderFilings\(tickerData\)/);
+  const dashboard = app.slice(app.indexOf('side.setAttribute("aria-label", "Macro drivers, news and filings")'));
+  assert.match(dashboard, /filings = renderFilings\(tickerData\)/);
+  assert.match(dashboard, /filings\.dataset\.mobilePanel = "more"/);
+});

@@ -3831,11 +3831,7 @@ function renderStockPage() {
     tabs.append(tab);
   });
   page.append(tabs);
-  const filingsPanel = renderFilings(tickerData);
-  if (filingsPanel) {
-    filingsPanel.dataset.stockPanel = "overview";
-    page.append(filingsPanel);
-  }
+  // Filings & events lives on the dashboard and research pages only (#194).
   root.append(page);
   settings.refresh();
 }
