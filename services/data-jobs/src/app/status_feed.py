@@ -35,11 +35,17 @@ JOBS: dict[str, tuple[str, str | None, str, str | None]] = {
     "D5": ("Government contracts", "45 17 * * 1-5", "federal", None),
     "M1": ("Release-day data & calendar", "35 6 * * 1-5", "federal", None),
     "Q1": ("Quarterly fundamentals", "30 8 * * 1", "nyse", None),
+    # 07:15 ET matches the EventBridge schedule (America/New_York), not 07:15 UTC.
+    "Q2C": ("Company IR collect", "15 7 * * 1-5", "federal", None),
+    "Q2X": ("Company IR extract", None, "federal", "After company IR collect"),
+    "Q2S": ("Company metrics serve", None, "federal", "After company IR extract"),
     "SHORT": ("Short interest", "30 18 * * 1-5", "nyse", None),
     "OPTIONS": ("Options put/call and IV", "50 16 * * 1-5", "nyse", None),
     "TREND": ("Trend metrics", None, "nyse", "After market close and release day"),
     "BACKFILL": ("Ticker history backfill", None, "nyse", "When a ticker is added"),
     "RECONCILE": ("Split & dividend adjustment", "15 19 * * 1-5", "nyse", None),
+    # Weekday 06:00 ET. Ticker-added runs are extra; the feed shows the daily cron.
+    "SEC": ("SEC filings", "0 6 * * 1-5", "federal", None),
     # No cron until Ram accepts the Kalshi terms (issue #89). A next_run would advertise a schedule that is not enabled.
     "KALSHI": ("FOMC odds (Kalshi)", None, "federal", None),
 }
@@ -93,7 +99,8 @@ def apply_event(feed: dict | None, detail: dict, now: datetime) -> dict:
             failed = int(detail.get("failed_sources") or 0)
             outcome = detail.get("outcome", "success")
             status = (
-                "failed" if outcome != "success" else "partial" if failed
+                "failed" if outcome in {"failure", "failed"}
+                else "partial" if outcome == "partial" or failed
                 else "skipped" if detail.get("status") == "skipped" else "ok"
             )
             entry = {
@@ -105,6 +112,14 @@ def apply_event(feed: dict | None, detail: dict, now: datetime) -> dict:
                 "failed_sources": failed,
                 "failed_source_ids": list(detail.get("failed_source_ids") or []),
                 "reason": detail.get("reason"),
+            }
+        summary = detail.get("summary")
+        if isinstance(summary, dict):
+            entry["summary"] = {
+                "tickers_processed": int(summary.get("tickers_processed") or 0),
+                "new_filings": int(summary.get("new_filings") or 0),
+                "failures": int(summary.get("failures") or 0),
+                "no_sec_filer": int(summary.get("no_sec_filer") or 0),
             }
         if "dropped" in detail:
             dropped = list(detail.get("dropped") or [])

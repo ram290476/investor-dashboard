@@ -24,6 +24,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test deploy safety guards
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck \
+            infra/terraform/scripts/decide-bootstrap.sh \
+            infra/terraform/scripts/check-plan-destroys.sh \
+            infra/terraform/scripts/plan-guard.sh \
+            infra/terraform/scripts/test-deploy-guards.sh
+          bash infra/terraform/scripts/test-deploy-guards.sh
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -81,6 +94,7 @@ jobs:
           node --check apps/web/stock-page.js
           node --check apps/web/rates-panel.js
           node --check apps/web/market-status.js
+          node --check apps/web/market-correlation.js
 
       - name: Test chart periods, overlays, trend state, API responses and preferences
         run: node --test apps/web/*.test.js
@@ -91,6 +105,13 @@ jobs:
           terraform fmt -check -recursive
           terraform init -backend=false
           terraform validate
+
+      # Mock-provider plans of the root module on a fresh stack. They fail with
+      # "Invalid count argument" if a count or for_each reads a value known only
+      # after apply, as Deploy production #199 did.
+      - name: Plan-time count and for_each check (terraform test)
+        working-directory: infra/terraform
+        run: terraform test
 
       - name: Build the Lambda image for its deployment architecture
         run: |

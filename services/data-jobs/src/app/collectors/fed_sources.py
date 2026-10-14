@@ -9,8 +9,10 @@ fails loudly (and can be re-parsed from raw/) instead of storing wrong numbers.
   atlanta_mpt_url). The parser finds the header row (the first row with a "date"
   column) and returns long rows (date, column, value).
 - Cleveland Fed: the nowcast page shows tables for CPI, core CPI, PCE and core PCE.
-  The parser reads every HTML table and keeps rows whose first cell names one of those
-  measures, with the column headers as periods.
+  Since Oct 2026 the tables are transposed: one row per period (first cell "October 2026"
+  or "2026:Q3") and one column per measure, plus an "Updated" column. Tables are, in
+  order, month-over-month %, year-over-year %, quarterly annualized %. The parser accepts
+  that layout and the older one (one row per measure, periods as columns).
 """
 
 from __future__ import annotations
@@ -91,6 +93,11 @@ def _measure(label: str) -> str | None:
     return None
 
 
+def _exact_measure(label: str) -> str | None:
+    text = " ".join(label.split()).lower()
+    return next((m for m in MEASURES if m.lower() == text), None)
+
+
 def parse_cleveland_html(html: str, as_of: date) -> list[dict]:
     """Rows: as_of, table (index), period (column header), measure, value (percent)."""
     p = _Tables()
@@ -100,6 +107,21 @@ def parse_cleveland_html(html: str, as_of: date) -> list[dict]:
         if not table:
             continue
         header = table[0]
+        measure_cols = {i: _exact_measure(h) for i, h in enumerate(header) if i and _exact_measure(h)}
+        if measure_cols:
+            for r in table[1:]:
+                if len(r) < 2 or not r[0].strip():
+                    continue
+                for i, measure in measure_cols.items():
+                    if i >= len(r):
+                        continue
+                    try:
+                        val = float(r[i].replace("%", ""))
+                    except ValueError:
+                        continue  # blank: that month's actual is already released
+                    rows.append({"as_of": as_of, "table": t_idx, "period": r[0].strip(),
+                                 "measure": measure, "value": val, "source_id": "DS-90"})
+            continue
         for r in table[1:]:
             if not r:
                 continue

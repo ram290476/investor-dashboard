@@ -50,14 +50,86 @@ variable "use_fips_endpoint" {
 }
 
 variable "alert_emails" {
-  description = "Email addresses that receive ops and security alerts. Each must confirm the SNS subscription."
+  description = "Inboxes for ops alerts, including the CloudFront alarm. The notifier republishes to the ops delivery topic (<name>-ops-alerts); each address must confirm that subscription once. Do not also subscribe these addresses to the intake topics (<name>-ops-alarms, <name>-security-alarms) or the CloudFront alarm topic."
   type        = list(string)
 }
 
 variable "security_alert_emails" {
-  description = "Optional separate recipients for security alerts. Defaults to alert_emails when empty."
+  description = "Optional separate recipients for security alerts, on the security delivery topic (<name>-security-alerts). Defaults to alert_emails when empty. Each address must confirm that subscription."
   type        = list(string)
   default     = []
+}
+
+variable "alert_notifier_enabled" {
+  description = "Subscribe the us-east-1 CloudFront alarm topic to the alert notifier Lambda (which caps and sends email and SMS). Plan-time switch: the notifier ARN is unknown until apply on first create, so it cannot drive count (deploy #199). False leaves the CloudFront 5xx alarm without email or SMS."
+  type        = bool
+  default     = true
+}
+
+variable "email_window_minutes" {
+  description = "Email cap window in minutes. Windows are fixed America/Los_Angeles clock buckets aligned to local midnight, not a rolling interval from the first email. 60 is one clock hour (14:00-14:59 Pacific). Independent of sms_window_minutes."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.email_window_minutes >= 1 && var.email_window_minutes <= 1440
+    error_message = "email_window_minutes must be from 1 to 1440."
+  }
+}
+
+variable "email_max_per_window" {
+  description = "Maximum emails for one issue (CloudWatch alarm name, or job and error code) per email clock window. Further repeats are logged and not mailed. Independent of sms_max_per_window."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.email_max_per_window >= 1 && var.email_max_per_window <= 100
+    error_message = "email_max_per_window must be from 1 to 100."
+  }
+}
+
+variable "vuln_window_minutes" {
+  description = "Cap window in minutes for vulnerability findings (CVE or GHSA id). The notifier keys these by id and affected resource (ECR repository or Lambda function), not by Inspector vs Security Hub, so both reports of one CVE are one issue. This window replaces email_window_minutes and sms_window_minutes for those keys, so rescans and new image pushes do not re-send the same CVE each hour. Fixed America/Los_Angeles clock buckets aligned to local midnight; 1440 (default) is one Pacific calendar day. Other findings keep the normal windows."
+  type        = number
+  default     = 1440
+
+  validation {
+    condition     = var.vuln_window_minutes >= 1 && var.vuln_window_minutes <= 1440
+    error_message = "vuln_window_minutes must be from 1 to 1440."
+  }
+}
+
+variable "alert_sms_e164" {
+  description = "E.164 mobile number for SMS alerts, for example +14155552671. Empty leaves SMS off. Email still goes through the notifier and stays capped. Do not subscribe this number, or an inbox, directly to the ops, security, or CloudFront topics; that bypasses the cap."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alert_sms_e164 == "" || can(regex("^\\+[1-9][0-9]{7,14}$", var.alert_sms_e164))
+    error_message = "alert_sms_e164 must be empty or an E.164 number such as +14155552671."
+  }
+}
+
+variable "sms_window_minutes" {
+  description = "SMS cap window in minutes. Windows are fixed America/Los_Angeles clock buckets aligned to local midnight, not a rolling interval from the first text. 60 is one clock hour (14:00-14:59 Pacific). Independent of email_window_minutes."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.sms_window_minutes >= 1 && var.sms_window_minutes <= 1440
+    error_message = "sms_window_minutes must be from 1 to 1440."
+  }
+}
+
+variable "sms_max_per_window" {
+  description = "Maximum SMS messages for one issue (CloudWatch alarm name, or job and error code) per SMS clock window. Further repeats are logged and not texted. Independent of email_max_per_window."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.sms_max_per_window >= 1 && var.sms_max_per_window <= 100
+    error_message = "sms_max_per_window must be from 1 to 100."
+  }
 }
 
 variable "monthly_budget_usd" {
@@ -111,7 +183,7 @@ variable "max_tickers_per_user" {
 }
 
 variable "metrics_namespace" {
-  description = "CloudWatch namespace for the app's custom metrics. Keep the metric set at 10 or fewer to stay in the free tier."
+  description = "CloudWatch namespace for custom metrics. Job metrics use one service dimension. DashboardRawBytes and DashboardGzipBytes feed the 4 MiB payload alarm, ahead of the 6 MiB Lambda response limit."
   type        = string
   default     = "InvestorDashboard"
 }
@@ -230,6 +302,12 @@ variable "jobs_image_uri" {
 
 variable "lambda_reserved_concurrency" {
   description = "Reserved concurrency per function. Null = unreserved (required on new accounts limited to 10 concurrent executions)."
+  type        = number
+  default     = null
+}
+
+variable "prefs_api_reserved_concurrency" {
+  description = "Reserved concurrency for invdash-prefs-api. Null = fall back to lambda_reserved_concurrency (unreserved). Set to 3 only after the Lambda concurrent-executions quota increase: it cannot be set while the account cap is 10 (AWS keeps 10 unreserved)."
   type        = number
   default     = null
 }
@@ -360,8 +438,8 @@ variable "jobs" {
       schedule       = "cron(15 * ? * MON-FRI *)"
       triggers       = []
       memory         = 512
-      timeout        = 180
-      read_prefixes  = ["curated/news_articles/", "curated/news_daily/"]
+      timeout        = 300 # per-ticker Finnhub + Google News for up to 27 tickers, paced
+      read_prefixes  = ["curated/news_articles/", "curated/news_daily/", "serving/filings/"]
       write_prefixes = ["raw/news/", "curated/news_articles/", "curated/news_daily/"]
       api_keys       = ["finnhub", "alpha-vantage", "massive"]
       reads_prefs    = true
@@ -396,8 +474,8 @@ variable "jobs" {
       schedule      = "cron(45 17 ? * MON-FRI *)"
       triggers      = []
       memory        = 512
-      timeout       = 300
-      read_prefixes = ["curated/contracts/", "curated/contracts_rollup/"]
+      timeout       = 600 # one USAspending recipient search per watchlist ticker
+      read_prefixes = ["curated/contracts/", "curated/contracts_rollup/", "serving/filings/"]
       write_prefixes = [
         "raw/contracts/",
         "curated/contracts/",
@@ -410,8 +488,9 @@ variable "jobs" {
     dashboard-build = {
       handler  = "dashboard_build.handler"
       schedule = ""
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?batches>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1"]
-      memory   = 1024
+      # Rebuild when a backfill ticker finishes (tickers_completed > 0), not after every batch.
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1", "job:SEC?partial"]
+      memory   = 2048
       timeout  = 300
       read_prefixes = [
         "curated/prices_daily/",
@@ -432,6 +511,9 @@ variable "jobs" {
         "curated/releases/",
         "curated/release_calendar/",
         "curated/release_links/",
+        "curated/macro_daily/source=fred/",
+        "serving/rates/",
+        "serving/filings/",
       ]
       write_prefixes = ["serving/dashboard.json", "serving/chart_data/", "serving/dashboard-build/"]
       api_keys       = []
@@ -444,18 +526,22 @@ variable "jobs" {
       triggers       = ["ticker-added"]
       memory         = 1024
       timeout        = 300
-      read_prefixes  = ["manual/fundamentals/", "curated/fundamentals_quarterly/"]
+      read_prefixes  = ["manual/fundamentals/", "curated/fundamentals_quarterly/", "curated/company_metrics/"]
       write_prefixes = ["curated/fundamentals_quarterly/", "serving/fundamentals_quarterly.json"]
       api_keys       = []
       reads_prefs    = true
     }
-    # Weekday schedule. The handler fetches on the weekly baseline, inside an earnings
-    # window (T-3 through T+5), and when an event asks for an 8-K EX-99.1 extraction.
-    # Not applied in this change. Ram approves the metric catalog before any panel is served.
+    # Weekday 07:15 America/New_York. The handler collects on Monday, inside an earnings
+    # window (T-3 through T+5), and when H3 reports a new 8-K Item 2.02 with EX-99.1.
+    # deploy.yml applies this map whenever jobs_image_uri is set. SEC_USER_AGENT is already
+    # in the shared job environment. COMPANY_IR_LLM_SECRET_ID stays unset. Catalog approval
+    # is a reviewed JSON edit; the job does not approve metrics.
+    # A partial collect publishes outcome partial. Extract and serve match that outcome
+    # as well as success, so documents that did land are still parsed. A failed collect does not.
     q2-company-ir-collect = {
       handler        = "company_ir.collect_handler"
       schedule       = "cron(15 7 ? * MON-FRI *)"
-      triggers       = ["ticker-added"]
+      triggers       = ["ticker-added", "job:H3"]
       memory         = 1024
       timeout        = 300
       read_prefixes  = ["raw/company_ir/", "curated/company_metrics/"]
@@ -466,10 +552,10 @@ variable "jobs" {
     q2-company-ir-extract = {
       handler        = "company_ir.extract_handler"
       schedule       = ""
-      triggers       = ["job:Q2C"]
+      triggers       = ["job:Q2C?partial"]
       memory         = 1024
       timeout        = 300
-      read_prefixes  = ["raw/company_ir/", "curated/company_metrics/"]
+      read_prefixes  = ["raw/company_ir/", "curated/company_metrics/", "catalog/"]
       write_prefixes = ["curated/company_metrics/"]
       api_keys       = []
       reads_prefs    = true
@@ -477,19 +563,20 @@ variable "jobs" {
     q2-company-ir-serve = {
       handler        = "company_ir.serve_handler"
       schedule       = ""
-      triggers       = ["job:Q2X"]
+      triggers       = ["job:Q2X?partial"]
       memory         = 512
       timeout        = 120
-      read_prefixes  = ["curated/company_metrics/"]
+      read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/"]
       write_prefixes = ["serving/stock/"]
       api_keys       = []
       reads_prefs    = false
     }
-    # Daily poll; writes only when FINRA publishes a new settlement date (twice a month)
+    # Daily poll; writes only when FINRA publishes a new settlement date (twice a month).
+    # ticker-added also runs a one-time full-history catch-up for tickers that have none stored.
     short-interest = {
       handler        = "short_interest.handler"
       schedule       = "cron(30 18 ? * MON-FRI *)"
-      triggers       = []
+      triggers       = ["ticker-added"]
       memory         = 512
       timeout        = 300
       read_prefixes  = ["curated/short_interest/"]
@@ -557,6 +644,21 @@ variable "jobs" {
       api_keys          = ["bls", "bea", "census", "fred"]
       reads_prefs       = true
       manages_schedules = true
+    }
+    # Weekday 06:00 ET, plus ticker-added. Five-year backfill for a new ticker and for
+    # watchlist names that do not yet have a complete EDGAR history. SEC_USER_AGENT is
+    # already in the shared job environment. Fair access: company_ir Pace (<=10 req/s)
+    # and backoff on 403/429. A partial run still rebuilds the dashboard.
+    sec-filings = {
+      handler        = "sec_filings.handler"
+      schedule       = "cron(0 6 ? * MON-FRI *)"
+      triggers       = ["ticker-added"]
+      memory         = 1024
+      timeout        = 600
+      read_prefixes  = ["raw/sec_filings/", "curated/sec_filings/"]
+      write_prefixes = ["raw/sec_filings/", "curated/sec_filings/", "serving/filings/"]
+      api_keys       = []
+      reads_prefs    = true
     }
     # Rebuilds serving/status.json after every job
     status-feed = {

@@ -32,6 +32,34 @@ FOLLOW_UP_MINUTES = (0, 4, 8, 12, 16)
 BLS_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BEA_URL = "https://apps.bea.gov/api/data"
 CENSUS_URL = "https://api.census.gov/data/timeseries/eits/ftd"
+# EITS has no IMPG/EXPG variables (asking for them is a 400). Trade is long-format:
+# cell_value per (category_code, data_type_code, seasonally_adj, time), in millions of USD.
+# Verified with a keyed query on 2026-10-14: BOPG (goods) exists only with seasonally_adj=no,
+# BOPGS (goods and services) only with seasonally_adj=yes. BOPG+yes matches nothing and the
+# API answers with an empty body (#182). Use BOPGS SA, which also matches the FRED IMPGS
+# vintage series these rows are dated by.
+CENSUS_GOODS_CATEGORY = "BOPGS"
+CENSUS_TYPES = {"IMP": "CENSUS_IMPG", "EXP": "CENSUS_EXPG"}
+
+
+def census_payload(status_code: int, body: bytes):
+    """Census answers a query that matches no rows with an empty body (often 204). That is no data, not a failure."""
+    if status_code == 204 or not body.strip():
+        from observability import logger
+
+        logger.info("census_no_data", extra={"status": status_code, "body_bytes": len(body)})
+        return []
+    return json.loads(body)
+
+
+def census_params(start_year: int, key: str) -> dict:
+    return {
+        "get": "cell_value,data_type_code,category_code,seasonally_adj,time_slot_id",
+        "category_code": CENSUS_GOODS_CATEGORY,
+        "seasonally_adj": "yes",  # required for BOPGS; BOPG is only published unadjusted
+        "time": f"from {start_year}-01",
+        "key": key,
+    }
 FRED_URL = "https://api.stlouisfed.org/fred/releases/dates"
 FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
 # FRED vintage series -> the M1 series released that morning. The earliest realtime_start
@@ -52,7 +80,9 @@ YOY_SERIES = {
 }
 RELEASE_LINKS_KEY = "curated/release_links/release_links.parquet"
 _API_KEY_QUERY = re.compile(r"(api_key=)[^&\s\"]*")
-BLS_ICS_URL = "https://www.bls.gov/schedule/news_release/cpi.ics"
+# BLS retired the per-release cpi.ics (404 since Oct 2026). The all-releases calendar is the
+# documented feed (bls.gov/help/hlpical.htm); parse_ics keeps only Consumer Price Index events.
+BLS_ICS_URL = "https://www.bls.gov/schedule/news_release/bls.ics"
 CLEVELAND_PAGE = "https://www.clevelandfed.org/indicators-and-data/inflation-nowcasting"
 MEASURE_SERIES = {"CPI": "CUSR0000SA0", "Core CPI": "CUSR0000SA0L1E", "PCE": "PCE"}
 RELEASE_FIELDS = (
@@ -195,6 +225,22 @@ def parse_census(payload, release_ts: str) -> list[dict]:
         return []
     header = [str(name) for name in payload[0]]
     rows = []
+    if "cell_value" in header:
+        for raw in payload[1:]:
+            record = dict(zip(header, raw, strict=False))
+            series_id = CENSUS_TYPES.get(str(record.get("data_type_code") or "").upper())
+            period = str(record.get("time") or "")[:7]
+            if (
+                not series_id
+                or len(period) != 7
+                or str(record.get("category_code") or "").upper() != CENSUS_GOODS_CATEGORY
+                or str(record.get("seasonally_adj") or "").lower() != "yes"
+            ):
+                continue
+            actual = _number(record.get("cell_value"))
+            if actual is not None:
+                rows.append(_row(series_id, period, release_ts, actual, "census", "usd"))
+        return rows
     for raw in payload[1:]:
         record = dict(zip(header, raw, strict=False))
         period = str(record.get("time") or "")[:7]
@@ -329,11 +375,21 @@ def consensus_index(prior: float | None, nowcast_pct: float | None) -> float | N
 
 
 def apply_nowcast(rows: list[dict], nowcast_rows: list[dict]) -> list[dict]:
+    # Cleveland's first table is month-over-month percent; later tables are YoY and quarterly
+    # annualized, which must not be applied as a monthly change. Rows without a table index
+    # (older callers) keep the last-value-wins behavior.
     latest_pct: dict[str, float] = {}
+    by_period: dict[tuple[str, str], float] = {}
     for item in nowcast_rows:
         series_id = MEASURE_SERIES.get(str(item.get("measure") or ""))
-        if series_id and isinstance(item.get("value"), (int, float)):
-            latest_pct[series_id] = float(item["value"])
+        if not series_id or not isinstance(item.get("value"), (int, float)):
+            continue
+        if item.get("table", 0) != 0:
+            continue
+        latest_pct[series_id] = float(item["value"])
+        month = month_key(str(item.get("period") or ""))
+        if month:
+            by_period[(series_id, month)] = float(item["value"])
     grouped: dict[str, list[dict]] = {}
     for row in rows:
         grouped.setdefault(str(row.get("series_id")), []).append(row)
@@ -343,6 +399,7 @@ def apply_nowcast(rows: list[dict], nowcast_rows: list[dict]) -> list[dict]:
             continue
         ordered = sorted(group, key=lambda item: str(item.get("period") or ""))
         latest = ordered[-1]
+        pct = by_period.get((series_id, str(latest.get("period") or "")), pct)
         if latest.get("consensus") is not None:
             continue
         prior = latest.get("prior")
@@ -354,6 +411,19 @@ def apply_nowcast(rows: list[dict], nowcast_rows: list[dict]) -> list[dict]:
         latest["consensus"] = agreed
         latest["surprise"] = surprise(latest.get("actual"), agreed)
     return rows
+
+
+_MONTHS = {name: i for i, name in enumerate(
+    ("january", "february", "march", "april", "may", "june", "july",
+     "august", "september", "october", "november", "december"), start=1)}
+
+
+def month_key(label: str) -> str | None:
+    """'September 2026' -> '2026-09'."""
+    parts = label.strip().lower().split()
+    if len(parts) == 2 and parts[0] in _MONTHS and parts[1].isdigit() and len(parts[1]) == 4:
+        return f"{parts[1]}-{_MONTHS[parts[0]]:02d}"
+    return None
 
 
 def shift_period(period: str, months: int) -> str | None:
@@ -754,16 +824,13 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 rec["rows"] = len(parsed)
                 found.extend(parsed)
             with source_run("census") as rec, get_client() as http:
-                payload = request_with_retry(
+                response = request_with_retry(
                     http,
                     "GET",
                     CENSUS_URL,
-                    params={
-                        "get": "time,IMPG,EXPG",
-                        "time": f"from {start_year}-01",
-                        "key": api_key("census"),
-                    },
-                ).json()
+                    params=census_params(start_year, api_key("census")),
+                )
+                payload = census_payload(response.status_code, response.content)
                 write_json(payload, f"raw/releases/census/date={day}/{run_key}.json")
                 parsed = parse_census(payload, release_ts)
                 rec["rows"] = len(parsed)

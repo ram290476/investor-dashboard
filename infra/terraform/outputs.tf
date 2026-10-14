@@ -34,13 +34,23 @@ output "data_key_arn" {
 }
 
 output "ops_topic_arn" {
-  description = "SNS topic for operational alerts."
+  description = "Ops intake topic (<name>-ops-alarms) that alarms publish to. It invokes the notifier; do not subscribe inboxes here."
   value       = module.alerting.ops_topic_arn
 }
 
 output "security_topic_arn" {
-  description = "SNS topic for security alerts."
+  description = "Security intake topic (<name>-security-alarms) that rules publish to. It invokes the notifier; do not subscribe inboxes here."
   value       = module.alerting.security_topic_arn
+}
+
+output "ops_email_topic_arn" {
+  description = "Ops delivery topic (<name>-ops-alerts). Inboxes subscribe here; only the notifier publishes."
+  value       = module.alerting.ops_email_topic_arn
+}
+
+output "security_email_topic_arn" {
+  description = "Security delivery topic (<name>-security-alerts). Inboxes subscribe here; only the notifier publishes."
+  value       = module.alerting.security_email_topic_arn
 }
 
 output "lambda_environment" {
@@ -108,8 +118,13 @@ output "job_functions" {
   value       = module.jobs.function_names
 }
 
+output "sms_notifier_arn" {
+  description = "Lambda that caps email (email_max_per_window per email_window_minutes) and SMS (sms_max_per_window per sms_window_minutes) independently per issue. Windows are fixed Pacific clock buckets, default one hour."
+  value       = module.alerting.sms_notifier_arn
+}
+
 output "cloudfront_alarm_topic_arn" {
-  description = "us-east-1 topic for the CloudFront 5xx alarm (null when enable_cloudfront_alarms is false). Recipients confirm it separately."
+  description = "us-east-1 topic for the CloudFront 5xx alarm (null when enable_cloudfront_alarms is false). It invokes the notifier; mail is sent from the ops-email topic."
   value       = module.us_east_1.cloudfront_topic_arn
 }
 

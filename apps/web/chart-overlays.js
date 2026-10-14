@@ -1,10 +1,11 @@
-import { chartValue, isNumericValue, validBars } from "./chart-period.js";
+import { chartValue, isNumericValue, servedPriceHistory, validBars } from "./chart-period.js";
+import { formatQuarterLabel } from "./panel-dates.js";
 
 export const CHART_LANES = Object.freeze([
-  { id: "VOL", label: "Volume" },
-  { id: "SI", label: "Short interest" },
-  { id: "PRESS", label: "Macro pressure" },
-  { id: "OPT", label: "Options" },
+  { id: "VOL", label: "Volume", colorVar: "--lane-volume", glyph: "bars" },
+  { id: "SI", label: "Short interest", colorVar: "--lane-si", glyph: "step" },
+  { id: "PRESS", label: "Macro pressure", colorVar: "--lane-press", glyph: "pressure" },
+  { id: "OPT", label: "Options", colorVar: "--lane-opt", glyph: "dashed" },
 ]);
 
 export const DEFAULT_CHART_SETTINGS = Object.freeze({ overlays: [], lanes: ["VOL", "PRESS"] });
@@ -45,8 +46,97 @@ export const OVERLAYS = [
   { id: "NEWS:SENTIMENT", label: "7-day news sentiment", group: "Sentiment", kind: "sentiment" },
 ].map((overlay, index) => ({ ...overlay, short: overlay.kind === "market" ? overlay.id : undefined, color: index }));
 
+export const MARKET_OVERLAY_IDS = Object.freeze(
+  OVERLAYS.filter((overlay) => overlay.kind === "market").map((overlay) => overlay.id),
+);
+
 const GROUP_ORDER = ["Market", "Moving averages", "Rates", "Inflation", "Risk", "Policy & geo", "Fundamentals", "Sentiment"];
 const overlayById = new Map(OVERLAYS.map((overlay) => [overlay.id, overlay]));
+const dynamicById = new Map();
+
+// Same rule as prefs_api FUNDAMENTAL_OVERLAY_RE. Pending-review ids (`*_pending`) are not selectable.
+const FUNDAMENTAL_OVERLAY_RE = /^FUNDAMENTAL:[A-Za-z][A-Za-z0-9_]{0,64}$/;
+
+function selectableOverlay(id) {
+  const value = String(id ?? "");
+  if (value.endsWith("_pending")) return false;
+  if (overlayById.has(value)) return true;
+  // `$` matches before a trailing newline, so require the whole id.
+  const match = FUNDAMENTAL_OVERLAY_RE.exec(value);
+  return Boolean(match && match[0] === value);
+}
+
+function proposedRow(row) {
+  return row?.approval_state === "proposed" || row?.status === "proposed";
+}
+
+function rememberFundamentals(chartData) {
+  dynamicById.clear();
+  const rowsById = new Map();
+  for (const row of chartData?.fundamentals || []) {
+    if (!row?.series_id || !isNumericValue(row.value)) continue;
+    if (String(row.series_id).endsWith("_pending") || proposedRow(row)) continue;
+    const list = rowsById.get(row.series_id) || [];
+    list.push(row);
+    rowsById.set(row.series_id, list);
+  }
+  for (const [seriesId, rows] of rowsById) {
+    const id = `FUNDAMENTAL:${seriesId}`;
+    if (!selectableOverlay(id)) continue;
+    const base = overlayById.get(id);
+    const name = rows.find((row) => row.display_name)?.display_name || base?.label || seriesId.replaceAll("_", " ");
+    const label = base?.label || name;
+    if (base && label === base.label) continue;
+    dynamicById.set(id, {
+      ...(base || {
+        id,
+        group: "Fundamentals",
+        kind: "fundamental",
+        color: OVERLAYS.length + dynamicById.size,
+      }),
+      label,
+      unit: rows.find((row) => row.unit)?.unit || "",
+    });
+  }
+}
+
+function approvedMetric(metric) {
+  return (metric?.approval_state || metric?.status) === "approved";
+}
+
+export function mergeCompanyFundamentals(chartData, metrics) {
+  const extra = [];
+  for (const metric of metrics || []) {
+    if (!approvedMetric(metric)) continue;
+    const seriesId = String(metric.metric_id || "");
+    if (!seriesId || seriesId.endsWith("_pending")) continue;
+    const name = metric.display_name || seriesId;
+    for (const point of metric?.series || []) {
+      if (!point || point.reported === false || !isNumericValue(point.value)) continue;
+      const date = point.period_end || point.date;
+      if (!date) continue;
+      extra.push({
+        series_id: seriesId,
+        display_name: name,
+        date,
+        value: Number(point.value),
+        unit: metric.unit || "",
+        fiscal_quarter: point.fiscal_period,
+        source_id: metric.provenance?.source_title || metric.provenance?.source_kind || "Company metrics",
+        approval_state: "approved",
+      });
+    }
+  }
+  const raw = chartData?.fundamentals || [];
+  const kept = raw.filter((row) => {
+    const seriesId = String(row?.series_id || "");
+    return seriesId && !seriesId.endsWith("_pending") && !proposedRow(row);
+  });
+  if (!extra.length && kept.length === raw.length) return chartData;
+  const replaced = new Set(extra.map((row) => row.series_id));
+  const base = kept.filter((row) => !replaced.has(row.series_id));
+  return { ...(chartData || {}), fundamentals: [...base, ...extra] };
+}
 
 function dateKey(bar) {
   return String(bar?.date || bar?.ts || "").slice(0, 10);
@@ -60,18 +150,27 @@ export function chartSettingsFor(prefs, ticker) {
   const saved = prefs?.chart_settings?.[ticker];
   if (!saved) return { overlays: [...DEFAULT_CHART_SETTINGS.overlays], lanes: [...DEFAULT_CHART_SETTINGS.lanes] };
   return {
-    overlays: Array.isArray(saved.overlays) ? saved.overlays.filter((id) => overlayById.has(id)).slice(0, 5) : [],
+    overlays: Array.isArray(saved.overlays) ? saved.overlays.filter((id) => selectableOverlay(id)).slice(0, 5) : [],
     lanes: Array.isArray(saved.lanes) ? saved.lanes.filter((id) => CHART_LANES.some((lane) => lane.id === id)) : [],
   };
 }
 
-export function overlayGroups(tickerData, chartData, dashboard, bars = validBars(tickerData?.price_history)) {
+export function overlayGroups(tickerData, chartData, dashboard, bars = validBars(servedPriceHistory(tickerData, chartData)), charts = null) {
+  rememberFundamentals(chartData);
+  const context = { bars, tickerData, chartData, dashboard, charts };
   return GROUP_ORDER.map((label) => ({
     id: label,
     label,
-    overlays: OVERLAYS.filter(overlay => overlay.group === label
-      && valuesForOverlay(overlay.id, { bars, tickerData, chartData, dashboard }).some(isNumericValue))
-      .map(overlay => ({ ...overlay, available: true })),
+    overlays: [
+      ...OVERLAYS.filter(overlay => overlay.group === label
+        && valuesForOverlay(overlay.id, context).some(isNumericValue))
+        .map(overlay => ({ ...(dynamicById.get(overlay.id) || overlay), available: true })),
+      ...(label === "Fundamentals"
+        ? [...dynamicById.values()].filter((overlay) => !overlayById.has(overlay.id)
+          && valuesForOverlay(overlay.id, context).some(isNumericValue))
+          .map((overlay) => ({ ...overlay, available: true }))
+        : []),
+    ],
   })).filter((group) => group.overlays.length);
 }
 
@@ -149,22 +248,30 @@ function movingAverage(priceHistory, window, bars) {
   return alignedValues(averagePoints, bars);
 }
 
-function marketValues(overlay, dashboard, bars) {
+function marketValues(overlay, dashboard, bars, charts) {
   const record = dashboard?.tickers?.[overlay.id];
-  if (!record) return bars.map(() => null);
-  if (bars.some((bar) => bar.ts) && record.intraday?.bars?.length) {
+  const history = servedPriceHistory(record, charts?.[overlay.id]);
+  if (!record && !history.length) return bars.map(() => null);
+  if (bars.some((bar) => bar.ts) && record?.intraday?.bars?.length) {
     return alignedIntradayValues(record.intraday.bars, bars);
   }
-  const daily = (record.price_history || []).map((bar) => ({ date: bar.date, value: chartValue(bar) }));
+  const daily = history.map((bar) => ({ date: bar.date, value: chartValue(bar) }));
   const valuesByDate = new Map(daily.map((point) => [point.date, point.value]));
   return bars.map((bar) => valuesByDate.get(dateKey(bar)) ?? null);
 }
 
-export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard }) {
+export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard, charts }) {
+  if (String(id || "").endsWith("_pending")) return (bars || []).map(() => null);
   const overlay = overlayById.get(id);
-  if (!overlay) return bars.map(() => null);
-  if (overlay.kind === "market") return marketValues(overlay, dashboard, bars);
-  if (overlay.kind === "average") return movingAverage(tickerData?.price_history || [], overlay.window, bars);
+  if (!overlay) {
+    if (String(id || "").startsWith("FUNDAMENTAL:")) {
+      const metric = id.slice("FUNDAMENTAL:".length);
+      return alignedValues((chartData?.fundamentals || []).filter((row) => row.series_id === metric), bars);
+    }
+    return bars.map(() => null);
+  }
+  if (overlay.kind === "market") return marketValues(overlay, dashboard, bars, charts);
+  if (overlay.kind === "average") return movingAverage(servedPriceHistory(tickerData, chartData), overlay.window, bars);
   if (overlay.kind === "macro") return alignedValues(chartData?.macro_series?.[overlay.id], bars);
   if (overlay.kind === "sentiment") {
     const observed = new Map((tickerData?.news?.sentiment_history || []).map(point => [dateKey(point), pointValue(point)]));
@@ -174,8 +281,25 @@ export function valuesForOverlay(id, { bars, tickerData, chartData, dashboard })
   return alignedValues((chartData?.fundamentals || []).filter((row) => row.series_id === metric), bars);
 }
 
+const OVERLAY_UNITS = {
+  DGS10: "%", DGS2: "%", T10Y2Y: "%", DFII10: "%", SOFR: "%",
+  CPI_YOY: "%", CORE_CPI_YOY: "%", PCE_YOY: "%", T10YIE: "%",
+  DCOILWTICO: "USD",
+  "FUNDAMENTAL:revenue_gaap": "USD",
+  "FUNDAMENTAL:gross_profit_gaap": "USD",
+  "FUNDAMENTAL:gross_margin_gaap": "ratio",
+  "FUNDAMENTAL:shares_outstanding": "sh",
+  "FUNDAMENTAL:public_float_usd": "USD",
+  "FUNDAMENTAL:deliveries": "vehicles",
+  "FUNDAMENTAL:fsd_subscribers": "subscribers",
+};
+
+export function overlayUnit(id) {
+  return OVERLAY_UNITS[id] || dynamicById.get(id)?.unit || "";
+}
+
 export function overlayDefinition(id) {
-  return overlayById.get(id) || null;
+  return dynamicById.get(id) || overlayById.get(id) || null;
 }
 
 export function fundamentalObservation(id, chartData, through) {
@@ -191,7 +315,8 @@ export function fundamentalSummary(id, chartData, through) {
   const value = row.unit === "ratio" ? `${(Number(row.value) * 100).toFixed(1)}%`
     : row.unit === "USD" ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(row.value)
     : Number(row.value).toLocaleString("en-US");
-  return `${value}${row.fiscal_quarter ? ` · ${row.fiscal_quarter}` : ""}`;
+  const quarter = row.fiscal_quarter ? (formatQuarterLabel(row.fiscal_quarter) || row.fiscal_quarter) : "";
+  return `${value}${quarter ? ` · ${quarter}` : ""}`;
 }
 
 export function isMarketOverlay(id) {
@@ -234,6 +359,58 @@ export function panelsRevealedByOverlay(overlayId) {
   const group = overlayById.get(overlayId)?.group;
   if (!group) return [];
   return DETAIL_PANELS.filter((panel) => panel.groups.includes(group)).map((panel) => panel.id);
+}
+
+// Closed area between a macro-pressure series and zero. `sign` is +1 for the
+// tailwind side and -1 for the headwind side. Gaps and zero crossings split the fill.
+export function pressureFillPath(points, sign, yAt) {
+  const wanted = sign < 0 ? -1 : 1;
+  const samples = [];
+  let previous = null;
+  for (const point of points || []) {
+    if (!point || !Number.isFinite(point.value) || !Number.isFinite(point.x)) {
+      if (previous) samples.push(null);
+      previous = null;
+      continue;
+    }
+    if (previous && previous.value * point.value < 0) {
+      const t = previous.value / (previous.value - point.value);
+      samples.push({ x: previous.x + (point.x - previous.x) * t, value: 0 });
+    }
+    samples.push(point);
+    previous = point;
+  }
+  const zeroY = yAt(0);
+  let path = "";
+  let run = [];
+  const flush = () => {
+    const active = run.some((point) => point.value !== 0 && Math.sign(point.value) === wanted);
+    if (run.length >= 2 && active) {
+      path += `M${run[0].x.toFixed(2)} ${yAt(run[0].value).toFixed(2)}`;
+      for (let index = 1; index < run.length; index += 1) {
+        path += `L${run[index].x.toFixed(2)} ${yAt(run[index].value).toFixed(2)}`;
+      }
+      const end = run.at(-1);
+      const start = run[0];
+      path += `L${end.x.toFixed(2)} ${zeroY.toFixed(2)}L${start.x.toFixed(2)} ${zeroY.toFixed(2)}Z`;
+    }
+    run = [];
+  };
+  for (const sample of samples) {
+    if (!sample) {
+      flush();
+      continue;
+    }
+    const side = sample.value === 0 ? 0 : Math.sign(sample.value);
+    if (side === wanted || side === 0) run.push(sample);
+    else flush();
+    if (side === 0) {
+      flush();
+      run = [sample];
+    }
+  }
+  flush();
+  return path;
 }
 
 /** Follow mode shows a mapped card only when one of its groups is active. Dismissed cards stay hidden. */

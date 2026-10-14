@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#0B0E13;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#E6EAF0;padding:16px;width:900px}.note{font-size:11px;color:#E3C05C;margin:0 0 8px}</style></head><body>
+<p class="note">DESIGN REFERENCE: re-rendered from design/ai-generated/Main.dc.html lines 448–466 (Catalyst calendar drawer, open, TSLA, tz PT) with the design's own placeholder rows from lines 1448–1457 and summary from line 1505. Times use the design's tm() helper.</p>
+<section style="background:#12161D;border:1px solid #222A35;border-radius:10px">
+<div style="min-height:46px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 14px"><span style="display:flex;align-items:baseline;gap:12px;min-width:0"><span style="font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#9BA6B5;white-space:nowrap">Catalyst calendar</span><span style="font-size:11px;color:#8B96A6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">5 upcoming for TSLA · next: Weekly sweep — state AV, HTS, GPR · Mon Oct 5</span></span><span style="font-size:12px;color:#9BA6B5">[icon]</span></div>
+<div id="g" style="padding:0 14px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:6px 16px"></div></section>
+<script>
+const rows=[['Mon Oct 5','05:00 PT','Weekly sweep — state AV, HTS, GPR','W1 · robotaxi fleet trend update','#5B6577'],
+['[BLS date]','05:30 PT','CPI (Sep)','expected TSLA move ±[x]% (past avg) · nowcast drifting up','#F2A33A'],
+['[date]','13:30 PT','Tesla Q3 earnings','expected TSLA move ±[x]% (past avg) · DS-13','#E3C05C'],
+['Wed Oct 28','11:00 PT','FOMC decision · in 25 days','expected TSLA move ±[x]% (past avg) · cut odds 62%','#6CA6FF'],
+['[BEA date]','05:30 PT','PCE (Sep)','expected TSLA move ±[x]% (past avg) · DS-24','#F2A33A'],
+['[date]','—','Next Starship flight','no past TSLA events to size the move · Launch Library 2 · DS-08','#D2D8E0']];
+rows.length=5;
+for(const c of rows){document.getElementById('g').insertAdjacentHTML('beforeend',`<div style="display:grid;grid-template-columns:4px 88px minmax(0,1fr);gap:10px;padding:6px 0;border-top:1px solid #1A2029"><span style="border-radius:2px;background:${c[4]}"></span><span style="display:flex;flex-direction:column"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">${c[0]}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#8B96A6">${c[1]}</span></span><span style="display:flex;flex-direction:column;min-width:0"><span style="font-size:12px">${c[2]}</span><span style="font-size:10px;color:#9BA6B5">${c[3]}</span></span></div>`)}
+</script></body></html>

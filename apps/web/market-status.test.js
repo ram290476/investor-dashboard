@@ -87,7 +87,9 @@ test("header clock styles use theme tokens and stay one row, including the phone
   assert.match(block, /\.market-compact[\s\S]*display:\s*none/);
   assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}/);
   const phone = styles.slice(styles.indexOf("@media (max-width: 640px)"), styles.indexOf("@media (max-width: 930px)"));
-  assert.match(phone, /\.header-date,\s*\n\s*\.market-label,\s*\n\s*\.schedule-when/);
+  assert.match(phone, /\.account-text,\s*\n\s*\.market-label\s*\{/);
+  assert.doesNotMatch(phone, /header-date|schedule-when/);
+  assert.doesNotMatch(styles, /schedule-when|schedule-word/);
   assert.match(phone, /\.market-compact\s*\{[^}]*display:\s*inline/);
   assert.match(styles, /\.app-header\s*\{[^}]*flex-wrap:\s*nowrap/);
   for (const theme of THEMES) {
@@ -105,7 +107,9 @@ test("the header paints text nodes and keeps the account and data names", () => 
   assert.match(paint, /textContent/);
   assert.match(app, /data-market-status/);
   assert.match(app, /aria-label", view\.text/);
-  assert.match(app, /open collection schedules and data refresh status/);
+  assert.match(app, /actions\.append\(date, refresh, settings\.renderAccountButton\(\)\)/);
+  assert.doesNotMatch(app, /schedule-word|header-refresh|open collection schedules and data refresh status/);
+  assert.match(app, /View collection schedules and source health/);
   assert.match(account, /account-jobs/);
   assert.match(account, /aria-label", `Signed In · open account menu · data refresh: \$\{summary\.text\}`/);
   assert.match(account, /Private workspace/);

@@ -57,7 +57,30 @@ _runs: list[dict[str, Any]] = []
 JOB_EVENT_SOURCE = f"{SERVICE}.jobs"
 _events = None
 # Keys a handler return value may add to the Job Finished detail. rows_stored is published as rows_written.
-_EVENT_FIELDS = ("batches", "rows_written", "mode", "dropped", "over_cap", "status", "reason")
+_EVENT_FIELDS = (
+    "batches",
+    "rows_written",
+    "mode",
+    "dropped",
+    "over_cap",
+    "status",
+    "reason",
+    # Company IR chain: collect hands manifests to extract, extract hands tickers to serve.
+    "collected",
+    "documents",
+    "skipped",
+    "tickers",
+    "manifests",
+    "extracted",
+    "mismatches",
+    "served",
+    "run_status",
+    "filing",
+    # Backfill: how many tickers reached a terminal success in this run. Dashboard rebuilds on > 0.
+    "tickers_completed",
+    # SEC filings run: tickers processed, new filings, failures, no_sec_filer.
+    "summary",
+)
 
 
 def _finished_detail(result: Any) -> dict[str, Any]:
@@ -67,6 +90,23 @@ def _finished_detail(result: Any) -> dict[str, Any]:
     if "rows_written" not in detail and result.get("rows_stored") is not None:
         detail["rows_written"] = result["rows_stored"]
     return detail
+
+
+def chain_outcome(result: Any, default: str = "success") -> str:
+    """Publish partial and failed collector runs as those outcomes.
+
+    Only `run_status` opts in. Other jobs keep outcome success when some sources fail
+    and the status feed still marks them partial from failed_sources. An exception
+    already set default to failure and must stay a failure.
+    """
+    if default != "success" or not isinstance(result, dict):
+        return default
+    reported = result.get("run_status")
+    if reported == "partial":
+        return "partial"
+    if reported in {"failed", "failure"}:
+        return "failure"
+    return default
 
 
 def emit_job_finished(job_id: str, run_id: str, outcome: str, detail: dict[str, Any] | None = None) -> None:
@@ -95,7 +135,8 @@ def emit_job_finished(job_id: str, run_id: str, outcome: str, detail: dict[str, 
             raise RuntimeError("EventBridge rejected the job-finished event")
     except Exception:
         logger.exception("emit_job_finished_failed")
-        if outcome == "success":
+        # A dropped success or partial event would skip the downstream job, so retry it.
+        if outcome in {"success", "partial"}:
             raise
 
 
@@ -104,12 +145,17 @@ def job_handler(
     persist_runs: Callable[[list[dict[str, Any]]], None] | None = None,
     emit_event: bool = True,
     lease_key: str | None = None,
+    skip_when_leased: bool = True,
 ):
     """Wrap a Lambda handler: correlation ids, tracing, metric flush, run records, job event.
 
     persist_runs receives one dict per source run (the ingestion_runs rows) and
     should append them to the lake, e.g. curated/ingestion_runs/year=/month=/<run_id>.parquet.
     emit_event publishes 'Job Finished' (see emit_job_finished) when the handler returns or raises.
+    skip_when_leased (default True) returns a skipped result instead of failing when lease_key is
+    still held, so an overlapping invoke logs ``job_skipped`` and exits cleanly rather than raising
+    LeaseHeld, which counted as a Lambda error, got retried twice and landed on the dead-letter
+    queue. Pass False only for a job whose event must not be dropped while another run is active.
     """
 
     def decorator(fn):
@@ -127,16 +173,29 @@ def job_handler(
             outcome = "success"
             result = None
             try:
-                from lake import job_lease
+                from lake import LeaseHeld, job_lease
 
                 with job_lease(lease_key) if lease_key else nullcontext():
                     result = fn(event, context)
                 return result
+            except LeaseHeld:
+                if skip_when_leased:
+                    outcome = "skipped"
+                    result = {"status": "skipped", "reason": "lease held"}
+                    logger.info(
+                        "job_skipped",
+                        extra={"event": "job_run", "outcome": outcome, "reason": "lease held"},
+                    )
+                    return result
+                outcome = "failure"
+                logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})
+                raise
             except Exception:
                 outcome = "failure"
                 logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})
                 raise  # Lambda retries twice, then sends the event to the dead-letter queue.
             finally:
+                outcome = chain_outcome(result, outcome)
                 failed_ids = sorted({r["source_id"] for r in _runs if r["outcome"] == "failure"})
                 logger.info(
                     "job_finished",

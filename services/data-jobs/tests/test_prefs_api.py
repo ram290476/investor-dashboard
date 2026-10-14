@@ -1,4 +1,9 @@
+import base64
+import gzip
 import json
+import os
+import subprocess
+import sys
 
 import boto3
 import pytest
@@ -86,13 +91,20 @@ def test_legacy_over_limit_watchlists_remain_editable_without_growth(api, change
         assert "Remove 6" in json.loads(response["body"])["error"]
 
 
+def _stored(document: dict, etag: str = '"etag"') -> tuple[bytes, str, dict]:
+    raw = json.dumps(document, separators=(",", ":"), default=str).encode()
+    return raw, etag, document
+
+
 def test_authenticated_dashboard_and_status_routes(api, monkeypatch):
     mod, _ = api
     documents = {
         "serving/dashboard.json": {"schema_version": 1, "tickers": {"TSLA": {"price_history": []}}},
         "serving/status.json": {"jobs": [{"job": "D4", "status": "ok"}]},
     }
-    monkeypatch.setattr(mod, "_read_serving_json", lambda key: documents.get(key))
+    monkeypatch.setattr(
+        mod, "_read_serving_document", lambda key: _stored(documents[key], f'"{key}"') if key in documents else None
+    )
 
     dashboard_event = _event("GET")
     dashboard_event["rawPath"] = "/dashboard"
@@ -110,7 +122,12 @@ def test_chart_route_only_reads_a_ticker_in_the_callers_watchlist(api, monkeypat
     mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
     reads = []
     chart_data = {"ticker": "TSLA", "macro_pressure": [{"date": "2026-10-01", "value": 0.2}]}
-    monkeypatch.setattr(mod, "_read_serving_json", lambda key: reads.append(key) or chart_data)
+
+    def read(key):
+        reads.append(key)
+        return _stored(chart_data, '"chart"')
+
+    monkeypatch.setattr(mod, "_read_serving_document", read)
 
     event = _event("GET")
     event["rawPath"] = "/chart/TSLA"
@@ -125,17 +142,26 @@ def test_chart_route_only_reads_a_ticker_in_the_callers_watchlist(api, monkeypat
     assert denied["statusCode"] == 403
     assert reads == ["serving/chart_data/TSLA.json"]
 
+    proxy = _event("GET")
+    proxy["rawPath"] = "/chart/SPY"
+    allowed = mod.handler(proxy, None)
+    assert allowed["statusCode"] == 200
+    assert reads == ["serving/chart_data/TSLA.json", "serving/chart_data/SPY.json"]
 
-def test_stock_route_hides_proposed_metrics_and_stays_on_the_watchlist(api, monkeypatch):
+
+def test_stock_route_serves_proposed_metrics_with_status_and_stays_on_the_watchlist(api, monkeypatch):
     mod, _ = api
     mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
     stored = {
         "ticker": "TSLA",
         "generated_at": "2026-10-08T12:00:00Z",
         "run_status": "ok",
+        "freshness_label": "Pending review",
         "metrics": [
-            {"metric_id": "optimus", "approved": False, "approval_state": "proposed", "latest": {"value": 9}},
+            {"metric_id": "optimus", "approved": False, "approval_state": "proposed", "latest": {"value": 9},
+             "provenance": {"confidence": 0.95, "source_url": "https://www.sec.gov/Archives/edgar/data/fixture"}},
             {"metric_id": "tesla_semi", "approved": True, "approval_state": "approved", "latest": {"value": 4}},
+            {"metric_id": "secret", "approved": False, "approval_state": "rejected", "latest": {"value": 1}},
         ],
     }
     monkeypatch.setattr(mod, "_read_serving_json", lambda key: stored if key == "serving/stock/TSLA.json" else None)
@@ -143,7 +169,9 @@ def test_stock_route_hides_proposed_metrics_and_stays_on_the_watchlist(api, monk
     event = _event("GET")
     event["rawPath"] = "/stock/TSLA"
     body = json.loads(mod.handler(event, None)["body"])
-    assert [item["metric_id"] for item in body["metrics"]] == ["tesla_semi"]
+    assert [item["metric_id"] for item in body["metrics"]] == ["tesla_semi", "optimus"]
+    assert body["metrics"][1]["approval_state"] == "proposed"
+    assert body["metrics"][1]["provenance"]["confidence"] == 0.95
 
     missing = _event("GET")
     missing["rawPath"] = "/stock/SPCX"
@@ -153,14 +181,218 @@ def test_stock_route_hides_proposed_metrics_and_stays_on_the_watchlist(api, monk
     mod.handler(_event("PUT", body={"tickers": ["TSLA", "NVDA"], "pinned": [], "version": 1}), None)
     empty = _event("GET")
     empty["rawPath"] = "/stock/NVDA"
-    page = json.loads(mod.handler(empty, None)["body"])
-    assert page["metrics"] == []
-    assert page["freshness_label"] == "No company-specific metrics discovered"
+    unpublished = mod.handler(empty, None)
+    assert unpublished["statusCode"] == 404
+    assert json.loads(unpublished["body"])["code"] == "STOCK_NOT_READY"
+
+
+def _review_event(path, body, groups="admin", username="owner@example.com", method="PUT"):
+    event = _route_event(method, path, body)
+    event["requestContext"]["authorizer"]["jwt"]["claims"].update({
+        "cognito:groups": groups,
+        "username": username,
+    })
+    return event
+
+
+def _unsigned_jwt(payload: dict) -> str:
+    segment = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+    return f"eyJhbGciOiJub25lIn0.{segment}.sig"
+
+
+def _bearer_review_event(path, body, payload, sub="user-a"):
+    """Authorizer claims have sub only. Groups live on the bearer the authorizer already accepted."""
+    event = _route_event("PUT", path, body, sub=sub)
+    event["headers"] = {"authorization": f"Bearer {_unsigned_jwt(payload)}"}
+    return event
+
+
+def _seed_review_lake(mod, monkeypatch):
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="lake")
+    monkeypatch.setattr(mod, "LAKE_BUCKET", "lake")
+    monkeypatch.setattr(mod, "_s3", s3)
+    serving = {
+        "ticker": "TSLA",
+        "generated_at": "2026-10-11T00:00:00Z",
+        "run_status": "ok",
+        "freshness_label": "Pending review",
+        "metrics": [{
+            "metric_id": "total_deliveries",
+            "approved": False,
+            "approval_state": "proposed",
+            "status": "proposed",
+            "display_name": "Deliveries",
+            "latest": {"value": 486532},
+            "provenance": {"approval_state": "proposed", "source_url": "https://www.sec.gov/example"},
+        }],
+    }
+    s3.put_object(
+        Bucket="lake",
+        Key="serving/stock/TSLA.json",
+        Body=json.dumps(serving).encode(),
+        ContentType="application/json",
+    )
+    return s3
+
+
+def _lake_json(s3, key):
+    return json.loads(s3.get_object(Bucket="lake", Key=key)["Body"].read())
+
+
+def test_admin_approval_writes_the_lake_catalog_and_patches_serving(api, monkeypatch):
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+    response = mod.handler(_review_event(
+        "/stock/TSLA/metrics/total_deliveries", {"status": "approved"}, groups=["admin"],
+    ), None)
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["metrics"][0]["metric_id"] == "total_deliveries"
+    assert body["metrics"][0]["approval_state"] == "approved"
+    assert body["freshness_label"] == "IR data approved"
+    catalog = _lake_json(s3, "catalog/TSLA.json")
+    entry = catalog["metrics"][0]
+    assert entry["status"] == "approved"
+    assert entry["approved_by"] == "owner@example.com"
+    assert entry["approved_at"]
+    serving = _lake_json(s3, "serving/stock/TSLA.json")
+    assert serving["metrics"][0]["approval_state"] == "approved"
+    assert serving["metrics"][0]["approved_by"] == "owner@example.com"
+    assert serving["metrics"][0]["provenance"]["approval_state"] == "approved"
+    stored = s3.get_object(Bucket="lake", Key="serving/stock/TSLA.json")
+    assert stored["CacheControl"] == "no-store"
+    sibling = s3.get_object(Bucket="lake", Key="serving/stock/TSLA.json.gz")
+    assert sibling["CacheControl"] == "no-store"
+    assert sibling["ContentType"] == "application/gzip"
+    assert gzip.decompress(sibling["Body"].read()) == stored["Body"].read()
+
+    undone = mod.handler(_review_event(
+        "/stock/TSLA/metrics/total_deliveries", {"status": "proposed"}, groups="admin",
+    ), None)
+    assert undone["statusCode"] == 200
+    assert json.loads(undone["body"])["metrics"][0]["approval_state"] == "proposed"
+    cleared = _lake_json(s3, "catalog/TSLA.json")["metrics"][0]
+    assert cleared["status"] == "proposed"
+    assert cleared["approved_by"] is None
+    assert cleared["approved_at"] is None
+    assert _lake_json(s3, "serving/stock/TSLA.json")["freshness_label"] == "Pending review"
+
+
+def test_access_token_groups_authorize_when_the_authorizer_omits_the_array(api, monkeypatch):
+    """HTTP API JWT authorizers omit array claims. The page still sends the access token."""
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+    payload = {
+        "sub": "user-a",
+        "token_use": "access",
+        "username": "owner@example.com",
+        "cognito:groups": ["admin"],
+    }
+    response = mod.handler(
+        _bearer_review_event("/stock/TSLA/metrics/total_deliveries", {"status": "approved"}, payload),
+        None,
+    )
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["metrics"][0]["approval_state"] == "approved"
+    assert _lake_json(s3, "catalog/TSLA.json")["metrics"][0]["approved_by"] == "owner@example.com"
+    again = _event("GET")
+    again["rawPath"] = "/stock/TSLA"
+    reloaded = json.loads(mod.handler(again, None)["body"])
+    assert reloaded["metrics"][0]["approval_state"] == "approved"
+
+    string_groups = _review_event(
+        "/stock/TSLA/metrics/total_deliveries", {"status": "proposed"}, groups="[admin users]",
+    )
+    string_groups["requestContext"]["authorizer"]["jwt"]["claims"].pop("username", None)
+    string_groups["headers"] = {"authorization": f"Bearer {_unsigned_jwt(payload)}"}
+    undone = mod.handler(string_groups, None)
+    assert undone["statusCode"] == 200
+    assert json.loads(undone["body"])["metrics"][0]["approval_state"] == "proposed"
+
+
+def test_bearer_groups_are_ignored_for_a_different_sub_or_the_demo_account(api, monkeypatch):
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+    path = "/stock/TSLA/metrics/total_deliveries"
+    other = _bearer_review_event(path, {"status": "approved"}, {
+        "sub": "someone-else", "token_use": "access", "cognito:groups": ["admin"], "username": "owner@example.com",
+    })
+    assert mod.handler(other, None)["statusCode"] == 403
+    unsigned = _bearer_review_event(path, {"status": "approved"}, {
+        "sub": "user-a", "cognito:groups": ["admin"], "username": "owner@example.com",
+    })
+    assert mod.handler(unsigned, None)["statusCode"] == 403
+    demo = _bearer_review_event(path, {"status": "approved"}, {
+        "sub": "user-a",
+        "token_use": "id",
+        "email": "ram.vellamsetti@gmail.com",
+        "cognito:groups": ["admin"],
+    })
+    assert mod.handler(demo, None)["statusCode"] == 403
+    identity = _bearer_review_event(path, {"status": "approved"}, {
+        "sub": "user-a",
+        "token_use": "id",
+        "email": "owner@example.com",
+        "cognito:username": "owner@example.com",
+        "cognito:groups": ["admin"],
+    })
+    assert mod.handler(identity, None)["statusCode"] == 200
+    assert "catalog/TSLA.json" in [item["Key"] for item in s3.list_objects_v2(Bucket="lake").get("Contents", [])]
+
+
+def test_metric_review_rejects_non_admins_the_demo_account_and_bad_requests(api, monkeypatch):
+    mod, _ = api
+    _seed_review_lake(mod, monkeypatch)
+    path = "/stock/TSLA/metrics/total_deliveries"
+    denied = mod.handler(_review_event(path, {"status": "approved"}, groups=""), None)
+    assert denied["statusCode"] == 403
+    demo = mod.handler(_review_event(
+        path, {"status": "approved"}, groups=["admin"], username="ram.vellamsetti@gmail.com",
+    ), None)
+    assert demo["statusCode"] == 403
+    assert "admin" in json.loads(demo["body"])["error"].lower()
+    missing = mod.handler(_review_event(
+        "/stock/NVDA/metrics/total_deliveries", {"status": "approved"}, groups="admin",
+    ), None)
+    assert missing["statusCode"] == 403
+    unknown = mod.handler(_review_event(
+        "/stock/TSLA/metrics/not_a_metric", {"status": "approved"}, groups="[admin]",
+    ), None)
+    assert unknown["statusCode"] == 404
+    bad = mod.handler(_review_event(path, {"status": "rejected"}, groups="admin"), None)
+    assert bad["statusCode"] == 400
+    other = mod.handler(_review_event(path, None, method="GET"), None)
+    assert other["statusCode"] == 405
+
+
+def test_catalog_write_failure_is_a_named_api_error(api, monkeypatch, capsys):
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+
+    def put_object(**_kwargs):
+        raise _client_error("AccessDenied", "PutObject", f"SecretAccessKey={SECRET}")
+
+    monkeypatch.setattr(s3, "put_object", put_object)
+    body = _assert_error(
+        mod.handler(_review_event("/stock/TSLA/metrics/total_deliveries", {"status": "approved"}), None),
+        502,
+        "CATALOG_WRITE_FAILED",
+    )
+    assert body["error"] == mod._ERROR_MESSAGES["CATALOG_WRITE_FAILED"]
+    _assert_log(
+        _log_lines(capsys)[0],
+        "prefs_api_error",
+        "CATALOG_WRITE_FAILED",
+        "ClientError",
+        "PUT /stock/{ticker}/metrics/{metric_id}",
+    )
 
 
 def test_dashboard_route_reports_not_ready_instead_of_fake_data(api, monkeypatch):
     mod, _ = api
-    monkeypatch.setattr(mod, "_read_serving_json", lambda _key: None)
+    monkeypatch.setattr(mod, "_read_serving_document", lambda _key: None)
     event = _event("GET")
     event["rawPath"] = "/dashboard"
 
@@ -347,6 +579,91 @@ def test_chart_settings_are_saved_per_watchlist_ticker_and_survive_legacy_put(ap
     assert legacy["chart_settings"] == saved["chart_settings"]
 
 
+def test_chart_settings_accept_dynamic_fundamental_overlays(api):
+    mod, _ = api
+    response = mod.handler(
+        _event(
+            "PUT",
+            body={
+                "tickers": ["TSLA"],
+                "pinned": [],
+                "chart_settings": {
+                    "TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending"], "lanes": ["VOL"]},
+                },
+                "version": 0,
+            },
+        ),
+        None,
+    )
+    assert response["statusCode"] == 200
+    saved = json.loads(response["body"])["chart_settings"]["TSLA"]["overlays"]
+    assert saved == ["FUNDAMENTAL:capex"]
+    dropped = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": ["FUNDAMENTAL:capex_pending", "FUNDAMENTAL:capex_pending", "FUNDAMENTAL:opex_pending"],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert dropped["chart_settings"]["TSLA"]["overlays"] == []
+    under_cap = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": [
+                "FUNDAMENTAL:a_pending", "FUNDAMENTAL:b_pending", "FUNDAMENTAL:c_pending",
+                "FUNDAMENTAL:d_pending", "FUNDAMENTAL:e_pending", "FUNDAMENTAL:opex",
+            ],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert under_cap["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:opex"]
+    kept = mod.validate({
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "chart_settings": {"TSLA": {
+            "overlays": ["SPY", "DIA", "QQQ", "MA20", "DGS10", "FUNDAMENTAL:capex_pending"],
+            "lanes": ["VOL"],
+        }},
+        "version": 0,
+    })
+    assert kept["chart_settings"]["TSLA"]["overlays"] == ["SPY", "DIA", "QQQ", "MA20", "DGS10"]
+    boto3.resource("dynamodb").Table("invdash-user-prefs").put_item(Item={
+        "user_sub": "user-a",
+        "tickers": ["TSLA"],
+        "pinned": [],
+        "display": {},
+        "chart_settings": {
+            "TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending"], "lanes": ["VOL"]},
+        },
+        "version": 4,
+    })
+    loaded = json.loads(mod.handler(_event("GET"), None)["body"])
+    assert loaded["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:capex"]
+    rewritten = json.loads(mod.handler(
+        _event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": loaded["version"]}),
+        None,
+    )["body"])
+    assert rewritten["chart_settings"]["TSLA"]["overlays"] == ["FUNDAMENTAL:capex"]
+    rejected = mod.handler(
+        _event(
+            "PUT",
+            body={
+                "tickers": ["TSLA"],
+                "pinned": [],
+                "chart_settings": {"TSLA": {"overlays": ["FUNDAMENTAL:../capex"], "lanes": ["VOL"]}},
+                "version": 1,
+            },
+        ),
+        None,
+    )
+    assert rejected["statusCode"] == 400
+    assert "unsupported overlay" in json.loads(rejected["body"])["error"]
+
+
 @pytest.mark.parametrize(
     "settings,msg",
     [
@@ -354,6 +671,14 @@ def test_chart_settings_are_saved_per_watchlist_ticker_and_survive_legacy_put(ap
         ({"TSLA": {"overlays": [{}], "lanes": ["VOL"]}}, "unsupported overlay"),
         ({"TSLA": {"overlays": [], "lanes": ["UNKNOWN"]}}, "unsupported lane"),
         ({"TSLA": {"overlays": ["SPY"] * 6, "lanes": ["VOL"]}}, "at most 5"),
+        (
+            {"TSLA": {"overlays": [
+                "FUNDAMENTAL:capex", "FUNDAMENTAL:capex", "FUNDAMENTAL:capex_pending",
+            ], "lanes": ["VOL"]}},
+            "at most 5",
+        ),
+        ({"TSLA": {"overlays": ["FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
+        ({"TSLA": {"overlays": ["FUNDAMENTAL:capex", "FUNDAMENTAL:capex\n"], "lanes": ["VOL"]}}, "unsupported overlay"),
     ],
 )
 def test_chart_settings_reject_unknown_or_excess_values(api, settings, msg):
@@ -416,7 +741,12 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
                     "tickers": ["TSLA"],
                     "pinned": [],
                     "display": {
-                        "panels": {"rates": "dismissed", "news": "closed", "made-up": "dismissed"},
+                        "panels": {
+                            "rates": "dismissed",
+                            "news": "closed",
+                            "filings-events": "open",
+                            "made-up": "dismissed",
+                        },
                         "panel_mode": "follow",
                     },
                     "version": 0,
@@ -425,7 +755,7 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
             None,
         )["body"]
     )
-    assert saved["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    assert saved["display"]["panels"] == {"rates": "dismissed", "news": "closed", "filings-events": "open"}
     assert saved["display"]["panel_mode"] == "follow"
     kept = json.loads(
         mod.handler(
@@ -441,7 +771,7 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
             None,
         )["body"]
     )
-    assert kept["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    assert kept["display"]["panels"] == {"rates": "dismissed", "news": "closed", "filings-events": "open"}
     assert kept["display"]["panel_mode"] == "follow"
     assert kept["display"]["theme"] == "clean-light"
     shown = json.loads(
@@ -459,7 +789,7 @@ def test_dismissed_panels_and_panel_mode_round_trip(api):
         )["body"]
     )
     assert shown["display"]["panel_mode"] == "all"
-    assert shown["display"]["panels"] == {"rates": "dismissed", "news": "closed"}
+    assert shown["display"]["panels"] == {"rates": "dismissed", "news": "closed", "filings-events": "open"}
     rejected = mod.handler(
         _event(
             "PUT",
@@ -513,6 +843,205 @@ def test_validation(api, body, msg):
     assert r["statusCode"] == 400 and msg in json.loads(r["body"])["error"]
 
 
+SECURITY_HEADERS = {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+}
+
+
+def _gzip_event(path: str, encoding: str | None = "gzip"):
+    event = _event("GET")
+    event["rawPath"] = path
+    if encoding is not None:
+        event["headers"] = {"accept-encoding": encoding}
+    return event
+
+
+def _decode(response: dict) -> dict:
+    body = response["body"]
+    if response.get("isBase64Encoded"):
+        body = gzip.decompress(base64.b64decode(body)).decode()
+    return json.loads(body)
+
+
+def _assert_security(headers: dict) -> None:
+    for key, value in SECURITY_HEADERS.items():
+        assert headers[key] == value
+    assert not any(str(key).lower().startswith("access-control") for key in headers)
+
+
+def _history_document(bars: int = 400) -> dict:
+    return {
+        "schema_version": 3,
+        "tickers": {
+            f"T{ticker}": {
+                "price_history": [
+                    {
+                        "date": f"2024-{(index % 12) + 1:02d}-{(index % 28) + 1:02d}",
+                        "close": 100.0 + index,
+                        "close_raw": 99.0 + index,
+                        "adj_close": 100.0 + index,
+                        "volume": 1_000_000 + index,
+                        "headline": f"Session note {index} for ticker {ticker}",
+                    }
+                    for index in range(bars)
+                ]
+            }
+            for ticker in range(7)
+        },
+    }
+
+
+def test_dashboard_chart_and_status_gzip_when_the_client_accepts_it(api, monkeypatch):
+    mod, _ = api
+    dashboard = _history_document()
+    status = {"jobs": [{"job": "D4", "status": "ok", "detail": "x" * 1200}]}
+    chart = {"ticker": "TSLA", "points": [{"date": f"2024-01-{(i % 28) + 1:02d}", "value": i} for i in range(80)]}
+    documents = {
+        "serving/dashboard.json": dashboard,
+        "serving/status.json": status,
+        "serving/chart_data/TSLA.json": chart,
+    }
+    monkeypatch.setattr(
+        mod, "_read_serving_document", lambda key: _stored(documents[key], f'"{key}"') if key in documents else None
+    )
+    mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
+
+    plain = mod.handler(_gzip_event("/dashboard", encoding=None), None)
+    assert plain.get("isBase64Encoded") is not True
+    assert "Content-Encoding" not in plain["headers"]
+    assert plain["headers"]["Vary"] == "Accept-Encoding"
+    _assert_security(plain["headers"])
+    plain_body = json.loads(plain["body"])
+    assert plain_body["tickers"]["T0"]["price_history"]
+    assert plain_body["status"]["jobs"][0]["job"] == "D4"
+
+    compressed = mod.handler(_gzip_event("/dashboard"), None)
+    assert compressed["headers"]["Content-Encoding"] == "gzip"
+    assert compressed["headers"]["Vary"] == "Accept-Encoding"
+    assert compressed["isBase64Encoded"] is True
+    _assert_security(compressed["headers"])
+    transfer = len(base64.b64decode(compressed["body"]))
+    raw_size = len(plain["body"].encode())
+    assert transfer <= raw_size * 0.25
+    assert _decode(compressed) == plain_body
+
+    for path in ("/status", "/chart/TSLA"):
+        small_plain = mod.handler(_gzip_event(path, encoding=None), None)
+        small_gzip = mod.handler(_gzip_event(path), None)
+        assert len(small_plain["body"].encode()) > 1024
+        assert small_gzip["headers"]["Content-Encoding"] == "gzip"
+        assert small_gzip["headers"]["Vary"] == "Accept-Encoding"
+        assert small_gzip["isBase64Encoded"] is True
+        _assert_security(small_gzip["headers"])
+        assert _decode(small_gzip) == json.loads(small_plain["body"])
+
+
+def test_gzip_is_skipped_under_1kb_and_when_the_client_refuses_it(api, monkeypatch):
+    mod, _ = api
+    status = {"jobs": [{"job": "D4", "status": "ok"}]}
+    def read_status(key):
+        return _stored(status) if key == "serving/status.json" else None
+
+    monkeypatch.setattr(mod, "_read_serving_document", read_status)
+    assert len(json.dumps(status, separators=(",", ":")).encode()) <= 1024
+
+    for encoding in ("gzip", "gzip;q=0", "br", "identity", None):
+        response = mod.handler(_gzip_event("/status", encoding=encoding), None)
+        assert response["statusCode"] == 200
+        assert response.get("isBase64Encoded") is not True
+        assert "Content-Encoding" not in response["headers"]
+        assert "Vary" not in response["headers"]
+        assert json.loads(response["body"]) == status
+        _assert_security(response["headers"])
+
+
+def test_warm_cache_and_precompressed_sibling_skip_recompression(api, monkeypatch):
+    mod, _ = api
+    chart = {"ticker": "TSLA", "points": [{"i": index, "note": "bar"} for index in range(80)]}
+    stored = _stored(chart, '"chart-1"')
+    calls = []
+    real_compress = gzip.compress
+
+    def spy(data, **kwargs):
+        calls.append(len(data))
+        return real_compress(data, **kwargs)
+
+    monkeypatch.setattr(mod.gzip, "compress", spy)
+    monkeypatch.setattr(mod, "_read_serving_document", lambda key: stored if key.endswith("TSLA.json") else None)
+    monkeypatch.setattr(mod, "_read_gzip_sibling", lambda key: None)
+    mod.handler(_event("PUT", body={"tickers": ["TSLA"], "pinned": [], "version": 0}), None)
+
+    first = mod.handler(_gzip_event("/chart/TSLA"), None)
+    second = mod.handler(_gzip_event("/chart/TSLA"), None)
+    assert calls == [len(stored[0])]
+    assert first["body"] == second["body"]
+    assert _decode(first) == chart
+
+    sibling = real_compress(stored[0], compresslevel=6, mtime=0)
+    calls.clear()
+    mod._GZIP_CACHE.clear()
+    monkeypatch.setattr(mod, "_read_gzip_sibling", lambda key: sibling)
+    served = mod.handler(_gzip_event("/chart/TSLA"), None)
+    assert calls == []
+    assert base64.b64decode(served["body"]) == sibling
+    assert _decode(served) == chart
+
+
+def test_response_over_the_lambda_limit_is_refused(api, monkeypatch):
+    mod, _ = api
+    document = _history_document(bars=40)
+    def read_dashboard(key):
+        return _stored(document) if key.endswith("dashboard.json") else None
+
+    monkeypatch.setattr(mod, "_read_serving_document", read_dashboard)
+    monkeypatch.setattr(mod, "LAMBDA_RESPONSE_LIMIT", 800)
+
+    refused = mod.handler(_gzip_event("/dashboard", encoding=None), None)
+    assert refused["statusCode"] == 503
+    assert json.loads(refused["body"])["code"] == "RESPONSE_TOO_LARGE"
+    assert len(refused["body"]) < 200
+    _assert_security(refused["headers"])
+
+    monkeypatch.setattr(mod, "LAMBDA_RESPONSE_LIMIT", 120)
+    still_refused = mod.handler(_gzip_event("/dashboard"), None)
+    assert still_refused["statusCode"] == 503
+    assert json.loads(still_refused["body"])["code"] == "RESPONSE_TOO_LARGE"
+    assert "isBase64Encoded" not in still_refused
+    assert len(still_refused["body"]) < 200
+
+    monkeypatch.setattr(mod, "LAMBDA_RESPONSE_LIMIT", 6 * 1024 * 1024)
+    allowed = mod.handler(_gzip_event("/dashboard"), None)
+    assert allowed["statusCode"] == 200
+    assert allowed["headers"]["Content-Encoding"] == "gzip"
+    assert len(base64.b64decode(allowed["body"])) < len(json.dumps(_decode(allowed)).encode())
+
+
+def test_precompressed_dashboard_sibling_matches_the_build(api, monkeypatch):
+    mod, _ = api
+    import lake
+
+    status = {"jobs": [{"job": "D4", "status": "ok"}]}
+    snapshot = {"schema_version": 3, "pad": "a" * 2000, "status": status, "tickers": {"TSLA": {"price_history": []}}}
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="lake")
+    monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+    monkeypatch.setattr(lake, "_s3", s3)
+    monkeypatch.setattr(mod, "LAKE_BUCKET", "lake")
+    monkeypatch.setattr(mod, "_s3", s3)
+    lake.write_json(status, "serving/status.json")
+    size = lake.write_json_and_gzip(snapshot, "serving/dashboard.json")
+    calls = []
+    monkeypatch.setattr(mod.gzip, "compress", lambda *args, **kwargs: calls.append(1))
+
+    response = mod.handler(_gzip_event("/dashboard"), None)
+    assert calls == []
+    assert response["headers"]["Content-Encoding"] == "gzip"
+    assert len(base64.b64decode(response["body"])) == size["gzip_bytes"]
+    assert _decode(response)["status"] == status
+    assert _decode(response)["schema_version"] == 3
 SECRET = "super-secret-token"
 _LOG_KEYS = {"event", "route", "method", "error_class", "code"}
 
@@ -543,16 +1072,22 @@ def _log_lines(capsys):
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def _assert_log(entry, event_name, code, error_class, route):
+def _assert_log(entry, event_name, code, error_class, route, ticker=None):
     raw = json.dumps(entry)
-    assert set(entry) == _LOG_KEYS
-    assert entry == {
+    if ticker is None and route == "GET /chart/{ticker}":
+        ticker = "TSLA"  # every chart-route error test requests /chart/TSLA
+    expected = {
         "event": event_name,
         "route": route,
         "method": route.split()[0],
         "error_class": error_class,
         "code": code,
     }
+    if ticker:
+        expected["ticker"] = ticker
+    assert set(entry) == set(expected)
+    assert set(entry) - {"ticker"} == _LOG_KEYS
+    assert entry == expected
     assert f'"event": "{event_name}"' in raw
     assert f'"code": "{code}"' in raw
     assert SECRET not in raw
@@ -776,3 +1311,146 @@ def test_put_keeps_saved_prefs_when_eventbridge_publish_fails(api, monkeypatch, 
     assert len(logs) == 1
     _assert_log(logs[0], "ticker_added_publish_failed", "TICKER_ADDED_PUBLISH_FAILED", "ClientError", "PUT /prefs")
     assert "RIVN" not in json.dumps(logs[0])
+
+
+def test_prefs_api_imports_without_the_app_package():
+    """The user_prefs Lambda zip is prefs_api.py alone, so this import cannot see src/app."""
+    function_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.pardir, "src", "functions", "prefs_api")
+    )
+    repo = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir))
+    probe = """
+import sys
+from pathlib import Path
+
+function_dir = Path(sys.argv[1]).resolve()
+repo = Path(sys.argv[2]).resolve()
+kept = [str(function_dir)]
+for entry in sys.path:
+    if not entry:
+        continue
+    path = Path(entry).resolve()
+    if path == repo or repo in path.parents:
+        continue
+    kept.append(str(path))
+sys.path = kept
+import prefs_api
+
+assert "universe" not in sys.modules
+assert not any((Path(entry) / "universe.py").is_file() for entry in sys.path)
+assert prefs_api.INDEX_PROXIES == ("SPY", "DIA", "QQQ", "IWM", "XLY", "ITA", "SMH")
+"""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = ""
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    completed = subprocess.run(
+        [sys.executable, "-c", probe, function_dir, repo],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=function_dir,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_prefs_index_proxies_match_the_collector_universe():
+    import prefs_api
+    import universe
+
+    assert prefs_api.INDEX_PROXIES == universe.INDEX_PROXIES
+
+
+def test_unreadable_catalog_reports_review_failure_not_rebuild(api, monkeypatch, capsys):
+    """Without s3:ListBucket a missing catalog/<T>.json reads as AccessDenied. Do not say 'rebuilt'."""
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch)
+    real_get = s3.get_object
+
+    def get_object(**kwargs):
+        if kwargs["Key"].startswith("catalog/"):
+            raise _client_error("AccessDenied", "GetObject", "denied")
+        return real_get(**kwargs)
+
+    monkeypatch.setattr(mod._s3, "get_object", get_object)
+    response = mod.handler(_review_event(
+        "/stock/TSLA/metrics/total_deliveries", {"status": "approved"}, groups=["admin"],
+    ), None)
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 502
+    assert body["code"] == "CATALOG_READ_FAILED"
+    assert "rebuilt" not in body["error"]
+
+
+@pytest.mark.parametrize("aws_code", ["NoSuchKey", "404", "AccessDenied"])
+def test_missing_stock_page_is_clean_404(api, monkeypatch, capsys, aws_code):
+    """A ticker whose serving/stock/<T>.json is not built yet is a 404, not SERVING_READ_FAILED."""
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error(aws_code, "GetObject", "missing")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    body = _assert_error(mod.handler(_route_event("GET", "/stock/TSLA"), None), 404, "STOCK_NOT_READY")
+    assert "rebuilt" not in body["error"]
+    assert not any(line.get("code") == "SERVING_READ_FAILED" for line in _log_lines(capsys))
+
+
+@pytest.mark.parametrize("aws_code", ["NoSuchKey", "AccessDenied"])
+def test_review_on_missing_stock_page_is_404(api, monkeypatch, capsys, aws_code):
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error(aws_code, "GetObject", "missing")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    event = _bearer_review_event(
+        "/stock/TSLA/metrics/gross_margin",
+        {"status": "approved"},
+        {"sub": "user-a", "token_use": "access", "cognito:groups": ["admin"]},
+    )
+    response = mod.handler(event, None)
+    assert response["statusCode"] == 404
+    assert not any(line.get("code") == "SERVING_READ_FAILED" for line in _log_lines(capsys))
+
+
+@pytest.mark.parametrize("aws_code", ["NoSuchKey", "404", "AccessDenied"])
+def test_missing_chart_is_clean_404(api, monkeypatch, capsys, aws_code):
+    """Issue #183: a ticker whose serving/chart_data/<T>.json is not built yet is a 404, not SERVING_READ_FAILED."""
+    mod, _ = api
+    reads = []
+
+    def get_object(**kwargs):
+        reads.append(kwargs["Key"])
+        raise _client_error(aws_code, "GetObject", "missing")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    body = _assert_error(mod.handler(_route_event("GET", "/chart/TSLA"), None), 404, "CHART_NOT_READY")
+    assert "rebuilt" not in body["error"]
+    assert reads == ["serving/chart_data/TSLA.json"]
+    assert not any(line.get("code") == "SERVING_READ_FAILED" for line in _log_lines(capsys))
+
+
+def test_chart_kms_denial_still_serving_read_failed_and_logs_ticker(api, monkeypatch, capsys):
+    """Only a missing key maps to 404; a KMS denial is a real read failure and the log names the ticker."""
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error("KMS.AccessDeniedException", "GetObject", "kms denied")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    _assert_error(mod.handler(_route_event("GET", "/chart/tsla"), None), 502, "SERVING_READ_FAILED")
+    entry = _log_lines(capsys)[0]
+    _assert_log(entry, "prefs_api_error", "SERVING_READ_FAILED", "ClientError", "GET /chart/{ticker}", "TSLA")
+    assert entry["ticker"] == "TSLA"
+
+
+def test_non_chart_errors_do_not_log_a_ticker(api, monkeypatch, capsys):
+    mod, _ = api
+
+    def get_object(**_kwargs):
+        raise _client_error("SlowDown", "GetObject")
+
+    _patch_get_object(monkeypatch, mod, get_object)
+    mod.handler(_route_event("GET", "/dashboard"), None)
+    assert "ticker" not in _log_lines(capsys)[0]

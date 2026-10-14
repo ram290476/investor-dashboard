@@ -214,8 +214,11 @@ def test_outputs_unchanged_after_migrating_legacy_layout(s3, monkeypatch):
     before = _outputs(s3)
     assert before["dashboard"]["market"]["as_of"] == "2026-10-10T12:00:00+00:00"
     tsla = before["dashboard"]["tickers"]["TSLA"]["price_history"]
-    assert len(tsla) == len(days)
+    chart = json.loads(s3.get_object(Bucket="lake", Key="serving/chart_data/TSLA.json")["Body"].read())
+    assert len(chart["price_history"]) == len(days)
+    assert len(tsla) == min(len(days), dashboard_build.SUMMARY_PRICE_ROWS)
     assert tsla[-1]["date"] == str(days[-1])
+    assert chart["price_history"][-1]["date"] == str(days[-1])
 
     summary = compact.compact(bucket="lake", delete_legacy=True)
     assert summary["legacy_objects"] == 2 * (len(range(0, len(days), 63)) + 10)

@@ -10,7 +10,6 @@ export const SETTINGS_TABS = [
   { id: "tickers", label: "My tickers" },
   { id: "theme", label: "Theme & display" },
   { id: "profile", label: "Profile & time zone" },
-  { id: "refresh", label: "Data refresh" },
 ];
 
 export const PALETTES = [
@@ -40,10 +39,12 @@ function clone(prefs) {
   };
 }
 
-/** "#settings/theme" -> "theme"; unknown tabs fall back to My tickers; other hashes -> null. */
+/** "#settings/theme" -> "theme". "#settings/refresh" opens the data refresh pop-up.
+ * Unknown tabs fall back to My tickers. Other hashes return null. */
 export function parseSettingsHash(hash) {
   const match = /^#settings(?:\/([a-z-]*))?$/.exec(String(hash || ""));
   if (!match) return null;
+  if (match[1] === "refresh") return "refresh";
   return SETTINGS_TABS.some((tab) => tab.id === match[1]) ? match[1] : "tickers";
 }
 
@@ -145,17 +146,35 @@ export function fallbackSelection(prefs, selected) {
   return prefs.pinned?.[0] || prefs.tickers?.[0] || null;
 }
 
-/** Email claim from a Cognito ID token (display only; the API never trusts this). */
-export function emailFromIdToken(idToken) {
+const DEMO_METRIC_ADMIN = "ram.vellamsetti@gmail.com";
+
+/** JWT payload for display only. The API checks the Cognito group itself. */
+export function jwtClaims(token) {
   try {
-    const payload = String(idToken || "").split(".")[1];
+    const payload = String(token || "").split(".")[1];
     if (!payload) return null;
     const base64 = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
     const claims = JSON.parse(globalThis.atob(base64));
-    return typeof claims.email === "string" ? claims.email : null;
+    return claims && typeof claims === "object" ? claims : null;
   } catch {
     return null;
   }
+}
+
+/** Email claim from a Cognito ID token (display only; the API never trusts this). */
+export function emailFromIdToken(idToken) {
+  const email = jwtClaims(idToken)?.email;
+  return typeof email === "string" ? email : null;
+}
+
+/** True when the access token's Cognito groups include admin. The public demo account is never an admin. */
+export function canApproveMetrics(accessToken, email = "") {
+  const claims = jwtClaims(accessToken) || {};
+  const identities = [email, claims.email, claims.username, claims["cognito:username"]];
+  if (identities.some((value) => String(value || "").trim().toLowerCase() === DEMO_METRIC_ADMIN)) return false;
+  const groups = claims["cognito:groups"];
+  const list = Array.isArray(groups) ? groups : String(groups || "").split(/[\s,]+/);
+  return list.some((group) => String(group).replace(/[[\]"]/g, "").trim() === "admin");
 }
 
 /** Per-ticker history status for a just-added ticker (#33 adds a richer pipeline status later). */
@@ -172,11 +191,11 @@ export function timeZoneLabel(zone) {
 export const PANEL_IDS = [
   "rates", "inflation", "market-comparison", "moving-averages", "volatility",
   "dollar-oil", "tariffs", "correlation", "catalyst-calendar", "company",
-  "contracts", "about-data", "news",
+  "contracts", "about-data", "news", "filings-events",
 ];
 
 const PANEL_STATES = new Set(["open", "closed", "dismissed"]);
-const DEFAULT_OPEN_PANELS = new Set(["rates", "inflation", "moving-averages", "company", "news"]);
+const DEFAULT_OPEN_PANELS = new Set(["rates", "inflation", "moving-averages", "company", "news", "filings-events"]);
 
 /** Keep known ids with an open, closed, or dismissed value. Unknown ids and other values are dropped. */
 export function normalizePanels(raw) {

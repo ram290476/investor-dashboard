@@ -1,4 +1,4 @@
-"""D5: government awards for SpaceX and Tesla.
+"""D5: government awards for every watchlist ticker (base tickers plus prefs, capped at 25).
 
 USAspending needs no key and does the backfill. SAM.gov is capped at about 3 calls
 a run and 10 a day. A 401 or 403 is a partial run, not a failed job.
@@ -6,6 +6,7 @@ a run and 10 a day. A 401 or 403 is a partial run, not a failed job.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -20,11 +21,15 @@ STATE_KEY = "curated/contracts/_state.json"
 USASPENDING_CONTRACT_CODES = ("A", "B", "C", "D")
 USASPENDING_PAGE_SIZE = 100
 USASPENDING_MAX_PAGES = 20
-NAME_TO_TICKER = (
+# Recipient spellings SEC entity names do not cover. Watchlist names are added per run.
+NAME_OVERRIDES: tuple[tuple[str, str], ...] = (
     ("space exploration technologies", "SPCX"),
     ("spacex", "SPCX"),
     ("tesla", "TSLA"),
 )
+NAME_TO_TICKER: list[tuple[str, str]] = list(NAME_OVERRIDES)
+# USAspending recipient search term per ticker when the SEC name is not the contracting entity.
+RECIPIENT_OVERRIDES = {"SPCX": "Space Exploration Technologies", "TSLA": "Tesla"}
 # UEIs are filled as awards identify them. A listed UEI wins over the name match.
 UEI_TO_TICKER: dict[str, str] = {}
 
@@ -57,11 +62,49 @@ def fiscal_quarter(day: date) -> str:
 def ticker_for(name: str | None, uei: str | None = None) -> str | None:
     if uei and uei in UEI_TO_TICKER:
         return UEI_TO_TICKER[uei]
-    lowered = (name or "").lower()
+    lowered = f" {re.sub(r'[^a-z0-9]+', ' ', (name or '').lower())} "
     for needle, ticker in NAME_TO_TICKER:
-        if needle in lowered:
+        if f" {needle} " in lowered:
             return ticker
     return None
+
+
+def name_map_from_watchlist(names: dict[str, str | None]) -> list[tuple[str, str]]:
+    """Overrides first, then the cleaned SEC entity name of every watchlist ticker."""
+    from universe import short_company_name
+
+    entries = list(NAME_OVERRIDES)
+    for ticker, name in names.items():
+        needle = " ".join(short_company_name(name).lower().replace("&", " ").split())
+        needle = " ".join(re.sub(r"[^a-z0-9]+", " ", needle).split())
+        if needle and len(needle) >= 3 and all(needle != known for known, _ in entries):
+            entries.append((needle, ticker.upper()))
+    return entries
+
+
+def use_watchlist_names(names: dict[str, str | None]) -> list[tuple[str, str]]:
+    """Point ticker_for at this run's watchlist."""
+    NAME_TO_TICKER[:] = name_map_from_watchlist(names)
+    return NAME_TO_TICKER
+
+
+def recipient_searches(tickers: list[str], names: dict[str, str | None]) -> list[tuple[str, str]]:
+    """(ticker, USAspending recipient search text) for each watchlist ticker with a usable name."""
+    from universe import short_company_name
+
+    searches = []
+    for ticker in tickers:
+        text = RECIPIENT_OVERRIDES.get(ticker) or short_company_name(names.get(ticker))
+        if text:
+            searches.append((ticker, text))
+    return searches
+
+
+def sam_query_for(searches: list[tuple[str, str]], day: date) -> str:
+    """SAM.gov allows ~10 calls a day, so one watchlist name per day, in rotation."""
+    if not searches:
+        return "SpaceX"
+    return searches[day.toordinal() % len(searches)][1]
 
 
 def sam_budget(calls_today: int, wanted: int = SAM_CALLS_PER_RUN) -> int:
@@ -252,14 +295,18 @@ def reconcile(rows: list[dict]) -> list[dict]:
     return merge_awards(kept)
 
 
-def rollup_contracts(rows: list[dict], as_of: date) -> list[dict]:
-    """Trailing-12-month obligations, agency mix, and the last 30 days of new awards."""
+def rollup_contracts(rows: list[dict], as_of: date, tickers: list[str] | None = None) -> list[dict]:
+    """Trailing-12-month obligations, agency mix, and the last 30 days of new awards.
+
+    Every watchlist ticker with matched awards is rolled up; None means any matched ticker.
+    """
+    wanted = None if tickers is None else {str(t).upper() for t in tickers}
     ttm_start = (as_of - timedelta(days=365)).isoformat()
     recent_start = (as_of - timedelta(days=30)).isoformat()
     by_ticker: dict[str, dict] = {}
     for row in rows:
         ticker = row.get("ticker")
-        if ticker not in {"TSLA", "SPCX"}:
+        if not ticker or (wanted is not None and ticker not in wanted):
             continue
         bucket = by_ticker.setdefault(
             ticker,
@@ -321,6 +368,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from http_client import get_client, request_with_retry
     from lake import read_json, read_parquet_prefix, write_json, write_parquet
     from observability import job_handler, logger, source_run
+    from universe import watchlist_names, watchlist_tickers
 
     @job_handler(JOB_ID)
     def run(event, context):
@@ -337,10 +385,23 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         partial = False
         awards: list[dict] = []
         opportunities: list[dict] = []
+        tickers = watchlist_tickers()
+        names = watchlist_names(tickers, read_json)
+        use_watchlist_names(names)
+        searches = recipient_searches(tickers, names)
+        sam_query = sam_query_for(searches, now.date())
+
+        def time_left() -> bool:
+            remaining = getattr(context, "get_remaining_time_in_millis", None)
+            return remaining is None or remaining() > 60_000
 
         usaspending_ok = True
         with get_client() as http:
-            for index, name in enumerate(("Space Exploration Technologies", "Tesla")):
+            for index, (_ticker, name) in enumerate(searches):
+                if not time_left():
+                    logger.warning("usaspending_time_budget_skip", extra={"job": JOB_ID, "recipient": name})
+                    usaspending_ok = False
+                    continue
                 with source_run("usaspending") as record:
                     for page in range(1, USASPENDING_MAX_PAGES + 1):
                         payload = request_with_retry(
@@ -363,7 +424,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 with source_run("sam-awards") as record:
                     response = http.get(
                         "https://api.sam.gov/contract-awards/v1/search",
-                        params={"api_key": api_key("sam-gov"), "q": "SpaceX", "limit": 10},
+                        params={"api_key": api_key("sam-gov"), "q": sam_query, "limit": 10},
                     )
                     used += 1
                     outcome = sam_status(response.status_code)
@@ -381,7 +442,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 with source_run("sam-opportunities") as record:
                     response = http.get(
                         "https://api.sam.gov/opportunities/v2/search",
-                        params={"api_key": api_key("sam-gov"), "title": "SpaceX", "limit": 10},
+                        params={"api_key": api_key("sam-gov"), "title": sam_query, "limit": 10},
                     )
                     used += 1
                     if sam_status(response.status_code) == "partial":
@@ -424,7 +485,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 f"curated/contract_opportunities/date={now.date().isoformat()}/{run_id}.parquet",
             )
         all_rows = read_parquet_prefix("curated/contracts/")
-        rolled = rollup_contracts(all_rows.to_dicts() if not all_rows.is_empty() else merged, now.date())
+        rolled = rollup_contracts(all_rows.to_dicts() if not all_rows.is_empty() else merged, now.date(), tickers)
         if rolled:
             write_json(rolled, "curated/contracts_rollup/latest.json")
         state.setdefault("sam_calls", {})[now.date().isoformat()] = calls_today + used

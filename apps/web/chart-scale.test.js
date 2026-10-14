@@ -5,8 +5,12 @@ import test from "node:test";
 import {
   CHART_PLOT,
   chartTicks,
+  chartYearLabels,
+  fiscalAxis,
+  formatAmount,
   formatAxisTick,
   indexAtPlotX,
+  niceAmountTicks,
   plotEdgePixels,
   plotX,
 } from "./chart-scale.js";
@@ -50,41 +54,52 @@ test("a later series stays on the shared scale instead of stretching across the 
   assert.ok(plotX(firstOptions, count) < CHART_PLOT.right);
 });
 
-test("ticks use hours, days or weeks, months, and years for each period", () => {
+test("time axes use one quarter label and a separate year line", () => {
   const intraday = [9, 10, 11, 12, 13, 14, 15, 16].map((hour) => ({
     ts: `2026-10-07T${String(hour).padStart(2, "0")}:30:00Z`,
   }));
   const hours = chartTicks(intraday, "1D");
-  assert.ok(hours.length >= 4 && hours.length <= 8);
-  assert.ok(hours.every((tick) => /^\d{2}:\d{2}$/.test(tick.label)));
-  assert.equal(hours[0].label, "09:30");
-  assert.equal(hours.at(-1).x, plotX(hours.at(-1).index, intraday.length));
+  assert.deepEqual(hours.map((tick) => tick.label), ["Q4"]);
+  assert.deepEqual(chartYearLabels(hours).map((band) => band.year), ["2026"]);
+  assert.equal(hours[0].x, plotX(hours[0].index, intraday.length));
+  assert.equal(formatAxisTick({ date: "2026-03-02" }), "Q1");
+  assert.doesNotMatch(formatAxisTick({ date: "2025-05-02" }), /2025|Q2 '/);
 
-  const week = chartTicks(days("2026-10-05", 5), "1W");
-  assert.deepEqual(week.map((tick) => tick.label), ["Oct 5", "Oct 6", "Oct 7", "Oct 8", "Oct 9"]);
+  const year = chartTicks(days("2025-01-02", 252), "1Y");
+  assert.deepEqual(year.map((tick) => tick.label), ["Q1", "Q2", "Q3", "Q4"]);
+  assert.ok(year.every((tick) => tick.year === "2025"));
+  assert.equal(chartYearLabels(year).length, 1);
+  assert.ok(chartYearLabels(year)[0].x > year[0].x && chartYearLabels(year)[0].x < year.at(-1).x);
 
-  const month = chartTicks(days("2026-09-08", 21), "1M");
-  const quarter = chartTicks(days("2026-07-10", 63), "3M");
-  for (const ticks of [month, quarter]) {
-    assert.ok(ticks.length >= 3 && ticks.length <= 6);
-    assert.ok(ticks.every((tick) => /^[A-Z][a-z]{2} \d{1,2}$/.test(tick.label)));
-  }
+  const span = chartTicks(days("2024-10-01", 400), "3Y");
+  assert.ok(span.filter((tick) => tick.year === "2025").length === 4);
+  assert.ok(span.some((tick) => tick.boundary && tick.year === "2025"));
+  const years = chartYearLabels(span);
+  assert.deepEqual(years.map((band) => band.year), ["2024", "2025", "2026"]);
+  assert.ok(years.every((band) => !band.year.includes("Q")));
 
-  const year = chartTicks(days("2025-10-08", 252), "1Y");
-  const ytd = chartTicks(days("2026-01-02", 200), "YTD");
-  for (const ticks of [year, ytd]) {
-    assert.ok(ticks.length >= 3 && ticks.length <= 6);
-    assert.ok(ticks.every((tick) => /^[A-Z][a-z]{2}( \d{2})?$/.test(tick.label)));
-  }
-  assert.equal(formatAxisTick({ date: "2026-03-02" }, "1Y"), "Mar");
+  const phone = chartTicks(days("2024-10-01", 400), "3Y", CHART_PLOT, { compact: true });
+  assert.ok(phone.length < span.length);
+  assert.ok(phone.every((tick) => /^Q[1-4]$/.test(tick.label)));
+  assert.ok(chartYearLabels(phone).length >= 2);
 
-  const fiveYear = chartTicks(days("2021-10-01", 1259), "5Y");
-  const threeYear = chartTicks(days("2023-10-02", 756), "3Y");
-  for (const ticks of [fiveYear, threeYear]) {
-    assert.ok(ticks.length >= 3 && ticks.length <= 6);
-    assert.ok(ticks.every((tick) => /^\d{4}$/.test(tick.label)));
-    assert.deepEqual(ticks.map((tick) => tick.label), [...new Set(ticks.map((tick) => tick.label))]);
-  }
+  const fiscal = fiscalAxis(["2025Q1", "2025Q2", "2025Q3", "2025Q4", "2026Q1"], { compact: false });
+  assert.deepEqual(fiscal.ticks.map((tick) => tick.label), ["Q1", "Q2", "Q3", "Q4", "Q1"]);
+  assert.deepEqual(fiscal.years.map((band) => band.year), ["2025", "2026"]);
+  const thin = fiscalAxis(["2024Q1", "2024Q2", "2024Q3", "2024Q4", "2025Q1"], { compact: true });
+  assert.equal(thin.ticks.filter((tick) => tick.show).length < thin.ticks.length, true);
+  assert.equal(thin.years.length, 2);
+});
+
+test("amount ticks are rounded and keep their unit", () => {
+  const prices = niceAmountTicks(412.2, 488.8, 4);
+  assert.ok(prices.length >= 2 && prices.length <= 6);
+  assert.ok(prices.every((tick) => tick >= 400 && tick <= 500));
+  assert.equal(formatAmount(250, "USD"), "$250");
+  assert.match(formatAmount(1.2e9, "USD"), /\$1\.2B/);
+  assert.equal(formatAmount(45, "%"), "45%");
+  assert.equal(formatAmount(12.5, "GWh"), "12.5 GWh");
+  assert.equal(formatAmount(0.125, "ratio"), "12.5%");
 });
 
 test("tick positions are the same x as the price chart bar they label", () => {

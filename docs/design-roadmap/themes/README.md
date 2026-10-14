@@ -57,15 +57,18 @@ green/red for existing users; choose **Theme default** to use each theme's own u
 
 These captures show the **real application** at 1440px, not the design mockup. Authentication,
 prices, headlines, filings, fundamentals, and macro values are synthetic fixtures, not live data.
+The links below are a local preview of `main` on October 10, 2026, after catalyst rows (#127),
+news rows (#130), mini-chart colors and the wider company page (#131), and the #133 UI fixes (#134).
+The `production-*.png` files in this folder are the October 8 captures, from before those changes.
 
 | Theme | Production capture |
 | --- | --- |
-| Industrial Dark | [Desktop](production-industrial-dark.png) |
-| Terminal Amber | [Desktop](production-terminal-amber.png) |
-| Charting Navy | [Desktop](production-charting-navy.png) |
-| Clean Light | [Desktop](production-clean-light.png) / [390px mobile](production-clean-light-mobile.png) |
-| Colorblind High Contrast | [Desktop](production-colorblind-hc.png) |
-| Midnight Slate | [Desktop](production-midnight-slate.png) |
+| Industrial Dark | [Desktop](../current-app/industrial-dark-1440.png) |
+| Terminal Amber | [Desktop](../current-app/terminal-amber-1440.png) |
+| Charting Navy | [Desktop](../current-app/charting-navy-1440.png) |
+| Clean Light | [Desktop](../current-app/clean-light-1440.png) / [390px chart](../current-app/clean-light-390-chart.png) |
+| Colorblind High Contrast | [Desktop](../current-app/colorblind-hc-1440.png) |
+| Midnight Slate | [Desktop](../current-app/midnight-slate-1440.png) |
 
 To regenerate with Chrome and `puppeteer-core` available, serve `apps/web` on
 `http://127.0.0.1:8716`, then run:

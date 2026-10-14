@@ -183,12 +183,26 @@ resource "aws_cloudwatch_log_group" "api_fn" {
   name              = "/aws/lambda/${local.fn_name}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name change. In-place retention updates stay allowed.
+  # See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_cloudwatch_log_group" "api_access" {
   name              = "/aws/apigateway/${var.name}-site-api"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name change. In-place retention updates stay allowed.
+  # See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "aws_iam_policy_document" "api" {
@@ -212,14 +226,41 @@ data "aws_iam_policy_document" "api" {
     actions = ["s3:GetObject"]
     resources = [
       "${var.lake_bucket_arn}/serving/dashboard.json",
+      "${var.lake_bucket_arn}/serving/dashboard.json.gz",
       "${var.lake_bucket_arn}/serving/status.json",
       "${var.lake_bucket_arn}/serving/chart_data/*",
       "${var.lake_bucket_arn}/serving/stock/*",
     ]
   }
   statement {
+    sid       = "ReadMetricCatalog"
+    actions   = ["s3:GetObject"]
+    resources = ["${var.lake_bucket_arn}/catalog/*"]
+  }
+  # A missing catalog/<TICKER>.json (first approval for a ticker), serving/stock/<TICKER>.json or
+  # serving/chart_data/<TICKER>.json (ticker not built yet) must read as NoSuchKey, not
+  # AccessDenied. S3 only returns 404 when the caller may list the prefix.
+  statement {
+    sid       = "ListMetricCatalog"
+    actions   = ["s3:ListBucket"]
+    resources = [var.lake_bucket_arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["catalog/*", "serving/stock/*", "serving/chart_data/*"]
+    }
+  }
+  statement {
+    sid     = "WriteMetricReview"
+    actions = ["s3:PutObject"]
+    resources = [
+      "${var.lake_bucket_arn}/catalog/*",
+      "${var.lake_bucket_arn}/serving/stock/*",
+    ]
+  }
+  statement {
     sid       = "DecryptDashboardServingObjects"
-    actions   = ["kms:Decrypt"]
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
     resources = [var.data_key_arn]
     condition {
       test     = "StringEquals"
@@ -307,7 +348,7 @@ resource "aws_apigatewayv2_api" "site" {
   cors_configuration {
     allow_origins = var.site_origins
     allow_methods = ["GET", "PUT"]
-    allow_headers = ["authorization", "content-type"]
+    allow_headers = ["authorization", "content-type", "accept"]
     max_age       = 300
   }
 }
@@ -332,7 +373,7 @@ resource "aws_apigatewayv2_integration" "prefs" {
 }
 
 resource "aws_apigatewayv2_route" "site" {
-  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /stock/{ticker}"])
+  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /stock/{ticker}", "PUT /stock/{ticker}/metrics/{metric_id}"])
   api_id             = aws_apigatewayv2_api.site.id
   route_key          = each.value
   target             = "integrations/${aws_apigatewayv2_integration.prefs.id}"
@@ -362,11 +403,12 @@ resource "aws_apigatewayv2_stage" "default" {
 
 resource "aws_lambda_permission" "api_route" {
   for_each = {
-    prefs     = "prefs"
-    dashboard = "dashboard"
-    status    = "status"
-    chart     = "chart/*"
-    stock     = "stock/*"
+    prefs        = "prefs"
+    dashboard    = "dashboard"
+    status       = "status"
+    chart        = "chart/*"
+    stock        = "stock/*"
+    stock_metric = "stock/*/metrics/*"
   }
   statement_id  = "AllowApiGateway-${each.key}"
   action        = "lambda:InvokeFunction"
@@ -392,8 +434,10 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
   ok_actions          = [var.ops_topic_arn]
 }
 
-# Per-code visibility for prefs_api structured errors. The filter phrases match
-# _log_event() in prefs_api.py (json.dumps default spacing).
+# Per-code visibility for prefs_api structured errors. _log_event() in prefs_api.py
+# prints one JSON object per line, so match it with a JSON metric filter on the
+# "event" and "code" keys. (A quoted-term pattern such as `"event": "x"` is rejected
+# by PutMetricFilter: the bare colon is not valid filter syntax.)
 locals {
   prefs_api_error_alarms = {
     STS_UNAVAILABLE = {
@@ -416,6 +460,10 @@ locals {
       event       = "prefs_api_error"
       description = "Site API hit an unexpected error"
     }
+    CATALOG_WRITE_FAILED = {
+      event       = "prefs_api_error"
+      description = "Site API could not save a company-metric review"
+    }
     TICKER_ADDED_PUBLISH_FAILED = {
       event       = "ticker_added_publish_failed"
       description = "Site API saved preferences but could not publish TickerAdded"
@@ -427,7 +475,7 @@ resource "aws_cloudwatch_log_metric_filter" "prefs_api_error" {
   for_each       = local.prefs_api_error_alarms
   name           = "${var.name}-prefs-api-${lower(replace(each.key, "_", "-"))}"
   log_group_name = aws_cloudwatch_log_group.api_fn.name
-  pattern        = "\"event\": \"${each.value.event}\" \"code\": \"${each.key}\""
+  pattern        = "{ ($.event = \"${each.value.event}\") && ($.code = \"${each.key}\") }"
 
   metric_transformation {
     name      = each.key

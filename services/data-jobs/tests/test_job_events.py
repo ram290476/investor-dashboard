@@ -18,8 +18,53 @@ def test_rejected_event_publish_is_not_silently_successful(monkeypatch):
     monkeypatch.setattr(observability, "_events", Bus())
     with pytest.raises(RuntimeError, match="EventBridge rejected"):
         observability.emit_job_finished("TREND", "run", "success")
+    with pytest.raises(RuntimeError, match="EventBridge rejected"):
+        observability.emit_job_finished("Q2X", "run", "partial")
     # Preserve the original exception when reporting an already failed job.
     observability.emit_job_finished("TREND", "run", "failure")
+
+
+class _Context:
+    function_name = "test"
+    memory_limit_in_mb = 128
+    invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:test"
+    aws_request_id = "test"
+
+
+def test_run_status_sets_the_logged_and_published_outcome(monkeypatch):
+    captured = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: captured.append((outcome, detail)),
+    )
+
+    @observability.job_handler("Q2C")
+    def partial(event, context):
+        with observability.source_run("edgar:TSLA:8-K"):
+            raise RuntimeError("index 404")
+        return {"status": "partial", "run_status": "partial", "documents": 1}
+
+    partial({}, _Context())
+    assert captured[-1][0] == "partial"
+    assert captured[-1][1]["run_status"] == "partial"
+    assert captured[-1][1]["failed_sources"] == 1
+
+    @observability.job_handler("Q2C")
+    def failed(event, context):
+        return {"status": "failed", "run_status": "failed", "documents": 0}
+
+    failed({}, _Context())
+    assert captured[-1][0] == "failure"
+
+    @observability.job_handler("D1")
+    def still_success(event, context):
+        with observability.source_run("fred:SOFR"):
+            raise ValueError("down")
+        return {"status": "success"}
+
+    still_success({}, _Context())
+    assert captured[-1][0] == "success"
+    assert captured[-1][1]["failed_sources"] == 1
 
 
 def test_partial_source_ids_and_skipped_status_are_actionable():
@@ -83,6 +128,37 @@ def test_job_lease_excludes_concurrent_publishers_and_recovers_after_expiry(monk
             pass
 
 
+def test_leased_job_can_exit_cleanly_instead_of_failing(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    published = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: published.append(outcome),
+    )
+    entered = []
+
+    @observability.job_handler(
+        "DASHBOARD", emit_event=True, lease_key="serving/dashboard-build/_lease.json", skip_when_leased=True,
+    )
+    def run(event, context):
+        entered.append(True)
+        return {"status": "ok"}
+
+    with mock_aws():
+        client = boto3.client("s3")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        with lake.job_lease("serving/dashboard-build/_lease.json"):
+            skipped = run({}, _Context())
+        finished = run({}, _Context())
+    assert skipped == {"status": "skipped", "reason": "lease held"}
+    assert entered == [True]
+    assert finished["status"] == "ok"
+    assert published == ["skipped", "success"]
+
+
 def test_job_lease_is_released_after_exception(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
@@ -96,3 +172,33 @@ def test_job_lease_is_released_after_exception(monkeypatch):
                 raise ValueError("build failed")
         with lake.job_lease("lease"):
             pass
+
+
+@pytest.mark.parametrize("skip,expect", [(None, "skipped"), (False, "failure")])
+def test_lease_held_skips_by_default_and_can_opt_out(monkeypatch, skip, expect):
+    """Overlapping sec-filings/trend-metrics invokes used to raise LeaseHeld -> retries -> DLQ."""
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    published = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: published.append(outcome),
+    )
+    kwargs = {} if skip is None else {"skip_when_leased": skip}
+
+    @observability.job_handler("SEC", emit_event=True, lease_key="raw/sec_filings/_lease.json", **kwargs)
+    def run(event, context):
+        return {"status": "ok"}
+
+    with mock_aws():
+        client = boto3.client("s3")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        with lake.job_lease("raw/sec_filings/_lease.json"):
+            if expect == "skipped":
+                assert run({}, _Context()) == {"status": "skipped", "reason": "lease held"}
+            else:
+                with pytest.raises(lake.LeaseHeld):
+                    run({}, _Context())
+    assert published == [expect]

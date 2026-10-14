@@ -29,7 +29,8 @@ document's proposed TypeScript/Vite/Svelte implementation.
 The currently wired data jobs include hourly/daily prices, news/sentiment, regulatory feeds,
 government contracts, daily FRED macro (`D1`), release-day data/calendar (`M1`),
 Yahoo historical prices (`backfill`), trend metrics, quarterly fundamentals, short interest,
-options, status-feed updates and dashboard snapshot building. The key-rotation checker is a
+options, SEC filing metadata for every watchlist ticker, status-feed updates and dashboard
+snapshot building. The key-rotation checker is a
 separate Lambda. The job map and schedules live in `infra/terraform/variables.tf`.
 
 This is not yet the complete source catalog implementation: the architecture lists additional
@@ -102,12 +103,15 @@ The CloudFront alarm and the IAM/sign-in forwarding rules are in us-east-1, so l
 ## GitHub Actions CI/CD
 
 `.github/workflows/ci.yml` runs Python lint/tests, dependency audit, browser-JavaScript syntax
-validation, Terraform format/validation, an arm64 Lambda image build and Checkov. It runs on pull
-requests and pushes to `main`.
+validation, Terraform format/validation, deploy-guard shell tests, an arm64 Lambda image build
+and Checkov. It runs on pull requests and pushes to `main`.
 
 `.github/workflows/deploy.yml` runs only after a successful `main` CI push, or by manual
-dispatch from `main`. Protect the GitHub `production` environment with required reviewers and
-branch restrictions; the environment gate is what prevents an unreviewed production apply.
+dispatch from `main`. A manual run honors the `production` environment variable
+`DEPLOY_ALLOW_DESTROY` only when that value is exactly `true`. Leave the variable unset.
+An automatic run after CI ignores it even if it is still set. Protect the GitHub
+`production` environment with required reviewers and branch restrictions; the environment gate
+is what prevents an unreviewed production apply.
 Configure:
 
 ### One-time setup
@@ -139,6 +143,12 @@ The workflow checks that all four exist and fails with a clear message if one is
 This repository is public, so its workflow logs are public too. The workflow masks every e-mail
 address found in `TERRAFORM_TFVARS` before Terraform runs. Any other value in that secret may
 appear in plan output, so keep only non-sensitive settings in it.
+
+`DEPLOY_ALLOW_DESTROY` is not one of those four, and the deploy does not require it. Leave it
+unset on the `production` environment. Only someone who can edit that environment can set it.
+Setting it does not by itself deploy anything: set it to `true`, dispatch **Deploy production**
+from `main`, then unset it (or set it to `false`) as soon as that run has started. A later
+automatic deploy still ignores the variable.
 
 ### Who can assume the deploy role
 
@@ -181,9 +191,62 @@ The deploy workflow must never pass an empty `jobs_image_uri` once jobs exist:
 2. **Every later run:** skip that bootstrap apply, build/push a new image, then apply once with
    that image URI. The workflow also refuses to apply if `JOBS_IMAGE_URI` is unset.
 
-The bootstrap check loads `terraform state list` into a bash array first. Piping `state list`
-directly into `grep -q` under `set -o pipefail` is unsafe: a successful early match can SIGPIPE
-`state list`, flip an `if !` condition, and re-enter the empty-image apply.
+The bootstrap check writes `terraform state list` to a file and compares addresses in bash
+(`scripts/decide-bootstrap.sh`). Do not pipe that list, or a `printf` of it, into `grep -q`
+under `set -o pipefail`. `grep -q` exits at the first match and SIGPIPEs the writer; the
+pipeline status is non-zero even though the address is present, and the workflow treats that
+as "not in state". Deploy 37496345092 failed that way on `terraform state list | grep -q`.
+Deploy 38137774464 (11 Oct 2026, 05:02 PT, commit `f1f5af6`) failed the same way on
+`printf | grep -q`: the guard took the empty-image path, Terraform destroyed 201 job
+resources (Lambdas, roles, rules, schedules, and log groups), and the second apply recreated
+them, which deleted the retained CloudWatch log events.
+
+If `terraform state list` fails, the deploy aborts. An empty list is the only signal for a
+first-time bootstrap. A failed list is not an empty state.
+
+Before either apply, `scripts/plan-guard.sh` runs `terraform plan -detailed-exitcode -out=tfplan`
+and `scripts/check-plan-destroys.sh` reads `terraform show -json`. The apply uses that saved
+plan. The gate aborts when the plan deletes or replaces more than 10 managed resources, or
+deletes or replaces any `aws_lambda_function` or `aws_cloudwatch_log_group`. A replacement
+counts because it deletes the existing object; replacing a log group drops its events. A plan
+that cannot be parsed aborts too. The only waiver is a manual dispatch from `main` while
+the `production` environment variable `DEPLOY_ALLOW_DESTROY` is exactly `true`. Set that
+variable, dispatch **Deploy production**, then unset it. A `workflow_run` deploy ignores the
+variable. The waiver applies only after the plan JSON parses.
+
+#### CloudWatch log groups
+
+These log groups set `lifecycle { prevent_destroy = true }`:
+
+| Resource | What it keeps |
+| --- | --- |
+| `module.jobs.aws_cloudwatch_log_group.job` | Per-job Lambda logs |
+| `module.observability.aws_cloudwatch_log_group.lambda` | Pre-created function log groups |
+| `module.api_keys.aws_cloudwatch_log_group.checker` | Key-rotation checker logs |
+| `module.user_prefs.aws_cloudwatch_log_group.api_fn` | Preferences API logs |
+| `module.user_prefs.aws_cloudwatch_log_group.api_access` | API Gateway access logs |
+
+Terraform rejects the plan before it deletes retained events. That includes the empty-image
+failure mode: `module.jobs` drops every job instance when `jobs_image_uri` is empty, and
+`prevent_destroy` on the `for_each` log group rejects that plan. Changing retention is an
+in-place update and stays allowed. Automatic KMS key-material rotation keeps the same key ARN
+and stays allowed. Changing `name`, or the `for_each` key, is a replacement (destroy plus
+create), so it is rejected too.
+
+To rename or retire a log group on purpose, knowing that the replacement deletes its events:
+
+1. Remove that resource's `prevent_destroy` block in a reviewed change. On a `for_each` log
+   group the block covers every instance, so review the whole plan, not only the one key.
+2. On the `production` environment, set the variable `DEPLOY_ALLOW_DESTROY` to `true`.
+   Only an admin who can edit that environment can do this.
+3. Dispatch **Deploy production** from `main`. The workflow still plans first and records
+   the resources it will destroy. A run started by CI on `main` ignores the variable.
+4. Unset `DEPLOY_ALLOW_DESTROY` (or set it to `false`) as soon as that dispatch has started.
+5. Restore `prevent_destroy` in a follow-up if any of those log groups remain.
+
+`prevent_destroy` is a literal in the configuration. It cannot be turned off from
+`terraform.tfvars` or from `DEPLOY_ALLOW_DESTROY`. The variable only lets the destroy gate
+accept a plan. Terraform still rejects the plan until the lifecycle block is removed.
 
 #### Admin-only IAM on the deploy role
 
@@ -373,7 +436,7 @@ Alpaca's free plan (DS-02, `feed=iex`) is IEX-only volume, about 2–3% of conso
 | `daily-prices` | IEX `volume` and `volume_iex`, `volume_source=DS-02`. Closes stay on Alpaca |
 | `price-reconcile` | For the last 10 NYSE sessions, replaces `volume` with Yahoo's consolidated volume when that session is in the chart it already fetched, and sets `volume_source=DS-05`. Does not add a Yahoo call. Older `volume` values are not rescaled. A missing `volume_source` is filled from `source_id` |
 
-A session Yahoo does not return stays IEX and keeps `volume_source=DS-02`. Rows older than those 10 sessions that `daily-prices` already wrote stay IEX and stay marked `DS-02`; later runs do not walk back and rewrite them. `dashboard-build` copies `volume`, `volume_source`, and `volume_iex` onto each `price_history` bar. `volume_source_changes` lists each date in that series where the source differs from the previous bar (`from`, `to`). One source produces an empty list. The two prints are not scaled into each other.
+A session Yahoo does not return stays IEX and keeps `volume_source=DS-02`. Rows older than those 10 sessions that `daily-prices` already wrote stay IEX and stay marked `DS-02`; later runs do not walk back and rewrite them. `dashboard-build` copies `volume`, `volume_source`, and `volume_iex` onto each `price_history` bar. A traded close equal to the split-adjusted close, and an IEX print equal to `volume`, are omitted. `volume_source_changes` lists each date in that served series where the source differs from the previous bar (`from`, `to`). One source produces an empty list. The two prints are not scaled into each other. The dashboard series is the recent window used for first paint. The five-year series, with the same volume fields, is on `serving/chart_data/<T>.json`.
 
 Limits: the Yahoo chart endpoint is unofficial and has no SLA, the same quota rules as backfill (#69). The steady-state reconcile reads volume from the 35-day event check; a split rebuild reads it from the full-history response that rebuild already requests. Hourly and intraday volume stay IEX-only. Between the 16:45 ET `daily-prices` run and the 19:15 ET reconcile, the newest bar is still IEX and the change date is served.
 
@@ -414,9 +477,21 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | `macro-daily` | Weekdays 07:00 ET | FRED history/revisions, including the 11 constant-maturity Treasury tenors (`DGS1MO` through `DGS30`); federal holidays skipped. |
 | `release-day` | Weekdays 06:35 ET and release-morning one-offs | Bootstraps the calendar and stores release history. D4, RECONCILE and non-idle BACKFILL events rebuild ticker links without provider calls. |
 | `trend-metrics` | D1, D4, M1, RECONCILE and non-idle BACKFILL events | Publishes shared series metrics plus per-ticker correlation/effect history. |
-| `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill and reconcile events | Publishes `serving/dashboard.json`. |
+| `regulatory-feeds` | Weekdays 06:25–22:25 ET | Form 4 insider rows, with share counts, for every watchlist ticker (capped at 25), plus the existing regulatory event feeds. A later submissions copy does not erase stored share counts. |
+| `sec-filings` | Weekdays 06:00 ET and `TickerAdded` | EDGAR filing metadata for every watchlist ticker. A new ticker, and a few incomplete names each morning, get five years. Others stay incremental. `no_sec_filer` and `failed` are explicit. |
+| `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill, reconcile, and SEC filing events | Publishes `serving/dashboard.json` and `serving/chart_data/<T>.json`, each with a gzip sibling, and records the dashboard document size. Recent filings come from `serving/filings/<T>.json`. |
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
 | `kalshi-fomc` | Not scheduled | Collector and status-feed id `KALSHI` exist. Live fetches stay off until the Kalshi terms are accepted. No next run is advertised. |
+
+### Serving encoding and size limits
+
+CloudFront compresses the static site (`index.html`, `app.js`, `styles.css`). It does not compress the API. `GET /dashboard`, `GET /chart/{ticker}` and `GET /status` come from the HTTP API and the prefs Lambda. HTTP APIs have no built-in response compression.
+
+When the request `Accept-Encoding` includes `gzip` (q greater than zero) and the JSON body is larger than 1 KB, the Lambda returns that body gzip-compressed (level 6) with `Content-Encoding: gzip`, `Vary: Accept-Encoding` and `isBase64Encoded: true`. Clients that do not accept gzip, and bodies of 1 KB or smaller, still get plain JSON. The existing `Content-Type`, `Cache-Control: no-store`, `X-Content-Type-Options` and `Strict-Transport-Security` headers are unchanged. API Gateway CORS is unchanged. Browsers send `Accept-Encoding: gzip` and `fetch` decompresses the body, so the web app does not decode gzip itself.
+
+`dashboard_build` writes `serving/dashboard.json.gz` and `serving/chart_data/<T>.json.gz` next to the plain files (gzip level 6, timestamp omitted). The API returns those bytes when they decompress to the document it is about to send, and it caches gzip bytes in the warm Lambda keyed by S3 ETag. `/dashboard` also inlines the latest `serving/status.json`, so its cache key includes that object's ETag. If the inlined status changes the bytes, the precompressed dashboard object is not used and the assembled JSON is compressed instead. `/status` is compressed in the Lambda when it is over 1 KB; the status feed does not write a sibling.
+
+The synchronous Lambda response limit is 6 MiB (6,291,456 bytes), measured on the proxy JSON. A gzip body counts in its base64 form, about a third larger than the bytes on the wire. If that payload would exceed the limit, the route returns HTTP 503 `RESPONSE_TOO_LARGE` instead of a truncated 500 or 502. `dashboard_build` emits `DashboardRawBytes` and `DashboardGzipBytes` in the `InvestorDashboard` namespace with the same `service` dimension as the other job metrics. Alarm `invdash-dashboard-payload-size` fires when the maximum raw dashboard document in a six-hour window is over 4 MiB (4,194,304 bytes). That threshold is unchanged. `dashboard.json` keeps the summary needed for first paint, including the last 64 daily closes per ticker. Five-year price history, short-interest history, and correlation series are on `serving/chart_data/<T>.json`, which the page loads when a ticker or market overlay is selected. A synthetic 25-ticker build must stay under 2 MB raw.
 
 ### Header market status
 
@@ -432,7 +507,9 @@ The Rates & yields drawer reads one shared `rates` object on `serving/dashboard.
 | --- | --- | --- | --- |
 | `rates.curve` | FRED constant-maturity `DGS1MO`, `DGS3MO`, `DGS6MO`, `DGS1`, `DGS2`, `DGS3`, `DGS5`, `DGS7`, `DGS10`, `DGS20`, `DGS30` | Weekdays 07:00 ET with D1 | Today's yield, the print on or before 30 calendar days earlier, and the change in basis points. The regime label needs both the 2Y and 10Y moves. Tenors that are not already trend drivers are stored in the same macro table and are not chart overlays. |
 | `rates.fomc` | Kalshi public market-data API (DS-89), no key | Not enabled | The collector parses the next meeting's cut, hold and hike prices, stops on 4xx and 429 without retry, and has status-feed id `KALSHI`. Live fetches stay off until Ram accepts the Kalshi terms. Until a document is stored, the panel says Kalshi is unavailable. |
-| `rates.policy_path` | Not selected | No job | Ram has not chosen the Atlanta Fed market probability tracker, Kalshi multi-meeting markets, or fed funds futures. The field is null. The panel says the source has not been selected. |
+| `rates.policy_path` | Not selected | No job | Ram has not chosen the Atlanta Fed market probability tracker, Kalshi multi-meeting markets, or fed funds futures. The field is null. The panel heading says Atlanta Fed and the body says the source has not been selected. |
+
+The drawer body is the curve (regime, 2Y/10Y one-month note, filled area, tenor changes), then FOMC, then the policy path. It does not repeat the 2Y, 10Y, 30Y, spread, real, SOFR, or breakeven sparkline rows. `releases.inflation` on the same document holds the last six CPI YoY prints (`CUSR0000SA0`) and the headline and core direction from the last two prints. Each print's change is versus the previous YoY print, not a Cleveland Fed nowcast. Nowcasts and Kalshi CPI probabilities are not stored, so the inflation panel says the nowcast is absent.
 
 D1, M1, TREND and DASHBOARD use conditional S3 leases to prevent concurrent
 read/build/publish runs from overwriting newer documents. Leases expire after 15
@@ -470,7 +547,14 @@ The #27 roadmap UI consumes the existing schema-v3 serving document and chart hi
 - Signals rank finite driver effects, show price/macro regime labels and report release
   sensitivity only with a finite correlation and at least 12 paired releases. Sensitivity
   is historical association, not a causal forecast.
-- Market comparisons use each symbol's adjusted daily history. Moving averages require
+- Market comparison rows follow the chart's selected index overlays and the
+  active period. Return and relative performance use adjusted closes. ρ and β
+  are the last 90 paired daily returns (at least 20), stored on the ticker's
+  chart file, not on `dashboard.json`. Correlation drift lists the live daily
+  drivers from the design (yields, real yield, VIX, dollar, WTI, policy
+  uncertainty) and flags a 30D versus 90D shift of at least 0.08, or a sign
+  change. The sparkline is up to six months of 30D correlation.
+- Moving averages require
   all 10/20/50/100/200 observations; missing history is never replaced with demo series.
   Rates, inflation, volatility, dollar/oil and policy panels identify missing inputs.
   Policy uncertainty is a proxy, not a tariff-rate or geopolitical-risk measurement.
@@ -508,7 +592,7 @@ The #27 roadmap UI consumes the existing schema-v3 serving document and chart hi
   is `follow` (the default when the key is missing) or `all`. Ram has not confirmed the
   default, and has not decided whether adding an overlay should reopen a dismissed card.
   This build does not reopen it. Follow mode shows Market comparison, Moving averages,
-  Rates & yields, Inflation & release links, Volatility, Dollar & oil, Tariffs &
+  Rates & yields, Inflation surprise, Volatility, Dollar & oil, Tariffs &
   geopolitics, the company panel and News & sentiment only when that overlay group is
   active. Risk covers both Volatility and Dollar & oil. Correlation drift has no group,
   so it stays visible in Follow mode until dismissed. A PUT that omits `panels` or
@@ -555,36 +639,14 @@ aws cognito-idp admin-create-user \
   --desired-delivery-mediums EMAIL
 ```
 
-Require the invited user to finish the temporary-password setup and complete sign-in (MFA is
-currently off). Cognito MFA is **off** (password-only sign-in) by design for now; Plus-tier
-threat protection stays enforced. Never disable the JWT authorizer to troubleshoot a browser
-sign-in issue.
-
-### Fix an existing user
-
-A user invited without `email_verified=true` has an unverified address, so Forgot password
-does not send a code. Mark the existing address verified; do not change the address:
+Require the invited user to complete the temporary-password setup. Company-metric approval uses the `admin` Cognito group, which Terraform creates with no members. Do not add the public demo account `ram.vellamsetti@gmail.com`. Add your own account with:
 
 ```sh
-aws cognito-idp admin-update-user-attributes \
-  --region us-west-1 \
-  --user-pool-id <user-pool-id> \
-  --username <email> \
-  --user-attributes Name=email_verified,Value=true
+aws cognito-idp admin-add-user-to-group --user-pool-id <user-pool-id> --username <your-email> --group-name admin
 ```
 
-If the temporary password has already expired, an administrator can set a known permanent
-password with `admin-set-user-password --permanent`. Do not commit that password. The README
-demo account is the only password this repository publishes.
-
-```sh
-aws cognito-idp admin-set-user-password \
-  --region us-west-1 \
-  --user-pool-id <user-pool-id> \
-  --username <email> \
-  --password '<permanent-password>' \
-  --permanent
-```
+Cognito MFA is **off** (password-only sign-in) by design for now; Plus-tier threat protection stays enforced. Never
+disable the JWT authorizer to troubleshoot a browser sign-in issue.
 
 This is separate from **AWS console / IAM Identity Center MFA**, which remains required. Alerting
 on console MFA changes (for example `DeactivateMFADevice`) is unchanged.
@@ -672,7 +734,7 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 | Backfill has not advanced | Inspect checkpoint and Lambda logs; check Yahoo status/rate limits and function timeout. Retry the same event; keep state. |
 | API rate limiting / throttles | Review `429`, `Retry-After`, retry logs and per-provider schedules. Reduce batch/work-per-run settings or space runs; do not raise concurrency blindly. |
 | Missing or stale prices | Check D4 Lambda state, Alpaca SSM credentials, schedule timezone, source failures and the S3 `ticker=<T>/year=<YYYY>` partitions; then run the collector manually. |
-| Dashboard API returns 503 | The dashboard build has not published `serving/dashboard.json`, or status is missing. Check build permissions/logs, upstream events and S3 serving keys. |
+| Dashboard API returns 503 | `DASHBOARD_NOT_READY`: the build has not published `serving/dashboard.json`. Check build permissions/logs, upstream events and S3 serving keys. `RESPONSE_TOO_LARGE`: the document would exceed the 6 MiB Lambda response limit. Check `DashboardRawBytes` and alarm `invdash-dashboard-payload-size` (raw over 4 MiB). |
 | Preferences API returns 409 | Another tab updated the version; reload `/prefs` and retry. A 401 means sign-in expired; sign in again. |
 | API returns 5xx | Review API Gateway access logs and `invdash-prefs-api` Lambda logs; verify scoped DynamoDB role, KMS decrypt and S3 read permissions. |
 | Site does not load or sign-in loops | Check `config.json`, callback/logout URLs, CORS origin, Cognito domain/client, CloudFront status and browser network errors. Invalidate after config changes. |
@@ -693,7 +755,7 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 * Fundamentals infer fiscal quarters from the annual duration fact's end month, using the
   fiscal-year end year as the label. Changing fiscal calendars and 52/53-week years crossing
   month boundaries still require a reviewed fiscal-calendar mapping. Public float is a sparse,
-  usually annual USD series; deliveries/FSD subscribers remain reviewed manual observations.
+  usually annual USD series. Deliveries and FSD subscribers stay reviewed manual observations until the matching company-metrics catalog entries are approved, and a missing manual file is logged.
 * The watchlist limit is 25 per user (separate from the existing 25-ticker cross-user collector
   cap). Legacy over-limit lists are never trimmed: display/chart/pin/reorder/removal saves work,
   but new symbols are blocked until capacity is available. Each chip draws that ticker's last
@@ -743,9 +805,21 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 * Overlay colors use the active theme's six series tokens. Extra stable slots blend adjacent
   series tokens in 13% increments per cycle and retain at least 3:1 chart contrast. Shadows
   and the settings backdrop use light/dark theme tokens.
-* Deployment-review notifications remain GitHub environment notifications. AWS SMS was checked
-  on October 8, 2026: the account was in sandbox with no sending number, so no approval texts
-  were sent and no SMS resources or spend were provisioned.
+* Deployment-review notifications remain GitHub environment notifications. Ops and security
+  email, including ram.vellamsetti@gmail.com, and optional SMS are sent by `invdash-alert-notifier`.
+  Each issue sends at most `email_max_per_window` emails per fixed Pacific clock window
+  (`email_window_minutes`, default 60) and, when `alert_sms_e164` is set, at most
+  `sms_max_per_window` texts per its own window (`sms_window_minutes`, default 60). Both
+  defaults are one clock hour aligned to local midnight (14:00-14:59 Pacific), not a rolling
+  hour from the first send. The channels are counted separately. Set the four values in
+  Terraform (`email_window_minutes`, `email_max_per_window`, `sms_window_minutes`,
+  `sms_max_per_window`). Repeats in the window are not mailed or texted; the log line records
+  the issue key, the channel, and the suppressed count. The next window's first message for
+  that channel includes the count. If the dedupe table errors, that channel still sends.
+  Confirm the invdash-ops-alerts and invdash-security-alerts subscriptions. On October 8, 2026 the account was
+  in the SMS sandbox with no sending number. Do not subscribe the inbox or the phone directly
+  to the intake (-alarms) or CloudFront topics; that bypasses the cap. AWS Budgets mail is not
+  part of this cap. Vulnerability findings are keyed by CVE (or GHSA) id plus the affected ECR repository or Lambda function, not by the reporting product, so an Inspector finding and its Security Hub copy are one issue and mail once. Those keys use `vuln_window_minutes` (default 1440, one Pacific calendar day aligned to midnight) on both channels, so rescans and new image pushes with the same CVE do not re-send it every hour. Other security findings (GuardDuty, Security Hub controls, Inspector network findings) keep their product-specific keys and the normal windows.
 * The UI is a zero-build vanilla JavaScript implementation rather than the architecture
   document's proposed TypeScript/Vite/Svelte stack.
 * No public freshness document is currently published, so the external Synthetics canary is

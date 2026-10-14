@@ -81,12 +81,12 @@ Tables are grouped by how often they change, and that sets their file layout: ho
 | risk_indices | Weekly | index, obs_date | value | none | W1, D1 |
 | releases | On release | series_id, ref_period | actual, nowcast, surprise, release_ts | none | M1 |
 | fundamentals_quarterly | Quarterly | ticker, metric, fiscal_quarter | release_date, measurement_date, value, unit, source_id; metrics include public_float_usd (SEC DEI, USD), shares_outstanding (SEC DEI), gross_margin_gaap, revenue_gaap, gross_profit_gaap, deliveries, fsd_subscribers | none | q1_fundamentals (DS-11 XBRL, DS-12 manual) |
-| company_metrics | Quarterly | ticker, metric_id, fiscal_period | period_end, value, unit, source_url, source_doc_hash, extracted_at, confidence, approved. Proposed catalog entries are stored and not served. Raw documents stay at raw/company_ir/\<ticker\>/\<period\>/ with a manifest (source_url, fetched_at, sha256). | ticker | q2_company_ir (EDGAR EX-99.1, company IR). Catalog: curated/company_metrics/catalog/\<ticker\>.json |
+| company_metrics | Quarterly | ticker, metric_id, fiscal_period | period_end, value, unit, source_url, source_doc_hash, extracted_at, confidence, approved. Proposed metrics are served with status. Raw documents stay at raw/company_ir/\<ticker\>/\<period\>/ with a manifest (source_url, fetched_at, sha256). | ticker | q2_company_ir (EDGAR EX-99.1, company IR). Review status: catalog/\<ticker\>.json |
 | calendar_days | Monthly | calendar, date | is_open, close_time | none | C1, A1 |
 | ingestion_runs | Every run | run_id | job, source_id, status, rows, error, duration_ms | year/month | all jobs |
 | user_prefs (DynamoDB) | On change | user_sub | tickers\[\], pinned\[\] (max 6), display.time_zone, display.updown_palette, display.chart_period, version, updated_at | n/a | prefs API |
 
-**Serving layer** — the compact `serving/dashboard.json` snapshot plus per-ticker `serving/chart_data/<T>.json` histories for macro overlays, macro pressure, short interest, options, and quarterly fundamentals. `serving/stock/<T>.json` is the approved-metric payload for the per-stock page (series, latest value, QoQ/YoY, provenance, run status). `GET /chart/{ticker}` and `GET /stock/{ticker}` serve only a ticker in the caller's watchlist. Proposed company metrics are omitted.
+**Serving layer** — the compact `serving/dashboard.json` snapshot (first-paint summary, including a short daily-close tail) plus per-ticker `serving/chart_data/<T>.json` histories for the five-year price series, macro overlays, macro pressure, correlation, short interest, options, and quarterly fundamentals. `serving/stock/<T>.json` is the company-page payload (series, latest value, QoQ/YoY, provenance, run status, and approval status). `GET /chart/{ticker}` and `GET /stock/{ticker}` serve only a ticker in the caller's watchlist. Proposed company metrics are served with status. `PUT /stock/{ticker}/metrics/{metric_id}` is admin-only: it writes `catalog/<T>.json` and patches `serving/stock/<T>.json` plus the gzip sibling. The admin group is read from the access token when the HTTP API authorizer omits the array claim. Rejected metrics stay out.
 
 - Macro series use one long table (series_id, obs_date, value) so a new FRED or BLS series needs no schema change.
 
@@ -153,7 +153,7 @@ Monthly series hold their last released value until the next release. Output goe
 
 - **Gross margin:** total GAAP gross margin = GrossProfit ÷ Revenues from SEC XBRL company facts (DS-11). release_date is the SEC filing date. Q4 = full year minus Q1–Q3, because Q4 isn't filed on its own.
 
-- **Deliveries and FSD subscribers:** not in XBRL, so they come from a reviewed manual file. scripts/add_fundamental.py validates each row and appends it to manual/fundamentals/fundamentals_manual.csv. A later row for the same quarter replaces the earlier one.
+- **Deliveries and FSD subscribers:** not in XBRL. Once `total_deliveries` (or the Model 3/Y and other-models split) and `fsd_subscriptions` are approved in the company catalog, Q1 takes those curated rows and they replace the manual file for the same quarter. Until then they come from a reviewed manual file. scripts/add_fundamental.py validates each row and appends it to manual/fundamentals/fundamentals_manual.csv. A later row for the same quarter replaces the earlier one. Example: Q3 2026 deliveries were 486,532 on 2026-10-02. 497,099 is Q3 2025. A missing manual file is logged.
 
 - **Schedule:** Monday 08:30 ET as a safety net, plus a one-off run the day after earnings, scheduled by D1.
 
@@ -165,8 +165,8 @@ Monthly series hold their last released value until the next release. Output goe
 |----|----|----|----|
 | trend-metrics | After D4 or M1 succeeds | curated prices and macro | serving/trend_metrics/ |
 | q1-fundamentals | Mon 08:30 + day after earnings | SEC XBRL (DS-11), manual file (DS-12) | curated/ and serving/fundamentals_quarterly.json |
-| q2-company-ir-collect | Weekdays 07:15. Fetches on Monday (weekly baseline) and on a day inside an earnings window (T-3 through T+5). An 8-K EX-99.1 for a watchlist ticker triggers extraction. | SEC EDGAR and company IR pages. robots.txt is honored. HTTP 403 and 429 are not retried. | raw/company_ir/\<ticker\>/\<period\>/ |
-| q2-company-ir-extract | After collect, and on an EX-99.1 trigger | Raw IR documents. Unchanged documents skip the LLM (hash cache). | curated/company_metrics/ |
+| q2-company-ir-collect | Weekdays 07:15 ET. Fetches on Monday (weekly baseline), inside an earnings window (T-3 through T+5), and when H3 reports a new 8-K Item 2.02. | SEC EDGAR submissions, EX-99.1, 10-Q/10-K and companyfacts. ir.tesla.com PDFs are a fallback after robots.txt. tesla.com is not fetched. HTTP 403 and 429 are not retried. | raw/company_ir/\<ticker\>/\<period\>/ |
+| q2-company-ir-extract | After collect, including a partial collect | Raw IR documents. Unchanged documents skip the LLM (hash cache). | curated/company_metrics/ |
 | q2-company-ir-serve | After extract | Approved catalog rows only. Partial or failed runs keep the previous serving object and emit FailedRuns. | serving/stock/\<ticker\>.json |
 | short-interest | 18:30 Mon–Fri; stores only new settlement dates, so data lands twice a month on FINRA's publication days | FINRA (DS-91, OAuth keys in SSM) | curated/short_interest/ |
 | options-daily | 16:50 Mon–Fri, after D4 | Alpaca indicative options (DS-92) | curated/options_daily/; enabled by default, with IV30 explicitly unavailable when the feed omits it |
@@ -369,13 +369,19 @@ Every signal carries the same run_id and source_id, so one job run can be follow
 | Configuration history | Every resource change, continuously | AWS Config → config bucket (versioned, KMS, delete-deny; no Object Lock, which Config does not support) | 30 months |
 | Threats and vulnerabilities | GuardDuty findings (incl. malware scans of raw/), Inspector CVEs, Security Hub NIST 800-53 control results | Security Hub | 90 days of findings |
 
-Alerts go to two email topics: **ops** for reliability and **security** for incident response.
+Alarms and EventBridge rules publish to two SNS topics: **ops** for reliability and **security** for incident response. `invdash-alert-notifier` subscribes to both, and to the CloudFront topic in us-east-1, and is the only publisher to the inboxes.
 
 - **Ops (8–11 CloudWatch alarms):** Lambda errors, throttles, dead-letter queue not empty, failed runs, stale P1 source, quota headroom under 20%, freshness SLO burn, canary failing, availability SLO fast and slow burn, CloudFront 5xx (in us-east-1, with its own topic).
 
 - **Security (8 EventBridge rules, free):** GuardDuty findings rated medium or higher, high or critical Security Hub and Inspector findings, attempts to stop or weaken logging, monitoring or keys, S3 exposure changes, IAM changes, root or no-MFA sign-ins, and any API key change. IAM and global sign-in events arrive only in us-east-1, so two rules there forward them to the primary region's bus (no extra alerts: each event reaches one region).
 
 - **AWS Health events** go to the ops topic.
+
+- **Email cap:** at most `email_max_per_window` messages per issue per fixed Pacific clock window (`email_window_minutes`, default 60, aligned to local midnight, so 14:00-14:59 Pacific is one window). Ops mail, including CloudFront, goes to `alert_emails` on the ops delivery topic (`invdash-ops-alerts`). Security mail goes to `security_alert_emails` on the security delivery topic (`invdash-security-alerts`). Alarms and rules publish to the intake topics (`invdash-ops-alarms`, `invdash-security-alarms`), which only invoke the notifier. Confirm the delivery subscriptions once; they predate the notifier and are kept in place. Configure the window and the maximum in Terraform; they are separate from the SMS settings. Vulnerability findings are keyed by CVE (or GHSA) id plus the affected ECR repository or Lambda function, not by the reporting product, so an Inspector finding and its Security Hub copy are one issue and mail once. Those keys use `vuln_window_minutes` (default 1440, one Pacific calendar day aligned to midnight) on both channels, so rescans and new image pushes with the same CVE do not re-send it every hour. Other security findings (GuardDuty, Security Hub controls, Inspector network findings) keep their product-specific keys and the normal windows.
+
+- **SMS (optional):** set `alert_sms_e164`. The same notifier texts at most `sms_max_per_window` times per issue per its own fixed Pacific clock window (`sms_window_minutes`, default 60). The handset subscribes only to the SMS topic. Email and SMS counters are independent.
+
+- **Repeats:** a repeat inside the window is not mailed or texted. The log line names the issue key, the channel (`email` or `sms`), and how many repeats were suppressed. The next allowed message on that channel includes the count. If the dedupe table errors, that channel still sends. The issue is the alarm name, or the job and error code. Do not subscribe an inbox or the phone directly to the ops, security, or CloudFront topics.
 
 - **Dashboards:** two CloudWatch dashboards, ops and SLO. Data health per source stays in the app's own panel.
 
@@ -553,7 +559,7 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 | data_lake | Lake bucket with versioning, KMS and TLS-only access, replicated to us-west-2; job dead-letter queue; ECR repo with immutable tags |
 | audit_logging | CloudTrail with data events, validation and Insights into an Object-Locked audit bucket; AWS Config into its own versioned config bucket |
 | security_services | GuardDuty with S3, Lambda and malware protection; Security Hub NIST 800-53 Rev 5; Inspector; Access Analyzer; account guardrails |
-| alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes |
+| alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes; per-issue email and optional SMS caps on fixed Pacific clock windows |
 | us_east_1 | CloudFront 5xx alarm with its own encrypted topic and key; forwarding of IAM and root sign-in events to the primary region |
 | observability | Log groups, saved queries, alarms with SLO burn rates, 2 dashboards, canary, \$40 budget |
 | api_keys | 14 SSM SecureStrings with rotation periods (now including FINRA); daily 8:00 PT check that emails reminders |
@@ -577,7 +583,7 @@ Before the first apply:
 
 3.  Run terraform fmt -recursive and terraform validate. I couldn't download the Terraform binary in my workspace, so the code was checked with an HCL parser, a cross-reference script and a smoke test of the Python helper.
 
-4.  Set alert_emails, apply, and confirm the subscription emails. Add health_url once the site is live to turn on the canary.
+4.  Set alert_emails, apply, and confirm the invdash-ops-alerts and invdash-security-alerts subscriptions. Add health_url once the site is live to turn on the canary.
 
 Expect security alerts during your own deploys (key policy and trail updates count as changes); that is the change-control audit trail working.
 

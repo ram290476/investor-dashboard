@@ -1,0 +1,14 @@
+{
+  "cik": "1318605",
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0001628280-26-064366"],
+      "filingDate": ["2026-10-02"],
+      "reportDate": ["2026-09-30"],
+      "form": ["8-K"],
+      "primaryDocument": ["tsla-8k.htm"],
+      "primaryDocDescription": ["Results of Operations and Financial Condition"],
+      "items": ["2.02,9.01"]
+    }
+  }
+}

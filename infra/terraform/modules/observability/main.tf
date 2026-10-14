@@ -98,6 +98,13 @@ resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${each.value}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name or for_each key change. In-place retention updates stay
+  # allowed. See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Saved Logs Insights queries for audit review (AU-6) and troubleshooting.
@@ -134,7 +141,8 @@ resource "aws_cloudwatch_query_definition" "trace_a_run" {
 }
 
 # ---------------------------------------------------------------------------
-# Alarms -> ops topic. Kept at 11 to stay near the 10-alarm free tier.
+# Alarms -> ops topic. Eight base alarms, including the 4 MiB dashboard payload alarm,
+# plus three canary alarms when the health URL is set.
 # ---------------------------------------------------------------------------
 locals {
   app_dims = { service = var.name } # Powertools adds this dimension; keep it constant across functions.
@@ -182,6 +190,12 @@ locals {
       namespace   = local.ns, metric = "FreshP1Ratio", stat = "Average", dims = jsonencode(local.app_dims)
       period      = 21600, evals = 1, datapoints = 1
       op          = "LessThanThreshold", threshold = 1 - 6 * (1 - local.slo_freshness), missing = "notBreaching"
+    }
+    dashboard-payload-size = {
+      description = "Raw serving/dashboard.json is over 4 MiB, before the 6 MiB Lambda response limit"
+      namespace   = local.ns, metric = "DashboardRawBytes", stat = "Maximum", dims = jsonencode(local.app_dims)
+      period      = 21600, evals = 1, datapoints = 1
+      op          = "GreaterThanThreshold", threshold = 4194304, missing = "notBreaching"
     }
   }
 
@@ -449,6 +463,14 @@ locals {
       properties = {
         title   = "Dead-letter queue", region = local.region, stat = "Maximum", period = 300, view = "timeSeries"
         metrics = [["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", var.dlq_name]]
+      }
+    },
+    {
+      type = "metric", x = 0, y = 15, width = 24, height = 6
+      properties = {
+        title       = "Dashboard document size (bytes)", region = local.region, stat = "Maximum", period = 3600, view = "timeSeries"
+        metrics     = [[local.ns, "DashboardRawBytes", "service", var.name], [".", "DashboardGzipBytes", ".", ".", { yAxis = "right" }]]
+        annotations = { horizontal = [{ value = 4194304, label = "4 MiB alarm" }] }
       }
     },
   ])

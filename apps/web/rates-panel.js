@@ -1,5 +1,7 @@
 // Rates & yields blocks (#89). Pure view models: missing prints stay unavailable, never zero.
 
+import { formatConsumerDate, readablePanelText } from "./panel-dates.js";
+
 export const CURVE_TENOR_ORDER = ["1M", "3M", "6M", "1Y", "2Y", "3Y", "5Y", "7Y", "10Y", "20Y", "30Y"];
 const REGIME_MIN_BP = 1;
 
@@ -48,19 +50,21 @@ function statusOf(rates, key, fallbackSource) {
 }
 
 function whenText(lastAttempt) {
-  return lastAttempt ? `last attempt ${lastAttempt}` : "no attempt recorded";
+  if (!lastAttempt) return "no attempt recorded";
+  const day = formatConsumerDate(lastAttempt) || readablePanelText(lastAttempt);
+  return `last attempt ${day}`;
 }
 
 function unavailableMessage(block, status, fallback) {
   const source = status.source || "source not selected";
   const detail = status.detail || fallback;
-  return `Unavailable · ${block} · ${source} · ${whenText(status.last_attempt)}. ${detail}`;
+  return readablePanelText(`Unavailable · ${block} · ${source} · ${whenText(status.last_attempt)}. ${detail}`);
 }
 
 function errorMessage(block, status) {
   const source = status.source || "source not selected";
   const detail = status.detail || "Refresh data to retry.";
-  return `${block} could not be loaded · ${source} · ${whenText(status.last_attempt)}. ${detail}`;
+  return readablePanelText(`${block} could not be loaded · ${source} · ${whenText(status.last_attempt)}. ${detail}`);
 }
 
 function linePath(values, width, height) {
@@ -91,20 +95,39 @@ export function curvePaths(tenors) {
   const lo = Math.min(...both);
   const hi = Math.max(...both);
   const yOf = (value) => 8 + (hi === lo ? 0.5 : (hi - value) / (hi - lo)) * 84;
+  const points = (series) => series.map((value, index) => {
+    if (value == null) return null;
+    const x = 8 + index / (series.length - 1) * 284;
+    return [x.toFixed(1), yOf(value).toFixed(1)];
+  });
   const path = (series) => {
     let connected = false;
-    return series.map((value, index) => {
-      if (value == null) {
+    return points(series).map((point) => {
+      if (!point) {
         connected = false;
         return "";
       }
       const command = connected ? "L" : "M";
       connected = true;
-      const x = 8 + index / (series.length - 1) * 284;
-      return `${command}${x.toFixed(1)},${yOf(value).toFixed(1)}`;
+      return `${command}${point[0]},${point[1]}`;
     }).join(" ");
   };
-  return { today: path(today), ago: path(ago) };
+  const todayPoints = points(today).filter(Boolean);
+  const agoPoints = points(ago).filter(Boolean);
+  const fill = todayPoints.length >= 2 && agoPoints.length >= 2
+    ? `${todayPoints.map((point, index) => `${index ? "L" : "M"}${point[0]},${point[1]}`).join(" ")} ${
+      agoPoints.slice().reverse().map((point) => `L${point[0]},${point[1]}`).join(" ")
+    } Z`
+    : "";
+  return { today: path(today), ago: path(ago), fill };
+}
+
+function noteBp(value) {
+  const number = finiteNumber(value);
+  if (number == null) return null;
+  const rounded = Math.round(number);
+  const sign = rounded > 0 ? "+" : rounded < 0 ? "−" : "";
+  return `${sign}${Math.abs(rounded)}bp`;
 }
 
 function tenorViews(curve) {
@@ -141,30 +164,51 @@ export function curveView(rates, dashboardState) {
   }
   const regime = curve.regime || curveRegime(curve.tenors);
   const paths = curvePaths(curve.tenors);
+  const shown = regime ? regime.charAt(0).toUpperCase() + regime.slice(1) : null;
+  const tenors = tenorViews(curve);
+  const move = (label) => {
+    const row = (curve.tenors || []).find((item) => item.tenor === label);
+    const text = noteBp(row?.chg_1m_bp);
+    return text == null ? null : `${label} ${text}`;
+  };
+  const moves = [move("2Y"), move("10Y")].filter(Boolean);
   return {
     kind: "ready",
-    regime,
-    dates: `${curve.date} vs ${curve.ref_date_1m}`,
-    ariaLabel: `Treasury yield curve on ${curve.date} versus ${curve.ref_date_1m}. ${regime || "Regime unavailable"}.`,
+    regime: shown,
+    dates: `${formatConsumerDate(curve.date) || curve.date} vs ${formatConsumerDate(curve.ref_date_1m) || curve.ref_date_1m}`,
+    note: moves.length ? `${moves.join(" · ")} (1M)` : "",
+    ariaLabel: `Treasury yield curve on ${formatConsumerDate(curve.date) || curve.date} versus ${formatConsumerDate(curve.ref_date_1m) || curve.ref_date_1m}. ${shown || "Regime unavailable"}.`,
     todayPath: paths.today,
     agoPath: paths.ago,
-    tenors: tenorViews(curve),
+    fillPath: paths.fill,
+    tenors,
   };
 }
 
 const FOMC_CLASS = { Cut: "fomc-cut", Hold: "fomc-hold", Hike: "fomc-hike" };
+const FOMC_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function fomcMeetingLabel(iso) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  if (!match) return `${iso} · Kalshi`;
+  const month = FOMC_MONTHS[Number(match[2]) - 1];
+  if (!month) return `${iso} · Kalshi`;
+  return `${month} ${Number(match[3])} FOMC · Kalshi`;
+}
 
 export function fomcSegments(outcomes) {
   return (outcomes || []).flatMap((row) => {
     const prob = finiteNumber(row?.prob);
     const label = String(row?.label || "").trim();
     if (!label || prob == null || prob < 0 || prob > 1) return [];
+    const percent = Math.round(prob * 100);
     return [{
       label,
       prob,
       className: FOMC_CLASS[label] || "fomc-other",
       width: `${Math.round(prob * 1000) / 10}%`,
-      title: `${label} ${Math.round(prob * 100)}%`,
+      title: `${label} ${percent}%`,
+      text: percent >= 12 ? `${label} ${percent}%` : "",
     }];
   });
 }
@@ -190,11 +234,16 @@ export function fomcView(rates, dashboardState) {
   }
   const history = (fomc.history_14d || []).filter((row) => finiteNumber(row.cut) != null);
   const legend = segments.map((segment) => segment.title).join(" · ");
+  const first = finiteNumber(history[0]?.cut);
+  const last = finiteNumber(history.at(-1)?.cut);
+  const delta = first == null || last == null || history.length < 2 ? null : Math.round((last - first) * 100);
+  const cutTrend = delta == null ? "" : `cut ${delta > 0 ? "▲ +" : delta < 0 ? "▼ " : ""}${delta} pts / ${history.length >= 10 ? "2w" : "stored"}`;
   return {
     kind: "ready",
-    meeting: `${fomc.meeting_date} · Kalshi`,
+    meeting: fomcMeetingLabel(fomc.meeting_date),
     segments,
     legend,
+    cutTrend,
     ariaLabel: `FOMC outcome probabilities. ${legend}`,
     history,
     sparkLabel: "Cut probability over the stored history",

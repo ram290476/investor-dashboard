@@ -1,8 +1,9 @@
 """Company IR collection, extraction, catalog gating and per-ticker serving JSON.
 
 Raw documents land at raw/company_ir/<ticker>/<period>/<sha256>.<ext> with a manifest.
-Curated rows use the company_metrics Parquet schema. Only catalog entries Ram has
-approved are served. Proposed metrics are stored and omitted from serving JSON.
+Curated rows use the company_metrics Parquet schema. Approved metrics are served as
+primary. Proposed metrics are served too, with status, confidence and source, so the
+UI can label them Pending review. Rejected metrics stay out of serving JSON.
 
 Live crawling, LLM calls and Terraform apply stay outside this module's tests.
 LLM credentials are a Secrets Manager / SSM id in the environment, never a key literal.
@@ -15,6 +16,7 @@ import json
 import os
 import re
 from datetime import UTC, date, datetime, timedelta
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -81,6 +83,105 @@ REQUIRED_TESLA_METRICS = (
     "auto_gross_margin_ex_credits",
     "regulatory_credits_revenue",
 )
+COMPANY_IR_MAX_TICKERS = 25
+SEC_MIN_INTERVAL_S = 0.12
+FUZZY_LABEL_CUTOFF = 0.92
+DISCLOSURE_STATUSES = {"numeric", "narrative", "chart_only", "not_disclosed", "discontinued"}
+CATALOG_STATUSES = {"proposed", "approved", "rejected"}
+BLOCKED_HOSTS = {"tesla.com", "www.tesla.com"}
+SEC_HOSTS = {"www.sec.gov", "data.sec.gov"}
+# Operating items: the latest deck beats the press release, and news never wins over an official number.
+# GAAP items: XBRL beats the deck, which beats the press release.
+SOURCE_PRIORITY = {
+    "fundamentals": {"xbrl": 100, "deck": 50, "press_release": 40, "note": 45, "news": 0, "llm": 0},
+    "operating": {"deck": 80, "press_release": 70, "xbrl": 40, "note": 30, "news": 0, "llm": 0},
+    "guidance": {"deck": 80, "press_release": 70, "note": 30, "news": 0, "llm": 0},
+}
+# Tags used only to reconcile a deck figure. XBRL wins; a deck value never replaces these.
+# Cash-flow concepts are filed year-to-date; mode "ytd" differences them into quarters.
+# Tag order is a tie-break. The tag whose newest fact is most recent wins, so a
+# concept that died in 2009 does not block the one the company uses now.
+GAAP_XBRL_TAGS = {
+    "revenue_gaap": {
+        "kind": "duration",
+        "tags": ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax", "SalesRevenueNet"],
+        "mode": "income",
+    },
+    "gross_profit": {"kind": "duration", "tags": ["GrossProfit"], "mode": "income"},
+    "cost_of_revenue": {
+        "kind": "duration",
+        "tags": ["CostOfRevenue", "CostOfGoodsAndServicesSold"],
+        "mode": "income",
+    },
+    "operating_income": {"kind": "duration", "tags": ["OperatingIncomeLoss"], "mode": "income"},
+    "net_income_gaap": {"kind": "duration", "tags": ["NetIncomeLoss"], "mode": "income"},
+    "research_and_development": {
+        "kind": "duration",
+        "tags": ["ResearchAndDevelopmentExpense"],
+        "mode": "income",
+    },
+    "sga": {
+        "kind": "duration",
+        "tags": ["SellingGeneralAndAdministrativeExpense", "GeneralAndAdministrativeExpense"],
+        "mode": "income",
+    },
+    "operating_cash_flow": {
+        "kind": "duration",
+        "tags": ["NetCashProvidedByUsedInOperatingActivities"],
+        "mode": "ytd",
+    },
+    "capex": {
+        "kind": "duration",
+        "tags": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+        "mode": "ytd",
+    },
+    "share_repurchases": {
+        "kind": "duration",
+        "tags": ["PaymentsForRepurchaseOfCommonStock"],
+        "mode": "ytd",
+    },
+    "dividends_paid": {
+        "kind": "duration",
+        "tags": ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"],
+        "mode": "ytd",
+    },
+    "eps_diluted": {
+        "kind": "duration",
+        "tags": ["EarningsPerShareDiluted"],
+        "mode": "income",
+        "unit": "USD/shares",
+    },
+    "deferred_revenue": {
+        "kind": "instant",
+        "tags": [
+            "ContractWithCustomerLiabilityCurrent",
+            "ContractWithCustomerLiabilityNoncurrent",
+            "DeferredRevenueCurrent",
+            "ContractWithCustomerLiability",
+        ],
+        "mode": "deferred",
+    },
+    "inventory": {"kind": "instant", "tags": ["InventoryNet"], "mode": "instant"},
+    "cash_and_equivalents": {
+        "kind": "instant",
+        "tags": [
+            "CashAndCashEquivalentsAtCarryingValue",
+            "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+        ],
+        "mode": "instant",
+    },
+    # Composed per period in cash_and_investments_series. The retired restricted-cash
+    # concept stops at 2018Q3 and must not win just because it has older facts.
+    "cash_and_investments": {"kind": "instant", "tags": [], "mode": "cash_investments"},
+}
+_FOOTNOTE_TAIL = re.compile(r"(?:\s*[\u00b9\u00b2\u00b3\u2070-\u2079]+|\s*\(\d+\))+\s*$")
+_UNIT_PAREN = re.compile(
+    r"\s*\((?:[^)]*\b(?:mil(?:lion)?s?|bn|billions?|gwh|mwh|mw|%))[^)]*\)",
+    re.IGNORECASE,
+)
+_QSHORT = re.compile(r"^Q([1-4])[\s'\-]*(\d{2}|\d{4})$", re.IGNORECASE)
+_YOY_HEADER = {"yoy", "y/y", "year over year", "change", "vs prior year"}
+_STORAGE_GWH = re.compile(r"(\d+(?:\.\d+)?)\s*GWh of energy storage", re.IGNORECASE)
 
 
 def crawler_user_agent(contact: str | None = None) -> str:
@@ -196,13 +297,100 @@ def sanitize_html(html: str) -> str:
     return _HANDLER.sub("", cleaned)
 
 
+def generic_gaap_metrics() -> list[dict]:
+    """Minimal GAAP catalog shared by every filer. Every row stays proposed.
+
+    Company JSON files add only the rows that are not in this list. A ticker with
+    no file still keeps XBRL instead of dropping it.
+    """
+    rows = [
+        ("revenue_gaap", "Revenue", "USD", ["Revenue", "Total revenue", "Total revenues", "revenue total"]),
+        ("gross_profit", "Gross profit", "USD", ["Gross profit"]),
+        ("cost_of_revenue", "Cost of revenue", "USD", ["Cost of revenue"]),
+        (
+            "operating_income",
+            "Operating income (loss)",
+            "USD",
+            ["Operating income", "Income from operations", "Loss from operations"],
+        ),
+        (
+            "net_income_gaap",
+            "Net income (loss)",
+            "USD",
+            ["Net income", "Net loss", "Net income attributable to common stockholders (GAAP)"],
+        ),
+        (
+            "eps_diluted",
+            "Diluted EPS",
+            "USD/share",
+            ["Diluted EPS", "EPS attributable to common stockholders, diluted (GAAP)"],
+        ),
+        ("research_and_development", "R&D expense", "USD", ["Research and development", "R&D"]),
+        ("sga", "SG&A", "USD", ["SG&A", "Selling, general and administrative"]),
+        ("cash_and_equivalents", "Cash and cash equivalents", "USD", ["Cash and cash equivalents"]),
+        ("deferred_revenue", "Deferred revenue", "USD", ["Deferred revenue"]),
+        ("inventory", "Inventory", "USD", ["Inventory", "Inventory, net"]),
+        (
+            "operating_cash_flow",
+            "Operating cash flow",
+            "USD",
+            ["Operating cash flow", "Net cash provided by operating activities"],
+        ),
+        (
+            "capex",
+            "Capital expenditures",
+            "USD",
+            ["Capital expenditures", "Capex", "Payments to acquire property, plant and equipment"],
+        ),
+        (
+            "share_repurchases",
+            "Share repurchases",
+            "USD",
+            ["Share repurchases", "Payments related to repurchases of common stock"],
+        ),
+        ("dividends_paid", "Dividends paid", "USD", ["Dividends paid", "Dividends"]),
+    ]
+    metrics = []
+    for order, (metric_id, display_name, unit, aliases) in enumerate(rows, start=1):
+        metrics.append(
+            {
+                "metric_id": metric_id,
+                "display_name": display_name,
+                "unit": unit,
+                "definition": f"{display_name} from SEC companyfacts. Proposed until a reviewer approves it.",
+                "category": "fundamentals",
+                "status": "proposed",
+                "approved_by": None,
+                "approved_at": None,
+                "panel_order": 400 + order,
+                "aliases": aliases,
+                "disclosure_status": "numeric",
+                "scale": 1,
+                "source_priority": ["xbrl", "deck", "press_release"],
+            }
+        )
+    return metrics
+
+
 def load_catalog(ticker: str) -> dict:
+    """Ticker file plus any generic GAAP rows the file does not already define."""
     symbol = str(ticker or "").upper()
     path = Path(__file__).resolve().parent / "catalog" / f"{symbol}.json"
-    if not path.is_file():
-        return {"ticker": symbol, "catalog_version": 1, "metrics": []}
-    document = json.loads(path.read_text(encoding="utf-8"))
+    if path.is_file():
+        document = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        document = {
+            "ticker": symbol,
+            "catalog_version": 1,
+            "approval_note": "Generic GAAP rows only. Every entry is proposed. Nothing is auto-approved.",
+            "metrics": [],
+        }
     document["ticker"] = symbol
+    present = {item.get("metric_id") for item in document.get("metrics") or []}
+    for item in generic_gaap_metrics():
+        if item["metric_id"] not in present:
+            document.setdefault("metrics", []).append(item)
+            present.add(item["metric_id"])
     return document
 
 
@@ -211,7 +399,11 @@ def catalog_entry(catalog: dict, metric_id: str) -> dict | None:
 
 
 def set_catalog_status(
-    catalog: dict, metric_id: str, status: str, approved_by: str | None, approved_at: str | None,
+    catalog: dict,
+    metric_id: str,
+    status: str,
+    approved_by: str | None,
+    approved_at: str | None,
 ) -> dict:
     """Reviewed JSON/CLI approval. Does not invent an approval Ram has not made."""
     if status not in {"proposed", "approved", "rejected"}:
@@ -226,15 +418,153 @@ def set_catalog_status(
     return updated
 
 
+def catalog_object_key(ticker: str) -> str:
+    """Lake review record. The packaged catalog stays the metric definitions."""
+    return f"catalog/{str(ticker or '').upper()}.json"
+
+
+def preserve_approved_status(existing: dict | None, incoming: dict) -> dict:
+    """A collect may add proposed metrics. It must not clear an approval already stored."""
+    updated = json.loads(json.dumps(incoming))
+    if not isinstance(existing, dict):
+        return updated
+    saved = {
+        item.get("metric_id"): item
+        for item in existing.get("metrics") or []
+        if isinstance(item, dict) and item.get("status") == "approved"
+    }
+    for entry in updated.get("metrics") or []:
+        prior = saved.get(entry.get("metric_id"))
+        if not prior:
+            continue
+        entry["status"] = "approved"
+        entry["approved_by"] = prior.get("approved_by")
+        entry["approved_at"] = prior.get("approved_at")
+    return updated
+
+
+def review_catalog(packaged: dict, lake: dict | None) -> dict:
+    """Lake review status is the live record, including an undo back to proposed.
+
+    Approved lake rows are applied again so a packaged ``proposed`` copy cannot clear them.
+    """
+    updated = json.loads(json.dumps(packaged))
+    if not isinstance(lake, dict):
+        return updated
+    lake_by_id = {
+        item.get("metric_id"): item
+        for item in lake.get("metrics") or []
+        if isinstance(item, dict) and item.get("metric_id")
+    }
+    for entry in updated.get("metrics") or []:
+        saved = lake_by_id.get(entry.get("metric_id"))
+        if not saved:
+            continue
+        status = saved.get("status")
+        if status not in {"approved", "proposed", "rejected"}:
+            continue
+        entry["status"] = status
+        entry["approved_by"] = saved.get("approved_by") if status == "approved" else None
+        entry["approved_at"] = saved.get("approved_at") if status == "approved" else None
+    return preserve_approved_status(lake, updated)
+
+
+def _read_lake_catalog(read_json, ticker: str) -> dict | None:
+    if read_json is None:
+        return None
+    try:
+        loaded = read_json(catalog_object_key(ticker))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def normalize_label(text: str) -> str:
+    """Lowercase a row label and drop footnote markers and unit parentheticals."""
+    cleaned = str(text).replace("_", " ")
+    cleaned = re.sub(r"\(\d+\)", " ", cleaned)
+    cleaned = _FOOTNOTE_TAIL.sub("", cleaned)
+    cleaned = _UNIT_PAREN.sub("", cleaned)
+    cleaned = cleaned.replace("%", " ")
+    return " ".join(cleaned.lower().split())
+
+
+def scale_from_label(label: str) -> tuple[float, str | None]:
+    """`(mil)` means x1e6. A unit token such as GWh sets the unit and does not scale."""
+    match = _UNIT_PAREN.search(str(label))
+    if not match:
+        return 1.0, None
+    token = match.group(0).lower()
+    if "gwh" in token:
+        return 1.0, "GWh"
+    if "mwh" in token:
+        return 1.0, "MWh"
+    if re.search(r"\bmw\b", token):
+        return 1.0, "MW"
+    if "bn" in token or "billion" in token:
+        return 1_000_000_000.0, None
+    if "mil" in token:
+        return 1_000_000.0, None
+    if "%" in token:
+        return 1.0, "ratio"
+    return 1.0, None
+
+
+def table_unit_scale(headers: list[str]) -> float:
+    """A financial summary caption such as ``($ in millions)`` scales every value in that table."""
+    blob = " ".join(str(header) for header in headers).lower()
+    if "in billions" in blob or "($ b" in blob:
+        return 1_000_000_000.0
+    if "in millions" in blob or "$ in millions" in blob or "($ m" in blob or "(mil)" in blob:
+        return 1_000_000.0
+    if "in thousands" in blob or "$ in thousands" in blob or "(in thousands" in blob:
+        return 1_000.0
+    return 1.0
+
+
+def apply_scale(value: float, label: str, entry: dict, table_scale: float = 1) -> tuple[float, str | None]:
+    """Scale a reported figure into base units.
+
+    A table caption or a ``(mil)`` label always scales. The catalog scale applies to small
+    reported figures such as 1.48 million subscribers, and leaves a base-unit count alone.
+    """
+    label_scale, unit_hint = scale_from_label(label)
+    if table_scale != 1:
+        scale = table_scale
+    elif label_scale != 1:
+        scale = label_scale
+    else:
+        scale = float(entry.get("scale") or 1)
+        if scale != 1 and abs(value) >= 1000:
+            scale = 1
+    if scale != 1:
+        value *= scale
+    return value, unit_hint
+
+
 def _alias_index(catalog: dict) -> dict[str, dict]:
     index: dict[str, dict] = {}
     for entry in catalog.get("metrics", []):
         names = [entry.get("display_name", ""), entry.get("metric_id", ""), *(entry.get("aliases") or [])]
         for name in names:
-            key = " ".join(str(name).lower().replace("_", " ").split())
+            key = normalize_label(str(name))
             if key:
                 index[key] = entry
     return index
+
+
+def match_catalog_entry(label: str, catalog: dict) -> dict | None:
+    """Exact normalized alias, then a high fuzzy cutoff so nearby labels are not merged."""
+    index = _alias_index(catalog)
+    key = normalize_label(label)
+    if not key:
+        return None
+    if key in index:
+        return index[key]
+    import difflib
+
+    found = difflib.get_close_matches(key, index.keys(), n=1, cutoff=FUZZY_LABEL_CUTOFF)
+    return index[found[0]] if found else None
 
 
 def confidence_for(method: str) -> float:
@@ -248,21 +578,56 @@ def row_approved(catalog_status: str, method: str) -> bool:
     return catalog_status == "approved" and method != "llm"
 
 
-def period_end_for(fiscal_period: str) -> date:
+def _quarter_end_month(fiscal_end_month: int, quarter: int) -> int:
+    """Calendar month in which a fiscal quarter closes. Q4 closes on the year-end month."""
+    return (fiscal_end_month + quarter * 3 - 1) % 12 + 1
+
+
+def period_end_for(fiscal_period: str, fiscal_end_month: int = 12) -> date:
+    """Last day of the company's fiscal quarter.
+
+    Nvidia's fiscal year ends in January, so 2027Q2 closes in July 2026, not on
+    the calendar quarter-end June 30, 2027. A fact or release end date is more
+    precise and replaces this month-end when the caller has one.
+    """
     match = _QUARTER.fullmatch(fiscal_period)
     if not match:
         raise ValueError(f"fiscal period must look like 2026Q3, got {fiscal_period!r}")
     year, quarter = int(match.group(1)), int(match.group(2))
-    month_day = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
-    month, day = month_day[quarter]
-    return date(year, month, day)
+    month = _quarter_end_month(fiscal_end_month, quarter)
+    calendar_year = year if month <= fiscal_end_month else year - 1
+    if month == 12:
+        return date(calendar_year, 12, 31)
+    return date(calendar_year, month + 1, 1) - timedelta(days=1)
+
+
+_POSITIVE_SPEND = {"capex", "capex_total"}
+
+
+def _as_positive_spend(metric_id: str, value: float) -> float:
+    """Capex is an outflow. The deck shows it in parentheses and XBRL files it positive."""
+    if metric_id in _POSITIVE_SPEND and value < 0:
+        return -value
+    return value
 
 
 def _parse_number(text: str) -> float | None:
-    cleaned = " ".join(text.replace("\u00a0", " ").replace("\u2013", "-").replace("\u2014", "-").split()).strip()
-    if cleaned.lower() in _MISSING:
-        return None
+    value, _lower = _parse_cell(text)
+    return value
+
+
+def _parse_cell(text: str) -> tuple[float | None, bool]:
+    """Parse one cell. `>550,000` keeps the number and a lower-bound flag. `—` is null."""
+    cleaned = " ".join(str(text).replace("\u00a0", " ").replace("\u2013", "-").replace("\u2014", "-").split()).strip()
+    lower_bound = cleaned.startswith(">")
+    if lower_bound:
+        cleaned = cleaned[1:].strip()
+    # `$(1,943)` and `$ (1,943)` are negatives. The currency mark sits outside the paren.
+    cleaned = re.sub(r"^[\$€£]\s*", "", cleaned)
+    if cleaned.lower() in _MISSING or _FOOTNOTE_TOKEN.fullmatch(cleaned.replace(" ", "")):
+        return None, lower_bound
     negative = cleaned.startswith("(") and cleaned.endswith(")")
+    percent = "%" in cleaned
     cleaned = cleaned.strip("()").replace(",", "").replace("$", "").replace("%", "").strip()
     multiplier = 1.0
     suffix = cleaned[-1:].lower()
@@ -272,8 +637,12 @@ def _parse_number(text: str) -> float | None:
     try:
         value = float(cleaned) * multiplier
     except ValueError:
-        return None
-    return -value if negative else value
+        return None, lower_bound
+    if negative:
+        value = -value
+    if percent:
+        value = value / 100.0
+    return value, lower_bound
 
 
 class _TableParser(HTMLParser):
@@ -342,13 +711,551 @@ def text_tables(text: str) -> list[list[list[str]]]:
     return [rows] if len(rows) >= 2 else []
 
 
+def quarter_token(header: str) -> str | None:
+    """`2026Q3`, `Q3-26`, `4Q-2022` and `Q2 FY27` are fiscal periods. A YoY column is not."""
+    text = " ".join(str(header).replace("'", " ").split())
+    if "|" in text:
+        text = text.split("|", 1)[0].strip()
+    lowered = text.lower()
+    if lowered in _YOY_HEADER or lowered in {"q/q", "y/y", "ytd"}:
+        return None
+    compact = text.upper().replace(" ", "")
+    if _QUARTER.fullmatch(compact):
+        return compact
+    fiscal = re.fullmatch(r"Q([1-4])\s*FY\s*(\d{2}|\d{4})", text, re.IGNORECASE)
+    if fiscal:
+        year = int(fiscal.group(2))
+        if year < 100:
+            year += 2000
+        return f"{year}Q{fiscal.group(1)}"
+    match = _QSHORT.fullmatch(text.strip())
+    if match:
+        year = int(match.group(2))
+        if year < 100:
+            year += 2000
+        return f"{year}Q{match.group(1)}"
+    trailing = re.fullmatch(r"([1-4])Q[\s'\-]*(\d{2}|\d{4})", text.strip(), re.IGNORECASE)
+    if not trailing:
+        return None
+    year = int(trailing.group(2))
+    if year < 100:
+        year += 2000
+    return f"{year}Q{trailing.group(1)}"
+
+
+def _coalesce_percent_cells(row: list[str]) -> list[str]:
+    """EDGAR sometimes puts the percent sign in the next cell. Glue it back."""
+    cells: list[str] = []
+    index = 0
+    while index < len(row):
+        cell = row[index]
+        if index + 1 < len(row) and row[index + 1].strip() == "%" and _parse_cell(cell)[0] is not None:
+            cells.append(f"{cell}%")
+            index += 2
+            continue
+        cells.append(cell)
+        index += 1
+    return cells
+
+
+def _prepare_quarter_table(table: list[list[str]]) -> list[list[str]] | None:
+    """Find the header row. A caption above it still supplies `($ in millions)`."""
+    prepared = [_coalesce_percent_cells(row) for row in table]
+    header_at = None
+    # Captions such as "(in thousands)" can sit well above the quarter header.
+    for index, row in enumerate(prepared[:15]):
+        if len(_quarter_headers(row)) >= 2:
+            header_at = index
+            break
+    if header_at is None:
+        return None
+    header = list(prepared[header_at])
+    caption = " ".join(" ".join(row) for row in prepared[:header_at]).strip()
+    if caption:
+        header[0] = f"{caption} {header[0]}".strip()
+    return [header, *prepared[header_at + 1 :]]
+
+
+_TABLE_SCALE_SKIP = re.compile(
+    r"\b(?:eps|per share|per month|arpu|gwh|days|count)\b|\(in gw\)|\(#\)|metric tons?",
+    re.IGNORECASE,
+)
+
+
+def _row_scale(label: str, cell: str, table_scale: float) -> float:
+    """A millions caption does not apply to percents, per-share amounts, or unit rows."""
+    text = str(cell)
+    if any(token in text.lower() for token in ("%", "bp", "pts")):
+        return 1.0
+    if _TABLE_SCALE_SKIP.search(label or ""):
+        return 1.0
+    return table_scale
+
+
 def _quarter_headers(headers: list[str]) -> list[tuple[int, str]]:
     found = []
     for index, header in enumerate(headers):
-        token = header.upper().replace(" ", "")
-        if _QUARTER.fullmatch(token):
-            found.append((index, token))
+        token = quarter_token(header)
+        if token or _date_from_header(str(header)):
+            found.append((index, token or header))
     return found
+
+
+def _observation(
+    entry: dict,
+    *,
+    ticker: str,
+    fiscal_period: str,
+    value: float,
+    unit: str,
+    source_url: str,
+    source_doc_hash: str,
+    extracted_at: datetime,
+    published_date: str | None,
+    method: str,
+    confidence: float,
+    lower_bound: bool,
+    source_kind: str,
+    label: str,
+    period_end: date | None = None,
+    fiscal_end_month: int = 12,
+) -> dict:
+    return {
+        "ticker": ticker.upper(),
+        "metric_id": entry["metric_id"],
+        "period_end": period_end or period_end_for(fiscal_period, fiscal_end_month),
+        "fiscal_period": fiscal_period,
+        "value": _as_positive_spend(entry["metric_id"], value),
+        "unit": unit,
+        "source_url": source_url,
+        "source_doc_hash": source_doc_hash,
+        "extracted_at": extracted_at,
+        "confidence": confidence,
+        "approved": row_approved(entry.get("status", "proposed"), method),
+        "method": method,
+        "published_date": published_date,
+        "display_name": entry.get("display_name"),
+        "category": entry.get("category") or "operating",
+        "catalog_status": entry.get("status", "proposed"),
+        "lower_bound": lower_bound,
+        "source_kind": source_kind,
+        "label": label,
+        "accession": None,
+        "footnote": None,
+    }
+
+
+_NON_GAAP = re.compile(r"non[-\s]?gaap", re.IGNORECASE)
+_COMPANY_TOTAL_METRICS = set(GAAP_XBRL_TAGS) | {"gross_margin_gaap", "capex_total"}
+_DURATION_PHRASE = re.compile(
+    r"three\s+months|six\s+months|nine\s+months|twelve\s+months|quarter\s+ended|year\s+ended|period\s+ended|months\s+ended",
+    re.IGNORECASE,
+)
+_BALANCE_SHEET = re.compile(
+    r"balance sheets?|\bas of\b|goodwill|retained earnings|total liabilities|total assets|stockholders. equity",
+    re.IGNORECASE,
+)
+_PROPOSAL_SKIP = re.compile(
+    r"^(?:total|totals|basic|diluted)$"
+    r"|\b(?:basic|diluted)\b"
+    r"|\bfootnotes?\b"
+    r"|^\(\d+\)|\(\d+\)\s"
+    r"|[a-z]\d+$"
+    r"|^adjusted\b"
+    r"|^gaap\s+"
+    r"|^net loss,? as reported\b"
+    r"|^(?:loss|income) before (?:income )?taxes\b"
+    r"|^income\s+\(loss\)\s+from\s+operations\s+\S"
+    r"|\bebitda\b"
+    r"|\btotal adjustments\b"
+    r"|\binterest expense\b"
+    r"|\baccretion\b"
+    r"|\bdepreciation\b|\bamortiz"
+    r"|\bshare[-\s]?based\b|\bstock[-\s]?based\b"
+    r"|\bnet cash (?:used in|provided by)\b"
+    r"|\b(?:six|nine)\s+months\s+ended\b",
+    re.IGNORECASE,
+)
+_SEGMENT_HEADING = re.compile(r"\bsegment\s*:?\s*$", re.IGNORECASE)
+_CONSOLIDATED_HEADING = re.compile(r"\bconsolidated\b", re.IGNORECASE)
+_RECON_MARK = re.compile(
+    r"\breconciliation\b|\btotal adjustments\b|\badjusted\s+ebitda\b|\bebitda\b",
+    re.IGNORECASE,
+)
+_RECON_SECTION = re.compile(r"\breconciliation\b|\btotal adjustments\b", re.IGNORECASE)
+_CASH_FLOW_LABEL = re.compile(
+    r"net cash (?:used in|provided by)"
+    r"|cash flows provided by \(used in\)"
+    r"|cash flows \(used in\) provided by",
+    re.IGNORECASE,
+)
+_GAAP_LINE = re.compile(r"^gaap\s+\S", re.IGNORECASE)
+_ADJUSTED_TOTAL = re.compile(r"^adjusted\s+\S", re.IGNORECASE)
+_TOTAL_ADJUSTMENTS = re.compile(r"\btotal\b.*\badjustments?\b", re.IGNORECASE)
+_YTD_SPAN = re.compile(r"\b(?:six|nine)\s+months\s+ended\b", re.IGNORECASE)
+_QUARTER_SPAN = re.compile(r"\bthree\s+months\s+ended\b|\bquarter(?:s)?\s+ended\b|\bq[1-4]\b", re.IGNORECASE)
+_SCALE_CAPTION = re.compile(
+    r"(?:\(\s*)?(?:\$\s*)?in\s+(?:thousands|millions|billions)\b",
+    re.IGNORECASE,
+)
+
+
+def _labels_are_bridge(labels: list[str]) -> bool:
+    """A non-GAAP bridge, even when the caption never says reconciliation.
+
+    EVgo's tables pair ``GAAP revenue`` lines with an ``Adjusted EBITDA`` total, or a
+    ``Total ... adjustments`` row, and do not use the word reconciliation.
+    """
+    gaap_line = False
+    adjusted_total = False
+    total_adjustments = False
+    for label in labels:
+        text = normalize_label(label)
+        if _GAAP_LINE.search(text):
+            gaap_line = True
+        if _ADJUSTED_TOTAL.search(text):
+            adjusted_total = True
+        if _TOTAL_ADJUSTMENTS.search(text):
+            total_adjustments = True
+    return (gaap_line and adjusted_total) or total_adjustments
+
+
+def _is_gaap_metric(entry: dict) -> bool:
+    metric_id = str(entry.get("metric_id") or "")
+    return metric_id in GAAP_XBRL_TAGS or "gaap" in metric_id
+
+
+def _skip_proposal(label: str) -> bool:
+    """Footnotes, basic/diluted share rows, and a bare Total are not new metrics."""
+    text = " ".join(str(label).split())
+    normalized = normalize_label(text)
+    if not normalized or normalized in {"total", "totals"}:
+        return True
+    return _PROPOSAL_SKIP.search(normalized) is not None or _PROPOSAL_SKIP.search(text) is not None
+
+
+def _newest_column(periods: list[str]) -> str:
+    return max(periods)
+
+
+def _header_period_end(header: str) -> date | None:
+    """A column header may carry the real period end next to its fiscal label."""
+    text = str(header)
+    if "|" in text:
+        _period, _, raw = text.partition("|")
+        try:
+            return date.fromisoformat(raw.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _scan_quarters(header: list[str], fiscal_end_month: int) -> list[tuple[int, str, date | None]]:
+    """Quarter columns, plus a date header's own period end. TTM is not a quarter."""
+    found = []
+    for index, cell in enumerate(header):
+        token = quarter_token(cell)
+        period_end = _header_period_end(cell)
+        if token is None:
+            parsed = _date_from_header(str(cell))
+            if parsed is None:
+                continue
+            token = _fiscal_period(parsed, fiscal_end_month)
+            period_end = parsed
+        if token:
+            found.append((index, token, period_end))
+    return found
+
+
+def _column_is_date(cell: str) -> bool:
+    """A column that came from a period-end date, not from a Q1/Q2 token."""
+    text = str(cell)
+    if "|" in text:
+        raw = text.split("|", 1)[1].strip()
+        return _date_from_header(raw) is not None or re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw) is not None
+    return quarter_token(text) is None and _date_from_header(" ".join(text.split())) is not None
+
+
+def _is_spacer_cell(cell: str) -> bool:
+    text = " ".join(str(cell).replace("\u00a0", " ").split())
+    return re.fullmatch(r"[\$€£]|usd", text, re.IGNORECASE) is not None
+
+
+def _is_amount_slot(cell: str) -> bool:
+    """A real column: a number, a blank, or a dash. A lone ``$`` is the spacer beside it."""
+    text = " ".join(str(cell).replace("\u00a0", " ").replace("\u2013", "-").replace("\u2014", "-").split())
+    if not text or text.lower() in _MISSING:
+        return True
+    if _is_spacer_cell(text):
+        return False
+    return _parse_cell(text)[0] is not None
+
+
+def _is_instant_metric(metric_id: str) -> bool:
+    spec = GAAP_XBRL_TAGS.get(metric_id) or {}
+    return spec.get("kind") == "instant" or spec.get("mode") in {"instant", "deferred", "cash_investments"}
+
+
+def _body_indexes(header_indexes: list[int], cells: list[str]) -> list[int]:
+    """Pair each header with the body cell that holds its number.
+
+    EDGAR balance sheets put the date in one header cell (colspan) and ``$`` plus the
+    amount in two body cells. Reading the header index then lands on ``$`` and shifts
+    the amount onto the comparative column.
+    """
+    if all(index < len(cells) and _is_amount_slot(cells[index]) for index in header_indexes):
+        return header_indexes
+    amounts = [
+        index for index, cell in enumerate(cells) if index > 0 and _parse_cell(str(cell))[0] is not None
+    ]
+    if len(amounts) >= len(header_indexes):
+        return amounts[: len(header_indexes)]
+    return header_indexes
+
+
+def _match_row_entry(raw_label: str, catalog: dict) -> dict | None:
+    entry = match_catalog_entry(raw_label, catalog)
+    if entry is not None:
+        return entry
+    normalized = normalize_label(raw_label)
+    if normalized.endswith(" total"):
+        prefix = raw_label.rsplit(None, 1)[0]
+        return match_catalog_entry(prefix, catalog)
+    return None
+
+
+def _header_caption(header: list[str]) -> str:
+    """Column titles. A long flowing-text preamble is not a caption."""
+    cells = [str(cell) for cell in header]
+    if cells and len(cells[0]) > 180:
+        cells = cells[1:]
+    return " ".join(cells)
+
+
+def _quarters_ahead(period: str, filing_period: str | None) -> int | None:
+    """How many quarters `period` sits after the filing. None when either side is not a quarter."""
+    if not filing_period:
+        return None
+    token = quarter_token(period) or period
+    current = _linear_quarter(str(filing_period))
+    candidate = _linear_quarter(token)
+    if current is None or candidate is None:
+        return None
+    return candidate - current
+
+
+def table_scan(
+    tables: list[list[list[str]]],
+    catalog: dict,
+    *,
+    ticker: str,
+    source_url: str,
+    source_doc_hash: str,
+    extracted_at: datetime,
+    published_date: str | None,
+    method: str = "table",
+    source_kind: str = "deck",
+    fiscal_end_month: int = 12,
+    filing_period: str | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Split a quarter table into catalog matches and proposed labels.
+
+    Each data row is a label, then one cell per quarter header, then an ignored YoY column.
+    Non-GAAP sections are not stored as GAAP metrics. A segment table does not supply the
+    company total; a Total row does.
+    """
+    confidence = confidence_for(method)
+    rows: list[dict] = []
+    proposals: list[dict] = []
+    seen_proposals: set[str] = set()
+    for raw_table in tables:
+        table = _prepare_quarter_table(raw_table) if raw_table else None
+        if not table:
+            continue
+        quarters = _scan_quarters(table[0], fiscal_end_month)
+        if len(quarters) < 2:
+            continue
+        tail = " ".join(str(cell) for cell in table[0])[-300:]
+        header_blob = " ".join(str(cell) for cell in table[0])
+        caption = _header_caption(table[0])
+        row_labels = [str(row[0]) for row in table[1:] if row]
+        label_blob = " ".join(row_labels)
+        segment_table = re.search(r"\bsegment\b", tail, re.IGNORECASE) is not None
+        # A reconciliation bridge, including its GAAP starting line and the adjustments
+        # under it, is not a set of company metrics. Cash-flow and year-to-date-only
+        # statements are not quarterly KPI tables. EVgo never captions the bridge
+        # "reconciliation"; the GAAP lines plus an Adjusted total identify it.
+        recon_table = _RECON_MARK.search(caption) is not None or _labels_are_bridge(row_labels)
+        cash_flow = (
+            _CASH_FLOW_LABEL.search(caption) is not None or _CASH_FLOW_LABEL.search(label_blob) is not None
+        )
+        ytd_only = _YTD_SPAN.search(caption) is not None and _QUARTER_SPAN.search(caption) is None
+        in_non_gaap = _NON_GAAP.search(tail) is not None
+        reported_scale = table_unit_scale(table[0])
+        date_only = all(_column_is_date(table[0][index]) for index, _period, _end in quarters)
+        balance_sheet = (
+            date_only
+            and _DURATION_PHRASE.search(header_blob) is None
+            and _BALANCE_SHEET.search(header_blob) is not None
+        )
+        header_indexes = [index for index, _period, _end in quarters]
+        table_rows: list[tuple[bool, dict]] = []
+        table_proposals: list[tuple[str, dict]] = []
+        # A row such as "AWS Segment:" scopes the following lines until a total or consolidated heading.
+        segment_scope = segment_table
+        in_recon = recon_table
+        for cells in table[1:]:
+            if not cells or not str(cells[0]).strip():
+                continue
+            raw_label = str(cells[0]).strip()
+            normalized = normalize_label(raw_label)
+            if date_only and _DURATION_PHRASE.search(header_blob) is None and _BALANCE_SHEET.search(raw_label):
+                balance_sheet = True
+            body_indexes = _body_indexes(header_indexes, cells)
+            aligned = [
+                (period, column_end, cell_index)
+                for (_index, period, column_end), cell_index in zip(quarters, body_indexes, strict=True)
+            ]
+            valued = [
+                period
+                for period, _end, cell_index in aligned
+                if cell_index < len(cells) and _parse_cell(cells[cell_index])[0] is not None
+            ]
+            if _SEGMENT_HEADING.search(raw_label):
+                segment_scope = True
+            elif _CONSOLIDATED_HEADING.search(raw_label):
+                segment_scope = False
+            if _RECON_SECTION.search(raw_label):
+                in_recon = True
+            if not valued and raw_label:
+                if _NON_GAAP.search(raw_label):
+                    in_non_gaap = True
+                elif re.search(r"\bgaap\b", raw_label, re.IGNORECASE):
+                    in_non_gaap = False
+                continue
+            entry = _match_row_entry(raw_label, catalog)
+            if entry and entry.get("metric_id") in {"inventory", "deferred_revenue"}:
+                # Cash-flow "change in" lines and the noncurrent rollforward are not the balance.
+                if "change in" in normalized or "net of current" in normalized or "write down" in normalized:
+                    entry = None
+            is_total = normalized == "total" or normalized.endswith(" total") or normalized.startswith("total ")
+            if is_total and not segment_table:
+                segment_scope = False
+            blocked = False
+            if entry and (in_non_gaap or _NON_GAAP.search(raw_label)) and _is_gaap_metric(entry):
+                blocked = True
+                entry = None
+            if entry and (segment_table or segment_scope) and entry.get("metric_id") in _COMPANY_TOTAL_METRICS:
+                blocked = True
+                entry = None
+            if entry and balance_sheet and not _is_instant_metric(str(entry.get("metric_id") or "")):
+                blocked = True
+                entry = None
+            if entry and _is_gaap_metric(entry) and re.match(
+                r"adjusted\b|^gaap\s+(?:net\s+(?:loss|income)|revenue)\b", normalized, re.IGNORECASE
+            ):
+                blocked = True
+                entry = None
+            if entry and in_recon and _is_gaap_metric(entry):
+                blocked = True
+                entry = None
+            label_scale, unit_hint = scale_from_label(raw_label)
+            parsed_any = False
+            for fiscal_period, column_end, index in aligned:
+                if index >= len(cells):
+                    continue
+                value, lower_bound = _parse_cell(cells[index])
+                if value is None:
+                    continue
+                parsed_any = True
+                if entry is None:
+                    continue
+                scaled, hinted = apply_scale(
+                    value,
+                    raw_label,
+                    entry,
+                    _row_scale(raw_label, cells[index], reported_scale),
+                )
+                unit = entry.get("unit") or hinted or unit_hint or ""
+                if unit == "ratio" and abs(scaled) > 1:
+                    scaled = scaled / 100.0
+                table_rows.append(
+                    (
+                        is_total,
+                        _observation(
+                            entry,
+                            ticker=ticker,
+                            fiscal_period=fiscal_period,
+                            value=scaled,
+                            unit=unit,
+                            source_url=source_url,
+                            source_doc_hash=source_doc_hash,
+                            extracted_at=extracted_at,
+                            published_date=published_date,
+                            method=method,
+                            confidence=confidence,
+                            lower_bound=lower_bound,
+                            source_kind=source_kind,
+                            label=raw_label,
+                            period_end=column_end,
+                            fiscal_end_month=fiscal_end_month,
+                        ),
+                    )
+                )
+            if (
+                blocked
+                or entry is not None
+                or not parsed_any
+                or method == "llm"
+                or balance_sheet
+                or cash_flow
+                or ytd_only
+                or in_recon
+            ):
+                continue
+            if _skip_proposal(raw_label):
+                continue
+            key = normalize_label(raw_label)
+            seen_periods = list(valued or [period for period, _end, _index in aligned])
+            if filing_period and _linear_quarter(str(filing_period)) is not None:
+                seen_periods = [
+                    period
+                    for period in seen_periods
+                    if (ahead := _quarters_ahead(period, str(filing_period))) is not None and ahead <= 0
+                ]
+            if not seen_periods or not key:
+                continue
+            if key:
+                table_proposals.append(
+                    (
+                        key,
+                        propose_metric(
+                            raw_label,
+                            unit=unit_hint or "",
+                            scale=label_scale,
+                            fiscal_period=_newest_column(seen_periods),
+                            source=source_url,
+                            lower_bound=any(
+                                _parse_cell(cells[index])[1]
+                                for _period, _end, index in aligned
+                                if index < len(cells)
+                            ),
+                        ),
+                    )
+                )
+        if balance_sheet:
+            table_rows = [item for item in table_rows if _is_instant_metric(str(item[1].get("metric_id") or ""))]
+        else:
+            for key, proposal in table_proposals:
+                if key not in seen_proposals:
+                    seen_proposals.add(key)
+                    proposals.append(proposal)
+        totals = {(row["metric_id"], row["fiscal_period"]) for is_total, row in table_rows if is_total}
+        for is_total, row in table_rows:
+            if not is_total and (row["metric_id"], row["fiscal_period"]) in totals:
+                continue
+            rows.append(row)
+    return rows, proposals
 
 
 def observations_from_tables(
@@ -361,45 +1268,19 @@ def observations_from_tables(
     extracted_at: datetime,
     published_date: str | None,
     method: str = "table",
+    source_kind: str = "deck",
 ) -> list[dict]:
-    aliases = _alias_index(catalog)
-    confidence = confidence_for(method)
-    rows: list[dict] = []
-    for table in tables:
-        if not table:
-            continue
-        quarters = _quarter_headers(table[0])
-        if not quarters:
-            continue
-        for cells in table[1:]:
-            label = " ".join(cells[0].lower().replace("_", " ").split()) if cells else ""
-            entry = aliases.get(label)
-            if entry is None:
-                continue
-            for index, fiscal_period in quarters:
-                if index >= len(cells):
-                    continue
-                value = _parse_number(cells[index])
-                if value is None:
-                    continue
-                rows.append({
-                    "ticker": ticker.upper(),
-                    "metric_id": entry["metric_id"],
-                    "period_end": period_end_for(fiscal_period),
-                    "fiscal_period": fiscal_period,
-                    "value": value,
-                    "unit": entry.get("unit") or "",
-                    "source_url": source_url,
-                    "source_doc_hash": source_doc_hash,
-                    "extracted_at": extracted_at,
-                    "confidence": confidence,
-                    "approved": row_approved(entry.get("status", "proposed"), method),
-                    "method": method,
-                    "published_date": published_date,
-                    "display_name": entry.get("display_name"),
-                    "category": entry.get("category"),
-                    "catalog_status": entry.get("status", "proposed"),
-                })
+    rows, _proposals = table_scan(
+        tables,
+        catalog,
+        ticker=ticker,
+        source_url=source_url,
+        source_doc_hash=source_doc_hash,
+        extracted_at=extracted_at,
+        published_date=published_date,
+        method=method,
+        source_kind=source_kind,
+    )
     return rows
 
 
@@ -411,24 +1292,563 @@ def parse_deck_text(text: str, catalog: dict, **kwargs) -> list[dict]:
     return observations_from_tables(text_tables(text), catalog, method="table", **kwargs)
 
 
-def parse_xbrl_quarters(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
-    """Map fiscal quarter to the first filed 10-Q/10-K value. Q4 is not inferred here."""
-    series: dict[str, float] = {}
+_WEEK_EDGE_DAYS = 7
+
+
+def _snap_week_end(end: date) -> date:
+    """A 52/53-week period can close in the first week of the next month.
+
+    A fiscal year that ends on January 2, 2027 is FY2026 Q4 when the year ends in December.
+    """
+    if end.day <= _WEEK_EDGE_DAYS:
+        return end.replace(day=1) - timedelta(days=1)
+    return end
+
+
+def _fiscal_period(end: date, fiscal_end_month: int) -> str:
+    end = _snap_week_end(end)
+    year = end.year + int(end.month > fiscal_end_month)
+    quarter = ((end.month - fiscal_end_month - 1) % 12) // 3 + 1
+    return f"{year}Q{quarter}"
+
+
+def fiscal_end_month_from_submissions(submissions: dict) -> int:
+    """SEC `fiscalYearEnd` is MMDD. Nvidia's `0131` is a late-January year end."""
+    digits = re.sub(r"\D", "", str((submissions or {}).get("fiscalYearEnd") or ""))
+    if len(digits) >= 2:
+        month = int(digits[:2])
+        if 1 <= month <= 12:
+            return month
+    return 12
+
+
+def _quarter_months(fiscal_end_month: int, quarter: int) -> set[int]:
+    """Months that belong to a fiscal quarter. A January year end makes Q2 May-July."""
+    first = ((fiscal_end_month % 12) + (quarter - 1) * 3) % 12 + 1
+    return {first, first % 12 + 1, (first + 1) % 12 + 1}
+
+
+def _filing_key(fact: dict) -> tuple:
+    """Facts that share an accession are one filing. Comparatives reuse that filing's fy/fp."""
+    accn = str(fact.get("accn") or fact.get("accession") or "").strip()
+    if accn:
+        return ("accn", accn)
+    return (
+        "filed",
+        str(fact.get("filed") or ""),
+        str(fact.get("form") or ""),
+        str(fact.get("fy") or ""),
+        str(fact.get("fp") or ""),
+    )
+
+
+def _fp_label(fy: object, fp: object) -> str | None:
+    text = str(fp or "").upper()
+    if text in {"Q1", "Q2", "Q3", "Q4"}:
+        return f"{int(fy)}{text}"
+    if text == "FY":
+        return f"{int(fy)}Q4"
+    return None
+
+
+def _periods_for_facts(facts: list[dict], fiscal_end_month: int) -> dict[int, str]:
+    """Label each fact from its own end date, and from start for a duration.
+
+    `fy`/`fp` belong to the filing. They are used only for the fact whose end is
+    that filing's period end, and only when that label matches the known fiscal
+    year-end month. A fitted month from an early filing must not relabel the row.
+    A prior-year comparative keeps the quarter of its own end date.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for fact in facts:
+        if fact.get("end"):
+            groups.setdefault(_filing_key(fact), []).append(fact)
+    labeled: dict[int, str] = {}
+    for group in groups.values():
+        filing_end = max(str(fact["end"]) for fact in group)
+        anchor = next(fact for fact in group if str(fact["end"]) == filing_end)
+        month = fiscal_end_month
+        anchor_label = _fp_label(anchor.get("fy"), anchor.get("fp")) if anchor.get("fy") and anchor.get("fp") else None
+        if anchor_label and _fiscal_period(date.fromisoformat(filing_end), fiscal_end_month) != anchor_label:
+            anchor_label = None
+        for fact in group:
+            end = date.fromisoformat(str(fact["end"]))
+            start_text = fact.get("start")
+            if start_text and str(start_text) != str(fact["end"]):
+                start = date.fromisoformat(str(start_text))
+                # The span closes on `end`. A start after the end is not a duration we can trust.
+                if start > end:
+                    labeled[id(fact)] = _fiscal_period(end, month)
+                    continue
+            from_dates = _fiscal_period(end, month)
+            use_filing_label = (
+                str(fact["end"]) == filing_end and anchor_label is not None and from_dates == anchor_label
+            )
+            labeled[id(fact)] = anchor_label if use_filing_label else from_dates
+    return labeled
+
+
+def _period_from_fact(fact: dict, fiscal_end_month: int, periods: dict[int, str] | None = None) -> str:
+    """Period of one fact. Pass `periods` from `_periods_for_facts` when the filing is known."""
+    if periods is not None and id(fact) in periods:
+        return periods[id(fact)]
+    return _fiscal_period(date.fromisoformat(str(fact["end"])), fiscal_end_month)
+
+
+_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+_ORDINAL_QUARTER = {"first": 1, "second": 2, "third": 3, "fourth": 4}
+
+
+def _expand_year(year: int) -> int:
+    return year + 2000 if year < 100 else year
+
+
+def _ordinal_period(ordinal: str, year: str) -> str:
+    return f"{_expand_year(int(year))}Q{_ORDINAL_QUARTER[ordinal.lower()]}"
+
+
+def fiscal_period_from_text(text: str, fiscal_end_month: int = 12) -> str | None:
+    """The quarter the release is about. The earliest heading wins, not pattern order.
+
+    The 8-K report date is the filing day, not the quarter. "Q4 and FY 2025 Update"
+    is 2025Q4. "Second quarter of fiscal year 2027" and Apple's "fiscal 2026 fourth
+    quarter" keep the fiscal year in the heading.
+    """
+    head = plain_text(text)[:5000]
+    found: list[tuple[int, str]] = []
+
+    def add(match: re.Match[str] | None, period: str | None) -> None:
+        if match is not None and period:
+            found.append((match.start(), period))
+
+    add(
+        (match := re.search(r"\bQ([1-4])\s+and\s+FY\s+(\d{2}|\d{4})\b", head, re.IGNORECASE)),
+        f"{_expand_year(int(match.group(2)))}Q{match.group(1)}" if match else None,
+    )
+    add(
+        (match := re.search(r"\bQ([1-4])\s*(?:FY|fiscal)\s*(\d{2}|\d{4})\b", head, re.IGNORECASE)),
+        f"{_expand_year(int(match.group(2)))}Q{match.group(1)}" if match else None,
+    )
+    named_fiscal = re.search(
+        r"\b(first|second|third|fourth)\s+quarter(?:\s+of)?\s+(?:fiscal(?:\s+year)?|fy)\s*(\d{2}|\d{4})\b",
+        head,
+        re.IGNORECASE,
+    )
+    add(named_fiscal, _ordinal_period(named_fiscal.group(1), named_fiscal.group(2)) if named_fiscal else None)
+    apple = re.search(
+        r"\bfiscal(?:\s+year)?\s+(\d{4})\s+(first|second|third|fourth)\s+quarter\b",
+        head,
+        re.IGNORECASE,
+    )
+    add(apple, _ordinal_period(apple.group(2), apple.group(1)) if apple else None)
+    update = re.search(r"\bQ([1-4])\s*(20\d{2})\s+update\b", head, re.IGNORECASE)
+    add(update, f"{update.group(2)}Q{update.group(1)}" if update else None)
+    named = re.search(
+        r"\b(first|second|third|fourth)\s+quarter\s+(20\d{2})\b",
+        head,
+        re.IGNORECASE,
+    )
+    add(named, _ordinal_period(named.group(1), named.group(2)) if named else None)
+    short = re.search(r"\bQ([1-4])\s+(20\d{2})\b", head, re.IGNORECASE)
+    add(short, f"{short.group(2)}Q{short.group(1)}" if short else None)
+    ended = re.search(r"\bquarter ended\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})", head, re.IGNORECASE)
+    if ended and ended.group(1).lower() in _MONTHS:
+        end = date(int(ended.group(3)), _MONTHS[ended.group(1).lower()], int(ended.group(2)))
+        add(ended, _fiscal_period(end, fiscal_end_month))
+    if not found:
+        return None
+    return min(found, key=lambda item: item[0])[1]
+
+
+def period_ends_from_text(text: str, fiscal_end_month: int = 12) -> dict[str, date]:
+    """Explicit 'quarter ended July 26, 2026' dates, keyed by fiscal period."""
+    head = plain_text(text)[:8000]
+    found: dict[str, date] = {}
+    for match in re.finditer(
+        r"\b(?:quarter|year|period|months)\s+ended\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})",
+        head,
+        re.IGNORECASE,
+    ):
+        month = _MONTHS.get(match.group(1).lower())
+        if month is None:
+            continue
+        end = date(int(match.group(3)), month, int(match.group(2)))
+        found[_fiscal_period(end, fiscal_end_month)] = end
+    return found
+
+
+def _span_bucket(days: int) -> str | None:
+    """Map a cash-flow duration to a quarter, half year, nine months, or fiscal year."""
+    if 80 <= days <= 100:
+        return "quarter"
+    if 165 <= days <= 200:
+        return "h1"
+    if 250 <= days <= 290:
+        return "nine"
+    if 340 <= days <= 380:
+        return "fy"
+    return None
+
+
+def _component_quarter(period: str, bucket: str) -> int:
+    if len(period) < 5 or period[-2:-1] != "Q" or not period[-1].isdigit():
+        return 0
+    quarter = int(period[-1])
+    if bucket == "h1" and quarter != 2:
+        return 0
+    if bucket == "nine" and quarter != 3:
+        return 0
+    if bucket == "fy" and quarter != 4:
+        return 0
+    return quarter
+
+
+def _derive_filing_quarters(
+    components: dict[tuple[str, str], tuple[float, str]],
+    published: dict[str, float],
+    seen_ends: dict[str, float],
+    prior_nines: dict[int, tuple[float, str, str]] | None = None,
+) -> tuple[dict[str, tuple[float, str]], set[str]]:
+    """Difference YTD pieces from this filing. Borrow an earlier quarter only for a new span.
+
+    A later filing that restates H1 without restating Q1 must not subtract the old Q1.
+    The first time an end date appears, earlier published quarters complete the difference.
+    A missing quarter also comes from two consecutive spans in the same filing, including
+    Q1 = six months minus Q2 when the three-month Q1 fact was never filed.
+    Q4 is the fiscal year minus the nine-month figure from the earlier 10-Q. That is the
+    normal case: a 10-K does not repeat the nine-month fact. Q4 is stale when a later
+    filing restates that nine-month value, or an earlier piece of the same year (Q1 or
+    the six-month total) that the nine-month figure was built from.
+    """
+    prior_nines = prior_nines or {}
+    years = sorted({int(period[:4]) for period, _bucket in components})
+    derived: dict[str, tuple[float, str]] = {}
+    stale: set[str] = set()
+
+    def own(period: str, bucket: str) -> tuple[float, str] | None:
+        return components.get((period, bucket))
+
+    def fresh(piece: tuple[float, str] | None) -> bool:
+        return piece is not None and piece[1] not in seen_ends
+
+    def prior_sum(year: int, quarters: tuple[int, ...]) -> float | None:
+        total = 0.0
+        for quarter in quarters:
+            value = derived.get(f"{year}Q{quarter}")
+            if value is None:
+                value = published.get(f"{year}Q{quarter}")
+                if value is None:
+                    return None
+                total += value
+            else:
+                total += value[0]
+        return total
+
+    for year in years:
+        q1 = own(f"{year}Q1", "quarter")
+        q2 = own(f"{year}Q2", "quarter")
+        h1 = own(f"{year}Q2", "h1")
+        q3 = own(f"{year}Q3", "quarter")
+        nine = own(f"{year}Q3", "nine")
+        q4 = own(f"{year}Q4", "quarter")
+        fy = own(f"{year}Q4", "fy")
+        if q1 is not None:
+            derived[f"{year}Q1"] = q1
+        elif h1 is not None and q2 is not None:
+            # The 10-Q files the quarter and the six-month total, and omits Q1.
+            derived[f"{year}Q1"] = (h1[0] - q2[0], "")
+        if q2 is not None:
+            derived[f"{year}Q2"] = q2
+        elif h1 is not None and (q1 is not None or fresh(h1)):
+            base = prior_sum(year, (1,))
+            if base is not None:
+                derived[f"{year}Q2"] = (h1[0] - base, h1[1])
+        if q3 is not None:
+            derived[f"{year}Q3"] = q3
+        elif nine is not None and h1 is not None:
+            derived[f"{year}Q3"] = (nine[0] - h1[0], nine[1])
+        elif nine is not None and (q1 is not None or q2 is not None or fresh(nine)):
+            base = prior_sum(year, (1, 2))
+            if base is not None:
+                derived[f"{year}Q3"] = (nine[0] - base, nine[1])
+        quarter_key = f"{year}Q4"
+        if q4 is not None:
+            derived[quarter_key] = q4
+        elif fy is not None and (nine is not None or year in prior_nines):
+            nine_value = nine[0] if nine is not None else prior_nines[year][0]
+            derived[quarter_key] = (fy[0] - nine_value, fy[1])
+        elif fy is not None and (q1 is not None or q2 is not None or q3 is not None or fresh(fy)):
+            base = prior_sum(year, (1, 2, 3))
+            if base is not None:
+                derived[quarter_key] = (fy[0] - base, fy[1])
+    return derived, stale
+
+
+def _q4_input_year(period: str, bucket: str) -> int | None:
+    """Q1, the six-month total, and the nine-month total are the pieces behind FY minus 9M."""
+    if not _QUARTER.fullmatch(period):
+        return None
+    year = int(period[:4])
+    quarter = int(period[-1])
+    if bucket == "quarter" and quarter == 1:
+        return year
+    if bucket == "h1" and quarter == 2:
+        return year
+    if bucket == "nine" and quarter == 3:
+        return year
+    return None
+
+
+def _discrete_cashflow(
+    facts: list[dict],
+    fiscal_end_month: int = 12,
+) -> tuple[dict[str, float], dict[str, str], set[str]]:
+    """Single quarters, preferring every input from the same filing, plus the closing end date.
+
+    The third item is quarters whose Q1, six-month, or nine-month input was restated
+    by a later filing. A 10-K that simply arrives after the 10-Q does not make Q4 stale.
+    """
+    periods = _periods_for_facts(facts, fiscal_end_month)
+    filings: dict[tuple, list[tuple[str, str, float, str, str]]] = {}
+    for fact in facts:
+        if fact.get("form") not in {"10-Q", "10-K", "10-Q/A", "10-K/A"}:
+            continue
+        if "end" not in fact or "start" not in fact or "val" not in fact:
+            continue
+        days = (date.fromisoformat(str(fact["end"])) - date.fromisoformat(str(fact["start"]))).days
+        bucket = _span_bucket(days)
+        if bucket is None:
+            continue
+        period = periods.get(id(fact)) or _fiscal_period(date.fromisoformat(str(fact["end"])), fiscal_end_month)
+        if _component_quarter(period, bucket) == 0:
+            continue
+        filings.setdefault(_filing_key(fact), []).append(
+            (period, bucket, float(fact["val"]), str(fact["end"]), str(fact.get("filed") or "")),
+        )
+    order = sorted(filings, key=lambda key: max(item[4] for item in filings[key]))
+    published: dict[str, float] = {}
+    ends: dict[str, str] = {}
+    seen_ends: dict[str, float] = {}
+    prior_nines: dict[int, tuple[float, str, str]] = {}
+    component_values: dict[tuple[str, str], list[float]] = {}
+    invalid_q4: set[int] = set()
+    stale: set[str] = set()
+    for key in order:
+        components: dict[tuple[str, str], tuple[float, str]] = {}
+        filed_for: dict[tuple[str, str], str] = {}
+        for period, bucket, value, end, filed in filings[key]:
+            slot = (period, bucket)
+            if slot in filed_for and filed < filed_for[slot]:
+                continue
+            components[slot] = (value, end)
+            filed_for[slot] = filed
+        derived, derived_stale = _derive_filing_quarters(components, published, seen_ends, prior_nines)
+        stale -= set(derived)
+        stale |= derived_stale
+        for period, (value, end) in derived.items():
+            published[period] = value
+            if end:
+                ends[period] = end
+        changed_nine: set[int] = set()
+        for slot, (value, end) in components.items():
+            seen_ends[end] = value
+            year = _q4_input_year(slot[0], slot[1])
+            if year is None:
+                continue
+            seen = component_values.setdefault(slot, [])
+            if any(abs(value - earlier) > 1e-6 for earlier in seen):
+                invalid_q4.add(year)
+                if slot[1] == "nine":
+                    changed_nine.add(year)
+            seen.append(value)
+            if slot[1] == "nine":
+                filed = filed_for.get(slot, "")
+                previous = prior_nines.get(year)
+                if previous is None or filed >= previous[2]:
+                    prior_nines[year] = (value, end, filed)
+        for year in changed_nine:
+            # This filing subtracted its own restated nine-month figure from the fiscal year.
+            if (f"{year}Q4", "fy") in components and (f"{year}Q3", "nine") in components:
+                invalid_q4.discard(year)
+                stale.discard(f"{year}Q4")
+        for year in invalid_q4:
+            if f"{year}Q4" in published:
+                stale.add(f"{year}Q4")
+    return published, ends, stale
+
+
+def discrete_cashflow_quarters(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
+    """Turn year-to-date cash-flow facts into single quarters.
+
+    Q1 is the three-month fact, or six months minus Q2 when that quarter was not filed.
+    Q2 is H1 minus Q1. Q3 is nine months minus the first half.
+    Q4 is the fiscal year minus the latest nine-month figure. A fact that is already one
+    quarter wins over the difference. Pieces come from the same filing when that filing has them.
+    """
+    values, _ends, _stale = _discrete_cashflow(facts, fiscal_end_month)
+    return values
+
+
+def _newest_period_year(series: dict[str, float]) -> int:
+    years = [int(period[:4]) for period in series if _QUARTER.fullmatch(period)]
+    return max(years) if years else 0
+
+
+def gross_profit_series(
+    reported: dict[str, float],
+    revenue: dict[str, float],
+    cost: dict[str, float],
+) -> dict[str, float]:
+    """Use GrossProfit while it is current. Otherwise revenue minus cost of revenue.
+
+    Amazon's GrossProfit tag stops in 2009. Google and Meta do not tag gross profit.
+    A stale tag is left out rather than published as the latest quarter.
+    """
+    if reported and revenue and _newest_period_year(reported) >= _newest_period_year(revenue) - 5:
+        return reported
+    if reported and not revenue:
+        return reported
+    derived = {}
+    for period, amount in revenue.items():
+        if period in cost:
+            derived[period] = amount - cost[period]
+    return derived
+
+
+_SCALE_RATIO = 1000
+_NEIGHBOUR_QUARTERS = 4
+
+
+def _linear_quarter(period: str) -> int | None:
+    if not _QUARTER.fullmatch(period or ""):
+        return None
+    year, quarter = _quarter_index(period)
+    return year * 4 + quarter - 1
+
+
+def _neighbour_peers(period: str, latest: dict[str, float]) -> list[float]:
+    """Values from about four quarters on either side. Zeros are not peers."""
+    center = _linear_quarter(period)
+    if center is None:
+        return []
+    peers = []
+    for other, value in latest.items():
+        if other == period or not value:
+            continue
+        other_index = _linear_quarter(other)
+        if other_index is None or abs(other_index - center) > _NEIGHBOUR_QUARTERS:
+            continue
+        peers.append(value)
+    return peers
+
+
+def _is_scale_outlier(value: float, peers: list[float]) -> bool:
+    """A value about 1000x from its neighbouring quarters is a scale error.
+
+    Real growth across a few quarters, and zeros, stay. The comparison is the
+    median of those neighbours, not the company's whole history.
+    """
+    if not value:
+        return False
+    positives = [abs(item) for item in peers if item]
+    if not positives:
+        return False
+    ordered = sorted(positives)
+    median = ordered[len(ordered) // 2]
+    if median == 0:
+        return False
+    ratio = abs(value) / median
+    return ratio >= _SCALE_RATIO or ratio <= 1 / _SCALE_RATIO
+
+
+def _select_sane_latest(
+    by_period: dict[str, list[tuple]],
+) -> tuple[dict[str, float], list[dict], dict[str, str]]:
+    """Keep the latest filing for each period, walking back past an obvious scale error."""
+    latest = {period: facts[-1][1] for period, facts in by_period.items() if facts}
+    selected: dict[str, float] = {}
+    flags: list[dict] = []
+    ends: dict[str, str] = {}
+    for period, facts in by_period.items():
+        peers = _neighbour_peers(period, latest)
+        chosen = None
+        chosen_end = ""
+        for item in reversed(facts):
+            filed, value = item[0], item[1]
+            if _is_scale_outlier(value, peers):
+                flags.append(
+                    {
+                        "fiscal_period": period,
+                        "value": value,
+                        "filed": filed,
+                        "reason": "scale_error",
+                    }
+                )
+                continue
+            chosen = value
+            chosen_end = item[2] if len(item) > 2 else ""
+            break
+        if chosen is not None:
+            selected[period] = chosen
+            if chosen_end:
+                ends[period] = chosen_end
+    return selected, flags, ends
+
+
+def _collect_xbrl_facts(facts: list[dict], fiscal_end_month: int, kind: str) -> dict[str, list[tuple]]:
+    labeled = _periods_for_facts(facts, fiscal_end_month)
+    grouped: dict[str, list[tuple]] = {}
     for fact in sorted(facts, key=lambda item: item.get("filed", "")):
         if fact.get("form") not in {"10-Q", "10-K", "10-Q/A", "10-K/A"}:
             continue
         if "end" not in fact or "val" not in fact:
             continue
         end = date.fromisoformat(fact["end"])
-        year = end.year + int(end.month > fiscal_end_month)
-        quarter = ((end.month - fiscal_end_month - 1) % 12) // 3 + 1
         start = fact.get("start")
-        if start:
+        if kind == "duration":
+            if not start:
+                continue
             days = (end - date.fromisoformat(start)).days
             if not 80 <= days <= 100:
                 continue
-        series.setdefault(f"{year}Q{quarter}", float(fact["val"]))
-    return series
+        else:
+            if start and start != fact["end"]:
+                days = (end - date.fromisoformat(start)).days
+                if days > 5:
+                    continue
+        period = labeled.get(id(fact)) or _fiscal_period(end, fiscal_end_month)
+        grouped.setdefault(period, []).append((str(fact.get("filed") or ""), float(fact["val"]), str(fact["end"])))
+    return grouped
+
+
+def parse_xbrl_quarters(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
+    """Map fiscal quarter to the latest sane 10-Q/10-K duration value. Q4 is not inferred here."""
+    selected, _flags, _ends = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, "duration"))
+    return selected
+
+
+def parse_xbrl_instants(facts: list[dict], fiscal_end_month: int = 12) -> dict[str, float]:
+    """Balance-sheet instants at a quarter end. Scale errors are dropped, not served."""
+    selected, _flags, _ends = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, "instant"))
+    return selected
+
+
+def xbrl_scale_flags(facts: list[dict], fiscal_end_month: int = 12, kind: str = "instant") -> list[dict]:
+    _selected, flags, _ends = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, kind))
+    return flags
 
 
 def reconcile_xbrl(ir_value: float | None, xbrl_value: float | None, tolerance: float = XBRL_TOLERANCE) -> dict:
@@ -448,7 +1868,13 @@ def reconcile_rows(ir_rows: list[dict], xbrl_by_key: dict[tuple[str, str], float
         if key not in xbrl_by_key:
             continue
         result = reconcile_xbrl(row.get("value"), xbrl_by_key[key])
-        result.update({"metric_id": row["metric_id"], "fiscal_period": row["fiscal_period"]})
+        result.update(
+            {
+                "metric_id": row["metric_id"],
+                "fiscal_period": row["fiscal_period"],
+                "ticker": row.get("ticker"),
+            }
+        )
         if result["status"] == "mismatch":
             mismatches.append(result)
     return mismatches
@@ -567,17 +1993,57 @@ def _fill_gaps(points: list[dict]) -> list[dict]:
         if current is None:
             filled.append({"fiscal_period": fiscal_period, "value": None, "reported": False})
         else:
-            filled.append({
-                "fiscal_period": fiscal_period,
-                "period_end": current["period_end"].isoformat()
-                if isinstance(current["period_end"], date) else current.get("period_end"),
-                "value": current["value"],
-                "reported": current.get("value") is not None,
-            })
+            filled.append(
+                {
+                    "fiscal_period": fiscal_period,
+                    "period_end": current["period_end"].isoformat()
+                    if isinstance(current["period_end"], date)
+                    else current.get("period_end"),
+                    "value": current["value"],
+                    "reported": current.get("value") is not None,
+                }
+            )
         quarter += 1
         if quarter == 5:
             year, quarter = year + 1, 1
     return filled
+
+
+def _row_servable(row: dict, entry: dict | None) -> bool:
+    """Catalog status decides. LLM and news stay out. A stale row flag cannot hide an approval."""
+    if entry is None:
+        return False
+    status = entry.get("status") or "proposed"
+    if status not in {"approved", "proposed"}:
+        return False
+    if row.get("method") == "llm" or row.get("source_kind") in {"llm", "news"}:
+        return False
+    return True
+
+
+def _revision_meta(entry: dict) -> tuple[str | None, str | None]:
+    revised_from = entry.get("revised_from") or None
+    note = entry.get("revision_note") or None
+    if revised_from or note:
+        return revised_from, note
+    if entry.get("metric_id") != "capex":
+        return None, None
+    definition = str(entry.get("definition") or "").lower()
+    if "prior periods were adjusted" in definition or "q1 2025" in definition:
+        return (
+            "2025Q1",
+            "Capex uses a revised definition from 2025Q1. Earlier quarters keep the previous measure.",
+        )
+    return None, None
+
+
+def _metric_public(metric: dict) -> bool:
+    state = metric.get("approval_state") or metric.get("status")
+    if state == "rejected":
+        return False
+    if metric.get("approved") is True and state != "proposed":
+        return True
+    return state == "proposed"
 
 
 def _change(latest: dict | None, prior: dict | None) -> float | None:
@@ -586,6 +2052,17 @@ def _change(latest: dict | None, prior: dict | None) -> float | None:
     if latest.get("value") is None or prior.get("value") in (None, 0):
         return None
     return (latest["value"] - prior["value"]) / abs(prior["value"])
+
+
+def mismatches_for_ticker(ticker: str, mismatches: list[dict] | None) -> list[dict]:
+    """Scale flags stay on the ticker that produced them. A flag with no ticker is dropped."""
+    symbol = str(ticker or "").upper()
+    kept = []
+    for item in mismatches or []:
+        owner = str(item.get("ticker") or "").upper()
+        if owner == symbol:
+            kept.append(item)
+    return kept
 
 
 def build_serving(
@@ -598,32 +2075,32 @@ def build_serving(
     previous: dict | None = None,
     mismatches: list[dict] | None = None,
 ) -> dict:
-    """Approved metrics only. A partial or failed run keeps the previous good payload."""
+    """Approved and proposed metrics. A partial or failed run keeps the previous good payload."""
+    scoped = mismatches_for_ticker(ticker, mismatches if mismatches is not None else run.get("mismatches"))
     if run.get("status") in {"partial", "failed"} and previous and previous.get("metrics"):
         kept = json.loads(json.dumps(previous))
         kept["run_status"] = run["status"]
         kept["stale"] = True
         kept["generated_at"] = generated_at
         kept["freshness_label"] = "Partial run · previous approved values kept"
-        kept["mismatches"] = list(mismatches or run.get("mismatches") or [])
+        kept["mismatches"] = scoped
         return kept
 
-    mismatch_index = {
-        (item["metric_id"], item["fiscal_period"]): item for item in (mismatches or run.get("mismatches") or [])
-    }
+    mismatch_index = {(item["metric_id"], item["fiscal_period"]): item for item in scoped}
     by_metric: dict[str, list[dict]] = {}
     for row in rows:
-        if row.get("approved") is not True:
-            continue
         entry = catalog_entry(catalog, row["metric_id"])
-        if entry is None or entry.get("status") != "approved":
+        if not _row_servable(row, entry):
             continue
         by_metric.setdefault(row["metric_id"], []).append(row)
 
     metrics = []
     ordered = sorted(
         by_metric.items(),
-        key=lambda item: (catalog_entry(catalog, item[0]) or {}).get("panel_order", 0),
+        key=lambda item: (
+            0 if (catalog_entry(catalog, item[0]) or {}).get("status") == "approved" else 1,
+            (catalog_entry(catalog, item[0]) or {}).get("panel_order", 0),
+        ),
     )
     for metric_id, observations in ordered:
         entry = catalog_entry(catalog, metric_id)
@@ -645,13 +2122,20 @@ def build_serving(
         xbrl = mismatch_index.get((metric_id, latest["fiscal_period"])) if latest else None
         if xbrl is None and latest:
             xbrl = {"status": "uncompared", "delta": None}
-        metrics.append({
+        approval = entry.get("status") or "proposed"
+        revised_from, revision_note = _revision_meta(entry)
+        if revised_from:
+            start = _quarter_index(revised_from)
+            for point in series:
+                point["revised"] = _quarter_index(point["fiscal_period"]) >= start and start != (0, 0)
+        metric = {
             "metric_id": metric_id,
             "display_name": entry.get("display_name"),
             "unit": entry.get("unit"),
             "category": entry.get("category"),
-            "approved": True,
-            "approval_state": "approved",
+            "approved": approval == "approved",
+            "approval_state": approval,
+            "status": approval,
             "latest": latest,
             "qoq": _change(latest, prior_q),
             "yoy": _change(latest, prior_y),
@@ -659,30 +2143,55 @@ def build_serving(
             "provenance": {
                 "source_url": latest_row.get("source_url"),
                 "source_title": latest_row.get("source_title") or entry.get("display_name"),
+                "source_kind": latest_row.get("source_kind"),
                 "source_doc_hash": latest_row.get("source_doc_hash"),
                 "published_date": latest_row.get("published_date"),
                 "extracted_at": generated_at,
                 "confidence": latest_row.get("confidence"),
-                "approval_state": "approved",
+                "approval_state": approval,
             },
             "xbrl": xbrl,
-        })
+        }
+        if entry.get("panel_type"):
+            metric["panel_type"] = entry["panel_type"]
+        if entry.get("disclosure_status"):
+            metric["disclosure_status"] = entry["disclosure_status"]
+        if entry.get("definition"):
+            metric["definition"] = entry["definition"]
+        if entry.get("rows"):
+            metric["rows"] = entry["rows"]
+        if entry.get("text"):
+            metric["text"] = entry["text"]
+        if revised_from:
+            metric["revised_from"] = revised_from
+            metric["revision_note"] = revision_note
+        metrics.append(metric)
+    approved_count = sum(1 for item in metrics if item["approved"])
+    proposed_count = len(metrics) - approved_count
+    if approved_count and proposed_count:
+        freshness = "IR data approved · pending review included"
+    elif approved_count:
+        freshness = "IR data approved"
+    elif proposed_count:
+        freshness = "Pending review"
+    else:
+        freshness = "No approved company metrics"
     status = run.get("status", "ok")
     return {
         "ticker": ticker.upper(),
         "generated_at": generated_at,
         "run_status": status,
         "stale": status != "ok",
-        "freshness_label": "IR data approved" if metrics else "No approved company metrics",
+        "freshness_label": freshness,
         "discovered": bool(metrics),
         "metrics": metrics,
         "unavailable": [],
-        "mismatches": list(mismatches or []),
+        "mismatches": scoped,
     }
 
 
 def public_stock_document(document: dict | None, ticker: str) -> dict:
-    """Last gate before the API. Proposed or unapproved metrics are dropped."""
+    """Last gate before the API. Proposed metrics stay, labeled by status. Rejected metrics are dropped."""
     if not document:
         return {
             "ticker": ticker.upper(),
@@ -695,15 +2204,10 @@ def public_stock_document(document: dict | None, ticker: str) -> dict:
             "unavailable": [],
             "mismatches": [],
         }
-    metrics = []
-    for metric in document.get("metrics") or []:
-        if metric.get("approved") is not True:
-            continue
-        if metric.get("approval_state") in {"proposed", "rejected"}:
-            continue
-        if metric.get("status") in {"proposed", "rejected"}:
-            continue
-        metrics.append(metric)
+    metrics = [metric for metric in document.get("metrics") or [] if _metric_public(metric)]
+    metrics.sort(key=lambda metric: (
+        0 if metric.get("approved") is True and metric.get("approval_state") != "proposed" else 1
+    ))
     published = dict(document)
     published["ticker"] = ticker.upper()
     published["metrics"] = metrics
@@ -745,37 +2249,1873 @@ def plan_collection(event: dict | None, today: date) -> dict:
     return {"collect": collect, "extract": triggered, "reason": label}
 
 
-def collect_handler(event, context):  # pragma: no cover - AWS wrapper
+def slug_metric(label: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", normalize_label(label)).strip("_")
+    return (slug or "metric")[:64]
+
+
+def propose_metric(
+    label: str,
+    *,
+    unit: str,
+    scale: float,
+    fiscal_period: str,
+    source: str,
+    lower_bound: bool = False,
+) -> dict:
+    """A new table label enters the registry as proposed. Nothing here is approved."""
+    return {
+        "metric_id": slug_metric(label),
+        "display_name": _FOOTNOTE_TAIL.sub("", str(label)).strip(),
+        "aliases": [str(label).strip()],
+        "unit": unit or ("vehicles" if lower_bound else ""),
+        "scale": scale if scale != 1 else 1,
+        "definition": "Discovered from a company filing table. A person approves the name, unit and aliases.",
+        "category": "operating",
+        "status": "proposed",
+        "approved_by": None,
+        "approved_at": None,
+        "disclosure_status": "numeric",
+        "source_priority": ["deck", "press_release"],
+        "first_seen": {"period": fiscal_period, "source": source},
+        "last_seen": fiscal_period,
+        "lower_bound": lower_bound,
+    }
+
+
+def merge_proposals(catalog: dict, proposals: list[dict]) -> dict:
+    """Add unknown labels. Never change a status a person already set."""
+    updated = json.loads(json.dumps(catalog))
+    updated.setdefault("metrics", [])
+    known = {item.get("metric_id") for item in updated["metrics"]}
+    aliases = _alias_index(updated)
+    for proposal in proposals:
+        if proposal.get("metric_id") in known:
+            continue
+        if normalize_label(proposal.get("display_name") or "") in aliases:
+            continue
+        proposal["status"] = "proposed"
+        proposal["approved_by"] = None
+        proposal["approved_at"] = None
+        updated["metrics"].append(proposal)
+        known.add(proposal["metric_id"])
+    return preserve_approved_status(catalog, updated)
+
+
+def validate_catalog(document: dict) -> list[str]:
+    """Approved entries need a named reviewer. Proposed entries are allowed to wait."""
+    errors = []
+    if not str(document.get("ticker") or "").strip():
+        errors.append("ticker is required")
+    seen: set[str] = set()
+    for item in document.get("metrics") or []:
+        metric_id = str(item.get("metric_id") or "")
+        if not metric_id:
+            errors.append("metric_id is required")
+            continue
+        if metric_id in seen:
+            errors.append(f"duplicate metric_id {metric_id}")
+        seen.add(metric_id)
+        status = item.get("status")
+        if status not in CATALOG_STATUSES:
+            errors.append(f"{metric_id} has unsupported status {status!r}")
+        if status == "approved" and not str(item.get("approved_by") or "").strip():
+            errors.append(f"{metric_id} is approved without approved_by")
+        disclosure = item.get("disclosure_status")
+        if disclosure is not None and disclosure not in DISCLOSURE_STATUSES:
+            errors.append(f"{metric_id} has unsupported disclosure_status {disclosure!r}")
+        if not isinstance(item.get("aliases") or [], list):
+            errors.append(f"{metric_id} aliases must be a list")
+    return errors
+
+
+def plain_text(html: str) -> str:
+    """Visible text. Block tags become line breaks so a slide stays one paragraph."""
+    cleaned = unescape(sanitize_html(html or ""))
+    cleaned = re.sub(r"(?i)<br\s*/?>", "\n", cleaned)
+    cleaned = re.sub(r"(?i)</(?:p|div|tr|li|h[1-6]|table|section)>", "\n", cleaned)
+    cleaned = re.sub(r"(?i)<[^>]+>", " ", cleaned)
+    cleaned = cleaned.replace("\xa0", " ").replace("\u200b", "")
+    return cleaned
+
+
+_VALUE_TOKEN = re.compile(
+    r"^(?:[<>]\s*)?\$?\(?-?\d[\d,]*(?:\.\d+)?\)?(?:%|bp|pts)?$|[\u2014\u2013\-]$",
+    re.IGNORECASE,
+)
+_FOOTNOTE_TOKEN = re.compile(r"^\(\d\)$")
+_QUARTER_PIECE = r"(?:Q[1-4]|[1-4]Q)[\s'\-]*(?:FY\s*)?(?:\d{4}|\d{2})"
+_HEADER_PIECE = rf"(?:{_QUARTER_PIECE}|TTM|LTM)"
+_QUARTER_RUN = re.compile(
+    rf"(?:{_HEADER_PIECE}\s+){{3,16}}(?:YoY|Y/Y|Year(?:\s+|-)over(?:\s+|-)year)?",
+    re.IGNORECASE,
+)
+_TWELVE_MONTH = re.compile(r"twelve[-\s]*months?|trailing\s+twelve|12[-\s]*months?", re.IGNORECASE)
+_MONTH_DATE = (
+    r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4}"
+)
+_SHORT_DATE = r"\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2,4}"
+_EITHER_DATE = rf"(?:{_MONTH_DATE}|{_SHORT_DATE})"
+_MON3 = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+_CHANGE_LABELS = {"inventory", "deferred revenue", "accounts receivable", "accounts payable"}
+
+
+def _is_value_token(token: str) -> bool:
+    compact = token.replace(" ", "")
+    if _FOOTNOTE_TOKEN.fullmatch(compact):
+        return False
+    return bool(_VALUE_TOKEN.fullmatch(compact))
+
+
+def _glue_tokens(raw: list[str]) -> list[str]:
+    tokens: list[str] = []
+    index = 0
+    while index < len(raw):
+        token = raw[index]
+        if index + 1 < len(raw) and raw[index + 1].lower() in {"%", "bp", "pts"}:
+            token = f"{token}{raw[index + 1]}"
+            index += 2
+        else:
+            index += 1
+        tokens.append(token.strip("$").strip() if token in {"$"} else token)
+    return [token for token in tokens if token and token != "$"]
+
+
+def _rows_after_header(body: str, width: int) -> list[list[str]]:
+    tokens = _glue_tokens(body.split())
+    rows: list[list[str]] = []
+    section = ""
+    in_change = False
+    index = 0
+    while index < len(tokens) and len(rows) < 80:
+        if not _is_value_token(tokens[index]):
+            index += 1
+            continue
+        end = index
+        while end < len(tokens) and _is_value_token(tokens[end]):
+            end += 1
+        run = tokens[index:end]
+        if len(run) < width:
+            index = end
+            continue
+        label_tokens: list[str] = []
+        cursor = index - 1
+        while cursor >= 0 and not _is_value_token(tokens[cursor]) and len(label_tokens) < 16:
+            label_tokens.append(tokens[cursor])
+            cursor -= 1
+        label_tokens.reverse()
+        label = " ".join(label_tokens).strip(" .|")
+        label = re.sub(r"\s+", " ", label).strip("$").strip()
+        lowered = label.lower()
+        if lowered.startswith("revenue"):
+            section = "revenue"
+        elif "ebitda" in lowered:
+            section = "adjusted ebitda"
+        elif lowered.startswith("capex") or lowered.endswith(" capex"):
+            section = "capex"
+        elif "research and development" in lowered or lowered in {"r&d", "rd"}:
+            section = "Research and development"
+        elif "selling, general" in lowered or lowered in {"sg&a", "sga"}:
+            section = "Selling, general and administrative"
+        elif "from operations" in lowered or lowered.startswith("income"):
+            section = "operating income"
+        if lowered == "total" and section:
+            label = f"{section} total"
+        if in_change and lowered in _CHANGE_LABELS:
+            label = f"change in {label}"
+            lowered = label.lower()
+        if "change in" in lowered or "changes in" in lowered:
+            in_change = True
+        if lowered.startswith("net cash") or "cash flows from" in lowered or "supplemental" in lowered:
+            in_change = False
+        if label and lowered not in _YOY_HEADER:
+            rows.append([label, *run[:width]])
+        index = end
+    return rows
+
+
+def _date_from_header(token: str) -> date | None:
+    text = " ".join(token.strip().split())
+    match = re.fullmatch(_MONTH_DATE, text, re.IGNORECASE)
+    if match:
+        month_name, day, year = text.replace(",", "").split()
+        month = _MONTHS.get(month_name.lower())
+        if not month:
+            return None
+        return date(int(year), month, int(day))
+    short = re.fullmatch(r"(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})", text)
+    if not short:
+        return None
+    month = _MON3.get(short.group(2).lower())
+    if not month:
+        return None
+    year = int(short.group(3))
+    if year < 100:
+        year += 2000
+    return date(year, month, int(short.group(1)))
+
+
+def _date_clusters(plain: str) -> list[list[re.Match[str]]]:
+    """Dates that belong to one header, allowing a short twelve-month phrase between them."""
+    matches = list(re.finditer(_EITHER_DATE, plain, flags=re.IGNORECASE))
+    clusters: list[list[re.Match[str]]] = []
+    current: list[re.Match[str]] = []
+    for match in matches:
+        if not current or match.start() - current[-1].end() <= 60:
+            current.append(match)
+            continue
+        if len(current) >= 3:
+            clusters.append(current)
+        current = [match]
+    if len(current) >= 3:
+        clusters.append(current)
+    return clusters
+
+
+def _columns_for_dates(plain: str, cluster: list[re.Match[str]], fiscal_end_month: int) -> list[str]:
+    """Pair each date with its column. Twelve-month and TTM columns are not quarters."""
+    columns: list[str] = []
+    seen: set[str] = set()
+    lead = plain[max(0, cluster[0].start() - 50) : cluster[0].start()]
+    twelve = _TWELVE_MONTH.search(lead) is not None
+    if re.search(r"three\s+months|quarter\s+ended", lead, re.IGNORECASE):
+        twelve = False
+    previous = cluster[0].start()
+    for index, match in enumerate(cluster):
+        if index:
+            between = plain[previous : match.start()]
+            if re.search(r"\b(?:ttm|ltm)\b", between, re.IGNORECASE):
+                columns.append("TTM")
+            if _TWELVE_MONTH.search(between):
+                twelve = True
+            if re.search(r"three\s+months|quarter\s+ended", between, re.IGNORECASE):
+                twelve = False
+        previous = match.end()
+        parsed = _date_from_header(match.group(0))
+        if parsed is None or twelve:
+            columns.append("TTM")
+            continue
+        period = _fiscal_period(parsed, fiscal_end_month)
+        if period in seen:
+            columns.append("YTD")
+        else:
+            seen.add(period)
+            columns.append(f"{period}|{parsed.isoformat()}")
+    trailing = plain[cluster[-1].end() : cluster[-1].end() + 24]
+    if re.match(r"\s*(?:TTM|LTM)\b", trailing, re.IGNORECASE):
+        columns.append("TTM")
+    return columns
+
+
+_HEADER_GAP = re.compile(
+    r"twelve[-\s]*months?|six[-\s]*months?|nine[-\s]*months?|three[-\s]*months?"
+    r"|months?\s+ended|\bttm\b|\bltm\b|\bytd\b",
+    re.IGNORECASE,
+)
+
+
+def _date_cluster_is_prose(plain: str, cluster: list[re.Match[str]]) -> bool:
+    """Bond-maturity sentences are not column headers.
+
+    A real header has only spaces, or a duration phrase such as ``Twelve Months Ended``,
+    between its dates. ``and`` in ``July 15, 2031, and July 15, 2056`` is prose.
+    """
+    for index in range(len(cluster) - 1):
+        between = plain[cluster[index].end() : cluster[index + 1].start()]
+        if _HEADER_GAP.search(between):
+            continue
+        if re.search(r"[A-Za-z]{3,}", between):
+            return True
+    lead = plain[max(0, cluster[0].start() - 80) : cluster[0].start()]
+    return re.search(r"\b(?:matur\w*|tranches?|bonds?|senior notes?)\b", lead, re.IGNORECASE) is not None
+
+
+def flowing_text_tables(
+    text: str,
+    fiscal_end_month: int = 12,
+    filing_period: str | None = None,
+) -> list[list[list[str]]]:
+    """KPI rows with no `<table>` tag: a label, then quarter values, then YoY.
+
+    Also accepts a run of period-end dates. A repeated date is a year-to-date column
+    and is not treated as another quarter.
+    """
+    plain = plain_text(text)
+    tables: list[list[list[str]]] = []
+    quarter_spans = list(_QUARTER_RUN.finditer(plain))
+    for index, match in enumerate(quarter_spans):
+        stop = quarter_spans[index + 1].start() if index + 1 < len(quarter_spans) else match.end() + 6000
+        header_tokens = _glue_tokens(match.group(0).split())
+        header_cells = ["TTM" if re.fullmatch(r"ttm|ltm", token, re.IGNORECASE) else token for token in header_tokens]
+        quarters = [token for token in header_cells if quarter_token(token)]
+        if len(quarters) < 3:
+            continue
+        width = len(header_cells)
+        preamble = plain[max(0, match.start() - 500) : match.start()]
+        header = [preamble.strip() or "Metric", *header_cells]
+        body_rows = _rows_after_header(plain[match.end() : stop], width)
+        if body_rows:
+            tables.append([header, *body_rows])
+    occupied = [(match.start(), match.end()) for match in quarter_spans]
+    clusters = _date_clusters(plain)
+    for index, cluster in enumerate(clusters):
+        if any(start <= cluster[0].start() < end for start, end in occupied):
+            continue
+        if _date_cluster_is_prose(plain, cluster):
+            continue
+        columns = _columns_for_dates(plain, cluster, fiscal_end_month)
+        if filing_period:
+            columns = [
+                "TTM" if (ahead := _quarters_ahead(cell, filing_period)) is not None and ahead > 1 else cell
+                for cell in columns
+            ]
+        if sum(1 for cell in columns if quarter_token(cell)) < 2:
+            continue
+        body_at = cluster[-1].end()
+        trailing = re.match(r"\s*(?:TTM|LTM)\b", plain[body_at : body_at + 24], re.IGNORECASE)
+        if trailing:
+            body_at += trailing.end()
+        stop = clusters[index + 1][0].start() if index + 1 < len(clusters) else body_at + 6000
+        preamble = plain[max(0, cluster[0].start() - 500) : cluster[0].start()]
+        header = [preamble.strip() or "Metric", *columns]
+        body_rows = _rows_after_header(plain[body_at:stop], len(columns))
+        if body_rows:
+            tables.append([header, *body_rows])
+    return tables
+
+
+_EXHIBIT_TYPE = re.compile(r"^EX-99\.[12](?:[^0-9].*)?$")
+
+
+def _exhibit_type(value: str) -> str | None:
+    compact = re.sub(r"\s+", "", value or "").upper()
+    if _EXHIBIT_TYPE.match(compact):
+        return compact[:7] if compact.startswith("EX-99.") else compact
+    return None
+
+
+def exhibits_from_index_page(html: str) -> list[dict]:
+    """Document type from the filing index table. `index.json` only knows the mime type."""
+    found = []
+    seen: set[tuple[str, str]] = set()
+    for table in html_tables(html or ""):
+        for cells in table:
+            exhibit = next((kind for cell in cells if (kind := _exhibit_type(cell))), None)
+            if not exhibit:
+                continue
+            name = ""
+            for cell in cells:
+                match = re.search(r"([A-Za-z0-9_.\-]+\.htm[l]?)", cell, re.IGNORECASE)
+                if match and "index" not in match.group(1).lower():
+                    name = match.group(1)
+            if not name or name.lower().endswith((".jpg", ".jpeg", ".gif", ".png")):
+                continue
+            key = (exhibit, name.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            description = next(
+                (
+                    cell
+                    for cell in cells
+                    if cell and cell != name and _exhibit_type(cell) is None and not cell.isdigit()
+                ),
+                exhibit,
+            )
+            found.append({"name": name, "type": exhibit, "description": description})
+    return found
+
+
+def exhibits_from_submission(text: str) -> list[dict]:
+    """`<TYPE>` and `<FILENAME>` inside a complete submission `.txt`."""
+    found = []
+    seen: set[tuple[str, str]] = set()
+    for part in re.split(r"(?i)<DOCUMENT>", text or "")[1:]:
+        type_match = re.search(r"(?i)<TYPE>\s*([^\n<]+)", part)
+        file_match = re.search(r"(?i)<FILENAME>\s*([^\n<]+)", part)
+        desc_match = re.search(r"(?i)<DESCRIPTION>\s*([^\n<]+)", part)
+        if not type_match or not file_match:
+            continue
+        exhibit = _exhibit_type(type_match.group(1))
+        name = file_match.group(1).strip()
+        if not exhibit or not name or name.lower().endswith((".jpg", ".jpeg", ".gif", ".png", ".zip", ".xml", ".xsd")):
+            continue
+        key = (exhibit, name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(
+            {
+                "name": name,
+                "type": exhibit,
+                "description": (desc_match.group(1).strip() if desc_match else exhibit),
+            }
+        )
+    return found
+
+
+_UPDATE_DECK = re.compile(
+    r"q[1-4](?:\s+and\s+fy)?\s*(?:fy\s*)?(?:\d{2}|\d{4})\s+update",
+    re.IGNORECASE,
+)
+
+
+def classify_release(title: str, body: str) -> str:
+    """Classify from the document text. An HTML title of `Document` is not a deck.
+
+    An unclassified exhibit stays `other`. Deck is the highest source priority, so it
+    is not the fallback.
+    """
+    plain = plain_text(body)
+    head = plain[:800].lower()
+    blob = f"{title or ''}\n{plain[:8000]}".lower()
+    # The update deck says "Q2 2026 Update" or "Q4 and FY 2025 Update" up front.
+    # A deliveries release mentions the later "Q3 2026 update" only as a link.
+    if _UPDATE_DECK.search(head) or "quarterly update" in head:
+        return "deck"
+    if "production" in head and "deliver" in head:
+        return "press_release"
+    if "cfo commentary" in blob:
+        return "press_release"
+    if any(
+        phrase in blob
+        for phrase in (
+            "financial results",
+            "earnings release",
+            "reports first quarter",
+            "reports second quarter",
+            "reports third quarter",
+            "reports fourth quarter",
+        )
+    ):
+        return "press_release"
+    return classify_exhibit_title(title)
+
+
+def classify_exhibit_title(title: str) -> str:
+    """Both deliveries and the earnings deck are Item 2.02. The exhibit title separates them."""
+    text = " ".join(str(title or "").lower().split())
+    if "production" in text and "deliver" in text:
+        return "press_release"
+    if _UPDATE_DECK.search(text) or "quarterly update" in text or text.endswith(" update"):
+        return "deck"
+    if "update" in text and re.search(r"q[1-4]", text):
+        return "deck"
+    return "other"
+
+
+def title_from_html(html: str) -> str:
+    match = re.search(r"(?is)<title[^>]*>(.*?)</title>", html or "")
+    if match:
+        return " ".join(re.sub(r"<[^>]+>", " ", match.group(1)).split())
+    match = re.search(r"(?is)<h1[^>]*>(.*?)</h1>", html or "")
+    if match:
+        return " ".join(re.sub(r"<[^>]+>", " ", match.group(1)).split())
+    return ""
+
+
+def fiscal_period_for_end(end: date, fiscal_end_month: int = 12) -> str:
+    return _fiscal_period(end, fiscal_end_month)
+
+
+def exhibits_from_index(payload: dict) -> list[dict]:
+    """EX-99 rows only when index.json itself carries the document type.
+
+    Live EDGAR index.json sets `type` to a mime such as `text.gif`. That is not an
+    exhibit type, and the filename is not a reliable substitute.
+    """
+    items = (payload.get("directory") or {}).get("item") or []
+    if isinstance(items, dict):
+        items = [items]
+    found = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        exhibit = _exhibit_type(str(item.get("type") or ""))
+        if not exhibit or not name or name.lower().endswith((".jpg", ".jpeg", ".gif", ".png")):
+            continue
+        key = (exhibit, name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        description = str(item.get("description") or exhibit)
+        found.append({"name": name, "type": exhibit, "description": description})
+    return found
+
+
+def archive_url(cik: str, accession: str, name: str) -> str:
+    bare = accession.replace("-", "")
+    return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{bare}/{name}"
+
+
+def filing_index_url(cik: str, accession: str) -> str:
+    """Directory index. `{accession}-index.json` 404s; the filing folder serves `index.json`."""
+    return archive_url(cik, accession, "index.json")
+
+
+def item_202_filings(submissions: dict, *, limit: int = 4) -> list[dict]:
+    """Latest 8-K Item 2.02 filings. The exhibit list comes from the filing index, not the item code."""
+    recent = (submissions.get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+    cik = str(submissions.get("cik") or "0").zfill(10)
+    rows = []
+    for index, form in enumerate(forms):
+        if str(form).upper() not in {"8-K", "8-K/A"}:
+            continue
+        raw_items = (recent.get("items") or [""] * len(forms))[index] or ""
+        items = [part.strip() for part in str(raw_items).split(",") if part.strip()]
+        if "2.02" not in items:
+            continue
+        accession = (recent.get("accessionNumber") or [""] * len(forms))[index]
+        if not accession:
+            continue
+        rows.append(
+            {
+                "accession": accession,
+                "cik": cik,
+                "form": str(form),
+                "filed": (recent.get("filingDate") or [""] * len(forms))[index],
+                "report_date": (recent.get("reportDate") or [""] * len(forms))[index] or None,
+                "items": items,
+                "primary_document": (recent.get("primaryDocument") or [""] * len(forms))[index],
+            }
+        )
+    rows.sort(key=lambda row: row.get("filed") or "", reverse=True)
+    return rows[:limit]
+
+
+def latest_periodic_filings(submissions: dict) -> list[dict]:
+    """The newest 10-Q and 10-K primary documents, for the raw layer."""
+    recent = (submissions.get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+    cik = str(submissions.get("cik") or "0").zfill(10)
+    chosen: dict[str, dict] = {}
+    for index, form in enumerate(forms):
+        kind = str(form).upper()
+        if kind not in {"10-Q", "10-K"} or kind in chosen:
+            continue
+        accession = (recent.get("accessionNumber") or [""] * len(forms))[index]
+        document = (recent.get("primaryDocument") or [""] * len(forms))[index]
+        if not accession or not document:
+            continue
+        chosen[kind] = {
+            "accession": accession,
+            "cik": cik,
+            "form": kind,
+            "filed": (recent.get("filingDate") or [""] * len(forms))[index],
+            "report_date": (recent.get("reportDate") or [""] * len(forms))[index] or None,
+            "primary_document": document,
+        }
+    return list(chosen.values())
+
+
+def parse_deliveries_matrix(
+    table: list[list[str]],
+    fiscal_period: str,
+    catalog: dict,
+    **kwargs,
+) -> tuple[list[dict], list[dict]]:
+    """One-quarter production / deliveries grid from the press release, not the five-quarter deck."""
+    if not table or not fiscal_period:
+        return [], []
+    headers = [normalize_label(cell) for cell in table[0]]
+    columns: dict[int, str] = {}
+    for index, header in enumerate(headers):
+        if "production" in header:
+            columns[index] = "production"
+        elif "deliver" in header:
+            columns[index] = "deliveries"
+    if not columns:
+        return [], []
+    rows: list[dict] = []
+    proposals: list[dict] = []
+    for cells in table[1:]:
+        if not cells:
+            continue
+        for index, kind in columns.items():
+            if index >= len(cells):
+                continue
+            raw_label = f"{cells[0]} {kind}"
+            value, lower_bound = _parse_cell(cells[index])
+            if value is None or "%" in str(cells[index]):
+                continue
+            entry = match_catalog_entry(raw_label, catalog)
+            if entry is None:
+                proposals.append(
+                    propose_metric(
+                        raw_label,
+                        unit="vehicles",
+                        scale=1,
+                        fiscal_period=fiscal_period,
+                        source=kwargs.get("source_url") or "",
+                        lower_bound=lower_bound,
+                    )
+                )
+                continue
+            scaled, _hint = apply_scale(value, raw_label, entry)
+            rows.append(
+                _observation(
+                    entry,
+                    ticker=kwargs["ticker"],
+                    fiscal_period=fiscal_period,
+                    value=scaled,
+                    unit=entry.get("unit") or "vehicles",
+                    source_url=kwargs["source_url"],
+                    source_doc_hash=kwargs["source_doc_hash"],
+                    extracted_at=kwargs["extracted_at"],
+                    published_date=kwargs.get("published_date"),
+                    method="table",
+                    confidence=confidence_for("table"),
+                    lower_bound=lower_bound,
+                    source_kind=kwargs.get("source_kind") or "press_release",
+                    label=raw_label,
+                )
+            )
+    return rows, proposals
+
+
+def storage_observation(text: str, fiscal_period: str, catalog: dict, **kwargs) -> dict | None:
+    """The deliveries release states storage deployed in a sentence, not the quarterly grid."""
+    if not fiscal_period:
+        return None
+    match = _STORAGE_GWH.search(text or "")
+    if not match:
+        return None
+    entry = match_catalog_entry("Storage deployed", catalog)
+    if entry is None:
+        return None
+    return _observation(
+        entry,
+        ticker=kwargs["ticker"],
+        fiscal_period=fiscal_period,
+        value=float(match.group(1)),
+        unit=entry.get("unit") or "GWh",
+        source_url=kwargs["source_url"],
+        source_doc_hash=kwargs["source_doc_hash"],
+        extracted_at=kwargs["extracted_at"],
+        published_date=kwargs.get("published_date"),
+        method="table",
+        confidence=confidence_for("table"),
+        lower_bound=False,
+        source_kind=kwargs.get("source_kind") or "press_release",
+        label="Storage deployed",
+    )
+
+
+def narrative_candidates(text: str, *, enabled: bool) -> list[dict]:
+    """Low-confidence candidates from prose. They are never approved, and they stay off without a secret."""
+    if not enabled:
+        return []
+    found = []
+    attach = re.search(r">\s*(\d+(?:\.\d+)?)\s*%[^.\n]{0,80}deliver", text or "", re.IGNORECASE)
+    if attach:
+        found.append(
+            {
+                "metric_id": "fsd_attach_rate",
+                "label": "FSD attach rate",
+                "value": float(attach.group(1)) / 100.0,
+                "unit": "ratio",
+                "lower_bound": True,
+                "method": "llm",
+                "confidence": CONFIDENCE["llm"],
+                "source_kind": "llm",
+            }
+        )
+    metros = re.search(r"live in (seven|\d+) major metros", text or "", re.IGNORECASE)
+    if metros:
+        words = {"seven": 7}
+        raw = metros.group(1).lower()
+        found.append(
+            {
+                "metric_id": "robotaxi_metros",
+                "label": "Robotaxi metros",
+                "value": float(words.get(raw, raw)),
+                "unit": "metros",
+                "lower_bound": False,
+                "method": "llm",
+                "confidence": CONFIDENCE["llm"],
+                "source_kind": "llm",
+            }
+        )
+    return found
+
+
+def _scale_phrase(text: str) -> str:
+    """The unit caption in `text`, if it says the figures are in thousands, millions, or billions."""
+    found = list(_SCALE_CAPTION.finditer(text or ""))
+    if not found:
+        return ""
+    phrase = text[found[-1].start() : found[-1].end()]
+    return " ".join(phrase.split())
+
+
+def _with_scale_caption(text: str, tables: list[list[list[str]]]) -> list[list[list[str]]]:
+    """Pull `(in thousands)` / `(in millions)` from the text above an HTML table.
+
+    The caption often sits well above the table it covers. Each table takes only the
+    caption in its own preamble, so a unit on one statement does not scale a later table.
+    """
+    if not tables or "<table" not in text.lower():
+        return tables
+    starts = [match.start() for match in re.finditer(r"(?is)<table\b", text)]
+    captioned = []
+    for index, table in enumerate(tables):
+        if index >= len(starts):
+            captioned.append(table)
+            continue
+        before = plain_text(text[max(0, starts[index] - 8000) : starts[index]])
+        snippet = _scale_phrase(before)
+        own = _scale_phrase(" ".join(" ".join(row) for row in table[:8]))
+        if snippet and not own:
+            table = [[snippet], *table]
+        captioned.append(table)
+    return captioned
+
+
+def parse_company_document(text: str, catalog: dict, **kwargs) -> dict:
+    """Press-release grids, five-quarter summary tables, and optional low-confidence narrative candidates."""
+    fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
+    text_period = fiscal_period_from_text(text, fiscal_end_month)
+    # A table's first comparative quarter is not the filing. The cap is the later of the
+    # heading and the period the collector already assigned.
+    cap_candidates = [
+        str(candidate)
+        for candidate in (text_period, kwargs.get("fiscal_period"))
+        if candidate and _linear_quarter(str(candidate)) is not None
+    ]
+    filing_period = max(cap_candidates, key=_linear_quarter) if cap_candidates else None
+    tables = html_tables(text) if "<table" in text.lower() or "<tr" in text.lower() else []
+    tables = _with_scale_caption(text, tables)
+    has_quarter_table = any(_prepare_quarter_table(table) for table in tables)
+    if not has_quarter_table:
+        tables = [*tables, *text_tables(text), *flowing_text_tables(text, fiscal_end_month, filing_period)]
+    source_kind = kwargs.get("source_kind") or "deck"
+    detected = classify_release(title_from_html(text), text)
+    body = plain_text(text).lower()
+    if detected == "press_release" and "production" in body and "deliver" in body:
+        source_kind = "press_release"
+    rows, proposals = table_scan(
+        tables,
+        catalog,
+        source_kind=source_kind,
+        method=kwargs.get("method") or "table",
+        fiscal_end_month=fiscal_end_month,
+        filing_period=str(filing_period) if filing_period else None,
+        **{
+            key: kwargs[key]
+            for key in (
+                "ticker",
+                "source_url",
+                "source_doc_hash",
+                "extracted_at",
+                "published_date",
+            )
+        },
+    )
+    period = text_period or kwargs.get("fiscal_period")
+    matrix_kwargs = {key: value for key, value in kwargs.items() if key not in {"fiscal_period", "fiscal_end_month"}}
+    if period and source_kind == "press_release":
+        for table in tables:
+            extra, extra_proposals = parse_deliveries_matrix(table, period, catalog, **matrix_kwargs)
+            rows.extend(extra)
+            proposals.extend(extra_proposals)
+        stored = storage_observation(text, period, catalog, **matrix_kwargs)
+        if stored:
+            rows.append(stored)
+    if kwargs.get("llm_enabled") and period:
+        for candidate in narrative_candidates(text, enabled=True):
+            entry = match_catalog_entry(candidate["label"], catalog) or {
+                "metric_id": candidate["metric_id"],
+                "display_name": candidate["label"],
+                "unit": candidate["unit"],
+                "status": "proposed",
+                "category": "operating",
+            }
+            rows.append(
+                _observation(
+                    entry,
+                    ticker=kwargs["ticker"],
+                    fiscal_period=period,
+                    value=candidate["value"],
+                    unit=candidate["unit"],
+                    source_url=kwargs["source_url"],
+                    source_doc_hash=kwargs["source_doc_hash"],
+                    extracted_at=kwargs["extracted_at"],
+                    published_date=kwargs.get("published_date"),
+                    method="llm",
+                    confidence=CONFIDENCE["llm"],
+                    lower_bound=candidate["lower_bound"],
+                    source_kind="llm",
+                    label=candidate["label"],
+                )
+            )
+    explicit_ends = period_ends_from_text(text, fiscal_end_month)
+    for row in rows:
+        row["accession"] = kwargs.get("accession")
+        explicit = explicit_ends.get(row["fiscal_period"])
+        if explicit is not None:
+            row["period_end"] = explicit
+    return {"rows": rows, "proposals": proposals}
+
+
+def _priority(row: dict) -> tuple:
+    category = row.get("category") or "operating"
+    table = SOURCE_PRIORITY.get(category) or SOURCE_PRIORITY["operating"]
+    kind = row.get("source_kind") or "deck"
+    published = str(row.get("published_date") or "")
+    extracted = row.get("extracted_at")
+    stamp = extracted.isoformat() if isinstance(extracted, datetime) else str(extracted or "")
+    score = table.get(kind, 0)
+    # Q4 loses to the press release when a later filing restated Q1, the six-month total, or the nine-month total.
+    if row.get("derivation") == "stale_ytd":
+        score = min(score, 30)
+    return (score, published, stamp)
+
+
+def dedupe_observations(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """One winner per (ticker, metric_id, fiscal_period). A changed later value records supersedes."""
+    groups: dict[tuple, list[dict]] = {}
+    for row in rows:
+        if row.get("value") is None:
+            continue
+        key = (row.get("ticker"), row.get("metric_id"), row.get("fiscal_period"))
+        groups.setdefault(key, []).append(row)
+    winners = []
+    revisions = []
+    for key, group in groups.items():
+        official = [
+            row for row in group if (row.get("source_kind") or "") not in {"news", "llm"} and row.get("method") != "llm"
+        ]
+        pool = official or group
+        pool = sorted(pool, key=_priority)
+        winner = dict(pool[-1])
+        # News and LLM rows never become the served value when an official number exists.
+        if official:
+            winner["approved"] = row_approved(
+                winner.get("catalog_status") or "proposed",
+                winner.get("method") or "table",
+            )
+        else:
+            winner["approved"] = False
+        previous = [row for row in pool[:-1] if row.get("value") != winner.get("value")]
+        if previous:
+            prior = previous[-1]
+            winner["supersedes"] = prior.get("source_doc_hash")
+            winner["revision_reason"] = (
+                prior.get("footnote") or winner.get("footnote") or "later filing restated the quarter"
+            )
+            revisions.append(
+                {
+                    "ticker": key[0],
+                    "metric_id": key[1],
+                    "fiscal_period": key[2],
+                    "value": winner.get("value"),
+                    "supersedes": winner["supersedes"],
+                    "previous_value": prior.get("value"),
+                    "reason": winner["revision_reason"],
+                    "source_doc_hash": winner.get("source_doc_hash"),
+                }
+            )
+        winners.append(winner)
+    return winners, revisions
+
+
+def _xbrl_tag_series(
+    gaap: dict,
+    tag: str,
+    kind: str,
+    unit: str = "USD",
+    fiscal_end_month: int = 12,
+) -> tuple[dict[str, float], list[dict]]:
+    facts = (gaap.get(tag) or {}).get("units", {}).get(unit) or []
+    if not facts:
+        return {}, []
+    selected, flags, _ends = _select_sane_latest(_collect_xbrl_facts(facts, fiscal_end_month, kind))
+    return selected, flags
+
+
+def _best_tag_facts(gaap: dict, tags: list[str], unit: str) -> list[dict]:
+    """Use the concept that is still being filed. An older tag must not hide the current one."""
+    ranked = []
+    for index, tag in enumerate(tags):
+        facts = (gaap.get(tag) or {}).get("units", {}).get(unit) or []
+        ends = [fact.get("end") or "" for fact in facts if fact.get("end")]
+        if ends:
+            ranked.append((max(ends), index, facts))
+    if not ranked:
+        return []
+    ranked.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+    return ranked[0][2]
+
+
+def _ytd_series(
+    facts: list[dict], fiscal_end_month: int
+) -> tuple[dict[str, float], list[dict], dict[str, str], set[str]]:
+    discrete, ends, stale = _discrete_cashflow(facts, fiscal_end_month)
+    grouped = {period: [("", value, ends.get(period, ""))] for period, value in discrete.items()}
+    selected, flags, selected_ends = _select_sane_latest(grouped)
+    return selected, flags, selected_ends, stale & set(selected)
+
+
+def deferred_revenue_series(gaap: dict, fiscal_end_month: int = 12) -> tuple[dict[str, float], list[dict]]:
+    """Current plus noncurrent contract liabilities. The single combined tag is often annual-only."""
+    current, flags = _xbrl_tag_series(
+        gaap,
+        "ContractWithCustomerLiabilityCurrent",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    noncurrent, more = _xbrl_tag_series(
+        gaap,
+        "ContractWithCustomerLiabilityNoncurrent",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    flags.extend(more)
+    selected: dict[str, float] = {}
+    for period in set(current) | set(noncurrent):
+        if period in current and period in noncurrent:
+            selected[period] = current[period] + noncurrent[period]
+        else:
+            selected[period] = current.get(period, noncurrent.get(period, 0.0))
+    for tag in ("DeferredRevenueCurrent", "ContractWithCustomerLiability"):
+        extra, extra_flags = _xbrl_tag_series(gaap, tag, "instant", fiscal_end_month=fiscal_end_month)
+        flags.extend(extra_flags)
+        for period, value in extra.items():
+            selected.setdefault(period, value)
+    return selected, flags
+
+
+def cash_and_investments_series(gaap: dict, fiscal_end_month: int = 12) -> tuple[dict[str, float], list[dict]]:
+    """Cash at carrying value plus one investments concept, then older single-concept fallbacks.
+
+    Tesla's current balance sheet tags cash and short-term investments separately.
+    Short-term investments win over marketable securities for the same quarter so a
+    concept that was filed twice is not added twice. Periods with neither current
+    concept fall back to the restricted-cash total, then the legacy combined tag.
+    """
+    cash, flags = _xbrl_tag_series(
+        gaap,
+        "CashAndCashEquivalentsAtCarryingValue",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    short_term, short_flags = _xbrl_tag_series(
+        gaap,
+        "ShortTermInvestments",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    marketable, market_flags = _xbrl_tag_series(
+        gaap,
+        "MarketableSecuritiesCurrent",
+        "instant",
+        fiscal_end_month=fiscal_end_month,
+    )
+    flags.extend(short_flags)
+    flags.extend(market_flags)
+    selected: dict[str, float] = {}
+    for period, value in cash.items():
+        extra = short_term.get(period)
+        if extra is None:
+            extra = marketable.get(period)
+        selected[period] = value + (extra or 0.0)
+    for tag in (
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+        "CashCashEquivalentsAndShortTermInvestments",
+    ):
+        series, tag_flags = _xbrl_tag_series(gaap, tag, "instant", fiscal_end_month=fiscal_end_month)
+        flags.extend(tag_flags)
+        for period, value in series.items():
+            selected.setdefault(period, value)
+    return selected, flags
+
+
+def _series_for_spec(
+    gaap: dict,
+    spec: dict,
+    fiscal_end_month: int,
+) -> tuple[dict[str, float], list[dict], dict[str, str], set[str]]:
+    mode = spec.get("mode") or spec.get("kind") or "duration"
+    if mode == "cash_investments":
+        selected, flags = cash_and_investments_series(gaap, fiscal_end_month)
+        return selected, flags, {}, set()
+    if mode == "deferred":
+        selected, flags = deferred_revenue_series(gaap, fiscal_end_month)
+        return selected, flags, {}, set()
+    unit = spec.get("unit") or "USD"
+    facts = _best_tag_facts(gaap, list(spec.get("tags") or []), unit)
+    if not facts:
+        return {}, [], {}, set()
+    # Income-statement durations reuse the cash-flow differencer so Q4 is FY minus 9M YTD.
+    if mode in {"ytd", "income"}:
+        return _ytd_series(facts, fiscal_end_month)
+    selected, flags, ends = _select_sane_latest(
+        _collect_xbrl_facts(facts, fiscal_end_month, spec.get("kind") or "duration")
+    )
+    return selected, flags, ends, set()
+
+
+def _catalog_xbrl_spec(catalog: dict, metric_id: str, spec: dict) -> dict:
+    """A catalog tag list replaces the shared mapping. Tesla's deferred revenue is current only."""
+    entry = catalog_entry(catalog, metric_id)
+    if entry is None or not entry.get("xbrl_tags"):
+        return spec
+    merged = dict(spec)
+    merged["tags"] = list(entry["xbrl_tags"])
+    if entry.get("xbrl_mode"):
+        merged["mode"] = entry["xbrl_mode"]
+    if entry.get("xbrl_kind"):
+        merged["kind"] = entry["xbrl_kind"]
+    if entry.get("xbrl_unit"):
+        merged["unit"] = entry["xbrl_unit"]
+    return merged
+
+
+def _extra_xbrl_specs(catalog: dict) -> list[tuple[str, dict]]:
+    """Company-specific XBRL rows live on the catalog entry, not in the shared GAAP list."""
+    extras = []
+    for entry in catalog.get("metrics") or []:
+        metric_id = entry.get("metric_id")
+        tags = entry.get("xbrl_tags") or []
+        if not metric_id or not tags or metric_id in GAAP_XBRL_TAGS:
+            continue
+        extras.append(
+            (
+                metric_id,
+                {
+                    "kind": entry.get("xbrl_kind") or "instant",
+                    "tags": list(tags),
+                    "mode": entry.get("xbrl_mode") or entry.get("xbrl_kind") or "instant",
+                    "unit": entry.get("xbrl_unit") or "USD",
+                },
+            )
+        )
+    return extras
+
+
+def companyfacts_observations(companyfacts: dict, catalog: dict, **kwargs) -> tuple[list[dict], list[dict]]:
+    """XBRL observations for GAAP catalog rows, with scale-error flags kept off the winning value."""
+    gaap = (companyfacts.get("facts") or {}).get("us-gaap") or {}
+    fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
+    ticker = kwargs["ticker"]
+    selected_by_metric: dict[str, dict[str, float]] = {}
+    ends_by_metric: dict[str, dict[str, str]] = {}
+    flags: list[dict] = []
+    specs = list(GAAP_XBRL_TAGS.items()) + _extra_xbrl_specs(catalog)
+    stale_by_metric: dict[str, set[str]] = {}
+    for metric_id, spec in specs:
+        spec = _catalog_xbrl_spec(catalog, metric_id, spec)
+        selected, scale_flags, ends, stale = _series_for_spec(gaap, spec, fiscal_end_month)
+        ends_by_metric[metric_id] = ends
+        stale_by_metric[metric_id] = stale
+        if not selected and not scale_flags:
+            continue
+        selected_by_metric[metric_id] = selected
+        for flag in scale_flags:
+            flag["metric_id"] = metric_id
+            flag["ticker"] = ticker.upper()
+            flags.append(flag)
+    reported_gross = selected_by_metric.get("gross_profit") or {}
+    derived_gross = gross_profit_series(
+        reported_gross,
+        selected_by_metric.get("revenue_gaap") or {},
+        selected_by_metric.get("cost_of_revenue") or {},
+    )
+    selected_by_metric["gross_profit"] = derived_gross
+    if derived_gross is not reported_gross:
+        ends_by_metric["gross_profit"] = {}
+    rows = []
+    for metric_id, selected in selected_by_metric.items():
+        entry = catalog_entry(catalog, metric_id)
+        if entry is None or not selected:
+            continue
+        for fiscal_period, value in selected.items():
+            end_iso = (ends_by_metric.get(metric_id) or {}).get(fiscal_period)
+            rows.append(
+                _observation(
+                    entry,
+                    ticker=ticker,
+                    fiscal_period=fiscal_period,
+                    value=float(value),
+                    unit=entry.get("unit") or "USD",
+                    source_url=kwargs.get("source_url") or "",
+                    source_doc_hash=kwargs.get("source_doc_hash") or "",
+                    extracted_at=kwargs["extracted_at"],
+                    published_date=kwargs.get("published_date"),
+                    method="table",
+                    confidence=confidence_for("table"),
+                    lower_bound=False,
+                    source_kind="xbrl",
+                    label=metric_id,
+                    period_end=date.fromisoformat(end_iso) if end_iso else None,
+                    fiscal_end_month=fiscal_end_month,
+                )
+            )
+            if fiscal_period in (stale_by_metric.get(metric_id) or ()):
+                rows[-1]["derivation"] = "stale_ytd"
+    return rows, flags
+
+
+def xbrl_value_map(rows: list[dict]) -> dict[tuple[str, str], float]:
+    found = {}
+    for row in rows:
+        if row.get("source_kind") == "xbrl":
+            found[(row["metric_id"], row["fiscal_period"])] = row["value"]
+    return found
+
+
+def company_ir_tickers(tickers: list[str], cap: int = COMPANY_IR_MAX_TICKERS) -> list[str]:
+    """Watchlist order, capped. TSLA is the reference catalog, not a special collector path."""
+    chosen = []
+    for ticker in tickers:
+        symbol = str(ticker or "").upper().strip()
+        if not symbol or symbol in chosen:
+            continue
+        chosen.append(symbol)
+        if len(chosen) >= cap:
+            break
+    return chosen
+
+
+def unwrap_job_event(event: dict | None) -> dict:
+    """Accept a bare handler payload or an EventBridge envelope."""
+    if not isinstance(event, dict):
+        return {}
+    detail = event.get("detail")
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except ValueError:
+            detail = None
+    if isinstance(detail, dict) and (event.get("detail-type") or detail.get("job") or detail.get("ticker")):
+        merged = dict(detail)
+        if event.get("detail-type"):
+            merged["detail-type"] = event["detail-type"]
+        return merged
+    return dict(event)
+
+
+def collection_plan(event: dict | None, today: date) -> dict:
+    """Schedule, ticker-added, or an H3 8-K Item 2.02. An hourly H3 run with no new filing does not collect."""
+    raw = event or {}
+    flat = unwrap_job_event(raw)
+    if flat.get("detail-type") == "TickerAdded" or raw.get("detail-type") == "TickerAdded":
+        ticker = str(flat.get("ticker") or "").upper()
+        return {
+            "collect": True,
+            "extract": False,
+            "reason": "ticker-added",
+            "tickers": [ticker] if ticker else [],
+        }
+    if flat.get("job") == "H3":
+        filing = flat.get("filing") or {}
+        ticker = str(filing.get("ticker") or "").upper()
+        watch = {ticker} if ticker else set()
+        triggered = bool(ticker) and filing_triggers_extraction(
+            str(filing.get("form") or ""),
+            list(filing.get("exhibits") or []),
+            ticker,
+            watch,
+        )
+        if triggered:
+            return {"collect": True, "extract": True, "reason": "edgar-8k", "tickers": [ticker]}
+        return {"collect": False, "extract": False, "reason": "skip", "tickers": []}
+    plan = plan_collection(flat, today)
+    explicit = [str(item).upper() for item in flat.get("watchlist") or flat.get("tickers") or []]
+    plan["tickers"] = explicit
+    return plan
+
+
+class Pace:
+    """Keep SEC calls under 10 requests per second. Other hosts are not delayed."""
+
+    def __init__(self, min_interval: float = SEC_MIN_INTERVAL_S, sleep=None, clock=None) -> None:
+        import time
+
+        self.min_interval = min_interval
+        self.sleep = sleep or time.sleep
+        self.clock = clock or time.monotonic
+        self._next = 0.0
+
+    def wait(self, host: str) -> None:
+        if host not in SEC_HOSTS or self.min_interval <= 0:
+            return
+        now = self.clock()
+        if now < self._next:
+            self.sleep(self._next - now)
+            now = self.clock()
+        self._next = now + self.min_interval
+
+
+def decide_ir_fetch(url: str, robots_txt: str | None, user_agent: str, status_code: int | None = None) -> dict:
+    """EDGAR is primary. tesla.com is never fetched. ir.tesla.com HTML is not a fallback; a PDF is, after robots.txt."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if host in BLOCKED_HOSTS:
+        return {"action": "skip", "retry": False, "store": False, "reason": "blocked_host"}
+    path_lower = parsed.path.lower()
+    if host == "ir.tesla.com" and not path_lower.endswith(".pdf") and not path_lower.endswith("/robots.txt"):
+        return {"action": "skip", "retry": False, "store": False, "reason": "html_not_a_fallback"}
+    path = parsed.path or "/"
+    if robots_txt is not None and not robots_allows(robots_txt, user_agent, path):
+        return {"action": "skip", "retry": False, "store": False, "reason": "robots"}
+    if status_code is None:
+        return {"action": "fetch", "retry": False, "store": False, "reason": "ok"}
+    return fetch_decision(status_code)
+
+
+def merge_manifest(existing: dict | None, entry: dict) -> dict:
+    docs = [doc for doc in (existing or {}).get("documents") or [] if doc.get("sha256") != entry.get("sha256")]
+    docs.append(entry)
+    return {"ticker": entry.get("ticker"), "period": entry.get("period"), "documents": docs}
+
+
+def curated_parquet_key(ticker: str) -> str:
+    return f"curated/company_metrics/ticker={ticker.upper()}/company_metrics.parquet"
+
+
+def curated_observations_key(ticker: str) -> str:
+    return f"curated/company_metrics/ticker={ticker.upper()}/observations.json"
+
+
+def sec_entity_name(document: dict | None) -> str:
+    """Company name already on an SEC companyfacts document or a curated observations file."""
+    if not isinstance(document, dict):
+        return ""
+    for key in ("entityName", "company_name", "entity_name"):
+        value = " ".join(str(document.get(key) or "").split())
+        if value:
+            return value
+    return ""
+
+
+def curated_proposals_key(ticker: str) -> str:
+    return f"curated/company_metrics/ticker={ticker.upper()}/proposals.json"
+
+
+def curated_revisions_key(ticker: str) -> str:
+    return f"curated/company_metrics/ticker={ticker.upper()}/revisions.json"
+
+
+def serving_stock_key(ticker: str) -> str:
+    return f"serving/stock/{ticker.upper()}.json"
+
+
+def _jsonable(row: dict) -> dict:
+    copied = {}
+    for key, value in row.items():
+        if isinstance(value, datetime):
+            copied[key] = value.isoformat()
+        elif isinstance(value, date):
+            copied[key] = value.isoformat()
+        else:
+            copied[key] = value
+    return copied
+
+
+def _source_kind_for_title(title: str) -> str:
+    kind = classify_exhibit_title(title)
+    if kind == "press_release":
+        return "press_release"
+    if kind == "deck":
+        return "deck"
+    return "other"
+
+
+# Leave headroom under the 300s collect Lambda so a slow ticker stops as partial, not a timeout.
+COLLECT_BUDGET_S = 280
+
+
+def run_collect(
+    event: dict | None,
+    today: date,
+    *,
+    fetch,
+    exists,
+    put_bytes,
+    put_json,
+    read_json,
+    tickers: list[str],
+    pace: Pace | None = None,
+    user_agent: str | None = None,
+    extracted_at: str | None = None,
+    budget_s: float | None = None,
+) -> dict:
+    """Fetch EDGAR submissions, Item 2.02 EX-99.1, periodic filings and companyfacts. IR PDFs are a fallback."""
+    plan = collection_plan(event, today)
+    if not plan["collect"]:
+        return {
+            "status": "skipped",
+            "reason": plan["reason"],
+            "collected": 0,
+            "documents": 0,
+            "skipped": 0,
+            "tickers": [],
+            "manifests": [],
+            "failed_source_ids": [],
+            "reasons": [],
+        }
+    agent = user_agent or crawler_user_agent()
+    limiter = pace or Pace(0)
+    targets = company_ir_tickers(plan["tickers"] or tickers)
+    budget = COLLECT_BUDGET_S if budget_s is None else budget_s
+    deadline = datetime.now(UTC) + timedelta(seconds=budget)
+    stopped_for_time = False
+    manifests = []
+    written = 0
+    documents = 0
+    skipped = 0
+    failed = []
+    reasons = []
+    stopped: set[str] = set()
+    stamp = extracted_at or datetime.now(UTC).isoformat(timespec="seconds")
+
+    def host_of(url: str) -> str:
+        from urllib.parse import urlparse
+
+        return (urlparse(url).hostname or "").lower()
+
+    def expired() -> bool:
+        nonlocal stopped_for_time
+        if budget <= 0 or datetime.now(UTC) >= deadline:
+            stopped_for_time = True
+            return True
+        return False
+
+    def pull(url: str, source_id: str, *, optional: bool = False):
+        if expired():
+            failed.append(source_id)
+            reasons.append({"source_id": source_id, "reason": "time_budget", "url": url})
+            return None
+        host = host_of(url)
+        if host in stopped:
+            reasons.append({"source_id": source_id, "reason": "provider_policy", "url": url})
+            return None
+        limiter.wait(host)
+        response = fetch(url, {"User-Agent": agent, "Accept": "application/json,text/html,*/*"})
+        decision = fetch_decision(response.status_code)
+        if decision["action"] == "stop":
+            stopped.add(host)
+            failed.append(source_id)
+            reasons.append({"source_id": source_id, "reason": decision["reason"], "url": url})
+            return None
+        if not decision["store"]:
+            if not optional:
+                reasons.append({"source_id": source_id, "reason": decision["reason"], "url": url})
+                if decision["reason"] != "ok":
+                    failed.append(source_id)
+            return None
+        return response
+
+    def save(
+        ticker: str,
+        period: str,
+        url: str,
+        body: bytes,
+        content_type: str,
+        source_kind: str,
+        accession: str,
+        published: str | None,
+        fiscal_end_month: int | None = None,
+    ):
+        nonlocal written, documents, skipped
+        stored = store_raw_document(
+            ticker=ticker,
+            period=period,
+            url=url,
+            body=body,
+            fetched_at=stamp,
+            status_code=200,
+            content_type=content_type,
+            etag=None,
+            robots_decision="edgar",
+            extension=url.rsplit(".", 1)[-1] if "." in url.rsplit("/", 1)[-1] else "bin",
+        )
+        documents += 1
+        entry = {
+            "ticker": ticker,
+            "period": period,
+            "key": stored["key"],
+            "source_url": url,
+            "sha256": stored["sha256"],
+            "source_kind": source_kind,
+            "accession": accession,
+            "published_date": published,
+            "content_type": content_type,
+            "fiscal_end_month": fiscal_end_month or 12,
+        }
+        manifests.append(entry)
+        if exists(stored["key"]):
+            skipped += 1
+        else:
+            put_bytes(stored["key"], body, content_type)
+            written += 1
+        current = None
+        if read_json:
+            try:
+                current = read_json(stored["manifest_key"])
+            except (OSError, ValueError, KeyError):
+                current = None
+            except Exception as exc:
+                if type(exc).__name__ not in {"NoSuchKey", "ClientError"}:
+                    raise
+                current = None
+        put_json(stored["manifest_key"], merge_manifest(current, {**stored["manifest"], **entry}))
+
+    ticker_doc = pull("https://www.sec.gov/files/company_tickers.json", "edgar:company-tickers")
+    cik_by_ticker = {}
+    if ticker_doc is not None:
+        try:
+            payload = ticker_doc.json()
+        except ValueError:
+            payload = {}
+        for record in payload.values() if isinstance(payload, dict) else []:
+            if isinstance(record, dict) and record.get("ticker") and record.get("cik_str") is not None:
+                cik_by_ticker[str(record["ticker"]).upper()] = f"{int(record['cik_str']):010d}"
+
+    for ticker in targets:
+        if expired():
+            failed.append(f"edgar:{ticker}:time_budget")
+            reasons.append({"source_id": f"edgar:{ticker}", "reason": "time_budget"})
+            break
+        catalog = load_catalog(ticker)
+        cik = cik_by_ticker.get(ticker)
+        if not cik:
+            skipped += 1
+            reasons.append({"source_id": f"edgar:{ticker}", "reason": "not_an_sec_filer"})
+            continue
+        submissions = pull(f"https://data.sec.gov/submissions/CIK{cik}.json", f"edgar:{ticker}:submissions")
+        if submissions is None:
+            continue
+        try:
+            body = submissions.json()
+        except ValueError:
+            failed.append(f"edgar:{ticker}:submissions")
+            continue
+        fy_month = fiscal_end_month_from_submissions(body)
+        for filing in item_202_filings(body):
+            exhibits: list[dict] = []
+            for suffix in (f"{filing['accession']}-index.html", f"{filing['accession']}-index.htm"):
+                page = pull(
+                    archive_url(cik, filing["accession"], suffix),
+                    f"edgar:{ticker}:{filing['accession']}:index-html",
+                    optional=True,
+                )
+                if page is None:
+                    continue
+                exhibits = exhibits_from_index_page(page.text)
+                if exhibits:
+                    break
+            if not exhibits:
+                index = pull(filing_index_url(cik, filing["accession"]), f"edgar:{ticker}:{filing['accession']}:index")
+                if index is None:
+                    continue
+                try:
+                    exhibits = exhibits_from_index(index.json())
+                except ValueError:
+                    failed.append(f"edgar:{ticker}:{filing['accession']}:index")
+                    continue
+            for exhibit in exhibits:
+                url = archive_url(cik, filing["accession"], exhibit["name"])
+                exhibit_type = str(exhibit.get("type") or "EX-99.1").lower()
+                document = pull(url, f"edgar:{ticker}:{filing['accession']}:{exhibit_type}")
+                if document is None:
+                    continue
+                title = title_from_html(document.text) or exhibit.get("description") or ""
+                kind = classify_release(title, document.text)
+                period = fiscal_period_from_text(document.text, fy_month) or "undated"
+                content = document.content if isinstance(document.content, bytes) else document.text.encode()
+                save(
+                    ticker,
+                    period,
+                    url,
+                    content,
+                    "text/html",
+                    kind,
+                    filing["accession"],
+                    filing.get("filed"),
+                    fy_month,
+                )
+        for filing in latest_periodic_filings(body):
+            url = archive_url(cik, filing["accession"], filing["primary_document"])
+            document = pull(url, f"edgar:{ticker}:{filing['form']}")
+            if document is None:
+                continue
+            period = "undated"
+            if filing.get("report_date"):
+                period = fiscal_period_for_end(date.fromisoformat(filing["report_date"]), fy_month)
+            content = document.content if isinstance(document.content, bytes) else document.text.encode()
+            save(ticker, period, url, content, "text/html", "note", filing["accession"], filing.get("filed"), fy_month)
+        facts_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+        facts = pull(facts_url, f"edgar:{ticker}:companyfacts")
+        if facts is not None:
+            content = facts.content if isinstance(facts.content, bytes) else facts.text.encode()
+            save(ticker, "companyfacts", facts_url, content, "application/json", "xbrl", "", None, fy_month)
+        if not any(item["ticker"] == ticker and item["source_kind"] in {"deck", "press_release"} for item in manifests):
+            for source in catalog.get("ir_sources") or []:
+                robots_url = source.get("robots_url")
+                robots_txt = ""
+                if robots_url:
+                    robots_decision = decide_ir_fetch(robots_url, None, agent)
+                    if robots_decision["action"] == "skip":
+                        reasons.append(
+                            {
+                                "source_id": source.get("id") or "ir",
+                                "reason": robots_decision["reason"],
+                                "url": robots_url,
+                            }
+                        )
+                        failed.append(source.get("id") or "ir")
+                        continue
+                    robots = pull(robots_url, f"ir:{ticker}:robots")
+                    robots_txt = robots.text if robots is not None else ""
+                for url in source.get("urls") or []:
+                    decision = decide_ir_fetch(url, robots_txt, agent)
+                    if decision["action"] == "skip":
+                        reasons.append(
+                            {
+                                "source_id": source.get("id") or "ir",
+                                "reason": decision["reason"],
+                                "url": url,
+                            }
+                        )
+                        failed.append(source.get("id") or "ir")
+                        continue
+                    document = pull(url, f"ir:{ticker}:{source.get('id') or 'pdf'}")
+                    if document is None:
+                        continue
+                    content = document.content if isinstance(document.content, bytes) else document.text.encode()
+                    save(ticker, "ir", url, content, "application/pdf", "deck", "", None)
+
+    status = "ok"
+    if stopped_for_time:
+        status = "partial"
+    elif failed and documents:
+        status = "partial"
+    elif failed and not documents:
+        status = "failed"
+    return {
+        "status": status,
+        "reason": plan["reason"],
+        "collected": written,
+        "documents": documents,
+        "skipped": skipped,
+        "tickers": targets,
+        "manifests": manifests,
+        "failed_source_ids": sorted(set(failed)),
+        "reasons": reasons,
+        "run_status": status,
+    }
+
+
+def _period_from_manifest(item: dict) -> str | None:
+    period = item.get("period")
+    if isinstance(period, str) and _QUARTER.fullmatch(period):
+        return period
+    return None
+
+
+def run_extract(
+    event: dict | None,
+    *,
+    read_bytes,
+    read_json,
+    write_parquet,
+    write_json,
+    now: datetime | None = None,
+) -> dict:
+    """Parse manifests from collect, reconcile GAAP to XBRL, and write curated rows plus proposals."""
+    flat = unwrap_job_event(event)
+    if flat.get("status") == "skipped" or (flat.get("job") == "Q2C" and not flat.get("manifests")):
+        return {
+            "status": "skipped",
+            "reason": flat.get("reason") or "upstream skipped",
+            "extracted": 0,
+            "mismatches": [],
+            "tickers": [],
+            "run_status": "skipped",
+        }
+    extracted_at = now or datetime.now(UTC)
+    llm_enabled = bool(llm_secret_id())
+    by_ticker: dict[str, list[dict]] = {}
+    proposals: dict[str, list[dict]] = {}
+    entity_names: dict[str, str] = {}
+    scale_flags: list[dict] = []
+    failed = []
+    for item in flat.get("manifests") or []:
+        ticker = str(item.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        try:
+            body = read_bytes(item["key"])
+        except (OSError, ValueError, KeyError):
+            failed.append(item.get("key") or ticker)
+            continue
+        text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
+        catalog = review_catalog(load_catalog(ticker), _read_lake_catalog(read_json, ticker))
+        fiscal_end_month = int(item.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
+        kind = item.get("source_kind") or "deck"
+        if kind == "xbrl":
+            try:
+                facts = json.loads(text)
+            except ValueError:
+                failed.append(item.get("key") or ticker)
+                continue
+            rows, flags = companyfacts_observations(
+                facts,
+                catalog,
+                ticker=ticker,
+                source_url=item.get("source_url") or "",
+                source_doc_hash=item.get("sha256") or "",
+                extracted_at=extracted_at,
+                published_date=item.get("published_date"),
+                fiscal_end_month=fiscal_end_month,
+            )
+            entity = sec_entity_name(facts)
+            if entity:
+                entity_names[ticker] = entity
+            by_ticker.setdefault(ticker, []).extend(rows)
+            scale_flags.extend(flags)
+            continue
+        if kind == "note":
+            continue
+        parsed = parse_company_document(
+            text,
+            catalog,
+            ticker=ticker,
+            source_url=item.get("source_url") or "",
+            source_doc_hash=item.get("sha256") or "",
+            extracted_at=extracted_at,
+            published_date=item.get("published_date"),
+            source_kind=kind if kind in {"deck", "press_release", "other"} else "other",
+            fiscal_period=_period_from_manifest(item),
+            fiscal_end_month=fiscal_end_month,
+            accession=item.get("accession"),
+            llm_enabled=llm_enabled,
+        )
+        by_ticker.setdefault(ticker, []).extend(parsed["rows"])
+        proposals.setdefault(ticker, []).extend(parsed["proposals"])
+    mismatches = []
+    tickers = []
+    total = 0
+    for ticker, rows in by_ticker.items():
+        catalog = review_catalog(load_catalog(ticker), _read_lake_catalog(read_json, ticker))
+        ir_only = [row for row in rows if row.get("source_kind") != "xbrl"]
+        ir_winners, _ignored = dedupe_observations(ir_only)
+        for item in reconcile_rows(ir_winners, xbrl_value_map(rows)):
+            mismatches.append({**item, "ticker": ticker})
+        winners, revisions = dedupe_observations(rows)
+        frame = metrics_frame(winners)
+        write_parquet(frame, curated_parquet_key(ticker))
+        observations = {"rows": [_jsonable(row) for row in winners]}
+        entity = entity_names.get(ticker) or ""
+        if entity:
+            observations["company_name"] = entity
+        write_json(curated_observations_key(ticker), observations)
+        merged = merge_proposals(catalog, proposals.get(ticker) or [])
+        new_items = [item for item in merged.get("metrics") or [] if catalog_entry(catalog, item["metric_id"]) is None]
+        write_json(curated_proposals_key(ticker), {"ticker": ticker, "metrics": new_items})
+        write_json(curated_revisions_key(ticker), {"revisions": revisions})
+        tickers.append(ticker)
+        total += frame.height
+    status = "partial" if failed else "ok"
+    for flag in scale_flags:
+        mismatches.append({**flag, "status": "scale_error"})
+    return {
+        "status": status,
+        "extracted": total,
+        "mismatches": mismatches,
+        "scale_flags": scale_flags,
+        "tickers": tickers,
+        "failed_source_ids": failed,
+        "run_status": status,
+    }
+
+
+def _load_observations(rows: list[dict]) -> list[dict]:
+    loaded = []
+    for row in rows:
+        copied = dict(row)
+        extracted = copied.get("extracted_at")
+        if isinstance(extracted, str):
+            copied["extracted_at"] = datetime.fromisoformat(extracted)
+        period_end = copied.get("period_end")
+        if isinstance(period_end, str):
+            copied["period_end"] = date.fromisoformat(period_end)
+        loaded.append(copied)
+    return loaded
+
+
+def run_serve(event: dict | None, *, read_json, write_json, now: str | None = None) -> dict:
+    """Publish approved and proposed metrics. A skipped upstream run does not replace the previous document."""
+    flat = unwrap_job_event(event)
+    if flat.get("status") == "skipped" or flat.get("run_status") == "skipped":
+        return {"status": "skipped", "reason": "upstream skipped", "served": 0, "tickers": [], "run_status": "skipped"}
+    tickers = company_ir_tickers(flat.get("tickers") or [])
+    generated_at = now or datetime.now(UTC).isoformat(timespec="seconds")
+    run_status = str(flat.get("run_status") or flat.get("status") or "ok")
+    if run_status not in {"ok", "partial", "failed"}:
+        run_status = "ok"
+    mismatches = list(flat.get("mismatches") or [])
+    served = []
+    for ticker in tickers:
+        catalog = review_catalog(load_catalog(ticker), _read_lake_catalog(read_json, ticker))
+        payload = read_json(curated_observations_key(ticker)) or {}
+        rows = _load_observations(payload.get("rows") or [])
+        previous = read_json(serving_stock_key(ticker))
+        company_name = sec_entity_name(payload) or sec_entity_name(previous)
+        own_mismatches = mismatches_for_ticker(ticker, mismatches)
+        document = build_serving(
+            ticker,
+            catalog,
+            rows,
+            run=run_record(status=run_status, sources={"tickers": len(tickers)}, mismatches=own_mismatches),
+            generated_at=generated_at,
+            previous=previous,
+            mismatches=own_mismatches,
+        )
+        if company_name:
+            document["company_name"] = company_name
+        public = public_stock_document(document, ticker)
+        write_json(serving_stock_key(ticker), json.loads(visible_html(public)))
+        served.append(ticker)
+    return {
+        "status": run_status,
+        "served": len(served),
+        "tickers": served,
+        "run_status": run_status,
+        "alert": run_needs_alert({"status": run_status}),
+    }
+
+
+def _record_failures(source_ids: list[str]) -> None:
+    from observability import source_run
+
+    for source_id in source_ids:
+        with source_run(source_id):
+            raise RuntimeError(source_id)
+
+
+def collect_handler(event, context):
+    import os
+
+    from http_client import get_client
+    from lake import read_json, s3, write_json
     from observability import job_handler
+    from universe import user_ticker_union, watchlist_universe
 
     @job_handler("Q2C")
     def run(event, context):
-        return plan_collection(event, datetime.now(UTC).date())
+        bucket = os.environ["LAKE_BUCKET"]
+        client = s3()
+
+        def exists(key: str) -> bool:
+            found = client.list_objects_v2(Bucket=bucket, Prefix=key, MaxKeys=1)
+            return any(obj["Key"] == key for obj in found.get("Contents", []))
+
+        def put_bytes(key: str, body: bytes, content_type: str) -> None:
+            client.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+
+        def put_json(key: str, obj: dict) -> None:
+            write_json(obj, key, bucket=bucket)
+
+        def fetch(url: str, headers: dict):
+            # The client is opened around the whole collect so SEC pacing stays in one connection pool.
+            return http.get(url, headers=headers)
+
+        universe = watchlist_universe(user_ticker_union())
+        remaining = getattr(context, "get_remaining_time_in_millis", None)
+        budget_s = None
+        if callable(remaining):
+            millis = remaining()
+            if isinstance(millis, (int, float)) and millis > 0:
+                budget_s = max(1.0, millis / 1000.0 - 20.0)
+        with get_client(headers={"User-Agent": crawler_user_agent()}) as http:
+            result = run_collect(
+                event,
+                datetime.now(UTC).date(),
+                fetch=fetch,
+                exists=exists,
+                put_bytes=put_bytes,
+                put_json=put_json,
+                read_json=lambda key: read_json(key, bucket),
+                tickers=list(universe["tickers"] or []),
+                pace=Pace(),
+                budget_s=budget_s,
+            )
+        _record_failures(result.get("failed_source_ids") or [])
+        return result
 
     return run(event, context)
 
 
-def extract_handler(event, context):  # pragma: no cover - AWS wrapper
+def extract_handler(event, context):
+    import os
+
+    from lake import read_json, s3, write_json, write_parquet
     from observability import job_handler
 
     @job_handler("Q2X")
     def run(event, context):
-        plan = plan_collection(event, datetime.now(UTC).date())
-        return {"extracted": 0, "triggered": plan["extract"]}
+        bucket = os.environ["LAKE_BUCKET"]
+
+        def read_bytes(key: str) -> bytes:
+            return s3().get_object(Bucket=bucket, Key=key)["Body"].read()
+
+        def write_frame(frame, key: str) -> None:
+            write_parquet(frame, key, bucket=bucket)
+
+        result = run_extract(
+            event,
+            read_bytes=read_bytes,
+            read_json=lambda key: read_json(key, bucket),
+            write_parquet=write_frame,
+            write_json=lambda key, obj: write_json(obj, key, bucket=bucket),
+        )
+        _record_failures(result.get("failed_source_ids") or [])
+        return result
 
     return run(event, context)
 
 
-def serve_handler(event, context):  # pragma: no cover - AWS wrapper
+def serve_handler(event, context):
+    import os
+
     from aws_lambda_powertools.metrics import MetricUnit
 
+    from lake import read_json, write_json_and_gzip
     from observability import job_handler, metrics
 
     @job_handler("Q2S")
     def run(event, context):
-        status = str((event or {}).get("run_status") or "ok")
-        if run_needs_alert({"status": status}):
+        bucket = os.environ.get("LAKE_BUCKET")
+        # JSON plus the .gz sibling, so a review patch's gzip copy is not left behind.
+        result = run_serve(
+            event,
+            read_json=lambda key: read_json(key, bucket),
+            write_json=lambda key, obj: write_json_and_gzip(obj, key, bucket=bucket, cache_seconds=0),
+        )
+        if result.get("alert"):
             metrics.add_metric(name="FailedRuns", unit=MetricUnit.Count, value=1)
-        return {"served": 0, "alert": run_needs_alert({"status": status})}
+        return result
 
     return run(event, context)

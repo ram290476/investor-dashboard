@@ -2,8 +2,10 @@
 """Add or correct a manual fundamentals row (deliveries, FSD subscribers).
 
 Usage:
-    scripts/add_fundamental.py --bucket invdash-lake-<acct> TSLA deliveries 2026Q3 2026-10-02 497099 \
+    scripts/add_fundamental.py --bucket invdash-lake-<acct> TSLA deliveries 2026Q3 2026-10-02 486532 \
         [--source DS-12] [--note "Q3 2026 production and deliveries release"]
+
+497,099 is Q3 2025, not Q3 2026. Q3 2026 deliveries were 486,532, released 2026-10-02.
 
 Validates the row with the same rules the Q1 job uses, appends it to
 s3://<bucket>/manual/fundamentals/fundamentals_manual.csv (a later row for the same
