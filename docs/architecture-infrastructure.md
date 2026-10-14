@@ -102,7 +102,7 @@ The dashboard now serves several signed-in users, each with their own ticker lis
 
 - **Sign-in:** invite-only Cognito user pool (Plus tier for threat protection), MFA off (password-only for now), 15-character passwords. The site uses the authorization-code flow with PKCE through Cognito's hosted UI, with no Amplify. Tokens last 1 hour and refresh for up to 12 hours (AC-12).
 
-- **Preferences store:** DynamoDB table invdash-user-prefs, one item per user keyed by Cognito sub (user_sub). On-demand billing, encrypted with the data key, point-in-time recovery, deletion protection.
+- **Preferences store:** DynamoDB table invdash-user-prefs, one item per user keyed by Cognito sub (user_sub). Provisioned 5 RCU / 5 WCU, auto scaling 5–25 at 70% (the always-free 25/25 ceiling; this is the only table). Encrypted with the data key, point-in-time recovery, deletion protection.
 
 - **Site API:** GET and PUT /prefs, GET /dashboard, GET /status, and GET /chart/{ticker} on an HTTP API with a Cognito JWT authorizer. Chart preferences are validated per ticker in the user item; chart reads are limited to the caller's watchlist. PUT needs the version it last read (a stale version returns 409). Adding a ticker nobody else follows triggers a 5-year history backfill.
 
@@ -188,7 +188,7 @@ Each job has its own role: read and write only its listed lake prefixes, read on
 | Item | Basis | Est. \$/month |
 |----|----|----|
 | Site API (HTTP API) | ~15,000 requests at \$1.00 per million ([pricing](https://aws.amazon.com/api-gateway/pricing/)) | 0.02 |
-| DynamoDB prefs table | On-demand \$0.625/M writes, \$0.125/M reads; storage under the 25 GB free tier; PITR \$0.20/GB-month on \<1 MB ([pricing](https://aws.amazon.com/dynamodb/pricing/on-demand/)) | 0.01 |
+| DynamoDB prefs table | Provisioned 5 RCU / 5 WCU, auto scaling max 25/25, inside the always-free 25 RCU, 25 WCU and 25 GB ([pricing](https://aws.amazon.com/dynamodb/pricing/provisioned/)). PITR about \$0.20/GB-month on \<1 MB, not in the free tier. The data KMS key is shared (\$1/key-month plus requests over 20k) | \<0.01 |
 | New job runs and events | ~1,500 Lambda runs (free tier); ~1,500 custom events at \$1/M | 0.01 |
 | Inspector on the API function | \$0.30 per zip-packaged function | 0.30 |
 | Security Hub and Config on ~40 new resources | More checks and configuration items | 0.50–1.20 |
