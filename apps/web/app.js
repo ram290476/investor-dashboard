@@ -33,17 +33,11 @@ import {
 } from "./market-correlation.js";
 import { canApproveMetrics, drawerControls, emailFromIdToken, fallbackSelection, isPanelOpen, panelState, parseSettingsHash, stripOrder, withPanelState } from "./settings-model.js";
 import {
-  callsCopy,
   companyDescription,
   companyName,
-  emptyKpiCopy,
-  formatMetricValue,
   freshnessBadge,
   metricsForReview,
   LONG_PRESS_MS,
-  nextStockTab,
-  stockPanels,
-  STOCK_TABS,
 } from "./stock-page.js";
 import { curveView, fomcView, policyPathView, sparklinePath } from "./rates-panel.js";
 import {
@@ -134,10 +128,7 @@ const session = {
   stockPage: {},
   stockPageState: {},
   stockPageError: {},
-  stockTab: "overview",
   metricReview: readStoredMetricReview(),
-  metricReviewError: "",
-  metricSave: false,
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 let prefsSaveQueue = Promise.resolve();
@@ -3192,35 +3183,6 @@ function readStoredMetricReview() {
   }
 }
 
-function storeMetricReview(mode) {
-  const value = mode === "approved" ? "approved" : "all";
-  try {
-    localStorage.setItem("investor-dashboard.metric-review", value);
-  } catch {
-    // Storage can be unavailable. The choice still applies until reload.
-  }
-}
-
-function renderMetricReview() {
-  const bar = node("div", "metric-review");
-  bar.setAttribute("role", "group");
-  bar.setAttribute("aria-label", "Company metric review");
-  const mode = session.metricReview === "approved" ? "approved" : "all";
-  [["all", "Show pending review"], ["approved", "Approved only"]].forEach(([id, label]) => {
-    const button = node("button", "metric-review-option", label);
-    button.type = "button";
-    button.setAttribute("aria-pressed", String(mode === id));
-    button.addEventListener("click", () => {
-      if (mode === id) return;
-      session.metricReview = id;
-      storeMetricReview(id);
-      renderDashboard();
-    });
-    bar.append(button);
-  });
-  return bar;
-}
-
 // Per-ticker theme catalog. Any other watchlist ticker gets the generic company panel,
 // which shows its own ticker-tagged events and federal awards when the snapshot has them.
 const COMPANY_THEMES = {
@@ -3399,271 +3361,6 @@ function renderAppHeader() {
   return header;
 }
 
-function renderDirectionMark(kind, value, text) {
-  const number = Number(value);
-  const up = number > 0;
-  const down = number < 0;
-  const word = up ? "Uptrend" : down ? "Downtrend" : "Flat";
-  const tone = up ? "up" : down ? "down" : "flat";
-  const arrow = up ? "▲" : down ? "▼" : "▬";
-  const mark = node("span", `direction-mark direction-mark-${tone}`);
-  const dot = node("span", "catalyst-dot");
-  dot.style.setProperty("--catalyst-color", up ? "var(--green)" : down ? "var(--red)" : "var(--muted)");
-  dot.setAttribute("aria-hidden", "true");
-  mark.append(
-    dot,
-    node("span", "direction-word", word),
-    node("span", `mono ${up ? "positive" : down ? "negative" : "neutral"}`, `${kind} ${arrow} ${text}`),
-  );
-  mark.setAttribute("aria-label", `${kind} ${word}, ${text}`);
-  return mark;
-}
-
-function renderReviewBadge() {
-  const badge = node("span", "review-badge");
-  const dot = node("span", "dot");
-  dot.setAttribute("aria-hidden", "true");
-  badge.append(dot, document.createTextNode("Pending review"));
-  return badge;
-}
-
-function renderMetricTable(rows) {
-  const records = (rows || []).filter((row) => row && typeof row === "object");
-  if (!records.length) return node("p", "stock-text", "Not reported yet.");
-  const keys = [];
-  records.forEach((row) => {
-    if (Array.isArray(row)) return;
-    Object.keys(row).forEach((key) => {
-      if (!keys.includes(key)) keys.push(key);
-    });
-  });
-  const table = node("table", "stock-table");
-  if (keys.length) {
-    const head = node("tr");
-    keys.forEach((key) => head.append(node("th", "", key.replaceAll("_", " "))));
-    table.append(head);
-    records.forEach((row) => {
-      const line = node("tr");
-      keys.forEach((key) => {
-        const cell = tableCellCopy(key, row[key], row);
-        const item = node("td", "", cell.text);
-        if (cell.title) item.title = cell.title;
-        line.append(item);
-      });
-      table.append(line);
-    });
-  }
-  return table;
-}
-
-function renderMetricCard(metric) {
-  const classes = [
-    "panel",
-    "stock-metric",
-    `stock-metric-${metric.panelType || "chart"}`,
-    metric.capex ? "stock-metric-capex" : "",
-    metric.unavailable ? "stock-metric-unavailable" : "",
-  ].filter(Boolean);
-  const card = node("article", classes.join(" "));
-  card.dataset.metricId = metric.id;
-  const heading = node("div", "stock-metric-heading");
-  const title = node("h3", "stock-metric-title", metric.name);
-  heading.append(title);
-  card.append(heading);
-  if (metric.emptyPeriod) {
-    card.append(node("p", "data-state", "No quarters in this period."));
-    return card;
-  }
-  if (metric.detailName) card.append(node("p", "signal-note", metric.detailName));
-  if (metric.unit && !metric.unavailable && metric.panelType !== "text") card.append(node("p", "signal-note", metric.unit));
-  if (metric.panelType === "table") card.append(renderMetricTable(metric.rows));
-  else if (metric.panelType === "text") {
-    card.append(node("p", "stock-text", readablePanelText(metric.text || metric.definition || "Not reported yet.")));
-  } else if (metric.panelType === "kpi") {
-    card.append(node("p", "stock-kpi-value", metric.unavailable ? "not reported" : readablePanelText(metric.latest)));
-  } else if (metric.series?.length) {
-    const chart = node("div", "stock-chart");
-    const reported = metric.series.filter((point) => point.reported);
-    const max = Math.max(...reported.map((point) => point.value), 0);
-    const yAxis = node("div", "stock-y-axis");
-    const amountUnit = metric.unit === "percent" ? "%" : metric.unit === "ratio" ? "ratio" : metric.unit === "USD" ? "USD" : metric.unit || "";
-    const ticks = max > 0 ? niceAmountTicks(0, max, 3) : [0];
-    [...ticks].reverse().forEach((value) => yAxis.append(node("span", "", formatAmount(value, amountUnit))));
-    const bars = node("div", "stock-bars");
-    bars.setAttribute("role", "img");
-    bars.setAttribute("aria-label", `${metric.name} by quarter`);
-    const axisModel = fiscalAxis(metric.series.map((point) => point.fiscal_period), { compact: axisCompact() || metric.series.length > 12 });
-    metric.series.forEach((point, index) => {
-      const bar = node("span", point.reported ? "stock-bar" : "stock-bar stock-bar-missing");
-      if (point.revised) {
-        bar.classList.add("stock-bar-revised");
-        bar.append(node("span", "stock-bar-revised-mark", "Rev"));
-      }
-      if (axisModel.years.some((band) => band.start === index && band.start > 0)) bar.classList.add("stock-bar-year");
-      const height = point.reported && max ? Math.max(8, Math.round((point.value / max) * 100)) : 8;
-      bar.style.height = `${height}%`;
-      const revised = point.revised ? "revised measure" : "";
-      bar.title = metricBarTitle(point, point.reported ? formatMetricValue(point.value, metric.unit) : "", revised);
-      bars.append(bar);
-    });
-    const quarters = node("div", "stock-axis stock-quarters");
-    quarters.style.gridTemplateColumns = `repeat(${metric.series.length}, minmax(0, 1fr))`;
-    axisModel.ticks.forEach((tick, index) => {
-      const point = metric.series[index];
-      const revised = point?.revised && tick.show;
-      const label = node("span", revised ? "stock-quarter-revised" : "", tick.show ? `${tick.label}${revised ? " Rev" : ""}` : "");
-      const period = formatMetricPeriod(point?.fiscal_period, point?.period_end);
-      if (period.title) label.title = period.title;
-      quarters.append(label);
-    });
-    const yearTrack = node("div", "stock-years stock-year-track");
-    yearTrack.style.gridTemplateColumns = `repeat(${metric.series.length}, minmax(0, 1fr))`;
-    axisModel.years.forEach((band) => {
-      const label = node("span", "stock-year", band.year);
-      label.style.gridColumn = `${band.start + 1} / ${band.end + 2}`;
-      yearTrack.append(label);
-    });
-    chart.append(yAxis, bars, quarters, yearTrack);
-    card.append(chart);
-  }
-  if (metric.revisionNote) card.append(node("p", "stock-revision", readablePanelText(metric.revisionNote)));
-  const latest = node("p", "stock-latest");
-  const latestCopy = metricLatestCopy(metric);
-  if (latestCopy.title) latest.title = latestCopy.title;
-  if (metric.panelType !== "text") {
-    latest.append(document.createTextNode(latestCopy.lead));
-    latest.append(node("span", "", metric.unavailable ? "not reported" : readablePanelText(metric.latest)));
-    if (!metric.unavailable && metric.qoq) latest.append(renderDirectionMark("QoQ", metric.qoqValue, metric.qoq));
-    if (!metric.unavailable && metric.yoy) latest.append(renderDirectionMark("YoY", metric.yoyValue, metric.yoy));
-    card.append(latest);
-  }
-  if (metric.capex && metric.context?.length) {
-    const context = node("p", "stock-capex-context");
-    metric.context.forEach((item, index) => {
-      if (index) context.append(document.createTextNode(" · "));
-      context.append(document.createTextNode(`${item.name} ${item.latest}`));
-    });
-    card.append(context);
-  }
-  if (metric.sourceTitle && metric.panelType !== "text") {
-    const source = node("p", "stock-source");
-    const bits = metricSourceBits(metric);
-    source.append(document.createTextNode(bits.join(" · ")));
-    if (metric.sourceUrl) {
-      const link = node("a", "stock-source-link", "Source");
-      link.href = metric.sourceUrl;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      source.append(document.createTextNode(" "), link);
-    }
-    card.append(source);
-  }
-  return card;
-}
-
-function focusMetricReviewError() {
-  requestAnimationFrame(() => {
-    root.querySelector("[data-metric-review-error]")?.scrollIntoView({ block: "nearest" });
-  });
-}
-
-async function submitMetricReview(metricId, status) {
-  if (session.metricSave) return;
-  if (!canApproveMetrics(session.accessToken, session.email)) {
-    session.metricReviewError = "Only an admin can change metric review status.";
-    renderDashboard();
-    focusMetricReviewError();
-    return;
-  }
-  session.metricSave = true;
-  session.metricReviewError = "";
-  renderDashboard();
-  try {
-    const saved = await apiPut(
-      `stock/${encodeURIComponent(session.selected)}/metrics/${encodeURIComponent(metricId)}`,
-      { status },
-      "Saving metric review",
-    );
-    session.stockPage[session.selected] = saved;
-    session.stockPageState[session.selected] = "ready";
-    session.metricReviewError = "";
-  } catch (error) {
-    session.metricReviewError = error.message || "The metric review could not be saved.";
-  } finally {
-    session.metricSave = false;
-    renderDashboard();
-    if (session.metricReviewError) focusMetricReviewError();
-  }
-}
-
-function renderCompanyMetrics(panels, pageState) {
-  const block = node("section", "panel stock-section company-metrics");
-  block.dataset.stockPanel = "overview";
-  block.id = "stock-panel-metrics";
-  block.append(node("h3", "stock-section-title", "Company metrics"));
-  if (session.metricReviewError) {
-    const alert = node("p", "metric-review-toast", session.metricReviewError);
-    alert.setAttribute("role", "alert");
-    alert.dataset.metricReviewError = "true";
-    block.append(alert);
-  }
-  if (!pageState || pageState === "loading") {
-    block.append(node("p", "data-state", "Loading company metrics"));
-    return block;
-  }
-  if (pageState === "error") {
-    block.append(node("p", "data-state", "Company metrics could not be loaded. Retry"));
-    return block;
-  }
-  const cards = [...panels.operating, ...panels.fundamentals, ...panels.guidance].filter((card) => !card.edgar);
-  const approved = cards.filter((card) => !card.pending);
-  const pending = cards.filter((card) => card.pending);
-  const admin = canApproveMetrics(session.accessToken, session.email);
-  const line = (card) => {
-    const row = node("div", "stock-metric-row");
-    row.dataset.metricId = card.id;
-    const copy = companyMetricLine(card);
-    const name = node("span", "stock-metric-row-name", copy.text);
-    if (copy.title) name.title = copy.title;
-    row.append(name);
-    if (card.pending) row.append(renderReviewBadge());
-    else row.append(node("span", "metric-status", "Approved"));
-    if (admin && !card.unavailable) {
-      const next = card.pending ? "approved" : "proposed";
-      const button = node("button", "overlay-chip panel-action metric-review-action", card.pending ? "Approve" : "Undo");
-      button.type = "button";
-      button.dataset.metricAction = card.pending ? "approve" : "undo";
-      button.disabled = Boolean(session.metricSave);
-      button.setAttribute("aria-busy", String(Boolean(session.metricSave)));
-      if (session.metricSave) button.textContent = "Saving";
-      button.setAttribute("aria-label", card.pending ? `Approve ${card.name}` : `Undo approval of ${card.name}`);
-      button.addEventListener("click", () => submitMetricReview(card.id, next));
-      row.append(button);
-    }
-    return row;
-  };
-  if (!approved.length) block.append(node("p", "data-state", "No approved company metrics."));
-  approved.forEach((card) => block.append(line(card)));
-  if (pending.length) {
-    block.append(node("h4", "stock-review-heading", "Pending review"));
-    pending.forEach((card) => block.append(line(card)));
-  } else if (!approved.length) {
-    block.append(node("p", "data-state", "No company metrics collected yet."));
-  }
-  return block;
-}
-
-function appendMetricGroups(block, cards, empty) {
-  if (!cards.length) {
-    block.append(node("p", "data-state", empty));
-    return;
-  }
-  const grid = node("div", "stock-metric-grid");
-  cards.forEach((metric) => grid.append(renderMetricCard(metric)));
-  block.append(grid);
-}
-
-// Technical Summary (#191). Live indicators from serving/chart_data/<T>.json (#196).
 function technicalSummaryFor(ticker) {
   const state = session.chartDataState[ticker] || "loading";
   return liveTechnicalSummary(ticker, session.chartData[ticker] || null, state);
@@ -3780,10 +3477,12 @@ function renderTechnicalSummary(ticker, history) {
       row.indicators.forEach((indicator) => {
         const tr = node("tr");
         tr.append(node("td", "", indicator.name), node("td", "technical-mono", indicator.value),
-          node("td", `technical-${indicator.tone === "buy" ? "up" : indicator.tone === "sell" ? "down" : "muted"}`, indicator.vote));
+          node("td", `technical-${indicator.tone === "buy" ? "up" : "down"}`, indicator.vote));
         indicators.append(tr);
       });
       details.append(indicators);
+    } else if (row.indicatorsNote) {
+      details.append(node("p", "technical-note technical-no-signals", row.indicatorsNote));
     }
     if (row.support.length || row.resistance.length) {
       details.append(node("p", "technical-note technical-mono",
@@ -3799,29 +3498,20 @@ function renderTechnicalSummary(ticker, history) {
   return panel;
 }
 
+// The company page is only the header and the Technical Summary (#207). Chart data is
+// still loaded for this ticker because the Technical Summary is computed from it; the
+// stock payload supplies the company name and description.
 function renderStockPage() {
   const chartData = session.chartData[session.selected] || null;
   const chartDataState = session.chartDataState[session.selected] || "loading";
   const tickerData = withChartHistory(selectedData(), chartData, chartDataState);
   const payload = session.stockPage[session.selected] || null;
-  const pageState = session.stockPageState[session.selected] || "loading";
-  const review = session.metricReview || "all";
   const history = tickerData?.price_history || [];
-  const period = resolveChartPeriod(session.prefs.display?.chart_period, history);
-  const periodOptions = {
-    period,
-    history,
-    ticker: session.selected,
-    asOf: String(history.at(-1)?.date || "").slice(0, 10),
-  };
-  // The review toggle filters every company-page metric panel, including chart cards.
-  const charts = stockPanels(payload, chartData, { ...periodOptions, review });
   root.replaceChildren();
   applyTheme(session.prefs.display);
   root.append(renderAppHeader(), renderWatchlist());
 
   const heading = node("section", "panel stock-heading");
-  heading.dataset.stockPanel = "overview";
   const copy = node("div", "stock-heading-copy");
   const title = node("h2", "", companyName(session.selected, payload, tickerData));
   title.id = "stock-title";
@@ -3845,73 +3535,8 @@ function renderStockPage() {
   root.append(heading);
 
   const page = node("main", "stock-page");
-  page.dataset.stockTab = session.stockTab;
   page.setAttribute("aria-label", `${session.selected} company page`);
-
-  const chart = renderChartPanel("company", session.selected);
-
-  const section = (id, label, cards, empty) => {
-    const block = node("section", "panel stock-section");
-    block.dataset.stockPanel = id;
-    block.id = `stock-panel-${id}`;
-    if (id === "kpis") block.append(renderMetricReview());
-    block.append(node("h3", "stock-section-title", label));
-    appendMetricGroups(block, cards, empty);
-    return block;
-  };
-
-  const calls = callsCopy();
-  const callsBlock = node("section", "panel stock-section");
-  callsBlock.dataset.stockPanel = "calls";
-  callsBlock.id = "stock-panel-calls";
-  callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
-  if (charts.guidance.length) {
-    appendMetricGroups(callsBlock, charts.guidance, "");
-    callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
-  } else {
-    callsBlock.append(node("p", "data-state", calls.transcripts));
-    callsBlock.append(node("p", "signal-note", calls.guidance));
-  }
-
-  page.append(
-    chart,
-    renderTechnicalSummary(session.selected, history),
-    section("kpis", "Operating KPIs", charts.operating, emptyKpiCopy()),
-    section(
-      "fundamentals",
-      charts.fundamentalsSource === "edgar" ? "SEC filings" : "Fundamentals",
-      charts.fundamentals,
-      "No company fundamentals are in this snapshot.",
-    ),
-    renderCompanyMetrics(charts, pageState),
-    callsBlock,
-  );
-
-  const tabs = node("div", "stock-page-tabs");
-  tabs.setAttribute("role", "tablist");
-  tabs.setAttribute("aria-label", "Company page sections");
-  STOCK_TABS.forEach((item) => {
-    const tab = action(item.label, "overlay-chip stock-tab", () => {
-      session.stockTab = item.id;
-      renderDashboard();
-      root.querySelector(`#stock-tab-${item.id}`)?.focus();
-    });
-    tab.id = `stock-tab-${item.id}`;
-    tab.dataset.stockTab = item.id;
-    tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-controls", item.id === "overview" ? "stock-title" : `stock-panel-${item.id}`);
-    tab.setAttribute("aria-selected", String(item.id === session.stockTab));
-    tab.tabIndex = item.id === session.stockTab ? 0 : -1;
-    tab.addEventListener("keydown", (event) => {
-      const next = nextStockTab(item.id, event.key);
-      if (!next) return;
-      event.preventDefault();
-      root.querySelector(`#stock-tab-${next}`)?.click();
-    });
-    tabs.append(tab);
-  });
-  page.append(tabs);
-  // Filings & events lives on the dashboard and research pages only (#194).
+  page.append(renderTechnicalSummary(session.selected, history));
   root.append(page);
   settings.refresh();
 }
@@ -3999,7 +3624,6 @@ function navigateToStock(ticker) {
   history.pushState(history.state, "", `/${hash}`);
   session.route = routeFromLocation(location.pathname, hash);
   session.selected = symbol;
-  session.stockTab = "overview";
   renderDashboard();
   loadChartData(symbol);
   loadStockPage(symbol);

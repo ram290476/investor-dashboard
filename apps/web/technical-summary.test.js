@@ -73,8 +73,8 @@ test("missing provider data never throws", () => {
   assert.equal(technicalSummaryView({ example: false, horizons: [] }).example, false);
 });
 
-test("the panel sits directly below the chart, uses theme tokens and has no hard-coded tickers", () => {
-  assert.match(app, /page\.append\(\s*chart,\s*renderTechnicalSummary\(session\.selected, history\),/);
+test("the panel sits directly below the company header, uses theme tokens and has no hard-coded tickers", () => {
+  assert.match(app, /page\.append\(renderTechnicalSummary\(session\.selected, history\)\);/);
   const render = app.slice(app.indexOf("function technicalSummaryFor"), app.indexOf("function renderStockPage"));
   assert.match(render, /Example data/);
   assert.match(render, /view\.disclaimer/);
@@ -163,4 +163,37 @@ test("the company page reads the live feed and renders the macro roll-up", () =>
   assert.match(render, /liveTechnicalSummary\(ticker, session\.chartData\[ticker\]/);
   assert.match(render, /technical-macro-summary/);
   assert.match(render, /Macro & pricing signals/);
+});
+
+test("each horizon lists only bullish or bearish indicators; neutrals still count (#207)", () => {
+  const horizon = {
+    id: "short", label: "Short-term", window: "Next week", requiredBars: 35, availableBars: 300,
+    summary: { buy: 1, neutral: 2, sell: 1 },
+    groups: [],
+    indicators: [
+      { name: "RSI (14)", value: "50", vote: 0 },
+      { name: "Price vs SMA 10", value: "10 > 9", vote: 1 },
+      { name: "MACD", value: "-0.1", vote: -1 },
+      { name: "Stochastic", value: "48", vote: 0 },
+    ],
+  };
+  const row = horizonView(horizon);
+  assert.deepEqual(row.indicators.map((item) => [item.name, item.vote, item.tone]),
+    [["Price vs SMA 10", "Buy", "buy"], ["MACD", "Sell", "sell"]]);
+  assert.equal(row.indicators.some((item) => item.vote === "Neutral"), false);
+  assert.equal(row.indicatorsNote, "");
+  // Tallies and the verdict still include the two neutral votes.
+  assert.equal(row.counts, "Buy 1 · Neutral 2 · Sell 1");
+  assert.equal(row.rating, horizonView({ ...horizon, indicators: [] }).rating);
+
+  const flat = horizonView({ ...horizon, summary: { buy: 0, neutral: 2, sell: 0 },
+    indicators: horizon.indicators.filter((item) => item.vote === 0) });
+  assert.deepEqual(flat.indicators, []);
+  assert.equal(flat.indicatorsNote, "No directional signals");
+  assert.equal(flat.counts, "Buy 0 · Neutral 2 · Sell 0");
+  assert.equal(horizonView({ ...horizon, indicators: [] }).indicatorsNote, "");
+
+  const render = app.slice(app.indexOf("function renderTechnicalSummary"), app.indexOf("function renderStockPage"));
+  assert.match(render, /else if \(row\.indicatorsNote\)/);
+  assert.match(render, /technical-no-signals/);
 });
