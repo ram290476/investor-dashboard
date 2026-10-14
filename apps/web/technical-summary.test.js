@@ -222,3 +222,18 @@ test("macro and pricing signals hide only signals neutral on both effect and vs 
   assert.equal(view.groups[0].effect, "Neutral");
   assert.equal(view.tone, "sell");
 });
+
+test("panel layout follows the issue 191 design: counts and chevron in the row, full-width breakdown band (#210)", () => {
+  const render = app.slice(app.indexOf("function renderTechnicalSummary"), app.indexOf("function renderStockPage"));
+  assert.match(render, /node\("span", "technical-chevron", "▸"\)/);
+  assert.match(render, /const expanded = node\("div", "technical-expanded"\)/);
+  assert.match(render, /item\.append\(name, ratingCell, body, details, expanded\)/);
+  assert.match(render, /expanded\.append\(groups\)/);
+  assert.match(styles, /\.technical-row\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 200px\) 130px minmax\(0, 1fr\) 180px/);
+  assert.match(styles, /\.technical-row\s*\{[^}]*padding:\s*14px 18px/);
+  assert.match(styles, /\.technical-row:has\(> \.technical-details\[open\]\) > \.technical-expanded\s*\{[^}]*display:\s*block/);
+  assert.match(styles, /\.technical-expanded\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*background:\s*var\(--surface-raised\)/);
+  assert.match(styles, /\.technical-details\[open\] \.technical-chevron\s*\{[^}]*rotate\(90deg\)/);
+  const css = styles.slice(styles.indexOf(".technical-summary {"));
+  assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/);
+});

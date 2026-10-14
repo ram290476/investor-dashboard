@@ -4300,12 +4300,21 @@ a.catalyst-edgar-link:hover {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 }
 
+/* Layout follows the issue 191 design: horizon · rating · consensus · counts + chevron. */
+.technical-summary > .panel-header {
+  padding: 14px 18px;
+}
+
+.technical-summary > .panel-header h2 {
+  font-size: 15px;
+}
+
 .technical-row {
   display: grid;
-  grid-template-columns: minmax(150px, 200px) 130px minmax(0, 1fr) minmax(170px, auto);
+  grid-template-columns: minmax(150px, 200px) 130px minmax(0, 1fr) 180px;
   gap: 8px 16px;
-  align-items: start;
-  padding: 14px 16px;
+  align-items: center;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -4392,20 +4401,45 @@ a.catalyst-edgar-link:hover {
 }
 
 .technical-agreement {
-  padding: 10px 16px 0;
+  padding: 10px 18px 0;
 }
 
 .technical-details > summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
   color: var(--muted);
   font-size: 12px;
   cursor: pointer;
+  list-style: none;
 }
 
-.technical-details[open] {
+.technical-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.technical-chevron {
+  flex: none;
+  color: var(--muted);
+}
+
+.technical-details[open] .technical-chevron {
+  transform: rotate(90deg);
+}
+
+/* The breakdown is a full-width band under the row, indented to the rating column. */
+.technical-expanded {
+  display: none;
   grid-column: 1 / -1;
-  padding: 10px 12px;
-  border-radius: 9px;
+  margin: 6px -18px -14px;
+  padding: 6px 18px 16px calc(min(200px, 25%) + 34px);
+  border-top: 1px solid var(--line);
   background: var(--surface-raised);
+}
+
+.technical-row:has(> .technical-details[open]) > .technical-expanded {
+  display: block;
 }
 
 .technical-table {
@@ -4479,7 +4513,7 @@ a.catalyst-edgar-link:hover {
 
 .technical-disclaimer {
   margin: 0;
-  padding: 12px 16px;
+  padding: 12px 18px;
   color: var(--subtle);
   font-size: 11px;
 }
@@ -4493,5 +4527,9 @@ a.catalyst-edgar-link:hover {
   .technical-details,
   .technical-nodata {
     grid-column: 1 / -1;
+  }
+
+  .technical-expanded {
+    padding-left: 18px;
   }
 }

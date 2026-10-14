@@ -3758,7 +3758,13 @@ function renderTechnicalSummary(ticker, history) {
     if (row.eventRisk) body.append(node("p", "technical-note technical-warn", `⚠ ${row.eventRisk}`));
 
     const details = rememberInner(node("details", "technical-details"), `technical:${row.id}`);
-    details.append(node("summary", "technical-counts", row.counts));
+    // #191 design: the counts and chevron sit in the row; the breakdown opens as a
+    // full-width band under it (.technical-expanded, shown while the details are open).
+    const summary = node("summary", "technical-counts");
+    summary.append(node("span", "", row.counts), node("span", "technical-chevron", "▸"));
+    summary.lastChild.setAttribute("aria-hidden", "true");
+    details.append(summary);
+    const expanded = node("div", "technical-expanded");
     const groups = node("table", "technical-table");
     const head = node("tr");
     ["Group", "Rating", "Buy / Neutral / Sell", "Score"].forEach((label) => head.append(node("th", "", label)));
@@ -3771,7 +3777,7 @@ function renderTechnicalSummary(ticker, history) {
         node("td", "technical-mono", group.counts), node("td", "technical-mono", group.score));
       groups.append(tr);
     });
-    details.append(groups);
+    expanded.append(groups);
     if (row.indicators.length) {
       const indicators = node("table", "technical-table");
       const ih = node("tr");
@@ -3783,15 +3789,15 @@ function renderTechnicalSummary(ticker, history) {
           node("td", `technical-${indicator.tone === "buy" ? "up" : "down"}`, indicator.vote));
         indicators.append(tr);
       });
-      details.append(indicators);
+      expanded.append(indicators);
     } else if (row.indicatorsNote) {
-      details.append(node("p", "technical-note technical-no-signals", row.indicatorsNote));
+      expanded.append(node("p", "technical-note technical-no-signals", row.indicatorsNote));
     }
     if (row.support.length || row.resistance.length) {
-      details.append(node("p", "technical-note technical-mono",
+      expanded.append(node("p", "technical-note technical-mono",
         `Support ${row.support.join(" · ") || "--"}   Resistance ${row.resistance.join(" · ") || "--"}`));
     }
-    item.append(name, ratingCell, body, details);
+    item.append(name, ratingCell, body, details, expanded);
     const macroBlock = renderMacroSignals(row);
     if (macroBlock) item.append(macroBlock);
     panel.append(item);
