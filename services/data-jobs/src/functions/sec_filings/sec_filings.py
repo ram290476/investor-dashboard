@@ -1111,7 +1111,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from observability import job_handler
     from universe import user_ticker_union, watchlist_universe
 
-    @job_handler(JOB_ID, lease_key=LEASE_KEY)
+    @job_handler(JOB_ID, lease_key=LEASE_KEY, skip_when_leased=True)
     def run(event, context):
         now = datetime.now(UTC)
         today = now.astimezone(ET).date()

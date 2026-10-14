@@ -172,3 +172,33 @@ def test_job_lease_is_released_after_exception(monkeypatch):
                 raise ValueError("build failed")
         with lake.job_lease("lease"):
             pass
+
+
+@pytest.mark.parametrize("skip,expect", [(None, "skipped"), (False, "failure")])
+def test_lease_held_skips_by_default_and_can_opt_out(monkeypatch, skip, expect):
+    """Overlapping sec-filings/trend-metrics invokes used to raise LeaseHeld -> retries -> DLQ."""
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    published = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: published.append(outcome),
+    )
+    kwargs = {} if skip is None else {"skip_when_leased": skip}
+
+    @observability.job_handler("SEC", emit_event=True, lease_key="raw/sec_filings/_lease.json", **kwargs)
+    def run(event, context):
+        return {"status": "ok"}
+
+    with mock_aws():
+        client = boto3.client("s3")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        with lake.job_lease("raw/sec_filings/_lease.json"):
+            if expect == "skipped":
+                assert run({}, _Context()) == {"status": "skipped", "reason": "lease held"}
+            else:
+                with pytest.raises(lake.LeaseHeld):
+                    run({}, _Context())
+    assert published == [expect]

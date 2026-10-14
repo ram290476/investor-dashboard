@@ -374,7 +374,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from observability import job_handler
     from universe import collection_universe, user_ticker_union, watchlist_universe
 
-    @job_handler("TREND", lease_key="serving/trend_metrics/_lease.json")
+    @job_handler("TREND", lease_key="serving/trend_metrics/_lease.json", skip_when_leased=True)
     def run(event, context):
         users = user_ticker_union()
         uni = collection_universe(users)
