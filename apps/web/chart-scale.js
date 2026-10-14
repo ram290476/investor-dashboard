@@ -125,6 +125,25 @@ export function fiscalAxis(periods, { compact = false } = {}) {
   return { ticks, years };
 }
 
+// Share of a calendar quarter's days that the bars in one quarter group span.
+export const MIN_QUARTER_COVERAGE = 0.5;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function dayOf(bar) {
+  const time = Date.parse(`${barStamp(bar).slice(0, 10)}T00:00:00Z`);
+  return Number.isFinite(time) ? time : null;
+}
+
+function quarterCoverage(bars, group) {
+  const first = dayOf(bars[group.start]);
+  const last = dayOf(bars[group.end]);
+  if (first === null || last === null) return 0;
+  const startMonth = (group.quarter - 1) * 3;
+  const quarterStart = Date.UTC(Number(group.year), startMonth, 1);
+  const quarterEnd = Date.UTC(Number(group.year), startMonth + 3, 1);
+  return ((last - first) / DAY_MS + 1) / ((quarterEnd - quarterStart) / DAY_MS);
+}
+
 export function chartTicks(bars, periodId, plot = CHART_PLOT, { compact = false } = {}) {
   if (!Array.isArray(bars) || !bars.length) return [];
   const groups = [];
@@ -137,8 +156,17 @@ export function chartTicks(bars, periodId, plot = CHART_PLOT, { compact = false 
     } else last.end = index;
   });
   if (!groups.length) return [];
+  // A period window rarely starts or ends on a quarter boundary, so its first and last
+  // quarters are usually slivers (1Y from mid-October touches Q4 at both ends). Labeling
+  // those slivers made the axis read as extra periods before and after the chip (#195).
+  // Label only quarters the window covers for at least half their days; a window shorter
+  // than that (1D–1M) keeps the one quarter it covers most, latest first on a tie.
+  const covered = groups.filter((group) => quarterCoverage(bars, group) >= MIN_QUARTER_COVERAGE);
+  const labeled = covered.length ? covered : [groups.reduce((best, group) => (
+    quarterCoverage(bars, group) >= quarterCoverage(bars, best) ? group : best
+  ))];
   const step = compact ? 2 : 1;
-  const shown = groups.filter((group, index) => index % step === 0 || index === groups.length - 1);
+  const shown = labeled.filter((group, index) => index % step === 0 || index === labeled.length - 1);
   return shown.map((group) => {
     const full = groups.find((item) => item.key === group.key);
     const index = Math.round((full.start + full.end) / 2);

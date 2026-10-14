@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { periodQuote } from "./chart-period.js";
+
 import {
   CHART_PLOT,
   chartTicks,
@@ -125,4 +127,41 @@ test("chart drawers do not copy the plot margins", () => {
   assert.match(scale, /left:\s*70/);
   assert.match(scale, /right:\s*890/);
   assert.match(app, /preserveAspectRatio", "none"/);
+});
+
+test("axis labels only the quarters the selected chip covers, not edge slivers (#195)", () => {
+  const quarterCount = { "1W": 1, "1M": 1, "3M": 1, "1Y": 4, "3Y": 12, "5Y": 20 };
+  // Several as-of dates, so windows start and end at different points inside a quarter.
+  for (const start of ["2020-03-02", "2020-05-20", "2020-08-11", "2020-11-27"]) {
+    const history = days(start, 1400).map((bar) => ({ ...bar, close: 100 }));
+    for (const [periodId, quarters] of Object.entries(quarterCount)) {
+      const window = periodQuote(history, periodId).window;
+      const labels = chartTicks(window, periodId).map((tick) => `${tick.year}Q${tick.label.slice(1)}`);
+      assert.ok(labels.length >= Math.max(1, quarters - 1) && labels.length <= quarters,
+        `${periodId} ending ${window.at(-1).date}: ${labels.join(" ")}`);
+      assert.equal(new Set(labels).size, labels.length);
+    }
+    const ytd = periodQuote(history, "YTD").window;
+    const ytdTicks = chartTicks(ytd, "YTD");
+    assert.ok(ytdTicks.every((tick) => tick.year === ytd.at(-1).date.slice(0, 4)));
+  }
+
+  // 1Y from mid-October: Q4 of the prior year is mostly inside, the trailing two weeks are not.
+  const year = days("2025-10-14", 252);
+  assert.deepEqual(chartTicks(year, "1Y").map((tick) => `${tick.year} ${tick.label}`),
+    ["2025 Q4", "2026 Q1", "2026 Q2", "2026 Q3"]);
+  // A one-month window across a quarter boundary keeps the quarter it mostly covers.
+  assert.deepEqual(chartTicks(days("2026-09-14", 22), "1M").map((tick) => tick.label), ["Q3"]);
+  assert.deepEqual(chartTicks(days("2026-09-28", 12), "1M").map((tick) => tick.label), ["Q4"]);
+  for (const tick of chartTicks(year, "1Y")) assert.equal(tick.x, plotX(tick.index, year.length));
+});
+
+test("the compact company chart keeps the time axis as wide as the plot (#195)", () => {
+  const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const compact = styles.match(/\.price-panel-compact \.price-chart,\s*\.price-panel-compact \.chart-time-axis\s*\{[^}]*\}/g) || [];
+  assert.ok(compact.length >= 2, "chart and axis share one compact width rule (desktop and phone)");
+  assert.ok(compact.every((rule) => /max-width:\s*calc\(180px \* 940 \/ (210|340)\)/.test(rule)));
+  // A max-height letterboxes the SVG, so the HTML axis no longer lines up with the plot.
+  assert.doesNotMatch(styles, /\.price-panel-compact \.price-chart\s*\{[^}]*max-height/);
+  assert.equal(CHART_PLOT.width, 940);
 });
