@@ -58,6 +58,7 @@ import {
   tableCellCopy,
 } from "./panel-dates.js";
 import { inflationSurpriseView } from "./inflation-panel.js";
+import { exampleTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
@@ -3617,6 +3618,99 @@ function appendMetricGroups(block, cards, empty) {
   block.append(grid);
 }
 
+// Technical Summary (#191). The data source is swappable: today it is EXAMPLE data.
+function technicalSummaryFor(ticker, history) {
+  return exampleTechnicalSummary(ticker, { history });
+}
+
+function renderTechnicalSummary(ticker, history) {
+  const view = technicalSummaryView(technicalSummaryFor(ticker, history));
+  const panel = node("section", "panel technical-summary");
+  panel.id = "stock-panel-technical";
+  panel.dataset.stockPanel = "overview";
+  panel.dataset.technicalSummary = view.example ? "example" : "live";
+  const header = node("div", "panel-header");
+  const titleBlock = node("div");
+  const title = node("h2", "", "Technical Summary");
+  if (view.example) {
+    const badge = node("span", "technical-example-badge", "Example data — not a prediction");
+    badge.title = "Illustrative values; real indicator computation is not wired up yet.";
+    title.append(" ", badge);
+  }
+  const subtitle = node("p", "panel-subtitle", "Indicator consensus by horizon · ");
+  const method = node("abbr", "technical-method", "Method ⓘ");
+  method.title = view.method;
+  method.tabIndex = 0;
+  subtitle.append(method);
+  titleBlock.append(title, subtitle);
+  header.append(titleBlock, node("p", "panel-subtitle technical-asof", view.asOf));
+  panel.append(header);
+
+  view.rows.forEach((row) => {
+    const item = node("div", `technical-row${row.enoughData ? "" : " is-empty"}`);
+    item.dataset.horizon = row.id;
+    const name = node("div", "technical-horizon");
+    name.append(node("strong", "", row.label), node("span", "panel-subtitle", row.window));
+    if (!row.enoughData) {
+      item.append(name, node("span", "technical-pill neutral", "—"), node("p", "technical-nodata", row.message));
+      panel.append(item);
+      return;
+    }
+    const ratingCell = node("div", "technical-rating");
+    ratingCell.append(node("span", `technical-pill ${row.tone}`, row.rating));
+    if (row.lowAgreement) ratingCell.append(node("span", "technical-warn", "⚠ Low agreement"));
+    const body = node("div", "technical-body");
+    const bar = node("div", "technical-bar");
+    bar.setAttribute("role", "img");
+    bar.setAttribute("aria-label", `${row.consensusText}, ${row.bearishText} (signal consensus, not probability)`);
+    const fill = node("i");
+    fill.style.width = `${row.bullish}%`;
+    bar.append(fill);
+    const labels = node("div", "technical-bar-labels");
+    labels.append(node("span", "technical-up", row.consensusText), node("span", "technical-down", row.bearishText));
+    body.append(bar, labels, node("p", "technical-note", row.explanation));
+    if (row.eventRisk) body.append(node("p", "technical-note technical-warn", `⚠ ${row.eventRisk}`));
+
+    const details = rememberInner(node("details", "technical-details"), `technical:${row.id}`);
+    details.append(node("summary", "technical-counts", row.counts));
+    const groups = node("table", "technical-table");
+    const head = node("tr");
+    ["Group", "Rating", "Buy / Neutral / Sell", "Score"].forEach((label) => head.append(node("th", "", label)));
+    groups.append(head);
+    row.groups.forEach((group) => {
+      const tr = node("tr");
+      const rating = node("td");
+      rating.append(node("span", `technical-pill ${group.tone}`, group.rating));
+      tr.append(node("td", group.id === "summary" ? "technical-strong" : "", group.label), rating,
+        node("td", "technical-mono", group.counts), node("td", "technical-mono", group.score));
+      groups.append(tr);
+    });
+    details.append(groups);
+    if (row.indicators.length) {
+      const indicators = node("table", "technical-table");
+      const ih = node("tr");
+      ["Indicator", "Value", "Vote"].forEach((label) => ih.append(node("th", "", label)));
+      indicators.append(ih);
+      row.indicators.forEach((indicator) => {
+        const tr = node("tr");
+        tr.append(node("td", "", indicator.name), node("td", "technical-mono", indicator.value),
+          node("td", `technical-${indicator.tone === "buy" ? "up" : indicator.tone === "sell" ? "down" : "muted"}`, indicator.vote));
+        indicators.append(tr);
+      });
+      details.append(indicators);
+    }
+    if (row.support.length || row.resistance.length) {
+      details.append(node("p", "technical-note technical-mono",
+        `Support ${row.support.join(" · ") || "--"}   Resistance ${row.resistance.join(" · ") || "--"}`));
+    }
+    item.append(name, ratingCell, body, details);
+    panel.append(item);
+  });
+  if (view.agreement) panel.append(node("p", "technical-note technical-warn technical-agreement", `⚠ ${view.agreement}`));
+  panel.append(node("p", "technical-disclaimer", `${view.consensusNote} ${view.disclaimer}`));
+  return panel;
+}
+
 function renderStockPage() {
   const chartData = session.chartData[session.selected] || null;
   const chartDataState = session.chartDataState[session.selected] || "loading";
@@ -3701,6 +3795,7 @@ function renderStockPage() {
 
   page.append(
     chart,
+    renderTechnicalSummary(session.selected, history),
     section("kpis", "Operating KPIs", charts.operating, emptyKpiCopy()),
     section(
       "fundamentals",
