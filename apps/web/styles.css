@@ -4424,6 +4424,44 @@ a.catalyst-edgar-link:hover {
   font-style: italic;
 }
 
+.technical-macro {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+}
+
+.technical-macro-group td {
+  background: color-mix(in srgb, var(--surface-raised) 60%, transparent);
+}
+
+.technical-macro-signal .technical-macro-name {
+  padding-left: 20px;
+  color: var(--secondary);
+}
+
+.technical-nodata-cell,
+.technical-macro-group.is-empty td {
+  color: var(--subtle);
+  font-style: italic;
+}
+
+.technical-macro-summary {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.technical-macro-summary.buy {
+  border-left-color: var(--green);
+}
+
+.technical-macro-summary.sell {
+  border-left-color: var(--red);
+}
+
 .technical-disclaimer {
   margin: 0;
   padding: 12px 16px;

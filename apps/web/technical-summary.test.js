@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  DISCLAIMER, agreementNote, consensus, exampleTechnicalSummary, formatScore, horizonView, ratingLabel,
-  technicalSummaryView, voteScore,
+  DISCLAIMER, agreementNote, consensus, exampleTechnicalSummary, formatScore, horizonView, liveTechnicalSummary,
+  macroView, ratingLabel, technicalSummaryView, voteScore,
 } from "./technical-summary.js";
 
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
@@ -82,4 +82,85 @@ test("the panel sits directly below the chart, uses theme tokens and has no hard
   const css = styles.slice(styles.indexOf(".technical-summary {"));
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/);
   assert.match(css, /var\(--green\)/);
+});
+
+const liveFeed = {
+  ticker: "ABC",
+  example: false,
+  as_of_date: "2026-10-13",
+  asOf: "Oct 13, 2026 4:00 PM ET",
+  delayed: true,
+  horizons: [
+    {
+      id: "short", label: "Short-term", window: "Next week", requiredBars: 35, availableBars: 300,
+      summary: { buy: 5, neutral: 1, sell: 2 },
+      groups: [{ id: "ma", label: "Moving Averages", buy: 3, neutral: 0, sell: 1 },
+        { id: "osc", label: "Oscillators", buy: 2, neutral: 1, sell: 1 }],
+      indicators: [{ name: "RSI (14)", value: "61", vote: 0 }],
+      explanation: "Price above SMA 10.", support: [10.5], resistance: [12.25],
+      eventRisk: "Scheduled inside this horizon: CPI 2026-10-14 — event risk.",
+      macro: {
+        net: "net headwind", summary: "Macro/pricing signals: net headwind for this short-term Buy (2 headwind; 0 tailwind; 1 neutral; No data: Credit spreads).",
+        events: [{ name: "CPI", date: "2026-10-14", group: "inflation" }],
+        groups: [
+          { id: "rates", label: "Rates & Fed", status: "live", effect: "headwind", relation: "contradicts",
+            confidence: "Contradicts the Buy; lowers confidence", events: [],
+            signals: [{ label: "10Y Treasury yield", value: "5.24%", direction: "rising", effect: "headwind",
+              relation: "contradicts", confidence: "Contradicts the Buy; lowers confidence", note: "10Y rising" },
+            { label: "FOMC path", status: "no_data", note: "Not live yet." }] },
+          { id: "credit", label: "Credit spreads", status: "no_data", reason: "No credit-spread series is collected yet.",
+            signals: [], events: [] },
+        ],
+      },
+    },
+    { id: "intermediate", requiredBars: 60, availableBars: 300, summary: { buy: 1, neutral: 1, sell: 5 } },
+    { id: "long", requiredBars: 200, availableBars: 120, macro: { net: null, summary: "Macro/pricing signals: No data for this horizon.", groups: [], events: [] } },
+  ],
+};
+
+test("live feed renders without the example badge and keeps disclaimer, as-of and low agreement (#193, #196)", () => {
+  const view = technicalSummaryView(liveTechnicalSummary("ABC", { technical_summary: liveFeed }));
+  assert.equal(view.example, false);
+  assert.equal(view.asOf, "As of Oct 13, 2026 4:00 PM ET · data delayed");
+  assert.deepEqual(view.rows.map((row) => row.rating), ["Buy", "Strong Sell", undefined]);
+  assert.match(view.rows[2].message, /Not enough data — needs ≥ 200 trading days of history \(ABC has 120\)/);
+  assert.match(view.agreement, /Low agreement/);
+  assert.equal(view.rows[0].lowAgreement, true);
+  assert.equal(view.disclaimer, DISCLAIMER);
+  assert.equal(technicalSummaryView({ horizons: [] }).example, false, "badge needs an explicit example flag");
+  assert.equal(technicalSummaryView(exampleTechnicalSummary("X")).example, true);
+});
+
+test("live provider never falls back to example values", () => {
+  const loading = technicalSummaryView(liveTechnicalSummary("ABC", null, "loading"));
+  assert.equal(loading.example, false);
+  assert.ok(loading.rows.every((row) => !row.enoughData && row.message === "Loading live indicators…"));
+  const missing = technicalSummaryView(liveTechnicalSummary("ABC", { price_history: [] }, "ready"));
+  assert.ok(missing.rows.every((row) => /not published for ABC/.test(row.message)));
+  assert.equal(missing.asOf, "As of --");
+});
+
+test("macro view shows direction, effect, relation, confidence, events, No data and a roll-up (#198)", () => {
+  const macro = macroView(liveFeed.horizons[0].macro);
+  assert.equal(macro.tone, "sell");
+  assert.deepEqual(macro.events, ["CPI 2026-10-14"]);
+  assert.match(macro.summary, /^Macro\/pricing signals: net headwind/);
+  const [rates, credit] = macro.groups;
+  assert.deepEqual([rates.effect, rates.relation, rates.tone], ["Headwind", "Contradicts", "sell"]);
+  assert.deepEqual([rates.signals[0].direction, rates.signals[0].effect], ["rising", "Headwind"]);
+  assert.deepEqual([rates.signals[1].value, rates.signals[1].effect], ["No data", "No data"]);
+  assert.deepEqual([credit.live, credit.effect], [false, "No data"]);
+  assert.match(credit.confidence, /credit-spread/);
+  assert.equal(macroView(undefined), null);
+  const view = technicalSummaryView(liveFeed);
+  assert.equal(view.rows[2].macro.summary, "Macro/pricing signals: No data for this horizon.");
+});
+
+test("the company page reads the live feed and renders the macro roll-up", () => {
+  assert.match(app, /import \{ liveTechnicalSummary, technicalSummaryView \} from "\.\/technical-summary\.js";/);
+  assert.doesNotMatch(app, /exampleTechnicalSummary/);
+  const render = app.slice(app.indexOf("function technicalSummaryFor"), app.indexOf("function renderStockPage"));
+  assert.match(render, /liveTechnicalSummary\(ticker, session\.chartData\[ticker\]/);
+  assert.match(render, /technical-macro-summary/);
+  assert.match(render, /Macro & pricing signals/);
 });
