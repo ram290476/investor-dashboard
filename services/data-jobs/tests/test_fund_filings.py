@@ -193,3 +193,12 @@ def test_stale_map_entry_is_refreshed():
 
 def test_efts_host_is_allowed():
     assert "efts.sec.gov" in http_client.ALLOWED_HOSTS
+
+
+def test_lambda_image_and_jobs_include_fund_handlers():
+    root = Path(__file__).resolve().parents[3]
+    dockerfile = (root / "infra" / "docker" / "Dockerfile").read_text()
+    jobs = (root / "infra" / "terraform" / "variables.tf").read_text()
+    for module in ("fund_filings", "fund_profile"):
+        assert f"src/functions/{module}/" in dockerfile
+        assert f'handler        = "{module}.handler"' in jobs
