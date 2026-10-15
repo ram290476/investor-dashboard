@@ -489,7 +489,7 @@ variable "jobs" {
       handler  = "dashboard_build.handler"
       schedule = ""
       # Rebuild when a backfill ticker finishes (tickers_completed > 0), not after every batch.
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1", "job:SEC?partial"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1", "job:SEC?partial", "job:FUND", "job:FUNDPROFILE"]
       memory   = 2048
       timeout  = 300
       read_prefixes = [
@@ -514,8 +514,12 @@ variable "jobs" {
         "curated/macro_daily/source=fred/",
         "serving/rates/",
         "serving/filings/",
+        "curated/fund_universe/",
+        "curated/fund_holdings/",
+        "curated/fund_profile/",
+        "curated/manager_holdings/",
       ]
-      write_prefixes = ["serving/dashboard.json", "serving/chart_data/", "serving/dashboard-build/"]
+      write_prefixes = ["serving/dashboard.json", "serving/chart_data/", "serving/dashboard-build/", "serving/funds/", "serving/managers/"]
       api_keys       = []
       reads_prefs    = true
     }
