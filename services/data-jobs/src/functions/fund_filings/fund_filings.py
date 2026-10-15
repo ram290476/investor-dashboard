@@ -21,6 +21,7 @@ from issuer_sectors import resolve_issuers
 
 from company_ir import Pace, crawler_user_agent
 from manager_holdings import (
+    F13_FORMS,
     MANAGER_MAP_MAX_AGE_DAYS,
     NCEN_FORMS,
     LookupUnavailable,
@@ -186,8 +187,48 @@ def names_agree(left: str | None, right: str | None) -> bool:
     return bool(a) and a == b
 
 
+COMPANY_SEARCH_URL = (
+    "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={name}&type=NPORT-P&dateb=&owner=include"
+    "&count=40&output=atom"
+)
+ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
+
+
+def company_search_match(atom_text: str | None) -> dict | None:
+    """One EDGAR company-search hit that files NPORT-P: {cik, name}. A list of several companies
+    (ambiguous) or no NPORT-P entries returns None, so nothing is guessed."""
+    if not atom_text:
+        return None
+    try:
+        root = ET.fromstring(atom_text)
+    except ET.ParseError:
+        return None
+    info = root.find("a:company-info", ATOM_NS)
+    if info is None:
+        return None  # a company list, not a single filer
+    cik = (info.findtext("a:cik", default="", namespaces=ATOM_NS) or "").strip()
+    forms = {e.get("term") for e in root.findall("a:entry/a:category", ATOM_NS)}
+    if not cik.isdigit() or not forms & {"NPORT-P", "NPORT-P/A"}:
+        return None
+    return {"cik": str(int(cik)), "name": (info.findtext("a:conformed-name", namespaces=ATOM_NS) or "").strip()}
+
+
+def resolve_by_company_search(ticker: str, name: str | None, get_text) -> dict | None:
+    """Second fallback (#223 scope 4.2): EDGAR company search by the fund's known name. The match is
+    kept only when the filer's own name agrees with that name."""
+    if not name or get_text is None:
+        return None
+    from urllib.parse import quote_plus
+
+    hit = company_search_match(get_text(COMPANY_SEARCH_URL.format(name=quote_plus(name))))
+    if not hit or not names_agree(name, hit["name"]):
+        return None
+    return {"status": "resolved", "kind": "fund", "cik": hit["cik"], "series_id": None, "class_id": None,
+            "name": hit["name"], "method": "edgar_company_search", "confidence": 0.8}
+
+
 def resolve_ticker(ticker: str, mf_map: dict, operating_map: dict, get_json, app: dict | None = None,
-                   fund_name_for=None) -> dict:
+                   fund_name_for=None, known_name: str | None = None, get_text=None) -> dict:
     """Map one watchlist ticker. A fund is accepted only when it cannot be the app's own entity.
 
     - The app shows an operating SEC filer for the ticker: it stays operating unless the SEC fund's
@@ -214,7 +255,10 @@ def resolve_ticker(ticker: str, mf_map: dict, operating_map: dict, get_json, app
     if operating:
         return {"status": "resolved", "kind": "operating", "cik": str(int(operating["cik"])),
                 "method": "company_tickers", "confidence": 1.0}
-    return resolve_by_fulltext(sym, get_json)
+    found = resolve_by_fulltext(sym, get_json)
+    if found.get("status") == "resolved" or found.get("reason") == "efts_unavailable":
+        return found
+    return resolve_by_company_search(sym, known_name or app.get("name"), get_text) or found
 
 
 def map_entry_fresh(entry: dict | None, now: datetime, max_age_days: int = FUND_MAP_MAX_AGE_DAYS,
@@ -358,6 +402,40 @@ def latest_nport(fund: dict, submissions: dict, get_text, series_rows: list[dict
     return None
 
 
+BACKFILL_PERIODS = 8  # #223 scope 6: the last 8 periods per fund and per manager, once
+MAX_BACKFILL_DOCS = 2 * BACKFILL_PERIODS
+
+
+def nport_history(fund: dict, submissions: dict, get_text, series_rows: list[dict] | None, latest: dict,
+                  periods: int = BACKFILL_PERIODS) -> tuple[list[dict], bool]:
+    """Older public periods for this fund (newest filed per period wins). Returns (filings, complete)."""
+    want = fund.get("series_id")
+    cik = str(int(fund["cik"]))
+    out: list[dict] = []
+    seen = {latest["period_end"]}
+    tried = 0
+    for row in series_rows or nport_filings(submissions):
+        if len(out) >= periods - 1:
+            return out, True
+        if row["accession"] == latest["accession"] or (row.get("report_date") and row["report_date"] in seen):
+            continue
+        if tried >= MAX_BACKFILL_DOCS:
+            return out, False
+        tried += 1
+        xml_text = get_text(ARCHIVE_URL.format(cik=cik, acc=row["accession"].replace("-", "")))
+        if not xml_text:
+            return out, False  # retried next run
+        parsed = parse_nport(xml_text)
+        if want and parsed["header"].get("series_id") != want:
+            continue
+        period = parsed["header"]["period_end"] or row["report_date"]
+        if period in seen:
+            continue
+        seen.add(period)
+        out.append({**row, **parsed, "xml": xml_text, "period_end": period})
+    return out, True
+
+
 def holdings_frame(fund_ticker: str, filing: dict) -> pl.DataFrame:
     head = filing["header"]
     base = {
@@ -372,6 +450,7 @@ def holdings_frame(fund_ticker: str, filing: dict) -> pl.DataFrame:
 def run_collection(
     tickers: list[str], *, fetch, pace, sleep, fund_map: dict | None, state: dict, now: datetime,
     app_documents: dict[str, dict | None] | None = None, issuer_sectors: dict | None = None,
+    known_names: dict[str, str | None] | None = None,
 ) -> dict:
     """Resolve the universe, then fetch only funds whose latest accession is new. Pure: no lake I/O."""
 
@@ -409,7 +488,8 @@ def run_collection(
     stamp = now.isoformat(timespec="seconds")
     for ticker in stale:
         app = apps[ticker]
-        resolved = resolve_ticker(ticker, mf_map, operating, get_json, app=app, fund_name_for=fund_name_for)
+        resolved = resolve_ticker(ticker, mf_map, operating, get_json, app=app, fund_name_for=fund_name_for,
+                                  known_name=(known_names or {}).get(ticker), get_text=get_text)
         entries[ticker] = {"ticker": ticker, **resolved, "app_kind": app["kind"], "app_cik": app["cik"],
                            "app_name": app["name"], "resolved_at": stamp}
 
@@ -450,6 +530,8 @@ def run_collection(
 
     seen = dict(state.get("latest_accession") or {})
     seen_13f = dict(state.get("latest_13f") or {})
+    backfilled = dict(state.get("backfilled") or {})
+    backfilled_13f = dict(state.get("backfilled_13f") or {})
     results = []
     for ticker in tickers:
         entry = entries.get(ticker) or {}
@@ -473,7 +555,13 @@ def run_collection(
         managers_for(ticker, entry, subs)
         new = seen.get(ticker) != filing["accession"]
         seen[ticker] = filing["accession"]
-        results.append({"ticker": ticker, "status": "ok", "new": new, "cik": entry["cik"], "filing": filing})
+        history: list[dict] = []
+        if not backfilled.get(ticker):
+            history, complete = nport_history(entry, subs, get_text, series_rows, filing)
+            if complete:
+                backfilled[ticker] = filing["accession"]
+        results.append({"ticker": ticker, "status": "ok", "new": new, "cik": entry["cik"], "filing": filing,
+                        "history": history})
     manager_ciks = list(dict.fromkeys(
         m["cik"] for r in results if r.get("filing") for m in (entries.get(r["ticker"]) or {}).get("managers") or []
     ))
@@ -494,8 +582,24 @@ def run_collection(
             previous = latest_13f(cik, subs, get_json, get_text, before=report["period_end"])
             if previous is not None:
                 seen_13f[prev_key] = previous["accession"]
+        history_13f: list[dict] = []
+        if not backfilled_13f.get(cik):
+            before = (previous or {}).get("period_end") or seen_13f.get(f"{cik}:prev_period")
+            older = sorted({f["report_date"] for f in latest_form(subs, F13_FORMS)
+                            if f["report_date"] and before and f["report_date"] < before}, reverse=True)
+            want = older[:max(0, BACKFILL_PERIODS - 2)]
+            for _ in want:
+                rep = latest_13f(cik, subs, get_json, get_text, before=before)
+                if rep is None:
+                    break
+                history_13f.append(rep)
+                before = rep["period_end"]
+            if len(history_13f) >= len(want) and (previous is not None or not want):
+                backfilled_13f[cik] = report["accession"]
+        if previous is not None:
+            seen_13f[f"{cik}:prev_period"] = previous["period_end"]
         managers.append({"cik": cik, "status": "ok", "new": new, "name": (subs or {}).get("name"), "report": report,
-                         "previous": previous})
+                         "previous": previous, "history": history_13f})
 
     # Sector/industry for every 13F issuer (current and previous quarter), from SEC data only.
     issuer_rows = [row for m in managers for rep in (m.get("report"), m.get("previous")) if rep
@@ -510,7 +614,8 @@ def run_collection(
                                   get_json=get_json, submissions_url=SUBMISSIONS_URL, now=now)
     return {
         "fund_map": {"updated_at": stamp, "funds": entries},
-        "state": {"latest_accession": seen, "latest_13f": seen_13f, "updated_at": stamp},
+        "state": {"latest_accession": seen, "latest_13f": seen_13f, "backfilled": backfilled,
+                  "backfilled_13f": backfilled_13f, "updated_at": stamp},
         "results": results,
         "managers": managers,
         "issuer_sectors": sectors,
@@ -583,15 +688,17 @@ def publish(collected: dict, *, write_text, write_json, write_parquet, write_jso
     """Write the run's outputs. Returns the tickers whose is_fund flag was stamped this run."""
     for result in collected["results"]:
         filing = result.get("filing")
-        if not filing or not result.get("new"):
+        if not filing:
             continue
-        cik, ticker, period = result["cik"], result["ticker"], filing["period_end"]
-        write_text(filing["xml"], raw_nport_key(cik, filing["accession"]))
-        write_parquet(holdings_frame(ticker, filing), holdings_key(cik, ticker, period))
-        write_json({**filing["header"], "accession": filing["accession"], "filed_at": filing["filed_at"],
-                    "fund_ticker": ticker}, fund_header_key(cik, ticker, period))
+        cik, ticker = result["cik"], result["ticker"]
+        for older in result.get("history") or []:
+            _publish_nport(cik, ticker, older, write_text, write_json, write_parquet)
+        if result.get("new"):
+            _publish_nport(cik, ticker, filing, write_text, write_json, write_parquet)
     for manager in collected.get("managers") or []:
         writers = (write_text, write_json, write_parquet)
+        for older in manager.get("history") or []:
+            _publish_13f(manager["cik"], manager.get("name"), older, *writers)
         if manager.get("previous"):
             _publish_13f(manager["cik"], manager.get("name"), manager["previous"], *writers)
         if manager.get("report") and manager.get("new"):
@@ -609,6 +716,14 @@ def publish(collected: dict, *, write_text, write_json, write_parquet, write_jso
     return stamped
 
 
+def _publish_nport(cik, ticker, filing, write_text, write_json, write_parquet) -> None:
+    period = filing["period_end"]
+    write_text(filing["xml"], raw_nport_key(cik, filing["accession"]))
+    write_parquet(holdings_frame(ticker, filing), holdings_key(cik, ticker, period))
+    write_json({**filing["header"], "accession": filing["accession"], "filed_at": filing["filed_at"],
+                "fund_ticker": ticker}, fund_header_key(cik, ticker, period))
+
+
 def _publish_13f(cik, name, report, write_text, write_json, write_parquet) -> None:
     period = report["period_end"]
     write_text(report["cover_xml"], raw_13f_key(cik, report["accession"], "primary_doc.xml"))
@@ -619,6 +734,15 @@ def _publish_13f(cik, name, report, write_text, write_json, write_parquet) -> No
                 "amendments": report["amendments"], "entry_total": report.get("entry_total"),
                 "value_total_usd": report.get("value_total"), "form": report["form"]},
                manager_header_key(cik, period))
+
+
+DASHBOARD_KEY = "serving/dashboard.json"
+
+
+def known_names_from_snapshot(snapshot: dict | None, tickers: list[str]) -> dict[str, str | None]:
+    """The app's own display name per ticker (for the EDGAR company-search fallback)."""
+    rows = (snapshot or {}).get("tickers") or {}
+    return {t: (rows.get(t) or {}).get("company_name") for t in tickers}
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
@@ -651,6 +775,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 fund_map=read_json(FUND_MAP_KEY), state=read_json(STATE_KEY) or {}, now=datetime.now(UTC),
                 app_documents={t: read_json(f"serving/filings/{t}.json") for t in planned["tickers"]},
                 issuer_sectors=read_json(ISSUER_SECTORS_KEY) or {},
+                known_names=known_names_from_snapshot(read_json(DASHBOARD_KEY), planned["tickers"]),
             )
         stamped = publish(collected, write_text=write_text, write_json=write_json, write_parquet=write_parquet,
                           write_json_once=write_json_once, now=datetime.now(UTC))
