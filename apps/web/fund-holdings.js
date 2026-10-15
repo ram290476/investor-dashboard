@@ -333,3 +333,9 @@ export function renderFundHoldingsPanel(state, document = globalThis.document) {
   draw();
   return panel;
 }
+
+/** #227: automatic retry delay after the Nth consecutive failed GET /fund load: 5 s doubling, capped at 5 min. */
+export function fundRetryDelayMs(attempts) {
+  const n = Math.max(1, Math.floor(Number(attempts) || 1));
+  return Math.min(5000 * 2 ** (n - 1), 300000);
+}
