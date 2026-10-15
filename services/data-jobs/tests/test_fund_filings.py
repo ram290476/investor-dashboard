@@ -202,3 +202,46 @@ def test_lambda_image_and_jobs_include_fund_handlers():
     for module in ("fund_filings", "fund_profile"):
         assert f"src/functions/{module}/" in dockerfile
         assert f'handler        = "{module}.handler"' in jobs
+
+
+def test_managers_derived_from_ncen_and_13f_published():
+    ncen = (FIXTURES / "ncen_ark_etf_trust_trimmed.xml").read_text()
+    cover = (FIXTURES / "13f_ark_primary_doc.xml").read_text()
+    table = (FIXTURES / "13f_ark_infotable_trimmed.xml").read_text()
+    import manager_holdings as mh
+
+    trust = {"name": "ARK ETF Trust", "filings": {"recent": {
+        "form": ["N-CEN", "NPORT-P"], "accessionNumber": ["0000940400-26-039198", "0000940400-26-037955"],
+        "filingDate": ["2026-10-06", "2026-09-22"], "reportDate": ["2026-07-31", "2026-07-31"]}}}
+    adviser = {"name": "ARK Investment Management LLC", "filings": {"recent": {
+        "form": ["13F-HR"], "accessionNumber": ["0001104659-26-096910"], "filingDate": ["2026-08-14"],
+        "reportDate": ["2026-06-30"]}}}
+    base = "https://www.sec.gov/Archives/edgar/data/1697748/000110465926096910/"
+    extra = {
+        ff.SUBMISSIONS_URL.format(cik="0001579982"): _Resp(payload=trust),
+        ff.ARCHIVE_URL.format(cik="1579982", acc="000094040026039198"): _Resp(text=ncen),
+        mh.EFTS_13F_URL.format(name="ARK%20Investment%20Management%20LLC"): _Resp(payload={"hits": {"hits": [
+            {"_source": {"ciks": ["0001697748"], "display_names": ["ARK Investment Management LLC  (CIK 0001697748)"]}}
+        ]}}),
+        ff.SUBMISSIONS_URL.format(cik="0001697748"): _Resp(payload=adviser),
+        base + "index.json": _Resp(payload={"directory": {"item": [{"name": "primary_doc.xml"},
+                                                                   {"name": "infotable.xml"}]}}),
+        base + "primary_doc.xml": _Resp(text=cover),
+        base + "infotable.xml": _Resp(text=table),
+    }
+    out, _calls, _pace = _run(["ARKK"], extra=extra)
+    entry = out["fund_map"]["funds"]["ARKK"]
+    assert entry["managers_status"] == "resolved" and entry["managers"][0]["cik"] == "1697748"
+    assert out["managers"][0]["report"]["period_end"] == "2026-06-30"
+    written = {}
+    ff.publish(out, write_text=lambda body, key: written.setdefault(key, body),
+               write_json=lambda obj, key: written.setdefault(key, obj),
+               write_parquet=lambda df, key: written.setdefault(key, df))
+    frame = written["curated/manager_holdings/cik=1697748/period=2026-06-30/holdings.parquet"]
+    assert frame.height == 3 and abs(frame["pct_portfolio"].sum() - 100) < 1e-9
+    assert "raw/fund_filings/13f/cik=1697748/0001104659-26-096910/infotable.xml" in written
+    assert written["curated/manager_holdings/cik=1697748/period=2026-06-30/_manager.json"]["form"] == "13F-HR"
+    # Second run with the cached map does not re-read the N-CEN.
+    again, calls, _ = _run(["ARKK"], fund_map=out["fund_map"], state=out["state"], extra=extra)
+    assert ff.ARCHIVE_URL.format(cik="1579982", acc="000094040026039198") not in calls
+    assert again["managers"][0]["new"] is False

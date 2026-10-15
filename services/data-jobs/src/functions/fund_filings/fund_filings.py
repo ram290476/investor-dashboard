@@ -12,7 +12,6 @@ sec_filings.fetch_sec and the company_ir 10 req/s pace.
 
 from __future__ import annotations
 
-import json
 import xml.etree.ElementTree as ET
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -20,6 +19,15 @@ from datetime import UTC, datetime, timedelta
 import polars as pl
 
 from company_ir import Pace, crawler_user_agent
+from manager_holdings import (
+    MANAGER_MAP_MAX_AGE_DAYS,
+    NCEN_FORMS,
+    LookupUnavailable,
+    advisers_from_ncen,
+    latest_13f,
+    latest_form,
+    resolve_manager,
+)
 from sec_filings import cik_map_from_company_tickers, fetch_sec, target_tickers
 
 JOB_ID = "FUND"
@@ -41,6 +49,7 @@ NPORT_FORMS = ("NPORT-P", "NPORT-P/A")
 FUND_FORMS = frozenset({"NPORT-P", "NPORT-P/A", "N-CEN", "N-CEN/A", "N-2", "N-2/A", "N-23C3A", "N-CSR", "N-1A"})
 MAX_NPORT_DOCS_PER_FUND = 12  # a trust files one NPORT-P per series; stop after this many misses
 MIN_FALLBACK_CONFIDENCE = 0.5
+MAX_NCEN_DOCS = 4
 
 NS = {"n": "http://www.sec.gov/edgar/nport"}
 
@@ -50,6 +59,11 @@ HOLDINGS_SCHEMA = {
     "ticker": pl.Utf8, "other_id": pl.Utf8, "other_id_desc": pl.Utf8, "balance": pl.Float64, "units": pl.Utf8,
     "currency": pl.Utf8, "value_usd": pl.Float64, "pct_nav": pl.Float64, "payoff": pl.Utf8, "asset_cat": pl.Utf8,
     "issuer_cat": pl.Utf8, "country": pl.Utf8, "fair_val_level": pl.Utf8, "restricted": pl.Boolean,
+}
+MANAGER_SCHEMA = {
+    "manager_cik": pl.Utf8, "period_end": pl.Utf8, "filed_at": pl.Utf8, "accession": pl.Utf8, "name": pl.Utf8,
+    "title": pl.Utf8, "cusip": pl.Utf8, "value_usd": pl.Float64, "shares": pl.Float64, "share_type": pl.Utf8,
+    "put_call": pl.Utf8, "is_option": pl.Boolean, "discretion": pl.Utf8, "pct_portfolio": pl.Float64,
 }
 
 
@@ -63,6 +77,18 @@ def raw_nport_key(cik: str, accession: str) -> str:
 
 def holdings_key(cik: str, fund_ticker: str, period: str) -> str:
     return f"curated/fund_holdings/cik={int(cik)}/fund={fund_ticker.upper()}/period={period}/holdings.parquet"
+
+
+def raw_13f_key(cik: str, accession: str, name: str) -> str:
+    return f"raw/fund_filings/13f/cik={int(cik)}/{accession}/{name}"
+
+
+def manager_holdings_key(cik: str, period: str) -> str:
+    return f"curated/manager_holdings/cik={int(cik)}/period={period}/holdings.parquet"
+
+
+def manager_header_key(cik: str, period: str) -> str:
+    return f"curated/manager_holdings/cik={int(cik)}/period={period}/_manager.json"
 
 
 def fund_header_key(cik: str, fund_ticker: str, period: str) -> str:
@@ -311,7 +337,43 @@ def run_collection(
         resolved = resolve_ticker(ticker, mf_map, operating, get_json)
         entries[ticker] = {"ticker": ticker, **resolved, "resolved_at": stamp}
 
+    def managers_for(ticker: str, entry: dict, subs: dict) -> None:
+        """Derive the fund's 13F managers from its latest N-CEN adviser list (cached in the fund map)."""
+        try:
+            fresh = now - datetime.fromisoformat(str(entry.get("managers_resolved_at"))) < timedelta(
+                days=MANAGER_MAP_MAX_AGE_DAYS)
+        except ValueError:
+            fresh = False
+        if fresh and "managers" in entry:
+            return
+        managers: list[dict] = []
+        advisers: list[dict] = []
+        # A trust can file several N-CENs (one per fiscal-year group); find the one listing this series.
+        for filing in latest_form(subs, NCEN_FORMS)[:MAX_NCEN_DOCS]:
+            acc = filing["accession"].replace("-", "")
+            xml_text = get_text(ARCHIVE_URL.format(cik=int(entry["cik"]), acc=acc))
+            try:
+                advisers = advisers_from_ncen(xml_text, entry.get("series_id")) if xml_text else []
+            except ET.ParseError:
+                advisers = []
+            if advisers:
+                break
+        try:
+            for adviser in advisers:
+                found = resolve_manager(adviser, get_json, SUBMISSIONS_URL)
+                if found and all(m["cik"] != found["cik"] for m in managers):
+                    managers.append(found)
+        except LookupUnavailable:
+            entry["managers_status"] = "retry"
+            return
+        entry["advisers"] = [a["name"] for a in advisers]
+        entry["managers"] = managers
+        entry["managers_status"] = "resolved" if managers else ("no_13f_filer" if advisers else "no_adviser")
+        entry["managers_resolved_at"] = stamp
+        entries[ticker] = entry
+
     seen = dict(state.get("latest_accession") or {})
+    seen_13f = dict(state.get("latest_13f") or {})
     results = []
     for ticker in tickers:
         entry = entries.get(ticker) or {}
@@ -332,14 +394,36 @@ def run_collection(
         if filing is None:
             results.append({"ticker": ticker, "status": "failed", "reason": "series_not_found"})
             continue
+        managers_for(ticker, entry, subs)
         new = seen.get(ticker) != filing["accession"]
         seen[ticker] = filing["accession"]
         results.append({"ticker": ticker, "status": "ok", "new": new, "cik": entry["cik"], "filing": filing})
+    manager_ciks = list(dict.fromkeys(
+        m["cik"] for r in results if r.get("filing") for m in (entries.get(r["ticker"]) or {}).get("managers") or []
+    ))
+    managers = []
+    for cik in manager_ciks:
+        subs = get_json(SUBMISSIONS_URL.format(cik=cik10(cik)))
+        report = latest_13f(cik, subs, get_json, get_text) if isinstance(subs, dict) else None
+        if report is None:
+            managers.append({"cik": cik, "status": "failed", "reason": "13f_unavailable"})
+            continue
+        key = "+".join([report["accession"], *report["amendments"]])
+        new = seen_13f.get(cik) != key
+        seen_13f[cik] = key
+        managers.append({"cik": cik, "status": "ok", "new": new, "name": (subs or {}).get("name"), "report": report})
     return {
         "fund_map": {"updated_at": stamp, "funds": entries},
-        "state": {"latest_accession": seen, "updated_at": stamp},
+        "state": {"latest_accession": seen, "latest_13f": seen_13f, "updated_at": stamp},
         "results": results,
+        "managers": managers,
     }
+
+
+def manager_frame(cik: str, report: dict) -> pl.DataFrame:
+    base = {"manager_cik": str(int(cik)), "period_end": report["period_end"], "filed_at": report["filed_at"],
+            "accession": report["accession"]}
+    return pl.DataFrame([{**base, **row} for row in report["holdings"]], schema=MANAGER_SCHEMA)
 
 
 def fund_summary(result: dict) -> dict:
@@ -368,6 +452,19 @@ def publish(collected: dict, *, write_text, write_json, write_parquet) -> None:
         write_parquet(holdings_frame(ticker, filing), holdings_key(cik, ticker, period))
         write_json({**filing["header"], "accession": filing["accession"], "filed_at": filing["filed_at"],
                     "fund_ticker": ticker}, fund_header_key(cik, ticker, period))
+    for manager in collected.get("managers") or []:
+        report = manager.get("report")
+        if not report or not manager.get("new"):
+            continue
+        cik, period = manager["cik"], report["period_end"]
+        write_text(report["cover_xml"], raw_13f_key(cik, report["accession"], "primary_doc.xml"))
+        write_text(report["table_xml"], raw_13f_key(cik, report["accession"], report["table_name"]))
+        write_parquet(manager_frame(cik, report), manager_holdings_key(cik, period))
+        write_json({"manager_cik": str(int(cik)), "name": manager.get("name"), "period_end": period,
+                    "filed_at": report["filed_at"], "accession": report["accession"],
+                    "amendments": report["amendments"], "entry_total": report.get("entry_total"),
+                    "value_total_usd": report.get("value_total"), "form": report["form"]},
+                   manager_header_key(cik, period))
     write_json(collected["fund_map"], FUND_MAP_KEY)
     write_json(collected["state"], STATE_KEY)
 
@@ -402,7 +499,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 fund_map=read_json(FUND_MAP_KEY), state=read_json(STATE_KEY) or {}, now=datetime.now(UTC),
             )
         publish(collected, write_text=write_text, write_json=write_json, write_parquet=write_parquet)
-        return {"status": "ok", "funds": [json.loads(json.dumps(fund_summary(r), default=str)) | {"top": None}
-                                          for r in collected["results"]]}
+        return {
+            "status": "ok",
+            "funds": [{k: v for k, v in fund_summary(r).items() if k != "top"} for r in collected["results"]],
+            "managers": [{k: m.get(k) for k in ("cik", "status", "reason", "new")} for m in collected["managers"]],
+        }
 
     return run(event, context)

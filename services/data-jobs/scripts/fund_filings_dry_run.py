@@ -50,10 +50,24 @@ def main() -> int:
         for r in collected["results"]:
             if r.get("filing"):
                 (out / f"{r['ticker']}_{r['filing']['accession']}.xml").write_text(r["filing"]["xml"])
+        for m in collected.get("managers") or []:
+            if m.get("report"):
+                (out / f"13f_{m['cik']}_cover.xml").write_text(m["report"]["cover_xml"])
+                (out / f"13f_{m['cik']}_table.xml").write_text(m["report"]["table_xml"])
     print(json.dumps({
         "universe": tickers,
         "fund_map": {k: v for k, v in collected["fund_map"]["funds"].items() if v.get("kind") != "operating"},
         "funds": [ff.fund_summary(r) for r in collected["results"]],
+        "managers": [
+            {"cik": m["cik"], "name": m.get("name"), "status": m["status"],
+             "period_end": (m.get("report") or {}).get("period_end"),
+             "filed_at": (m.get("report") or {}).get("filed_at"),
+             "accession": (m.get("report") or {}).get("accession"),
+             "positions": len((m.get("report") or {}).get("holdings") or []),
+             "top": [{k: h[k] for k in ("name", "cusip", "value_usd", "pct_portfolio", "put_call")}
+                     for h in ((m.get("report") or {}).get("holdings") or [])[:5]]}
+            for m in collected.get("managers") or []
+        ],
     }, indent=2, default=str))
     return 0
 
