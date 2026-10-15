@@ -660,6 +660,18 @@ variable "jobs" {
       api_keys       = []
       reads_prefs    = true
     }
+    # Fund holdings from SEC N-PORT (#223). Funds come only from the watchlist union.
+    fund-filings = {
+      handler        = "fund_filings.handler"
+      schedule       = "cron(0 7 ? * MON-FRI *)"
+      triggers       = ["ticker-added"]
+      memory         = 1024
+      timeout        = 600
+      read_prefixes  = ["raw/fund_filings/", "curated/fund_filings/", "curated/fund_universe/", "curated/fund_holdings/"]
+      write_prefixes = ["raw/fund_filings/", "curated/fund_filings/", "curated/fund_universe/", "curated/fund_holdings/"]
+      api_keys       = []
+      reads_prefs    = true
+    }
     # Rebuilds serving/status.json after every job
     status-feed = {
       handler        = "status_feed_job.handler"

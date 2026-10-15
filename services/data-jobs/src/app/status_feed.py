@@ -46,6 +46,8 @@ JOBS: dict[str, tuple[str, str | None, str, str | None]] = {
     "RECONCILE": ("Split & dividend adjustment", "15 19 * * 1-5", "nyse", None),
     # Weekday 06:00 ET. Ticker-added runs are extra; the feed shows the daily cron.
     "SEC": ("SEC filings", "0 6 * * 1-5", "federal", None),
+    # Weekday 07:00 ET N-PORT fund holdings (#223), plus ticker-added runs.
+    "FUND": ("Fund holdings (SEC N-PORT)", "0 7 * * 1-5", "federal", None),
     # No cron until Ram accepts the Kalshi terms (issue #89). A next_run would advertise a schedule that is not enabled.
     "KALSHI": ("FOMC odds (Kalshi)", None, "federal", None),
 }
