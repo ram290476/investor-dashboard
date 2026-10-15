@@ -25,6 +25,7 @@ import {
   restoreTicker,
   stripOrder,
   tabAfterKey,
+  settingsTabs,
   togglePin,
   validateNewTicker,
   withPanelState,
@@ -51,6 +52,10 @@ test("tab keys wrap with arrows and jump with Home/End", () => {
   assert.equal(tabAfterKey("tickers", "End"), "profile");
   assert.equal(tabAfterKey("profile", "ArrowLeft"), "theme");
   assert.equal(tabAfterKey("tickers", "a"), null);
+  // Admins get the Admin tab last; it is in the arrow-key cycle only for them.
+  assert.equal(tabAfterKey("profile", "ArrowRight", settingsTabs(true)), "admin");
+  assert.equal(tabAfterKey("admin", "ArrowRight", settingsTabs(true)), "tickers");
+  assert.deepEqual(settingsTabs(false).map((t) => t.id), ["tickers", "theme", "profile"]);
 });
 
 test("new tickers are validated for format, duplicates and the cap", () => {

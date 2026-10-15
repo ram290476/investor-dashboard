@@ -117,7 +117,7 @@ test("the company page shows the panel only for funds and fetches GET /fund/<T> 
   assert.ok(gate > 0 && page.indexOf("loadFundHoldings(session.selected)") > gate);
   // Fund holdings follows the Technical Summary; company-only panels are not appended for funds.
   const fundBranch = page.slice(gate, page.indexOf("return;", gate));
-  assert.match(fundBranch, /renderTechnicalSummary\(session\.selected, history\), fundPanel,\s+\.\.\.renderManager13f/);
+  assert.match(fundBranch, /renderTechnicalSummary\(session\.selected, history\), fundPanel,\s+\.\.\.renderFundSummary/);
   assert.doesNotMatch(fundBranch, /section\("kpis"/);
   assert.match(fundBranch, /page\.dataset\.stockTab = "overview"/);
   const panelCss = css.slice(css.indexOf("Fund holdings panel (issue 223)"));

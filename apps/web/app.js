@@ -62,7 +62,8 @@ import { inflationSurpriseView } from "./inflation-panel.js";
 import { chartPanelOptions } from "./chart-panel.js";
 import { liveTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
 import { classificationNote, isFund, renderFundHoldingsPanel } from "./fund-holdings.js";
-import { renderManager13fPanels } from "./manager-13f.js";
+import { renderFundSummaryPanels } from "./fund-summary.js";
+import { resetOutcome } from "./fund-flag-admin.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
@@ -607,6 +608,20 @@ async function apiPut(path, body, label) {
   return readApiResponse(response, label);
 }
 
+async function apiPost(path, label) {
+  let response;
+  try {
+    response = await fetch(apiUrl(path), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.accessToken}`, Accept: "application/json" },
+      cache: "no-store",
+    });
+  } catch (cause) {
+    throw networkError(label, cause);
+  }
+  return readApiResponse(response, label);
+}
+
 async function putPrefs(candidate) {
   let response;
   try {
@@ -728,9 +743,9 @@ function renderFundPanel(ticker, conflictNote = null) {
   return panel;
 }
 
-// 13F summary for the fund's manager(s), from the same /fund document (#223).
-function renderManager13f(ticker) {
-  return renderManager13fPanels(session.fundDoc[ticker] || null, session.fundState[ticker] || "loading", document);
+// Fund summary for the fund's manager(s), from the same /fund document (#223).
+function renderFundSummary(ticker) {
+  return renderFundSummaryPanels(session.fundDoc[ticker] || null, session.fundState[ticker] || "loading", document);
 }
 
 // Company page chart state (#212). Every chart toggle (overlays, under-chart lanes such as
@@ -4006,7 +4021,7 @@ function renderStockPage() {
     // The write-once is_fund stamp and the live SEC classification can disagree; say so, don't override.
     const fundPanel = renderFundPanel(session.selected, classificationNote(tickerData));
     page.append(chart, renderTechnicalSummary(session.selected, history), fundPanel,
-      ...renderManager13f(session.selected));
+      ...renderFundSummary(session.selected));
     root.append(page);
     settings.refresh();
     return;
@@ -4476,6 +4491,20 @@ const settings = createAccountSettings({
   formatTime,
   displayPrice,
   browserTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  // Admin tab (#223): same admin check as the metric Approve buttons; never the demo account.
+  isAdmin: () => canApproveMetrics(session.accessToken, session.email),
+  fundFlagRows: () => (session.prefs?.tickers || []).map((ticker) => ({
+    ticker, is_fund: session.dashboard?.tickers?.[ticker]?.is_fund,
+  })),
+  resetFundFlag: async (ticker) => {
+    try {
+      await apiPost(`admin/fund-flag/${encodeURIComponent(ticker)}/reset`, "Resetting the fund flag");
+      return resetOutcome(null);
+    } catch (error) {
+      return resetOutcome(error);
+    }
+  },
+  confirm: (message) => window.confirm(message),
 });
 
 applyTheme();

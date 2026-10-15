@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  CHANGE_ROWS, EMPTY_13F_COPY, NO_PREVIOUS_COPY, changeGroups, factsLine, managerSummaries, quarterLabel,
-  renderManager13fPanels, sectorRows, topNames,
-} from "./manager-13f.js";
+  CHANGE_ROWS, EMPTY_SUMMARY_COPY, NO_PREVIOUS_COPY, changeGroups, factsLine, managerSummaries, quarterLabel,
+  renderFundSummaryPanels, sectorRows, topNames,
+} from "./fund-summary.js";
 
 class Node {
   constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.style = {}; this.attrs = {}; this.textContent = ""; }
@@ -55,26 +55,26 @@ test("QoQ groups carry the full counts and the top rows", () => {
 });
 
 test("renderer: one panel per manager, previous quarter missing, and empty states", () => {
-  const [panel] = renderManager13fPanels(fundDoc, "ready", document);
-  assert.match(panel.text, /13F summary · ARK Investment Management LLC/);
+  const [panel] = renderFundSummaryPanels(fundDoc, "ready", document);
+  assert.match(panel.text, /Fund summary · ARK Investment Management LLC/);
   assert.match(panel.text, /Changes since Mar 31, 2026/);
-  assert.equal(panel.all("m13f-change").length, 4);
-  const [noPrev] = renderManager13fPanels({ managers: [{ ...fundDoc.managers[0], summary_13f: { ...summary, changes: null, previous_period_end: null } }] }, "ready", document);
+  assert.equal(panel.all("fsum-change").length, 4);
+  const [noPrev] = renderFundSummaryPanels({ managers: [{ ...fundDoc.managers[0], summary_13f: { ...summary, changes: null, previous_period_end: null } }] }, "ready", document);
   assert.match(noPrev.text, new RegExp(NO_PREVIOUS_COPY.slice(0, 30)));
-  const [empty] = renderManager13fPanels({ managers: [{ cik: "1", name: "X" }] }, "ready", document);
-  assert.match(empty.text, new RegExp(EMPTY_13F_COPY.slice(0, 20)));
-  assert.deepEqual(renderManager13fPanels({ managers: [] }, "ready", document), []);
-  assert.deepEqual(renderManager13fPanels(fundDoc, "loading", document), []);
+  const [empty] = renderFundSummaryPanels({ managers: [{ cik: "1", name: "X" }] }, "ready", document);
+  assert.match(empty.text, new RegExp(EMPTY_SUMMARY_COPY.slice(0, 20)));
+  assert.deepEqual(renderFundSummaryPanels({ managers: [] }, "ready", document), []);
+  assert.deepEqual(renderFundSummaryPanels(fundDoc, "loading", document), []);
   assert.equal(managerSummaries(null).length, 0);
 });
 
 test("styles use theme tokens only and have a phone layout; CI syntax-checks the new files", async () => {
   const { readFile } = await import("node:fs/promises");
   const css = await readFile(new URL("./styles.css", import.meta.url), "utf8");
-  const block = css.slice(css.indexOf("13F summary panel (issue 223)"));
+  const block = css.slice(css.indexOf("Fund summary panel (issue 223)"));
   assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}\b/);
   assert.match(block, /@media \(max-width: 640px\)/);
   const ci = await readFile(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.match(ci, /node --check apps\/web\/fund-holdings\.js/);
-  assert.match(ci, /node --check apps\/web\/manager-13f\.js/);
+  assert.match(ci, /node --check apps\/web\/fund-summary\.js/);
 });

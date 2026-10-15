@@ -4776,18 +4776,18 @@ a.catalyst-edgar-link:hover {
   }
 }
 
-/* 13F summary panel (issue 223). Same tokens and rhythm as the fund panel. */
-.manager-13f h2 {
+/* Fund summary panel (issue 223). Same tokens and rhythm as the fund panel. */
+.fund-summary h2 {
   margin: 0;
   font-size: 15px;
 }
 
-.m13f-asof {
+.fsum-asof {
   margin: 4px 0 0;
 }
 
-.m13f-facts,
-.m13f-source {
+.fsum-facts,
+.fsum-source {
   margin: 0;
   padding: 10px 16px 0;
   color: var(--secondary);
@@ -4795,27 +4795,27 @@ a.catalyst-edgar-link:hover {
   line-height: 1.5;
 }
 
-.m13f-source {
+.fsum-source {
   padding: 8px 0 0;
   color: var(--muted);
   font-size: 11px;
 }
 
-.m13f-grid {
+.fsum-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px 24px;
   padding: 12px 16px 4px;
 }
 
-.m13f-heading {
+.fsum-heading {
   margin: 0 0 8px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
 
-.m13f-bars {
+.fsum-bars {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -4823,7 +4823,7 @@ a.catalyst-edgar-link:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.m13f-bar-row {
+.fsum-bar-row {
   display: grid;
   grid-template-columns: minmax(72px, 38%) 1fr 52px;
   align-items: center;
@@ -4832,18 +4832,18 @@ a.catalyst-edgar-link:hover {
   border-bottom: 1px solid var(--grid);
 }
 
-.m13f-bar-label {
+.fsum-bar-label {
   overflow: hidden;
   color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.m13f-bar-track {
+.fsum-bar-track {
   display: block;
 }
 
-.m13f-bar {
+.fsum-bar {
   display: block;
   height: 6px;
   border-radius: 3px;
@@ -4851,45 +4851,45 @@ a.catalyst-edgar-link:hover {
   opacity: 0.75;
 }
 
-.m13f-bar-value {
+.fsum-bar-value {
   color: var(--secondary);
   text-align: right;
 }
 
-.m13f-changes {
+.fsum-changes {
   padding: 12px 16px 16px;
 }
 
-.m13f-change-grid {
+.fsum-change-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px 16px;
 }
 
-.m13f-change {
+.fsum-change {
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-raised);
 }
 
-.m13f-change-title {
+.fsum-change-title {
   margin: 0 0 6px;
   font-size: 12px;
   font-weight: 600;
 }
 
-.m13f-up .m13f-change-title,
-.m13f-up .m13f-change-detail {
+.fsum-up .fsum-change-title,
+.fsum-up .fsum-change-detail {
   color: var(--green);
 }
 
-.m13f-down .m13f-change-title,
-.m13f-down .m13f-change-detail {
+.fsum-down .fsum-change-title,
+.fsum-down .fsum-change-detail {
   color: var(--red);
 }
 
-.m13f-change-list {
+.fsum-change-list {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -4897,7 +4897,7 @@ a.catalyst-edgar-link:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.m13f-change-list li {
+.fsum-change-list li {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0 8px;
@@ -4905,11 +4905,11 @@ a.catalyst-edgar-link:hover {
   border-bottom: 1px solid var(--grid);
 }
 
-.m13f-change-list li:last-child {
+.fsum-change-list li:last-child {
   border-bottom: 0;
 }
 
-.m13f-change-name {
+.fsum-change-name {
   overflow: hidden;
   color: var(--text);
   font-weight: 600;
@@ -4917,29 +4917,136 @@ a.catalyst-edgar-link:hover {
   white-space: nowrap;
 }
 
-.m13f-change-sub {
+.fsum-change-sub {
   grid-column: 1 / -1;
   color: var(--muted);
   font-size: 11px;
 }
 
-.m13f-none {
+.fsum-none {
   color: var(--muted);
 }
 
 @media (max-width: 1100px) {
-  .m13f-change-grid {
+  .fsum-change-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
-  .m13f-grid,
-  .m13f-change-grid {
+  .fsum-grid,
+  .fsum-change-grid {
     grid-template-columns: 1fr;
   }
 
-  .m13f-bar-row {
+  .fsum-bar-row {
     min-height: 32px;
+  }
+}
+
+
+/* Admin tab: fund flag reset (issue 223). Theme tokens only. */
+.fund-flag-table-wrap {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.fund-flag-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.fund-flag-table th {
+  position: sticky;
+  top: 0;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.fund-flag-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--grid);
+  color: var(--text);
+}
+
+.ffa-col-pick {
+  width: 36px;
+}
+
+.ffa-col-ticker {
+  font-weight: 600;
+}
+
+.ffa-row.is-selected td {
+  background: var(--surface-raised);
+}
+
+.ffa-type-fund {
+  color: var(--blue);
+}
+
+.ffa-type-none {
+  color: var(--muted);
+}
+
+.ffa-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+}
+
+.ffa-reset {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ffa-reset:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ffa-status {
+  margin: 0;
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.ffa-status.is-ok {
+  color: var(--green);
+}
+
+.ffa-status.is-warn {
+  color: var(--amber);
+}
+
+.ffa-status.is-error {
+  color: var(--red);
+}
+
+@media (max-width: 640px) {
+  .ffa-reset {
+    flex: 1 1 100%;
+    min-height: 44px;
+  }
+
+  .fund-flag-table td {
+    padding: 10px 8px;
   }
 }
