@@ -1127,14 +1127,27 @@ def publish_fund_documents(
     """Merge fund sources into serving/funds/<T>.json and serving/managers/<cik>.json (#223).
 
     Returns {ticker: stock fields} for fund tickers so the snapshot can mark instrument_kind."""
-    from fund_serving import build_fund_documents, fund_document_key, manager_document_key, stock_fund_fields
+    from fund_serving import (
+        build_fund_documents,
+        fund_document_key,
+        manager_document_key,
+        stock_flag_fields,
+        stock_fund_fields,
+    )
 
     built = build_fund_documents(tickers, read_json=read_json, read_rows=read_rows, now=now, generated_at=generated_at)
     for ticker, document in built["funds"].items():
         write(document, fund_document_key(ticker))
     for cik, document in built["managers"].items():
         write(document, manager_document_key(cik))
-    return {ticker: stock_fund_fields(document) for ticker, document in built["funds"].items()}
+    fields = {ticker: stock_fund_fields(document) for ticker, document in built["funds"].items()}
+    for ticker, flag in (built.get("flags") or {}).items():
+        fields[ticker] = {**fields.get(ticker, {}), **stock_flag_fields(flag)}
+        if flag.get("conflict"):
+            from observability import logger
+
+            logger.warning("fund_classification_conflict", extra={"ticker": ticker, "conflict": flag["conflict"]})
+    return fields
 
 
 def apply_fund_fields(snapshot: dict, fields: dict[str, dict]) -> None:

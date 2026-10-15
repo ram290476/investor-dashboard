@@ -26,10 +26,39 @@ from company_ir import Pace, crawler_user_agent  # noqa: E402
 from http_client import get_client  # noqa: E402
 
 
+def write_serving(collected: dict, tickers: list[str], out: Path) -> None:
+    """Run publish + the dashboard-build merge against an in-memory lake. Nothing touches S3."""
+    from fund_serving import build_fund_documents
+
+    store: dict[str, object] = {}
+
+    def put(obj, key):
+        store[key] = obj.to_dict("records") if hasattr(obj, "to_dict") else obj
+
+    def put_once(obj, key):
+        if key in store:
+            return False
+        store[key] = obj
+        return True
+
+    now = datetime.now(UTC)
+    ff.publish(collected, write_text=lambda *a: None, write_json=put, write_parquet=put,
+               write_json_once=put_once, now=now)
+    built = build_fund_documents(
+        tickers, read_json=store.get, now=now, generated_at=now.isoformat(timespec="seconds"),
+        read_rows=lambda prefix: [r for k, v in store.items() if k.startswith(prefix) and isinstance(v, list)
+                                  for r in v])
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "funds.json").write_text(json.dumps(built["funds"], indent=2, default=str))
+    (out / "managers.json").write_text(json.dumps(built["managers"], indent=2, default=str))
+    (out / "flags.json").write_text(json.dumps(built["flags"], indent=2, default=str))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tickers", nargs="*", help="override the watchlist (still no hard-coded list)")
     parser.add_argument("--save-dir")
+    parser.add_argument("--serving-dir", help="publish into memory (never S3) and write serving/funds + managers here")
     parser.add_argument("--lake-bucket", help="read serving/filings/<T>.json (read-only) for the app's own identity")
     args = parser.parse_args()
     if args.tickers:
@@ -56,6 +85,8 @@ def main() -> int:
             tickers, fetch=lambda url: http.get(url), pace=pace, sleep=pace.sleep,
             fund_map=None, state={}, now=datetime.now(UTC), app_documents=app_documents,
         )
+    if args.serving_dir:
+        write_serving(collected, tickers, Path(args.serving_dir))
     if args.save_dir:
         out = Path(args.save_dir)
         out.mkdir(parents=True, exist_ok=True)

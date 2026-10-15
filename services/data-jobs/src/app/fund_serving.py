@@ -153,14 +153,104 @@ def manager_summary(header: dict, rows: list[dict], fund_rows: list[dict]) -> di
     }
 
 
-def build_manager_document(header: dict, rows: list[dict], cusip_tickers: dict[str, str], generated_at: str) -> dict:
-    """13F has no tickers; fill them from the same manager's N-PORT rows where the CUSIP matches."""
+ISSUER_SECTORS_KEY = "curated/fund_universe/issuer_sectors.json"
+OTHER_SECTOR = "Other"
+MANAGER_TOP_N = 10
+SUMMARY_13F_FIELDS = ("period_end", "previous_period_end", "positions", "value_total_usd", "top", "sectors",
+                      "sector_source", "changes")
+CHANGES_TOP_N = 10
+
+
+def _positions(rows: list[dict]) -> dict[str, dict]:
+    """Long, non-option 13F rows summed per CUSIP (a manager can report one issuer on several rows)."""
+    out: dict[str, dict] = {}
+    for row in rows:
+        if row.get("is_option") or not row.get("cusip"):
+            continue
+        cur = out.setdefault(row["cusip"], {"cusip": row["cusip"], "name": display_name(
+            {"name": row.get("name"), "title": row.get("title")}), "value_usd": 0.0, "shares": 0.0})
+        cur["value_usd"] += _num(row.get("value_usd")) or 0.0
+        cur["shares"] += _num(row.get("shares")) or 0.0
+    return out
+
+
+def quarter_changes(current: list[dict], previous: list[dict] | None, tickers: dict[str, str]) -> dict | None:
+    """New buys, full sells, and the biggest share-count increases and decreases (by dollar size)."""
+    if previous is None:
+        return None
+    now, before = _positions(current), _positions(previous)
+
+    def item(cusip, cur, old):
+        price = (cur["value_usd"] / cur["shares"]) if cur and cur["shares"] else (
+            (old["value_usd"] / old["shares"]) if old and old["shares"] else 0.0)
+        shares_now = cur["shares"] if cur else 0.0
+        shares_old = old["shares"] if old else 0.0
+        return {
+            "cusip": cusip, "ticker": tickers.get(cusip), "name": (cur or old)["name"],
+            "shares": shares_now, "shares_prev": shares_old,
+            "shares_change_pct": ((shares_now - shares_old) / shares_old * 100) if shares_old else None,
+            "value_usd": cur["value_usd"] if cur else 0.0, "value_prev_usd": old["value_usd"] if old else 0.0,
+            "trade_value_usd": (shares_now - shares_old) * price,
+        }
+
+    new_buys = [item(c, now[c], None) for c in now if c not in before]
+    sells = [item(c, None, before[c]) for c in before if c not in now]
+    held = [item(c, now[c], before[c]) for c in now if c in before and now[c]["shares"] != before[c]["shares"]]
+    increases = sorted((r for r in held if r["trade_value_usd"] > 0), key=lambda r: -r["trade_value_usd"])
+    decreases = sorted((r for r in held if r["trade_value_usd"] < 0), key=lambda r: r["trade_value_usd"])
+    return {
+        "new_buys": sorted(new_buys, key=lambda r: -r["value_usd"]),
+        "full_sells": sorted(sells, key=lambda r: -r["value_prev_usd"]),
+        "increases": increases[:CHANGES_TOP_N],
+        "decreases": decreases[:CHANGES_TOP_N],
+        "counts": {"new_buys": len(new_buys), "full_sells": len(sells), "increased": len(increases),
+                   "decreased": len(decreases), "unchanged": sum(1 for c in now if c in before) - len(held)},
+    }
+
+
+def sector_breakdown(rows: list[dict]) -> list[dict]:
+    book = [r for r in rows if not r["is_option"]]
+    total = sum(r["value_usd"] or 0 for r in book) or 0.0
+    groups: dict[str, dict] = {}
+    for r in book:
+        g = groups.setdefault(r.get("sector") or OTHER_SECTOR, {"sector": r.get("sector") or OTHER_SECTOR,
+                                                                "value_usd": 0.0, "positions": 0})
+        g["value_usd"] += r["value_usd"] or 0.0
+        g["positions"] += 1
+    out = [{**g, "pct_portfolio": g["value_usd"] / total * 100 if total else None} for g in groups.values()]
+    # "Other" always last so the known sectors read first.
+    return sorted(out, key=lambda g: (g["sector"] == OTHER_SECTOR, -g["value_usd"]))
+
+
+def build_manager_document(header: dict, rows: list[dict], cusip_tickers: dict[str, str], generated_at: str,
+                           previous_rows: list[dict] | None = None, previous_header: dict | None = None,
+                           sectors: dict | None = None) -> dict:
+    """13F has no tickers or sectors: tickers come from N-PORT CUSIPs and the SEC-derived issuer map,
+    sectors from the issuer map (unknown -> 'Other'). Adds totals, top names, sector weights and the
+    quarter-over-quarter diff when the previous quarter is in the lake."""
+    sectors = sectors or {}
+    tickers = {c: t for c, t in cusip_tickers.items() if t}
+    for cusip, info in sectors.items():
+        if info.get("ticker"):
+            tickers.setdefault(cusip, info["ticker"])
     out = manager_rows(rows)
     for row in out:
-        row["ticker"] = cusip_tickers.get(row["cusip"] or "")
+        info = sectors.get(row["cusip"] or "") or {}
+        row["ticker"] = tickers.get(row["cusip"] or "")
+        row["sector"] = info.get("sector") or OTHER_SECTOR
+        row["industry"] = info.get("industry")
+    book = [r for r in out if not r["is_option"]]
+    changes = quarter_changes(rows, previous_rows, tickers)
     return {"schema_version": SCHEMA_VERSION, "source": "sec_13f", **{k: header.get(k) for k in (
         "manager_cik", "name", "period_end", "filed_at", "accession", "amendments", "form")},
-        "positions": sum(1 for r in out if not r["is_option"]), "generated_at": generated_at, "holdings": out}
+        "positions": len(book), "option_rows": len(out) - len(book),
+        "value_total_usd": sum(r["value_usd"] or 0 for r in book),
+        "top": sorted(book, key=lambda r: -(r["value_usd"] or 0))[:MANAGER_TOP_N],
+        "sectors": sector_breakdown(out),
+        "sector_source": "SEC filer office (ownerOrg) via issuer CIK; unmatched issuers are 'Other'",
+        "previous_period_end": (previous_header or {}).get("period_end") if previous_rows is not None else None,
+        "changes": changes,
+        "generated_at": generated_at, "holdings": out}
 
 
 def latest_period(rows: list[dict]) -> tuple[str | None, str | None]:
@@ -174,10 +264,15 @@ def build_fund_documents(tickers: list[str], *, read_json, read_rows, now: datet
     funds: dict[str, dict] = {}
     managers: dict[str, dict] = {}
     manager_cache: dict[str, tuple[dict, list[dict]]] = {}
+    prior_cache: dict[str, tuple[dict | None, list[dict] | None]] = {}
     kinds: dict[str, str] = {}
     cusip_tickers: dict[str, str] = {}
+    flags: dict[str, dict] = {}
     for ticker in tickers:
         entry = fund_map.get(ticker) or {}
+        stamp = read_json(f"curated/fund_universe/is_fund/{ticker}.json")
+        if isinstance(stamp, dict) and isinstance(stamp.get("is_fund"), bool):
+            flags[ticker] = {"is_fund": stamp["is_fund"], "conflict": classification_conflict(stamp["is_fund"], entry)}
         if entry.get("kind") != "fund":
             continue
         kinds[ticker] = "fund"
@@ -201,22 +296,53 @@ def build_fund_documents(tickers: list[str], *, read_json, read_rows, now: datet
             mcik = str(int(manager["cik"]))
             if mcik not in manager_cache:
                 mrows = read_rows(f"curated/manager_holdings/cik={mcik}/")
-                period, _prior = latest_period(mrows)
+                period, prior = latest_period(mrows)
                 mheader = None
                 if period:
                     mheader = read_json(f"curated/manager_holdings/cik={mcik}/period={period}/_manager.json")
                 manager_cache[mcik] = (mheader or {}, [r for r in mrows if str(r.get("period_end")) == period])
+                prior_cache[mcik] = ({"period_end": prior}, [r for r in mrows if str(r.get("period_end")) == prior]) \
+                    if prior else (None, None)
             mheader, mrows = manager_cache[mcik]
             if mrows:
                 blocks.append(manager_summary(mheader | {"manager_cik": mcik}, mrows, rows))
         funds[ticker] = build_fund_document(ticker, entry=entry, header=header, rows=rows, previous_rows=previous,
                                             profile=profile if isinstance(profile, dict) else None,
                                             managers=blocks, generated_at=generated_at, now=now)
+    sectors = read_json(ISSUER_SECTORS_KEY) if manager_cache else None
     for mcik, (mheader, mrows) in manager_cache.items():
         if mrows:
-            managers[mcik] = build_manager_document(mheader | {"manager_cik": mcik}, mrows, cusip_tickers,
-                                                    generated_at)
-    return {"funds": funds, "managers": managers, "kinds": kinds}
+            prev_header, prev_rows = prior_cache.get(mcik, (None, None))
+            managers[mcik] = build_manager_document(
+                mheader | {"manager_cik": mcik}, mrows, cusip_tickers, generated_at,
+                previous_rows=prev_rows, previous_header=prev_header,
+                sectors=sectors if isinstance(sectors, dict) else None)
+    # The fund page shows the adviser's 13F summary; embed it (no full holdings list) in each fund block.
+    for doc in funds.values():
+        for block in doc.get("managers") or []:
+            full = managers.get(str(block.get("cik")))
+            if full:
+                block["summary_13f"] = {k: full.get(k) for k in SUMMARY_13F_FIELDS}
+    for ticker, flag in flags.items():
+        if ticker in funds:
+            funds[ticker]["is_fund"] = flag["is_fund"]
+            funds[ticker]["classification_conflict"] = flag["conflict"]
+    return {"funds": funds, "managers": managers, "kinds": kinds, "flags": flags}
+
+
+def classification_conflict(is_fund: bool, entry: dict) -> str | None:
+    """The write-once is_fund stamp never changes; the live fund map can. Report disagreements
+    instead of overriding either side."""
+    kind = (entry or {}).get("kind")
+    if is_fund and kind == "operating":
+        return "is_fund_stamped_true_but_now_operating"
+    if not is_fund and kind == "fund" and (entry or {}).get("status") == "resolved":
+        return "is_fund_stamped_false_but_nport_fund"
+    return None
+
+
+def stock_flag_fields(flag: dict) -> dict:
+    return {"is_fund": flag["is_fund"], "fund_classification_conflict": flag.get("conflict")}
 
 
 def stock_fund_fields(document: dict) -> dict:
