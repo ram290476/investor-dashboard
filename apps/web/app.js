@@ -61,7 +61,7 @@ import {
 import { inflationSurpriseView } from "./inflation-panel.js";
 import { chartPanelOptions } from "./chart-panel.js";
 import { liveTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
-import { classificationNote, isFund, renderFundHoldingsPanel } from "./fund-holdings.js";
+import { classificationNote, fundRetryDelayMs, isFund, renderFundHoldingsPanel } from "./fund-holdings.js";
 import { renderFundSummaryPanels } from "./fund-summary.js";
 import { resetOutcome } from "./fund-flag-admin.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
@@ -145,6 +145,7 @@ const session = {
   // Fund holdings panel (#223): GET /fund/<T>, loaded only for instrument_kind "fund".
   fundDoc: {},
   fundState: {},
+  fundRetry: {},
   fundUi: {},
   stockPageError: {},
   stockTab: "overview",
@@ -713,13 +714,22 @@ async function loadStockPage(ticker, force = false) {
 
 async function loadFundHoldings(ticker, force = false) {
   if (!ticker || (!force && ["ready", "loading", "missing"].includes(session.fundState[ticker]))) return;
+  // #227: a failed load re-rendered the page, which called this again at once (a tight request loop).
+  // After an error, wait with exponential backoff before retrying automatically; Refresh data (force) retries now.
+  const retry = session.fundRetry[ticker];
+  if (!force && session.fundState[ticker] === "error" && retry && Date.now() < retry.notBefore) return;
   session.fundState[ticker] = "loading";
   try {
     session.fundDoc[ticker] = await apiGet(`fund/${encodeURIComponent(ticker)}`);
     session.fundState[ticker] = "ready";
+    delete session.fundRetry[ticker];
   } catch (error) {
     session.fundDoc[ticker] = null;
     session.fundState[ticker] = error.status === 404 ? "missing" : "error";
+    if (session.fundState[ticker] === "error") {
+      const attempts = (force ? 0 : session.fundRetry[ticker]?.attempts || 0) + 1;
+      session.fundRetry[ticker] = { attempts, notBefore: Date.now() + fundRetryDelayMs(attempts) };
+    }
     if (error.status === 401) {
       settings.close();
       session.accessToken = null;

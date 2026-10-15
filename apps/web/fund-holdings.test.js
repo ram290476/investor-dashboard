@@ -4,6 +4,7 @@ import {
   CONFLICT_NOTES, DAILY_UNAVAILABLE_NOTE, EMPTY_COPY, classificationNote, TOP_N, UNNAMED, asOfLabel, defaultUiState, factsLine, fallbackNote, formatDate,
   formatPct, formatUsd, holdingName, isFund, nextSort, panelState, toggleLabel, visibleRows,
 } from "./fund-holdings.js";
+import { fundRetryDelayMs as _fundRetryDelayMs } from "./fund-holdings.js";
 
 const holdings = Array.from({ length: 14 }, (_, i) => ({
   ticker: i === 3 ? null : `T${i}`, name: i === 5 ? "N/A" : `Holding ${i}`, title: i === 5 ? "SpaceX SPV" : null,
@@ -110,7 +111,11 @@ test("the company page shows the panel only for funds and fetches GET /fund/<T> 
   const { readFile } = await import("node:fs/promises");
   const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
   const css = await readFile(new URL("./styles.css", import.meta.url), "utf8");
-  assert.match(app, /import \{ classificationNote, isFund, renderFundHoldingsPanel \} from "\.\/fund-holdings\.js"/);
+  assert.match(app, /import \{ classificationNote, fundRetryDelayMs, isFund, renderFundHoldingsPanel \} from "\.\/fund-holdings\.js"/);
+  // #227: an "error" load waits out its backoff unless forced (Refresh data), so re-renders cannot loop.
+  const loader = app.slice(app.indexOf("async function loadFundHoldings"), app.indexOf("function renderFundPanel"));
+  assert.match(loader, /!force && session\.fundState\[ticker\] === "error" && retry && Date\.now\(\) < retry\.notBefore\) return;/);
+  assert.match(loader, /notBefore: Date\.now\(\) \+ fundRetryDelayMs\(attempts\)/);
   assert.match(app, /apiGet\(`fund\/\$\{encodeURIComponent\(ticker\)\}`\)/);
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   const gate = page.indexOf("const fund = isFund(tickerData)");
@@ -123,4 +128,12 @@ test("the company page shows the panel only for funds and fetches GET /fund/<T> 
   const panelCss = css.slice(css.indexOf("Fund holdings panel (issue 223)"));
   assert.doesNotMatch(panelCss, /#[0-9a-fA-F]{3,8}\b/);
   assert.match(panelCss, /@media \(max-width: 640px\)/);
+});
+
+test("fundRetryDelayMs backs off exponentially and caps at 5 minutes (#227)", () => {
+  assert.equal(_fundRetryDelayMs(1), 5000);
+  assert.equal(_fundRetryDelayMs(2), 10000);
+  assert.equal(_fundRetryDelayMs(3), 20000);
+  assert.equal(_fundRetryDelayMs(20), 300000);
+  assert.equal(_fundRetryDelayMs(0), 5000);
 });

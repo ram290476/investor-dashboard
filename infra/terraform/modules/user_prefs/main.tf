@@ -510,6 +510,9 @@ resource "aws_lambda_permission" "api_route" {
     chart        = "chart/*"
     stock        = "stock/*"
     stock_metric = "stock/*/metrics/*"
+    # #227: every route in aws_apigatewayv2_route.site needs an invoke grant (tests/test_api_route_permissions.py).
+    fund            = "fund/*"
+    fund_flag_reset = "admin/fund-flag/*"
   }
   statement_id  = "AllowApiGateway-${each.key}"
   action        = "lambda:InvokeFunction"
