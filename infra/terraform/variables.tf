@@ -672,6 +672,18 @@ variable "jobs" {
       api_keys       = []
       reads_prefs    = true
     }
+    # Best-effort weekly Yahoo fund summaries (#223) for funds in the cached fund map.
+    fund-profile = {
+      handler        = "fund_profile.handler"
+      schedule       = "cron(0 8 ? * MON *)"
+      triggers       = []
+      memory         = 512
+      timeout        = 120
+      read_prefixes  = ["curated/fund_universe/", "curated/fund_profile/"]
+      write_prefixes = ["raw/fund_profile/", "curated/fund_profile/"]
+      api_keys       = []
+      reads_prefs    = false
+    }
     # Rebuilds serving/status.json after every job
     status-feed = {
       handler        = "status_feed_job.handler"

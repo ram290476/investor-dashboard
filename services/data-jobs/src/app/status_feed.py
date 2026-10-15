@@ -48,6 +48,8 @@ JOBS: dict[str, tuple[str, str | None, str, str | None]] = {
     "SEC": ("SEC filings", "0 6 * * 1-5", "federal", None),
     # Weekday 07:00 ET N-PORT fund holdings (#223), plus ticker-added runs.
     "FUND": ("Fund holdings (SEC N-PORT)", "0 7 * * 1-5", "federal", None),
+    # Weekly Monday 08:00 ET, best-effort Yahoo fund summaries (#223).
+    "FUNDPROFILE": ("Fund summaries (Yahoo)", "0 8 * * 1", "nyse", None),
     # No cron until Ram accepts the Kalshi terms (issue #89). A next_run would advertise a schedule that is not enabled.
     "KALSHI": ("FOMC odds (Kalshi)", None, "federal", None),
 }

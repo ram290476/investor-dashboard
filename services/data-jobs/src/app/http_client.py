@@ -28,6 +28,7 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         "api.polygon.io",  # DS-01, DS-42
         "query1.finance.yahoo.com",
         "query2.finance.yahoo.com",  # DS-05 backfill
+        "fc.yahoo.com",  # cookie for quoteSummary crumb: fund profiles (#223)
         "finnhub.io",  # DS-04, DS-13, DS-41
         "www.alphavantage.co",  # DS-03, DS-40
         # Rates, inflation, macro
