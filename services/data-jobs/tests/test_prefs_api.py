@@ -1572,3 +1572,20 @@ def datetime_now():
     from datetime import UTC, datetime
 
     return datetime(2026, 10, 15, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("stamp", [True, False, None])
+def test_fund_flag_reset_for_true_false_and_unstamped_tickers(api, monkeypatch, stamp):
+    """#229: reset works for a Fund stamp, a Stock stamp (is_fund=false, like RBI/AGIQ) and an
+    unstamped ticker (like SYFY, a clean 404 with CORS-safe JSON, never a crash)."""
+    mod, _ = api
+    s3 = _seed_review_lake(mod, monkeypatch) if stamp is None else _seed_fund_flag(mod, monkeypatch, is_fund=stamp)
+    response = mod.handler(_review_event("/admin/fund-flag/SPCX/reset", None, groups=["admin"],
+                                         method="POST"), None)
+    body = json.loads(response["body"])
+    if stamp is None:
+        assert response["statusCode"] == 404 and body["code"] == "FUND_FLAG_NOT_SET"
+    else:
+        assert response["statusCode"] == 200 and body["reset"] is True and body["old_is_fund"] is stamp
+        with pytest.raises(ClientError):
+            s3.get_object(Bucket="lake", Key="curated/fund_universe/is_fund/SPCX.json")

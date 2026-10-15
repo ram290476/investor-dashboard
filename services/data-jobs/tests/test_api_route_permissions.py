@@ -62,3 +62,25 @@ def test_fund_routes_are_granted():
 def test_matcher_rejects_an_ungranted_route():
     assert not _path_matches("GET /fund/{ticker}", "chart/*")
     assert _path_matches("PUT /stock/{ticker}/metrics/{metric_id}", "stock/*/metrics/*")
+
+
+def _cors_methods(text: str) -> set[str]:
+    block = _block(text, 'resource "aws_apigatewayv2_api" "site"')
+    m = re.search(r"allow_methods\s*=\s*\[(.*?)\]", block, re.S)
+    assert m, "cors_configuration allow_methods not found"
+    return {x.upper() for x in re.findall(r'"([^"]+)"', m.group(1))}
+
+
+def test_every_route_method_is_allowed_by_cors():
+    """#229: POST /admin/fund-flag/{ticker}/reset failed the browser preflight ("Load failed")
+    because the HTTP API CORS config only allowed GET and PUT."""
+    text = MAIN_TF.read_text()
+    allowed = _cors_methods(text)
+    missing = sorted({r.split(" ", 1)[0] for r in _routes(text)} - allowed)
+    assert not missing, f"route methods missing from CORS allow_methods: {missing}"
+
+
+def test_fund_flag_reset_preflight_allows_post():
+    text = MAIN_TF.read_text()
+    assert "POST /admin/fund-flag/{ticker}/reset" in _routes(text)
+    assert "POST" in _cors_methods(text)
