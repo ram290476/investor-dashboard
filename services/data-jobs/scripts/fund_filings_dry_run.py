@@ -33,7 +33,11 @@ def write_serving(collected: dict, tickers: list[str], out: Path) -> None:
     store: dict[str, object] = {}
 
     def put(obj, key):
-        store[key] = obj.to_dict("records") if hasattr(obj, "to_dict") else obj
+        for method in ("to_pylist", "to_dicts"):  # pyarrow Table / polars frame -> rows
+            if hasattr(obj, method):
+                obj = getattr(obj, method)()
+                break
+        store[key] = obj
 
     def put_once(obj, key):
         if key in store:
