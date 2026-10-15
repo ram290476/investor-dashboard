@@ -63,7 +63,7 @@ def test_metric_review_route_cors_integration_and_iam_prefixes():
     assert 'payload_format_version = "2.0"' in integration
     assert "aws_lambda_function.api.invoke_arn" in integration
     cors = _block(main, 'resource "aws_apigatewayv2_api" "site"')
-    assert 'allow_methods = ["GET", "PUT"]' in cors
+    assert 'allow_methods = ["GET", "PUT", "POST"]' in cors
     assert '"authorization"' in cors
     assert '"content-type"' in cors
     assert '"accept"' in cors

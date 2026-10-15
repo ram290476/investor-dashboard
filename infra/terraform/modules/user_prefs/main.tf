@@ -448,7 +448,9 @@ resource "aws_apigatewayv2_api" "site" {
 
   cors_configuration {
     allow_origins = var.site_origins
-    allow_methods = ["GET", "PUT"]
+    # #229: must list every method used by aws_apigatewayv2_route.site, or the browser preflight fails
+    # ("Load failed") before the request reaches the Lambda (tests/test_api_route_permissions.py).
+    allow_methods = ["GET", "PUT", "POST"]
     allow_headers = ["authorization", "content-type", "accept"]
     max_age       = 300
   }
