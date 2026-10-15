@@ -61,6 +61,7 @@ import {
 import { inflationSurpriseView } from "./inflation-panel.js";
 import { chartPanelOptions } from "./chart-panel.js";
 import { liveTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
+import { isFund, renderFundHoldingsPanel } from "./fund-holdings.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
@@ -139,6 +140,10 @@ const session = {
   revealPanel: "",
   stockPage: {},
   stockPageState: {},
+  // Fund holdings panel (#223): GET /fund/<T>, loaded only for instrument_kind "fund".
+  fundDoc: {},
+  fundState: {},
+  fundUi: {},
   stockPageError: {},
   stockTab: "overview",
   metricReview: readStoredMetricReview(),
@@ -688,6 +693,37 @@ async function loadStockPage(ticker, force = false) {
     }
   }
   if (session.selected === ticker) renderDashboard();
+}
+
+async function loadFundHoldings(ticker, force = false) {
+  if (!ticker || (!force && ["ready", "loading", "missing"].includes(session.fundState[ticker]))) return;
+  session.fundState[ticker] = "loading";
+  try {
+    session.fundDoc[ticker] = await apiGet(`fund/${encodeURIComponent(ticker)}`);
+    session.fundState[ticker] = "ready";
+  } catch (error) {
+    session.fundDoc[ticker] = null;
+    session.fundState[ticker] = error.status === 404 ? "missing" : "error";
+    if (error.status === 401) {
+      settings.close();
+      session.accessToken = null;
+      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+      return;
+    }
+  }
+  if (session.selected === ticker && session.route?.page === "stock") renderDashboard();
+}
+
+function renderFundPanel(ticker) {
+  const state = {
+    doc: session.fundDoc[ticker] || null,
+    loadState: session.fundState[ticker] || "loading",
+    ui: session.fundUi[ticker],
+    watchlist: session.prefs?.tickers || [],
+  };
+  const panel = renderFundHoldingsPanel(state, document);
+  session.fundUi[ticker] = state.ui;
+  return panel;
 }
 
 // Company page chart state (#212). Every chart toggle (overlays, under-chart lanes such as
@@ -3951,6 +3987,17 @@ function renderStockPage() {
     callsBlock.append(node("p", "signal-note", calls.guidance));
   }
 
+  // Funds (#223): Fund holdings follows the Technical Summary; the company-only panels and tabs
+  // are hidden. Operating companies never get the fund panel or its fetch.
+  const fund = isFund(tickerData);
+  if (fund) {
+    loadFundHoldings(session.selected);
+    page.dataset.instrumentKind = "fund";
+    page.append(chart, renderTechnicalSummary(session.selected, history), renderFundPanel(session.selected));
+    root.append(page);
+    settings.refresh();
+    return;
+  }
   page.append(
     chart,
     renderTechnicalSummary(session.selected, history),
@@ -4325,6 +4372,7 @@ async function refreshData(showLoading) {
   renderDashboard();
   await loadChartData(session.selected, true);
   await loadStockPage(session.selected, true);
+  if (isFund(selectedData())) await loadFundHoldings(session.selected, true);
 }
 
 async function start() {

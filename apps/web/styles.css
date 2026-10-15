@@ -4557,3 +4557,221 @@ a.catalyst-edgar-link:hover {
 .chart-readout-label {
   font-weight: 600;
 }
+
+/* Fund holdings panel (issue 223). Theme tokens only. */
+.fund-holdings h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.fund-asof {
+  margin: 4px 0 0;
+}
+
+.fund-edgar-link {
+  color: var(--blue);
+}
+
+.fund-facts,
+.fund-note,
+.fund-match-count {
+  margin: 0;
+  padding: 10px 16px 0;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.fund-note {
+  color: var(--amber);
+}
+
+.fund-match-count {
+  color: var(--muted);
+}
+
+.fund-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px 16px 4px;
+}
+
+.fund-search {
+  min-width: 220px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.fund-watch-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.fund-table-wrap {
+  overflow-x: auto;
+  padding: 4px 8px 8px;
+}
+
+.fund-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fund-table th {
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: left;
+}
+
+.fund-sort {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.fund-table th[aria-sort="descending"] .fund-sort::after {
+  content: " ▾";
+}
+
+.fund-table th[aria-sort="ascending"] .fund-sort::after {
+  content: " ▴";
+}
+
+.fund-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--grid);
+  color: var(--text);
+  vertical-align: top;
+}
+
+.fund-table .fund-col-value,
+.fund-table .fund-col-pct {
+  text-align: right;
+}
+
+.fund-col-ticker {
+  width: 76px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fund-col-pct {
+  width: 32%;
+}
+
+.fund-row.is-watched td:first-child {
+  box-shadow: inset 3px 0 0 var(--blue);
+  color: var(--blue);
+}
+
+.fund-name {
+  display: block;
+}
+
+.fund-cusip {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.fund-badge {
+  display: inline-block;
+  margin-top: 3px;
+  margin-right: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.fund-pct {
+  display: block;
+}
+
+.fund-bar {
+  display: block;
+  height: 4px;
+  margin: 4px 0 0 auto;
+  border-radius: 2px;
+  background: var(--blue);
+  opacity: 0.75;
+}
+
+.fund-value-under {
+  display: none;
+}
+
+.fund-toggle {
+  min-height: 40px;
+  margin: 4px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .fund-search {
+    flex: 1 1 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  .fund-watch-toggle,
+  .fund-sort,
+  .fund-toggle {
+    min-height: 44px;
+  }
+
+  .fund-table .fund-col-value {
+    display: none;
+  }
+
+  .fund-value-under {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .fund-col-ticker {
+    width: 60px;
+  }
+
+  .fund-col-pct {
+    width: 34%;
+  }
+
+  .fund-name {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}

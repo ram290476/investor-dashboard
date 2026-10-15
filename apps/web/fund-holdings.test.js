@@ -95,3 +95,21 @@ test("watchlist holdings are starred and can be filtered", () => {
   assert.deepEqual(view.rows.map((r) => r.ticker), ["T2", "T7"]);
   assert.ok(view.rows.every((r) => r.watched));
 });
+
+test("the company page shows the panel only for funds and fetches GET /fund/<T> lazily", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
+  const css = await readFile(new URL("./styles.css", import.meta.url), "utf8");
+  assert.match(app, /import \{ isFund, renderFundHoldingsPanel \} from "\.\/fund-holdings\.js"/);
+  assert.match(app, /apiGet\(`fund\/\$\{encodeURIComponent\(ticker\)\}`\)/);
+  const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
+  const gate = page.indexOf("const fund = isFund(tickerData)");
+  assert.ok(gate > 0 && page.indexOf("loadFundHoldings(session.selected)") > gate);
+  // Fund holdings follows the Technical Summary; company-only panels are not appended for funds.
+  const fundBranch = page.slice(gate, page.indexOf("return;", gate));
+  assert.match(fundBranch, /renderTechnicalSummary\(session\.selected, history\), renderFundPanel/);
+  assert.doesNotMatch(fundBranch, /section\("kpis"/);
+  const panelCss = css.slice(css.indexOf("Fund holdings panel (issue 223)"));
+  assert.doesNotMatch(panelCss, /#[0-9a-fA-F]{3,8}\b/);
+  assert.match(panelCss, /@media \(max-width: 640px\)/);
+});
