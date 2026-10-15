@@ -3993,6 +3993,9 @@ function renderStockPage() {
   if (fund) {
     loadFundHoldings(session.selected);
     page.dataset.instrumentKind = "fund";
+    // Funds have no KPI/Fundamentals/Calls tabs; a tab left over from a company page would hide
+    // every overview panel on a phone.
+    page.dataset.stockTab = "overview";
     page.append(chart, renderTechnicalSummary(session.selected, history), renderFundPanel(session.selected));
     root.append(page);
     settings.refresh();

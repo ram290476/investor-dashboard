@@ -109,6 +109,7 @@ test("the company page shows the panel only for funds and fetches GET /fund/<T> 
   const fundBranch = page.slice(gate, page.indexOf("return;", gate));
   assert.match(fundBranch, /renderTechnicalSummary\(session\.selected, history\), renderFundPanel/);
   assert.doesNotMatch(fundBranch, /section\("kpis"/);
+  assert.match(fundBranch, /page\.dataset\.stockTab = "overview"/);
   const panelCss = css.slice(css.indexOf("Fund holdings panel (issue 223)"));
   assert.doesNotMatch(panelCss, /#[0-9a-fA-F]{3,8}\b/);
   assert.match(panelCss, /@media \(max-width: 640px\)/);
