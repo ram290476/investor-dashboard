@@ -331,6 +331,13 @@ data "aws_iam_policy_document" "api" {
     actions   = ["s3:GetObject"]
     resources = ["${var.lake_bucket_arn}/catalog/*"]
   }
+  # Admin-only is_fund reset (#223): read the old stamp for the audit line, then delete it. The
+  # handler checks the admin group (never the demo account); IAM limits it to this prefix.
+  statement {
+    sid       = "ResetFundFlag"
+    actions   = ["s3:GetObject", "s3:DeleteObject"]
+    resources = ["${var.lake_bucket_arn}/curated/fund_universe/is_fund/*"]
+  }
   # A missing catalog/<TICKER>.json (first approval for a ticker), serving/stock/<TICKER>.json or
   # serving/chart_data/<TICKER>.json or serving/funds/<TICKER>.json (ticker not built yet) must read as NoSuchKey, not
   # AccessDenied. S3 only returns 404 when the caller may list the prefix.
@@ -341,7 +348,7 @@ data "aws_iam_policy_document" "api" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["catalog/*", "serving/stock/*", "serving/chart_data/*", "serving/funds/*"]
+      values   = ["catalog/*", "serving/stock/*", "serving/chart_data/*", "serving/funds/*", "curated/fund_universe/is_fund/*"]
     }
   }
   statement {
@@ -467,7 +474,7 @@ resource "aws_apigatewayv2_integration" "prefs" {
 }
 
 resource "aws_apigatewayv2_route" "site" {
-  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /fund/{ticker}", "GET /stock/{ticker}", "PUT /stock/{ticker}/metrics/{metric_id}"])
+  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /fund/{ticker}", "GET /stock/{ticker}", "PUT /stock/{ticker}/metrics/{metric_id}", "POST /admin/fund-flag/{ticker}/reset"])
   api_id             = aws_apigatewayv2_api.site.id
   route_key          = each.value
   target             = "integrations/${aws_apigatewayv2_integration.prefs.id}"

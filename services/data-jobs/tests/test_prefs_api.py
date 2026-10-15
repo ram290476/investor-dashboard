@@ -1496,4 +1496,79 @@ def test_fund_route_and_read_access_are_in_terraform():
     tf = (Path(__file__).resolve().parents[3] / "infra/terraform/modules/user_prefs/main.tf").read_text()
     assert '"GET /fund/{ticker}"' in tf
     assert '"${var.lake_bucket_arn}/serving/funds/*"' in tf
-    assert '"serving/funds/*"]' in tf
+    assert '"serving/funds/*", "curated/fund_universe/is_fund/*"]' in tf
+    # The admin reset may delete only the is_fund stamps, nothing else in the lake.
+    assert '"POST /admin/fund-flag/{ticker}/reset"' in tf
+    import re
+
+    deletes = re.findall(r'actions\s*=\s*\[[^\]]*"s3:DeleteObject"[^\]]*\]\s*resources\s*=\s*(\[[^\]]*\])', tf)
+    assert deletes == ['["${var.lake_bucket_arn}/curated/fund_universe/is_fund/*"]']
+
+
+def _seed_fund_flag(mod, monkeypatch, is_fund=True):
+    s3 = _seed_review_lake(mod, monkeypatch)
+    s3.put_object(Bucket="lake", Key="curated/fund_universe/is_fund/SPCX.json",
+                  Body=json.dumps({"ticker": "SPCX", "is_fund": is_fund, "stamped_at": "2026-10-14T12:00:00+00:00"}))
+    return s3
+
+
+def test_admin_resets_the_fund_flag_with_an_audit_line(api, monkeypatch, caplog):
+    import logging
+
+    mod, _ = api
+    s3 = _seed_fund_flag(mod, monkeypatch)
+    with caplog.at_level(logging.INFO):
+        response = mod.handler(_review_event("/admin/fund-flag/spcx/reset", None, groups=["admin"],
+                                             method="POST"), None)
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["reset"] is True and body["old_is_fund"] is True and body["reset_by"] == "owner@example.com"
+    with pytest.raises(ClientError):
+        s3.get_object(Bucket="lake", Key="curated/fund_universe/is_fund/SPCX.json")
+    audit = [r for r in caplog.records if r.getMessage() == "fund_flag_reset"]
+    assert audit and audit[0].reset_by == "owner@example.com" and audit[0].old_is_fund is True
+    assert audit[0].reset_at and audit[0].ticker == "SPCX"
+    again = mod.handler(_review_event("/admin/fund-flag/SPCX/reset", None, groups=["admin"], method="POST"), None)
+    assert again["statusCode"] == 404
+
+
+def test_fund_flag_reset_rejects_non_admins_and_the_demo_account(api, monkeypatch):
+    mod, _ = api
+    s3 = _seed_fund_flag(mod, monkeypatch)
+    path = "/admin/fund-flag/SPCX/reset"
+    assert mod.handler(_review_event(path, None, groups="", method="POST"), None)["statusCode"] == 403
+    demo = mod.handler(_review_event(path, None, groups=["admin"], username="ram.vellamsetti@gmail.com",
+                                     method="POST"), None)
+    assert demo["statusCode"] == 403
+    assert mod.handler(_review_event(path, None, groups=["admin"], method="GET"), None)["statusCode"] == 405
+    assert _lake_json(s3, "curated/fund_universe/is_fund/SPCX.json")["is_fund"] is True  # untouched
+
+
+def test_reset_flag_is_restamped_by_the_next_collection(api, monkeypatch):
+    import fund_filings as ff
+    import lake
+
+    mod, _ = api
+    s3 = _seed_fund_flag(mod, monkeypatch, is_fund=True)
+    key = "curated/fund_universe/is_fund/SPCX.json"
+    operating = {"ticker": "SPCX", "status": "resolved", "kind": "operating", "cik": "1181412"}
+    collected = {"results": [], "managers": [], "fund_map": {"funds": {"SPCX": operating}}, "state": {}}
+
+    def run():
+        return ff.publish(collected, write_text=lambda *a: None, write_json=lambda *a: None,
+                          write_parquet=lambda *a: None,
+                          write_json_once=lambda obj, k: lake.write_json_once(obj, k, bucket="lake", client=s3),
+                          now=datetime_now())
+
+    assert run() == []  # write-once: the wrong stamp survives a rerun
+    assert _lake_json(s3, key)["is_fund"] is True
+    assert mod.handler(_review_event("/admin/fund-flag/SPCX/reset", None, groups=["admin"],
+                                     method="POST"), None)["statusCode"] == 200
+    assert run() == ["SPCX"]
+    assert _lake_json(s3, key)["is_fund"] is False
+
+
+def datetime_now():
+    from datetime import UTC, datetime
+
+    return datetime(2026, 10, 15, tzinfo=UTC)

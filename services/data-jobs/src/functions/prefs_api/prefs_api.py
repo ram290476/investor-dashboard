@@ -568,6 +568,8 @@ def _route_label(method: str, path: object) -> str:
         return f"{method} /chart/{{ticker}}"
     if path.startswith("/fund/"):
         return f"{method} /fund/{{ticker}}"
+    if path.startswith("/admin/fund-flag/"):
+        return f"{method} /admin/fund-flag/{{ticker}}/reset"
     if path.startswith("/stock/") and "/metrics/" in path:
         return f"{method} /stock/{{ticker}}/metrics/{{metric_id}}"
     if path.startswith("/stock/"):
@@ -1007,6 +1009,33 @@ def _review_metric(event, sub: str, ticker: str, metric_id: str, respond) -> dic
     return respond(200, _public_stock(patched, ticker))
 
 
+FUND_FLAG_PREFIX = "curated/fund_universe/is_fund/"
+_FUND_FLAG_RESET_RE = re.compile(r"/admin/fund-flag/([A-Za-z][A-Za-z0-9.\-]{0,9})/reset")
+
+
+def _reset_fund_flag(event, ticker: str, respond) -> dict:
+    """Admin-only (#223): delete the write-once is_fund stamp so the next fund collection re-stamps it.
+    The demo account is never an admin. Every reset is logged with who, when and the old value."""
+    claims = _claims_for_review(event)
+    if not _is_metric_admin(claims):
+        return respond(403, {"error": "Only an admin can reset a fund flag"})
+    if not SYMBOL_RE.fullmatch(ticker):
+        return respond(400, {"error": "Ticker is not valid"})
+    key = f"{FUND_FLAG_PREFIX}{ticker}.json"
+    old = _read_json_object(key)
+    if old is None:
+        return respond(404, {"error": "No is_fund flag is stamped for this ticker", "code": "FUND_FLAG_NOT_SET"})
+    admin = _reviewer(claims)
+    reset_at = datetime.now(UTC).isoformat(timespec="seconds")
+    _s3.delete_object(Bucket=LAKE_BUCKET, Key=key)
+    logger.info("fund_flag_reset", extra={
+        "audit": True, "ticker": ticker, "reset_by": admin, "reset_by_sub": claims.get("sub"),
+        "reset_at": reset_at, "old_is_fund": old.get("is_fund"), "old_stamped_at": old.get("stamped_at"),
+    })
+    return respond(200, {"ticker": ticker, "reset": True, "old_is_fund": old.get("is_fund"),
+                         "reset_by": admin, "reset_at": reset_at})
+
+
 def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
     def respond(status: int, body: dict, **kwargs) -> dict:
         return _response(status, body, event, **kwargs)
@@ -1081,6 +1110,11 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
             gzip_key=fund_key,
             cache_key=f"fund:{ticker}:{_etag_token(etag, raw_bytes)}",
         )
+    flag_reset = _FUND_FLAG_RESET_RE.fullmatch(path)
+    if flag_reset and method == "POST":
+        return _reset_fund_flag(event, flag_reset.group(1).upper(), respond)
+    if flag_reset:
+        return respond(405, {"error": f"{method} not allowed"})
     review = re.fullmatch(r"/stock/([A-Za-z][A-Za-z0-9.\-]{0,9})/metrics/([A-Za-z][A-Za-z0-9_]{0,64})", path)
     if review and method == "PUT":
         ticker = review.group(1).upper()
