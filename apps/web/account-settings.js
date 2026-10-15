@@ -1,8 +1,9 @@
 // Account menu, the Settings pop-up, and the separate Data refresh pop-up.
-// Settings holds My tickers, Theme & display, and Profile & time zone.
+// Settings holds My tickers, Theme & display, Profile & time zone, and (admins only) Admin.
 // Data refresh is its own larger pop-up. Changes autosave through PUT /prefs.
 
 import { PERIODS, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
+import { renderFundFlagAdmin, resetConfirmText } from "./fund-flag-admin.js";
 import { sparkline } from "./sparkline.js";
 import { DEFAULT_THEME, THEMES, themeProperties } from "./theme.js";
 import {
@@ -10,7 +11,9 @@ import {
   MAX_TICKERS,
   PALETTES,
   PIN_LIMIT_MESSAGE,
+  ADMIN_TAB,
   SETTINGS_TABS,
+  settingsTabs,
   TIME_ZONE_PICKS,
   addTicker,
   canRemove,
@@ -98,6 +101,10 @@ export function createAccountSettings(ctx) {
   let openKind = null;
 
   const isOpen = () => openKind !== null;
+  // Admin tab: visible only when ctx.isAdmin() (metric-approval admin check; never the demo account).
+  const isAdmin = () => Boolean(ctx.isAdmin?.());
+  const visibleTabs = () => settingsTabs(isAdmin());
+  const fundFlag = { selected: null, outcomes: {} };
 
   function announce(message) {
     if (!live) return;
@@ -213,14 +220,14 @@ export function createAccountSettings(ctx) {
     const tablist = el("div", "settings-tabs");
     tablist.setAttribute("role", "tablist");
     tablist.setAttribute("aria-label", "Settings sections");
-    tabButtons = SETTINGS_TABS.map((tab) => {
+    tabButtons = [...SETTINGS_TABS, ADMIN_TAB].map((tab) => {
       const tabButton = button(tab.label, "settings-tab", () => selectTab(tab.id));
       tabButton.id = `settings-tab-${tab.id}`;
       tabButton.dataset.tab = tab.id;
       tabButton.setAttribute("role", "tab");
       tabButton.setAttribute("aria-controls", "settings-panel");
       tabButton.addEventListener("keydown", (event) => {
-        const next = tabAfterKey(tab.id, event.key);
+        const next = tabAfterKey(tab.id, event.key, visibleTabs());
         if (!next) return;
         event.preventDefault();
         selectTab(next);
@@ -268,8 +275,9 @@ export function createAccountSettings(ctx) {
 
   function selectTab(tabId) {
     const activeTabBefore = activeTab;
-    activeTab = SETTINGS_TABS.some((tab) => tab.id === tabId) ? tabId : "tickers";
+    activeTab = visibleTabs().some((tab) => tab.id === tabId) ? tabId : "tickers";
     tabButtons.forEach((tabButton) => {
+      tabButton.hidden = !visibleTabs().some((tab) => tab.id === tabButton.dataset.tab);
       const selected = tabButton.dataset.tab === activeTab;
       tabButton.setAttribute("aria-selected", String(selected));
       tabButton.tabIndex = selected ? 0 : -1;
@@ -401,10 +409,38 @@ export function createAccountSettings(ctx) {
     if (activeTab === "tickers") panel.append(...renderTickersTab());
     if (activeTab === "theme") panel.append(...renderThemeTab());
     if (activeTab === "profile") panel.append(...renderProfileTab());
+    if (activeTab === ADMIN_TAB.id && isAdmin()) panel.append(renderAdminTab());
     if (focusKey) {
       const target = panel.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
       (target && !target.disabled ? target : panel).focus();
     }
+  }
+
+  function renderAdminTab() {
+    return renderFundFlagAdmin({ rows: ctx.fundFlagRows?.() || [], ...fundFlag }, document, {
+      onSelect: (ticker) => {
+        fundFlag.selected = ticker;
+        renderPanel();
+      },
+      onReset: resetFundFlag,
+    });
+  }
+
+  async function resetFundFlag(ticker) {
+    if (fundFlag.outcomes[ticker]?.state === "saving") return;
+    fundFlag.selected = ticker;
+    if (!isAdmin()) {
+      fundFlag.outcomes[ticker] = { state: "forbidden" };
+      renderPanel();
+      return;
+    }
+    const ask = ctx.confirm || ((message) => globalThis.confirm?.(message));
+    if (!ask(resetConfirmText(ticker))) return;
+    fundFlag.outcomes[ticker] = { state: "saving" };
+    renderPanel();
+    fundFlag.outcomes[ticker] = await ctx.resetFundFlag(ticker);
+    if (fundFlag.outcomes[ticker].state === "forbidden") announce("Only an admin can reset the fund flag.");
+    renderPanel();
   }
 
   function renderTabError() {

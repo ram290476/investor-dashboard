@@ -61,6 +61,9 @@ import {
 import { inflationSurpriseView } from "./inflation-panel.js";
 import { chartPanelOptions } from "./chart-panel.js";
 import { liveTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
+import { classificationNote, isFund, renderFundHoldingsPanel } from "./fund-holdings.js";
+import { renderFundSummaryPanels } from "./fund-summary.js";
+import { resetOutcome } from "./fund-flag-admin.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
@@ -139,6 +142,10 @@ const session = {
   revealPanel: "",
   stockPage: {},
   stockPageState: {},
+  // Fund holdings panel (#223): GET /fund/<T>, loaded only for instrument_kind "fund".
+  fundDoc: {},
+  fundState: {},
+  fundUi: {},
   stockPageError: {},
   stockTab: "overview",
   metricReview: readStoredMetricReview(),
@@ -601,6 +608,20 @@ async function apiPut(path, body, label) {
   return readApiResponse(response, label);
 }
 
+async function apiPost(path, label) {
+  let response;
+  try {
+    response = await fetch(apiUrl(path), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.accessToken}`, Accept: "application/json" },
+      cache: "no-store",
+    });
+  } catch (cause) {
+    throw networkError(label, cause);
+  }
+  return readApiResponse(response, label);
+}
+
 async function putPrefs(candidate) {
   let response;
   try {
@@ -688,6 +709,43 @@ async function loadStockPage(ticker, force = false) {
     }
   }
   if (session.selected === ticker) renderDashboard();
+}
+
+async function loadFundHoldings(ticker, force = false) {
+  if (!ticker || (!force && ["ready", "loading", "missing"].includes(session.fundState[ticker]))) return;
+  session.fundState[ticker] = "loading";
+  try {
+    session.fundDoc[ticker] = await apiGet(`fund/${encodeURIComponent(ticker)}`);
+    session.fundState[ticker] = "ready";
+  } catch (error) {
+    session.fundDoc[ticker] = null;
+    session.fundState[ticker] = error.status === 404 ? "missing" : "error";
+    if (error.status === 401) {
+      settings.close();
+      session.accessToken = null;
+      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+      return;
+    }
+  }
+  if (session.selected === ticker && session.route?.page === "stock") renderDashboard();
+}
+
+function renderFundPanel(ticker, conflictNote = null) {
+  const state = {
+    conflictNote,
+    doc: session.fundDoc[ticker] || null,
+    loadState: session.fundState[ticker] || "loading",
+    ui: session.fundUi[ticker],
+    watchlist: session.prefs?.tickers || [],
+  };
+  const panel = renderFundHoldingsPanel(state, document);
+  session.fundUi[ticker] = state.ui;
+  return panel;
+}
+
+// Fund summary for the fund's manager(s), from the same /fund document (#223).
+function renderFundSummary(ticker) {
+  return renderFundSummaryPanels(session.fundDoc[ticker] || null, session.fundState[ticker] || "loading", document);
 }
 
 // Company page chart state (#212). Every chart toggle (overlays, under-chart lanes such as
@@ -3951,6 +4009,23 @@ function renderStockPage() {
     callsBlock.append(node("p", "signal-note", calls.guidance));
   }
 
+  // Funds (#223): Fund holdings follows the Technical Summary; the company-only panels and tabs
+  // are hidden. Operating companies never get the fund panel or its fetch.
+  const fund = isFund(tickerData);
+  if (fund) {
+    loadFundHoldings(session.selected);
+    page.dataset.instrumentKind = "fund";
+    // Funds have no KPI/Fundamentals/Calls tabs; a tab left over from a company page would hide
+    // every overview panel on a phone.
+    page.dataset.stockTab = "overview";
+    // The write-once is_fund stamp and the live SEC classification can disagree; say so, don't override.
+    const fundPanel = renderFundPanel(session.selected, classificationNote(tickerData));
+    page.append(chart, renderTechnicalSummary(session.selected, history), fundPanel,
+      ...renderFundSummary(session.selected));
+    root.append(page);
+    settings.refresh();
+    return;
+  }
   page.append(
     chart,
     renderTechnicalSummary(session.selected, history),
@@ -4325,6 +4400,7 @@ async function refreshData(showLoading) {
   renderDashboard();
   await loadChartData(session.selected, true);
   await loadStockPage(session.selected, true);
+  if (isFund(selectedData())) await loadFundHoldings(session.selected, true);
 }
 
 async function start() {
@@ -4415,6 +4491,20 @@ const settings = createAccountSettings({
   formatTime,
   displayPrice,
   browserTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  // Admin tab (#223): same admin check as the metric Approve buttons; never the demo account.
+  isAdmin: () => canApproveMetrics(session.accessToken, session.email),
+  fundFlagRows: () => (session.prefs?.tickers || []).map((ticker) => ({
+    ticker, is_fund: session.dashboard?.tickers?.[ticker]?.is_fund,
+  })),
+  resetFundFlag: async (ticker) => {
+    try {
+      await apiPost(`admin/fund-flag/${encodeURIComponent(ticker)}/reset`, "Resetting the fund flag");
+      return resetOutcome(null);
+    } catch (error) {
+      return resetOutcome(error);
+    }
+  },
+  confirm: (message) => window.confirm(message),
 });
 
 applyTheme();

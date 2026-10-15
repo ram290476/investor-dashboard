@@ -12,6 +12,13 @@ export const SETTINGS_TABS = [
   { id: "profile", label: "Profile & time zone" },
 ];
 
+// Admin-only tab (issue 223). Shown only when the caller is an admin (never the demo account).
+export const ADMIN_TAB = { id: "admin", label: "Admin" };
+
+export function settingsTabs(admin = false) {
+  return admin ? [...SETTINGS_TABS, ADMIN_TAB] : SETTINGS_TABS;
+}
+
 export const PALETTES = [
   { id: "theme", label: "Theme default" },
   { id: "green-red", label: "Green / Red" },
@@ -45,6 +52,7 @@ export function parseSettingsHash(hash) {
   const match = /^#settings(?:\/([a-z-]*))?$/.exec(String(hash || ""));
   if (!match) return null;
   if (match[1] === "refresh") return "refresh";
+  if (match[1] === ADMIN_TAB.id) return ADMIN_TAB.id; // the pop-up falls back to My tickers for non-admins
   return SETTINGS_TABS.some((tab) => tab.id === match[1]) ? match[1] : "tickers";
 }
 
@@ -53,8 +61,8 @@ export function settingsHash(tabId) {
 }
 
 /** Next tab for the WAI-ARIA tabs keyboard pattern (arrows wrap, Home/End jump). */
-export function tabAfterKey(currentId, key) {
-  const ids = SETTINGS_TABS.map((tab) => tab.id);
+export function tabAfterKey(currentId, key, tabs = SETTINGS_TABS) {
+  const ids = tabs.map((tab) => tab.id);
   const index = Math.max(0, ids.indexOf(currentId));
   if (key === "ArrowRight") return ids[(index + 1) % ids.length];
   if (key === "ArrowLeft") return ids[(index - 1 + ids.length) % ids.length];
