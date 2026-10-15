@@ -98,6 +98,8 @@ jobs:
           node --check apps/web/market-status.js
           node --check apps/web/market-correlation.js
           node --check apps/web/technical-summary.js
+          node --check apps/web/fund-holdings.js
+          node --check apps/web/manager-13f.js
 
       - name: Test chart periods, overlays, trend state, API responses and preferences
         run: node --test apps/web/*.test.js

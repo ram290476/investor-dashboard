@@ -61,7 +61,8 @@ import {
 import { inflationSurpriseView } from "./inflation-panel.js";
 import { chartPanelOptions } from "./chart-panel.js";
 import { liveTechnicalSummary, technicalSummaryView } from "./technical-summary.js";
-import { isFund, renderFundHoldingsPanel } from "./fund-holdings.js";
+import { classificationNote, isFund, renderFundHoldingsPanel } from "./fund-holdings.js";
+import { renderManager13fPanels } from "./manager-13f.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
@@ -714,8 +715,9 @@ async function loadFundHoldings(ticker, force = false) {
   if (session.selected === ticker && session.route?.page === "stock") renderDashboard();
 }
 
-function renderFundPanel(ticker) {
+function renderFundPanel(ticker, conflictNote = null) {
   const state = {
+    conflictNote,
     doc: session.fundDoc[ticker] || null,
     loadState: session.fundState[ticker] || "loading",
     ui: session.fundUi[ticker],
@@ -724,6 +726,11 @@ function renderFundPanel(ticker) {
   const panel = renderFundHoldingsPanel(state, document);
   session.fundUi[ticker] = state.ui;
   return panel;
+}
+
+// 13F summary for the fund's manager(s), from the same /fund document (#223).
+function renderManager13f(ticker) {
+  return renderManager13fPanels(session.fundDoc[ticker] || null, session.fundState[ticker] || "loading", document);
 }
 
 // Company page chart state (#212). Every chart toggle (overlays, under-chart lanes such as
@@ -3996,7 +4003,10 @@ function renderStockPage() {
     // Funds have no KPI/Fundamentals/Calls tabs; a tab left over from a company page would hide
     // every overview panel on a phone.
     page.dataset.stockTab = "overview";
-    page.append(chart, renderTechnicalSummary(session.selected, history), renderFundPanel(session.selected));
+    // The write-once is_fund stamp and the live SEC classification can disagree; say so, don't override.
+    const fundPanel = renderFundPanel(session.selected, classificationNote(tickerData));
+    page.append(chart, renderTechnicalSummary(session.selected, history), fundPanel,
+      ...renderManager13f(session.selected));
     root.append(page);
     settings.refresh();
     return;

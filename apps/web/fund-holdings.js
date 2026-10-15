@@ -21,8 +21,21 @@ const BLANK_NAMES = new Set(["", "N/A", "NA", "NONE", "NULL", "-", "--", "UNKNOW
 const SOURCE_LABELS = { sec_nport: "SEC N-PORT", yahoo_top_holdings: "Yahoo Finance", ark_daily: "ARK daily holdings" };
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+// The write-once is_fund stamp (#223) decides; instrument_kind is the fallback for tickers the
+// collector has not stamped yet. A disagreement is surfaced, never resolved here.
 export function isFund(tickerData) {
+  if (typeof tickerData?.is_fund === "boolean") return tickerData.is_fund;
   return tickerData?.instrument_kind === "fund";
+}
+
+export const CONFLICT_NOTES = {
+  is_fund_stamped_true_but_now_operating: "Listed as a fund, but SEC data now matches an operating company.",
+  is_fund_stamped_false_but_nport_fund: "SEC fund filings were found for this ticker; classification is under review.",
+};
+
+export function classificationNote(tickerData) {
+  const conflict = tickerData?.fund_classification_conflict;
+  return conflict ? (CONFLICT_NOTES[conflict] || "Fund classification is under review.") : null;
 }
 
 function blank(value) {
@@ -199,6 +212,7 @@ export function renderFundHoldingsPanel(state, document = globalThis.document) {
     }
     header.append(titleBlock);
     panel.append(header);
+    if (state.conflictNote) panel.append(el(document, "p", "fund-note fund-conflict", state.conflictNote));
 
     if (status === "loading") {
       panel.append(el(document, "p", "data-state", "Loading holdings…"));

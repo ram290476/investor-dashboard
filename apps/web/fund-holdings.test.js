@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  DAILY_UNAVAILABLE_NOTE, EMPTY_COPY, TOP_N, UNNAMED, asOfLabel, defaultUiState, factsLine, fallbackNote, formatDate,
+  CONFLICT_NOTES, DAILY_UNAVAILABLE_NOTE, EMPTY_COPY, classificationNote, TOP_N, UNNAMED, asOfLabel, defaultUiState, factsLine, fallbackNote, formatDate,
   formatPct, formatUsd, holdingName, isFund, nextSort, panelState, toggleLabel, visibleRows,
 } from "./fund-holdings.js";
 
@@ -19,6 +19,16 @@ test("only fund tickers get the panel", () => {
   assert.equal(isFund({ instrument_kind: "fund" }), true);
   assert.equal(isFund({}), false);
   assert.equal(isFund(null), false);
+});
+
+test("the write-once is_fund stamp wins over instrument_kind; conflicts get a note", () => {
+  assert.equal(isFund({ is_fund: true, instrument_kind: "operating" }), true);
+  assert.equal(isFund({ is_fund: false, instrument_kind: "fund" }), false);
+  assert.equal(isFund({ instrument_kind: "fund" }), true);
+  assert.equal(classificationNote({ is_fund: true }), null);
+  assert.equal(classificationNote({ fund_classification_conflict: "is_fund_stamped_true_but_now_operating" }),
+    CONFLICT_NOTES.is_fund_stamped_true_but_now_operating);
+  assert.match(classificationNote({ fund_classification_conflict: "something_new" }), /under review/);
 });
 
 test("N/A names fall back to issuer, then title, then Unnamed holding", () => {
@@ -100,14 +110,14 @@ test("the company page shows the panel only for funds and fetches GET /fund/<T> 
   const { readFile } = await import("node:fs/promises");
   const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
   const css = await readFile(new URL("./styles.css", import.meta.url), "utf8");
-  assert.match(app, /import \{ isFund, renderFundHoldingsPanel \} from "\.\/fund-holdings\.js"/);
+  assert.match(app, /import \{ classificationNote, isFund, renderFundHoldingsPanel \} from "\.\/fund-holdings\.js"/);
   assert.match(app, /apiGet\(`fund\/\$\{encodeURIComponent\(ticker\)\}`\)/);
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   const gate = page.indexOf("const fund = isFund(tickerData)");
   assert.ok(gate > 0 && page.indexOf("loadFundHoldings(session.selected)") > gate);
   // Fund holdings follows the Technical Summary; company-only panels are not appended for funds.
   const fundBranch = page.slice(gate, page.indexOf("return;", gate));
-  assert.match(fundBranch, /renderTechnicalSummary\(session\.selected, history\), renderFundPanel/);
+  assert.match(fundBranch, /renderTechnicalSummary\(session\.selected, history\), fundPanel,\s+\.\.\.renderManager13f/);
   assert.doesNotMatch(fundBranch, /section\("kpis"/);
   assert.match(fundBranch, /page\.dataset\.stockTab = "overview"/);
   const panelCss = css.slice(css.indexOf("Fund holdings panel (issue 223)"));
