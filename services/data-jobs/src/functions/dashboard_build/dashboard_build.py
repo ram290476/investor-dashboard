@@ -1121,6 +1121,42 @@ def publish_charts_sequentially(tickers: list[str], load_chart_inputs, generated
         del inputs, document
 
 
+def publish_fund_documents(
+    tickers: list[str], *, read_json, read_rows, write, now: datetime, generated_at: str
+) -> dict:
+    """Merge fund sources into serving/funds/<T>.json and serving/managers/<cik>.json (#223).
+
+    Returns {ticker: stock fields} for fund tickers so the snapshot can mark instrument_kind."""
+    from fund_serving import (
+        build_fund_documents,
+        fund_document_key,
+        manager_document_key,
+        stock_flag_fields,
+        stock_fund_fields,
+    )
+
+    built = build_fund_documents(tickers, read_json=read_json, read_rows=read_rows, now=now, generated_at=generated_at)
+    for ticker, document in built["funds"].items():
+        write(document, fund_document_key(ticker))
+    for cik, document in built["managers"].items():
+        write(document, manager_document_key(cik))
+    fields = {ticker: stock_fund_fields(document) for ticker, document in built["funds"].items()}
+    for ticker, flag in (built.get("flags") or {}).items():
+        fields[ticker] = {**fields.get(ticker, {}), **stock_flag_fields(flag)}
+        if flag.get("conflict"):
+            from observability import logger
+
+            logger.warning("fund_classification_conflict", extra={"ticker": ticker, "conflict": flag["conflict"]})
+    return fields
+
+
+def apply_fund_fields(snapshot: dict, fields: dict[str, dict]) -> None:
+    for ticker, extra in fields.items():
+        row = (snapshot.get("tickers") or {}).get(ticker)
+        if isinstance(row, dict):
+            row.update(extra)
+
+
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
     from lake import read_json, read_parquet_prefix, read_prices, write_json_and_gzip
     from observability import job_handler, logger
@@ -1252,6 +1288,19 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             release_links=link_rows,
             rates=rates_block,
         )
+        try:
+            fund_fields = publish_fund_documents(
+                tickers,
+                read_json=read_json,
+                read_rows=lambda prefix: read_parquet_prefix(prefix).to_dicts(),
+                write=lambda document, key: write_json_and_gzip(document, key, cache_seconds=30),
+                now=datetime.now(UTC),
+                generated_at=generated_at,
+            )
+        except Exception:  # noqa: BLE001 - fund panels must never block the dashboard snapshot
+            logger.exception("fund_documents_failed")
+            fund_fields = {}
+        apply_fund_fields(snapshot, fund_fields)
         size = write_json_and_gzip(snapshot, "serving/dashboard.json", cache_seconds=30)
         _emit_dashboard_size(size["raw_bytes"], size["gzip_bytes"])
         logger.info(

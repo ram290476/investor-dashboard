@@ -106,6 +106,28 @@ def write_json(obj, key: str, bucket: str | None = None, cache_seconds: int = 60
     return key
 
 
+def write_json_once(obj, key: str, bucket: str | None = None, client=None) -> bool:
+    """Create ``key`` only if it does not exist (S3 conditional write, If-None-Match: *).
+
+    Returns True when written, False when the object already existed. The S3 equivalent of a
+    DynamoDB attribute_not_exists condition: a stamped value is never overwritten."""
+    from botocore.exceptions import ClientError
+
+    try:
+        (client or s3()).put_object(
+            Bucket=bucket or LAKE_BUCKET,
+            Key=key,
+            Body=json.dumps(obj, separators=(",", ":"), default=str).encode(),
+            ContentType="application/json",
+            IfNoneMatch="*",
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"PreconditionFailed", "ConditionalRequestConflict"}:
+            return False
+        raise
+    return True
+
+
 def write_json_and_gzip(obj, key: str, bucket: str | None = None, cache_seconds: int = 60) -> dict[str, int]:
     """Write compact JSON and a deterministic gzip sibling at ``<key>.gz``.
 

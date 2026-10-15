@@ -489,7 +489,7 @@ variable "jobs" {
       handler  = "dashboard_build.handler"
       schedule = ""
       # Rebuild when a backfill ticker finishes (tickers_completed > 0), not after every batch.
-      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1", "job:SEC?partial"]
+      triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1", "job:SEC?partial", "job:FUND", "job:FUNDPROFILE"]
       memory   = 2048
       timeout  = 300
       read_prefixes = [
@@ -514,8 +514,12 @@ variable "jobs" {
         "curated/macro_daily/source=fred/",
         "serving/rates/",
         "serving/filings/",
+        "curated/fund_universe/",
+        "curated/fund_holdings/",
+        "curated/fund_profile/",
+        "curated/manager_holdings/",
       ]
-      write_prefixes = ["serving/dashboard.json", "serving/chart_data/", "serving/dashboard-build/"]
+      write_prefixes = ["serving/dashboard.json", "serving/chart_data/", "serving/dashboard-build/", "serving/funds/", "serving/managers/"]
       api_keys       = []
       reads_prefs    = true
     }
@@ -659,6 +663,30 @@ variable "jobs" {
       write_prefixes = ["raw/sec_filings/", "curated/sec_filings/", "serving/filings/"]
       api_keys       = []
       reads_prefs    = true
+    }
+    # Fund holdings from SEC N-PORT (#223). Funds come only from the watchlist union.
+    fund-filings = {
+      handler        = "fund_filings.handler"
+      schedule       = "cron(0 7 ? * MON-FRI *)"
+      triggers       = ["ticker-added"]
+      memory         = 1024
+      timeout        = 600
+      read_prefixes  = ["raw/fund_filings/", "curated/fund_filings/", "curated/fund_universe/", "curated/fund_holdings/", "curated/manager_holdings/", "serving/filings/"]
+      write_prefixes = ["raw/fund_filings/", "curated/fund_filings/", "curated/fund_universe/", "curated/fund_holdings/", "curated/manager_holdings/"]
+      api_keys       = []
+      reads_prefs    = true
+    }
+    # Best-effort weekly Yahoo fund summaries (#223) for funds in the cached fund map.
+    fund-profile = {
+      handler        = "fund_profile.handler"
+      schedule       = "cron(0 8 ? * MON *)"
+      triggers       = []
+      memory         = 512
+      timeout        = 120
+      read_prefixes  = ["curated/fund_universe/", "curated/fund_profile/"]
+      write_prefixes = ["raw/fund_profile/", "curated/fund_profile/"]
+      api_keys       = []
+      reads_prefs    = false
     }
     # Rebuilds serving/status.json after every job
     status-feed = {

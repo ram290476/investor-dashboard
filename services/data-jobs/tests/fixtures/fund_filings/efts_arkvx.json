@@ -1,0 +1,251 @@
+{
+ "took": 15,
+ "timed_out": false,
+ "_shards": {
+  "total": 50,
+  "successful": 50,
+  "skipped": 0,
+  "failed": 0
+ },
+ "hits": {
+  "total": {
+   "value": 32,
+   "relation": "eq"
+  },
+  "max_score": 21.749664,
+  "hits": [
+   {
+    "_index": "edgar_file",
+    "_id": "0000945621-25-000877:form4.xml",
+    "_score": 21.749664,
+    "_source": {
+     "ciks": [
+      "0001496362",
+      "0001905088"
+     ],
+     "display_names": [
+      "ZACK ROBERT G.  (CIK 0001496362)",
+      "ARK Venture Fund  (CIK 0001905088)"
+     ],
+     "form": "4",
+     "adsh": "0000945621-25-000877",
+     "file_date": "2025-09-26"
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0000945621-26-000924:form3.xml",
+    "_score": 20.881035,
+    "_source": {
+     "ciks": [
+      "0002145987",
+      "0001905088"
+     ],
+     "display_names": [
+      "Fontano Kathleen  (CIK 0002145987)",
+      "ARK Venture Fund  (CIK 0001905088)"
+     ],
+     "form": "3",
+     "adsh": "0000945621-26-000924",
+     "file_date": "2026-07-16"
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0000945621-25-000934:form4.xml",
+    "_score": 20.84412,
+    "_source": {
+     "ciks": [
+      "0001697748",
+      "0001905088"
+     ],
+     "display_names": [
+      "ARK Investment Management LLC  (CIK 0001697748)",
+      "ARK Venture Fund  (CIK 0001905088)"
+     ],
+     "form": "4",
+     "adsh": "0000945621-25-000934",
+     "file_date": "2025-10-08"
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001213900-25-018652:ea0232625-01_424b3.htm",
+    "_score": 20.46854,
+    "_source": {
+     "ciks": [
+      "0001905088"
+     ],
+     "display_names": [
+      "ARK Venture Fund  (CIK 0001905088)"
+     ],
+     "form": "424B3",
+     "adsh": "0001213900-25-018652",
+     "file_date": "2025-02-28"
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001013762-23-002458:ea160399_ncsr.htm",
+    "_score": 19.808048,
+    "_source": {
+     "ciks": [
+      "0001905088"
+     ],
+     "display_names": [
+      "Ark Venture Fund  (CIK 0001905088)"
+     ],
+     "form": "N-CSR",
+     "adsh": "0001013762-23-002458",
+     "file_date": "2023-10-06"
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001213900-26-107607:ea0304362-01_ncsr.htm",
+    "_score": 18.305614,
+    "_source": {
+     "ciks": [
+      "0001905088"
+     ],
+     "display_names": [
+      "ARK Venture Fund  (CIK 0001905088)"
+     ],
+     "form": "N-CSR",
+     "adsh": "0001213900-26-107607",
+     "file_date": "2026-10-07"
+    }
+   }
+  ]
+ },
+ "aggregations": {
+  "entity_filter": {
+   "doc_count_error_upper_bound": 0,
+   "sum_other_doc_count": 0,
+   "buckets": [
+    {
+     "key": "ARK Venture Fund  (CIK 0001905088)",
+     "doc_count": 22
+    },
+    {
+     "key": "Ark Venture Fund  (CIK 0001905088)",
+     "doc_count": 10
+    },
+    {
+     "key": "ARK Investment Management LLC  (CIK 0001697748)",
+     "doc_count": 1
+    },
+    {
+     "key": "Fontano Kathleen  (CIK 0002145987)",
+     "doc_count": 1
+    },
+    {
+     "key": "ZACK ROBERT G.  (CIK 0001496362)",
+     "doc_count": 1
+    }
+   ]
+  },
+  "sic_filter": {
+   "doc_count_error_upper_bound": 0,
+   "sum_other_doc_count": 0,
+   "buckets": []
+  },
+  "biz_states_filter": {
+   "doc_count_error_upper_bound": 0,
+   "sum_other_doc_count": 0,
+   "buckets": [
+    {
+     "key": "FL",
+     "doc_count": 32
+    }
+   ]
+  },
+  "form_filter": {
+   "doc_count_error_upper_bound": 0,
+   "sum_other_doc_count": 0,
+   "buckets": [
+    {
+     "key": "N-23C3A",
+     "doc_count": 16
+    },
+    {
+     "key": "486APOS",
+     "doc_count": 3
+    },
+    {
+     "key": "486BPOS",
+     "doc_count": 3
+    },
+    {
+     "key": "N-CSR",
+     "doc_count": 3
+    },
+    {
+     "key": "4",
+     "doc_count": 2
+    },
+    {
+     "key": "424B3",
+     "doc_count": 2
+    },
+    {
+     "key": "N-CSRS",
+     "doc_count": 2
+    },
+    {
+     "key": "3",
+     "doc_count": 1
+    }
+   ]
+  }
+ },
+ "query": {
+  "_source": {
+   "exclude": [
+    "doc_text"
+   ]
+  },
+  "query": {
+   "bool": {
+    "must": [
+     {
+      "match_phrase": {
+       "doc_text": "ARKVX"
+      }
+     }
+    ],
+    "must_not": [],
+    "should": [],
+    "filter": []
+   }
+  },
+  "from": 0,
+  "size": 100,
+  "aggregations": {
+   "form_filter": {
+    "terms": {
+     "field": "root_forms",
+     "size": 30
+    }
+   },
+   "entity_filter": {
+    "terms": {
+     "field": "display_names.raw",
+     "size": 30
+    }
+   },
+   "sic_filter": {
+    "terms": {
+     "field": "sics",
+     "size": 30
+    }
+   },
+   "biz_states_filter": {
+    "terms": {
+     "field": "biz_states",
+     "size": 30
+    }
+   }
+  }
+ }
+}

@@ -28,6 +28,7 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         "api.polygon.io",  # DS-01, DS-42
         "query1.finance.yahoo.com",
         "query2.finance.yahoo.com",  # DS-05 backfill
+        "fc.yahoo.com",  # cookie for quoteSummary crumb: fund profiles (#223)
         "finnhub.io",  # DS-04, DS-13, DS-41
         "www.alphavantage.co",  # DS-03, DS-40
         # Rates, inflation, macro
@@ -49,6 +50,7 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         # Filings, regulation, government
         "www.sec.gov",
         "data.sec.gov",  # DS-06, DS-10, DS-11, DS-75
+        "efts.sec.gov",  # EDGAR full-text search: fund CIK fallback (#223)
         "www.federalregister.gov",
         "www.whitehouse.gov",
         "ustr.gov",
