@@ -192,10 +192,11 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
         no_data_tickers: list[str] = []
         invalid_tickers: list[str] = []
         failed_tickers: list[str] = []
+        rate_limited = False
         index = int(state.get("next_index", 0)) % len(ticker_order)
 
         with get_client() as http:
-            while batches_done < max_batches:
+            while batches_done < max_batches and not rate_limited:
                 pending = [t for t in ticker_order if _is_pending(state["tickers"][t])]
                 if not pending:
                     break
@@ -218,9 +219,14 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                             "GET",
                             yahoo.CHART_URL.format(ticker=ticker),
                             params=params,
+                            retry_statuses=yahoo.CHART_RETRY_STATUSES,
+                            return_statuses=yahoo.CHART_RETURN_STATUSES,
                         )
                     except httpx.HTTPStatusError as exc:
                         response = exc.response
+                    if response.status_code == 429:
+                        record["coverage"] = "rate_limited"
+                        raise yahoo.YahooRateLimited("Yahoo returned HTTP 429; stopped until quota permits")
                     try:
                         payload = response.json()
                     except ValueError:
@@ -286,6 +292,9 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
 
                 if record["outcome"] == "failure":
                     failed_tickers.append(ticker)
+                    if record.get("error_type") == "YahooRateLimited":
+                        rate_limited = True
+                        break
                     continue
 
                 if progress.get("complete") and not progress.get("invalid"):
@@ -296,7 +305,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 write_json(state, STATE_KEY, bucket, cache_seconds=0)
 
         pending_after = [t for t in ticker_order if _is_pending(state["tickers"][t])]
-        state["status"] = "running" if pending_after else "complete"
+        if rate_limited:
+            state["status"] = "rate_limited"
+        else:
+            state["status"] = "running" if pending_after else "complete"
         state["completed_at"] = None if pending_after else datetime.now(UTC).isoformat(timespec="seconds")
         state["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         write_json(state, STATE_KEY, bucket, cache_seconds=0)
@@ -312,6 +324,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 "no_data_tickers": no_data_tickers,
                 "invalid_tickers": invalid_tickers,
                 "failed_tickers": failed_tickers,
+                "rate_limited": rate_limited,
                 "tickers_pending_before": pending_before,
             },
         )
@@ -325,6 +338,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
             "no_data_tickers": no_data_tickers,
             "invalid_tickers": invalid_tickers,
             "failed_tickers": failed_tickers,
+            "rate_limited": rate_limited,
         }
 
     return run(event, context)

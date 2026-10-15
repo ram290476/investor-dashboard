@@ -184,3 +184,35 @@ def test_backfill_stops_at_a_yahoo_400_and_marks_an_unknown_symbol_invalid(monke
     assert stored.height == 1
     assert again["batches"] == 0
     assert calls["APPL"] == 1
+
+
+def test_backfill_stops_the_run_on_a_yahoo_429_without_retrying(monkeypatch):
+    calls: list[str] = []
+
+    def respond(request):
+        ticker = request.url.path.rstrip("/").split("/")[-1]
+        calls.append(ticker)
+        return httpx.Response(429, json={"chart": {"error": {"description": "Too Many Requests"}}})
+
+    monkeypatch.setenv("BACKFILL_MAX_BATCHES", "5")
+    monkeypatch.setenv("BACKFILL_BATCH_DAYS", "90")
+    monkeypatch.setattr(http_client.time, "sleep", lambda _delay: pytest.fail("429 must not be retried"))
+    real_get_client = http_client.get_client
+    monkeypatch.setattr(
+        http_client, "get_client", lambda **kwargs: real_get_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    monkeypatch.setattr(observability, "emit_job_finished", lambda *args, **kwargs: None)
+    with mock_aws():
+        client = boto3.client("s3", region_name="us-east-1")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        result = backfill.handler({"tickers": ["SPCX", "TSLA", "AAPL"]}, _Context())
+        state = lake.read_json(backfill.STATE_KEY)
+    assert len(calls) == 1
+    assert result["status"] == "rate_limited"
+    assert result["rate_limited"] is True
+    assert result["failed_tickers"] == [calls[0]]
+    assert state["status"] == "rate_limited"
+    assert all(not progress["complete"] for progress in state["tickers"].values())
+    assert all(not progress.get("invalid") for progress in state["tickers"].values())
