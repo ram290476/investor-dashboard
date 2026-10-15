@@ -149,9 +149,13 @@ def info_table_name(index_json: dict | None) -> str | None:
     return others[0] if others else None
 
 
-def latest_13f(cik: str, submissions: dict, get_json, get_text, max_docs: int = 6) -> dict | None:
-    """Newest reporting period. Restatements replace it; 'NEW HOLDINGS' amendments add rows."""
+def latest_13f(cik: str, submissions: dict, get_json, get_text, max_docs: int = 6,
+               before: str | None = None) -> dict | None:
+    """Newest reporting period (or the newest before `before`, for the quarter-over-quarter
+    comparison). Restatements replace it; 'NEW HOLDINGS' amendments add rows."""
     filings = latest_form(submissions, F13_FORMS)
+    if before:
+        filings = [f for f in filings if f["report_date"] and f["report_date"] < before]
     if not filings:
         return None
     period = None

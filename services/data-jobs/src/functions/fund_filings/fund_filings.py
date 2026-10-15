@@ -17,6 +17,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
+from issuer_sectors import resolve_issuers
 
 from company_ir import Pace, crawler_user_agent
 from manager_holdings import (
@@ -30,6 +31,8 @@ from manager_holdings import (
     resolve_manager,
 )
 from sec_filings import cik_map_from_company_tickers, fetch_sec, target_tickers
+
+ISSUER_SECTORS_KEY = "curated/fund_universe/issuer_sectors.json"  # literal so the IAM read-prefix test can see it
 
 JOB_ID = "FUND"
 MF_URL = "https://www.sec.gov/files/company_tickers_mf.json"
@@ -90,6 +93,10 @@ def manager_holdings_key(cik: str, period: str) -> str:
 
 def manager_header_key(cik: str, period: str) -> str:
     return f"curated/manager_holdings/cik={int(cik)}/period={period}/_manager.json"
+
+
+def is_fund_key(ticker: str) -> str:
+    return f"curated/fund_universe/is_fund/{ticker.upper()}.json"
 
 
 def fund_header_key(cik: str, fund_ticker: str, period: str) -> str:
@@ -364,7 +371,7 @@ def holdings_frame(fund_ticker: str, filing: dict) -> pl.DataFrame:
 
 def run_collection(
     tickers: list[str], *, fetch, pace, sleep, fund_map: dict | None, state: dict, now: datetime,
-    app_documents: dict[str, dict | None] | None = None,
+    app_documents: dict[str, dict | None] | None = None, issuer_sectors: dict | None = None,
 ) -> dict:
     """Resolve the universe, then fetch only funds whose latest accession is new. Pure: no lake I/O."""
 
@@ -480,13 +487,73 @@ def run_collection(
         key = "+".join([report["accession"], *report["amendments"]])
         new = seen_13f.get(cik) != key
         seen_13f[cik] = key
-        managers.append({"cik": cik, "status": "ok", "new": new, "name": (subs or {}).get("name"), "report": report})
+        # The previous quarter, for the quarter-over-quarter comparison; fetched once per new quarter.
+        previous = None
+        prev_key = f"{cik}:prev"
+        if new or not seen_13f.get(prev_key):
+            previous = latest_13f(cik, subs, get_json, get_text, before=report["period_end"])
+            if previous is not None:
+                seen_13f[prev_key] = previous["accession"]
+        managers.append({"cik": cik, "status": "ok", "new": new, "name": (subs or {}).get("name"), "report": report,
+                         "previous": previous})
+
+    # Sector/industry for every 13F issuer (current and previous quarter), from SEC data only.
+    issuer_rows = [row for m in managers for rep in (m.get("report"), m.get("previous")) if rep
+                   for row in rep["holdings"] if not row.get("is_option")]
+    cusip_tickers = {h["cusip"]: h["ticker"] for r in results if r.get("filing")
+                     for h in r["filing"]["holdings"] if h.get("cusip") and h.get("ticker")}
+    sectors = dict(issuer_sectors or {})
+    if issuer_rows:
+        if not operating:
+            operating = cik_map_from_company_tickers(get_json(OPERATING_URL) or {})
+        sectors = resolve_issuers(issuer_rows, cusip_tickers=cusip_tickers, operating_map=operating, cache=sectors,
+                                  get_json=get_json, submissions_url=SUBMISSIONS_URL, now=now)
     return {
         "fund_map": {"updated_at": stamp, "funds": entries},
         "state": {"latest_accession": seen, "latest_13f": seen_13f, "updated_at": stamp},
         "results": results,
         "managers": managers,
+        "issuer_sectors": sectors,
     }
+
+
+def is_fund_decision(entry: dict | None, managers_with_13f: set[str]) -> bool | None:
+    """The one-time is_fund stamp: True when 13F data is present for the ticker (its fund's derived
+    manager has a parsed 13F), False when the ticker is definitely not covered by 13F data.
+    None means 'not definitive yet' (unresolved mapping or collision, EDGAR search outage, 13F fetch
+    failed), so nothing is stamped and the first definitive collection decides."""
+    entry = entry or {}
+    if entry.get("status") != "resolved":
+        return None
+    if entry.get("kind") == "operating":
+        return False
+    if entry.get("kind") != "fund":
+        return None
+    status = entry.get("managers_status")
+    ciks = {str(m.get("cik")) for m in entry.get("managers") or []}
+    if status == "resolved":
+        if ciks & managers_with_13f:
+            return True
+        return None  # manager known but its 13F did not load this run
+    if status in ("no_13f_filer", "no_adviser"):
+        return False
+    return None
+
+
+def is_fund_stamps(collected: dict, now: datetime) -> list[dict]:
+    with_13f = {str(m["cik"]) for m in collected.get("managers") or [] if m.get("report")}
+    out = []
+    for ticker, entry in sorted((collected.get("fund_map") or {}).get("funds", {}).items()):
+        decision = is_fund_decision(entry, with_13f)
+        if decision is None:
+            continue
+        out.append({
+            "ticker": ticker, "is_fund": decision, "stamped_at": now.isoformat(timespec="seconds"),
+            "basis": {"kind": entry.get("kind"), "method": entry.get("method"),
+                      "managers_status": entry.get("managers_status"),
+                      "manager_ciks": sorted(str(m.get("cik")) for m in entry.get("managers") or [])},
+        })
+    return out
 
 
 def manager_frame(cik: str, report: dict) -> pl.DataFrame:
@@ -511,7 +578,9 @@ def fund_summary(result: dict) -> dict:
     }
 
 
-def publish(collected: dict, *, write_text, write_json, write_parquet) -> None:
+def publish(collected: dict, *, write_text, write_json, write_parquet, write_json_once=None,
+            now: datetime | None = None) -> list[str]:
+    """Write the run's outputs. Returns the tickers whose is_fund flag was stamped this run."""
     for result in collected["results"]:
         filing = result.get("filing")
         if not filing or not result.get("new"):
@@ -522,26 +591,40 @@ def publish(collected: dict, *, write_text, write_json, write_parquet) -> None:
         write_json({**filing["header"], "accession": filing["accession"], "filed_at": filing["filed_at"],
                     "fund_ticker": ticker}, fund_header_key(cik, ticker, period))
     for manager in collected.get("managers") or []:
-        report = manager.get("report")
-        if not report or not manager.get("new"):
-            continue
-        cik, period = manager["cik"], report["period_end"]
-        write_text(report["cover_xml"], raw_13f_key(cik, report["accession"], "primary_doc.xml"))
-        write_text(report["table_xml"], raw_13f_key(cik, report["accession"], report["table_name"]))
-        write_parquet(manager_frame(cik, report), manager_holdings_key(cik, period))
-        write_json({"manager_cik": str(int(cik)), "name": manager.get("name"), "period_end": period,
-                    "filed_at": report["filed_at"], "accession": report["accession"],
-                    "amendments": report["amendments"], "entry_total": report.get("entry_total"),
-                    "value_total_usd": report.get("value_total"), "form": report["form"]},
-                   manager_header_key(cik, period))
+        writers = (write_text, write_json, write_parquet)
+        if manager.get("previous"):
+            _publish_13f(manager["cik"], manager.get("name"), manager["previous"], *writers)
+        if manager.get("report") and manager.get("new"):
+            _publish_13f(manager["cik"], manager.get("name"), manager["report"], *writers)
+    if collected.get("issuer_sectors"):
+        write_json(collected["issuer_sectors"], ISSUER_SECTORS_KEY)
     write_json(collected["fund_map"], FUND_MAP_KEY)
     write_json(collected["state"], STATE_KEY)
+    stamped: list[str] = []
+    if write_json_once is not None:
+        # Write-once: an existing stamp is never replaced, whatever later quarters or remaps say.
+        for stamp in is_fund_stamps(collected, now or datetime.now(UTC)):
+            if write_json_once(stamp, is_fund_key(stamp["ticker"])):
+                stamped.append(stamp["ticker"])
+    return stamped
+
+
+def _publish_13f(cik, name, report, write_text, write_json, write_parquet) -> None:
+    period = report["period_end"]
+    write_text(report["cover_xml"], raw_13f_key(cik, report["accession"], "primary_doc.xml"))
+    write_text(report["table_xml"], raw_13f_key(cik, report["accession"], report["table_name"]))
+    write_parquet(manager_frame(cik, report), manager_holdings_key(cik, period))
+    write_json({"manager_cik": str(int(cik)), "name": name, "period_end": period,
+                "filed_at": report["filed_at"], "accession": report["accession"],
+                "amendments": report["amendments"], "entry_total": report.get("entry_total"),
+                "value_total_usd": report.get("value_total"), "form": report["form"]},
+               manager_header_key(cik, period))
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
     import os
 
-    from lake import read_json, s3, write_json, write_parquet
+    from lake import read_json, s3, write_json, write_json_once, write_parquet
     from observability import job_handler
     from regulatory_feeds import assert_prod_user_agent
     from universe import user_ticker_union, watchlist_universe
@@ -567,12 +650,15 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 planned["tickers"], fetch=lambda url: http.get(url), pace=pace, sleep=pace.sleep,
                 fund_map=read_json(FUND_MAP_KEY), state=read_json(STATE_KEY) or {}, now=datetime.now(UTC),
                 app_documents={t: read_json(f"serving/filings/{t}.json") for t in planned["tickers"]},
+                issuer_sectors=read_json(ISSUER_SECTORS_KEY) or {},
             )
-        publish(collected, write_text=write_text, write_json=write_json, write_parquet=write_parquet)
+        stamped = publish(collected, write_text=write_text, write_json=write_json, write_parquet=write_parquet,
+                          write_json_once=write_json_once, now=datetime.now(UTC))
         return {
             "status": "ok",
             "funds": [{k: v for k, v in fund_summary(r).items() if k != "top"} for r in collected["results"]],
             "managers": [{k: m.get(k) for k in ("cik", "status", "reason", "new")} for m in collected["managers"]],
+            "is_fund_stamped": stamped,
         }
 
     return run(event, context)
