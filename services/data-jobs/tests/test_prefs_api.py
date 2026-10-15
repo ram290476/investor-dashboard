@@ -1454,3 +1454,46 @@ def test_non_chart_errors_do_not_log_a_ticker(api, monkeypatch, capsys):
     _patch_get_object(monkeypatch, mod, get_object)
     mod.handler(_route_event("GET", "/dashboard"), None)
     assert "ticker" not in _log_lines(capsys)[0]
+
+
+def test_fund_route_reads_only_watchlist_fund_documents(api, monkeypatch):
+    """GET /fund/{ticker} (#223): watchlist-scoped, 404 FUND_NOT_READY when missing or denied."""
+    mod, _ = api
+    mod.handler(_event("PUT", body={"tickers": ["TSLA", "ARKK"], "pinned": [], "version": 0}), None)
+    fund = {"schema_version": 1, "ticker": "ARKK", "holdings_source": "sec_nport", "holdings": []}
+    reads = []
+
+    def read(key):
+        reads.append(key)
+        if key == "serving/funds/ARKK.json":
+            return _stored(fund, '"fund"')
+        if key == "serving/funds/TSLA.json":
+            raise _client_error("AccessDenied", "GetObject", "denied")
+        return None
+
+    monkeypatch.setattr(mod, "_read_serving_document", read)
+    event = _event("GET")
+    event["rawPath"] = "/fund/arkk"
+    ok = mod.handler(event, None)
+    assert ok["statusCode"] == 200 and json.loads(ok["body"]) == fund
+    operating = _event("GET")
+    operating["rawPath"] = "/fund/TSLA"
+    missing = mod.handler(operating, None)
+    assert missing["statusCode"] == 404 and json.loads(missing["body"])["code"] == "FUND_NOT_READY"
+    other = _event("GET")
+    other["rawPath"] = "/fund/XOVR"
+    assert mod.handler(other, None)["statusCode"] == 403
+    bad = _event("GET")
+    bad["rawPath"] = "/fund/../x"
+    assert mod.handler(bad, None)["statusCode"] == 404
+    assert reads == ["serving/funds/ARKK.json", "serving/funds/TSLA.json"]
+    assert mod._route_label("GET", "/fund/ARKK") == "GET /fund/{ticker}"
+
+
+def test_fund_route_and_read_access_are_in_terraform():
+    from pathlib import Path
+
+    tf = (Path(__file__).resolve().parents[3] / "infra/terraform/modules/user_prefs/main.tf").read_text()
+    assert '"GET /fund/{ticker}"' in tf
+    assert '"${var.lake_bucket_arn}/serving/funds/*"' in tf
+    assert '"serving/funds/*"]' in tf

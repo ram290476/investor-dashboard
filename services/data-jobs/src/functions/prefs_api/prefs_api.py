@@ -21,6 +21,7 @@ Item (table user_prefs, partition key user_sub):
     version       number   optimistic concurrency; PUT must send the version it read
     updated_at    string   ISO-8601 UTC
 
+GET /fund/{ticker} reads serving/funds/<TICKER>.json (#223) for a watchlist ticker; 404 FUND_NOT_READY when missing.
 GET /chart/{ticker} reads a chart document when the ticker is in this caller's preferences
 or is an index proxy (SPY, DIA, QQQ, IWM, XLY, ITA, SMH). Other symbols return 403.
 GET /dashboard, /chart/{ticker} and /status are gzip-encoded when the client accepts gzip and the
@@ -565,6 +566,8 @@ def _route_label(method: str, path: object) -> str:
         return f"{method} /unknown"
     if path.startswith("/chart/"):
         return f"{method} /chart/{{ticker}}"
+    if path.startswith("/fund/"):
+        return f"{method} /fund/{{ticker}}"
     if path.startswith("/stock/") and "/metrics/" in path:
         return f"{method} /stock/{{ticker}}/metrics/{{metric_id}}"
     if path.startswith("/stock/"):
@@ -686,6 +689,23 @@ def _read_chart_document(ticker: str) -> tuple[bytes, str, dict] | None:
         raise
 
 
+def _read_fund_document(ticker: str) -> tuple[bytes, str, dict] | None:
+    """serving/funds/<TICKER>.json (#223), or None when it has not been published.
+
+    Mirrors _read_chart_document: AccessDenied on a missing key reads as missing (404 FUND_NOT_READY).
+    The document exists only for tickers the fund collector resolved as funds, so an operating
+    company also gets FUND_NOT_READY and the page never shows the panel for it."""
+    key = f"serving/funds/{ticker}.json"
+    try:
+        return _read_serving_document(key)
+    except ClientError as exc:
+        if _aws_error_code(exc) == "AccessDenied":
+            logger.warning("serving_fund_access_denied_as_missing", extra={"key": key, "ticker": ticker})
+            return None
+        raise
+
+
+_FUND_PATH_RE = re.compile(r"/fund/([A-Za-z][A-Za-z0-9.\-]{0,9})")
 _CHART_PATH_RE = re.compile(r"/chart/([A-Za-z][A-Za-z0-9.\-]{0,9})")
 
 
@@ -693,6 +713,13 @@ def _chart_ticker(path: object) -> str | None:
     if not isinstance(path, str):
         return None
     match = _CHART_PATH_RE.fullmatch(path)
+    return match.group(1).upper() if match else None
+
+
+def _fund_ticker(path: object) -> str | None:
+    if not isinstance(path, str):
+        return None
+    match = _FUND_PATH_RE.fullmatch(path)
     return match.group(1).upper() if match else None
 
 
@@ -1034,6 +1061,26 @@ def _dispatch(event, sub: str, method: str, path: str, route: str) -> dict:
             gzip_key=chart_key,
             cache_key=f"chart:{ticker}:{_etag_token(etag, raw_bytes)}",
         )
+    if method == "GET" and path.startswith("/fund/"):
+        match = _FUND_PATH_RE.fullmatch(path)
+        if not match:
+            return respond(404, {"error": "Fund holdings not found"})
+        ticker = match.group(1).upper()
+        prefs = get_prefs(_table_for(sub), sub)
+        if ticker not in prefs["tickers"]:
+            return respond(403, {"error": "Ticker is not in your watchlist"})
+        fund_key = f"serving/funds/{ticker}.json"
+        loaded = _read_fund_document(ticker)
+        if loaded is None:
+            return respond(404, {"error": "Fund holdings have not been published yet", "code": "FUND_NOT_READY"})
+        raw_bytes, etag, fund = loaded
+        return respond(
+            200,
+            fund,
+            raw=raw_bytes,
+            gzip_key=fund_key,
+            cache_key=f"fund:{ticker}:{_etag_token(etag, raw_bytes)}",
+        )
     review = re.fullmatch(r"/stock/([A-Za-z][A-Za-z0-9.\-]{0,9})/metrics/([A-Za-z][A-Za-z0-9_]{0,64})", path)
     if review and method == "PUT":
         ticker = review.group(1).upper()
@@ -1094,7 +1141,7 @@ def handler(event, context):
         if not isinstance(event, dict):
             return _response(401, {"error": "Not signed in"})
         sub, method, path, route = _request_parts(event)
-        ticker = _chart_ticker(path) if _safe_method(method) == "GET" else None
+        ticker = (_chart_ticker(path) or _fund_ticker(path)) if _safe_method(method) == "GET" else None
         if not sub:
             return _response(401, {"error": "Not signed in"})
         return _dispatch(event, sub, method, path, route)

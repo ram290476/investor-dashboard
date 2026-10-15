@@ -323,6 +323,7 @@ data "aws_iam_policy_document" "api" {
       "${var.lake_bucket_arn}/serving/status.json",
       "${var.lake_bucket_arn}/serving/chart_data/*",
       "${var.lake_bucket_arn}/serving/stock/*",
+      "${var.lake_bucket_arn}/serving/funds/*",
     ]
   }
   statement {
@@ -331,7 +332,7 @@ data "aws_iam_policy_document" "api" {
     resources = ["${var.lake_bucket_arn}/catalog/*"]
   }
   # A missing catalog/<TICKER>.json (first approval for a ticker), serving/stock/<TICKER>.json or
-  # serving/chart_data/<TICKER>.json (ticker not built yet) must read as NoSuchKey, not
+  # serving/chart_data/<TICKER>.json or serving/funds/<TICKER>.json (ticker not built yet) must read as NoSuchKey, not
   # AccessDenied. S3 only returns 404 when the caller may list the prefix.
   statement {
     sid       = "ListMetricCatalog"
@@ -340,7 +341,7 @@ data "aws_iam_policy_document" "api" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["catalog/*", "serving/stock/*", "serving/chart_data/*"]
+      values   = ["catalog/*", "serving/stock/*", "serving/chart_data/*", "serving/funds/*"]
     }
   }
   statement {
@@ -466,7 +467,7 @@ resource "aws_apigatewayv2_integration" "prefs" {
 }
 
 resource "aws_apigatewayv2_route" "site" {
-  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /stock/{ticker}", "PUT /stock/{ticker}/metrics/{metric_id}"])
+  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /fund/{ticker}", "GET /stock/{ticker}", "PUT /stock/{ticker}/metrics/{metric_id}"])
   api_id             = aws_apigatewayv2_api.site.id
   route_key          = each.value
   target             = "integrations/${aws_apigatewayv2_integration.prefs.id}"
