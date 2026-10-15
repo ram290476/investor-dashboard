@@ -49,6 +49,7 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         # Filings, regulation, government
         "www.sec.gov",
         "data.sec.gov",  # DS-06, DS-10, DS-11, DS-75
+        "efts.sec.gov",  # EDGAR full-text search: fund CIK fallback (#223)
         "www.federalregister.gov",
         "www.whitehouse.gov",
         "ustr.gov",

@@ -89,7 +89,7 @@ FUZZY_LABEL_CUTOFF = 0.92
 DISCLOSURE_STATUSES = {"numeric", "narrative", "chart_only", "not_disclosed", "discontinued"}
 CATALOG_STATUSES = {"proposed", "approved", "rejected"}
 BLOCKED_HOSTS = {"tesla.com", "www.tesla.com"}
-SEC_HOSTS = {"www.sec.gov", "data.sec.gov"}
+SEC_HOSTS = {"www.sec.gov", "data.sec.gov", "efts.sec.gov"}
 # Operating items: the latest deck beats the press release, and news never wins over an official number.
 # GAAP items: XBRL beats the deck, which beats the press release.
 SOURCE_PRIORITY = {
