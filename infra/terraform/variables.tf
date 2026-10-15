@@ -671,8 +671,8 @@ variable "jobs" {
       triggers       = ["ticker-added"]
       memory         = 1024
       timeout        = 600
-      read_prefixes  = ["raw/fund_filings/", "curated/fund_filings/", "curated/fund_universe/", "curated/fund_holdings/", "curated/manager_holdings/"]
-      write_prefixes = ["raw/fund_filings/", "curated/fund_filings/", "curated/fund_universe/", "curated/fund_holdings/", "curated/manager_holdings/"]
+      read_prefixes  = ["raw/fund_filings/", "curated/fund_filings/", "curated/fund_universe/", "curated/fund_holdings/", "curated/manager_holdings/", "serving/filings/"]
+      write_prefixes = ["raw/fund_filings/", "curated/fund_filings/", "curated/fund_universe/", "curated/fund_holdings/", "curated/manager_holdings/", "serving/filings/"]
       api_keys       = []
       reads_prefs    = true
     }

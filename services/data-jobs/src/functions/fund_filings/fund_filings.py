@@ -26,6 +26,7 @@ from manager_holdings import (
     advisers_from_ncen,
     latest_13f,
     latest_form,
+    norm_name,
     resolve_manager,
 )
 from sec_filings import cik_map_from_company_tickers, fetch_sec, target_tickers
@@ -150,18 +151,73 @@ def resolve_by_fulltext(ticker: str, get_json) -> dict:
     return {"status": "unresolved", "reason": "no_fund_filer", "kind": "unknown"}
 
 
-def resolve_ticker(ticker: str, mf_map: dict, operating_map: dict, get_json) -> dict:
+def app_identity(document: dict | None) -> dict:
+    """How the app already classifies a ticker: its SEC filings job (serving/filings/<T>.json).
+
+    status ok/partial with a CIK means the app shows an operating company under that name
+    (e.g. SPCX = SPACE EXPLORATION TECHNOLOGIES CORP); no_sec_filer means no operating filer."""
+    doc = document if isinstance(document, dict) else {}
+    status = str(doc.get("status") or "")
+    if status in ("ok", "partial") and doc.get("cik"):
+        kind = "operating"
+    elif status == "no_sec_filer":
+        kind = "non_operating"
+    else:
+        kind = None
+    cik = str(int(doc["cik"])) if str(doc.get("cik") or "").isdigit() else None
+    return {"kind": kind, "status": status or None, "cik": cik, "name": doc.get("entity_name")}
+
+
+_FUND_WORDS = {"etf", "fund", "trust", "shares", "the", "inc", "corp", "corporation", "llc", "co"}
+
+
+def names_agree(left: str | None, right: str | None) -> bool:
+    def words(value):
+        return [w for w in norm_name(value).split() if w not in _FUND_WORDS]
+
+    a, b = words(left), words(right)
+    return bool(a) and a == b
+
+
+def resolve_ticker(ticker: str, mf_map: dict, operating_map: dict, get_json, app: dict | None = None,
+                   fund_name_for=None) -> dict:
+    """Map one watchlist ticker. A fund is accepted only when it cannot be the app's own entity.
+
+    - The app shows an operating SEC filer for the ticker: it stays operating unless the SEC fund's
+      series name agrees with the app's stored name (ticker collisions like SPCX stay SpaceX).
+    - The ticker is in both company_tickers.json and the fund file and the app has no identity yet:
+      unresolved (ticker_collision), retried next run, never guessed.
+    """
     sym = ticker.upper()
-    if sym in mf_map:
-        rec = mf_map[sym]
-        return {"status": "resolved", "kind": "fund", **rec, "method": "company_tickers_mf", "confidence": 1.0}
-    if sym in operating_map:
-        return {"status": "resolved", "kind": "operating", "cik": str(int(operating_map[sym]["cik"])),
+    app = app or {"kind": None}
+    fund = mf_map.get(sym)
+    operating = operating_map.get(sym)
+    collision = {"fund_cik": fund["cik"], "series_id": fund.get("series_id")} if fund else None
+    if app.get("kind") == "operating":
+        if fund and fund_name_for is not None and names_agree(app.get("name"), fund_name_for(fund)):
+            return {"status": "resolved", "kind": "fund", **fund, "method": "company_tickers_mf+app_name",
+                    "confidence": 1.0}
+        return {"status": "resolved", "kind": "operating", "cik": app.get("cik"), "name": app.get("name"),
+                "method": "app_sec_filer", "confidence": 1.0, **({"collision": collision} if fund else {})}
+    if fund and operating:
+        return {"status": "unresolved", "kind": "unknown", "reason": "ticker_collision", "collision": collision,
+                "operating_cik": str(int(operating["cik"]))}
+    if fund:
+        return {"status": "resolved", "kind": "fund", **fund, "method": "company_tickers_mf", "confidence": 1.0}
+    if operating:
+        return {"status": "resolved", "kind": "operating", "cik": str(int(operating["cik"])),
                 "method": "company_tickers", "confidence": 1.0}
     return resolve_by_fulltext(sym, get_json)
 
 
-def map_entry_fresh(entry: dict | None, now: datetime, max_age_days: int = FUND_MAP_MAX_AGE_DAYS) -> bool:
+def map_entry_fresh(entry: dict | None, now: datetime, max_age_days: int = FUND_MAP_MAX_AGE_DAYS,
+                    app: dict | None = None) -> bool:
+    """Cached entries expire after max_age_days, after 1 day when unresolved, and at once when the
+    app's own classification of the ticker changed since the entry was resolved."""
+    if app is not None and entry and (entry.get("app_kind"), entry.get("app_cik")) != (app.get("kind"), app.get("cik")):
+        return False
+    if entry and entry.get("status") == "unresolved":
+        max_age_days = min(max_age_days, 1)
     try:
         stamp = datetime.fromisoformat(str((entry or {}).get("resolved_at")))
     except ValueError:
@@ -307,7 +363,8 @@ def holdings_frame(fund_ticker: str, filing: dict) -> pl.DataFrame:
 # ---------- run ----------
 
 def run_collection(
-    tickers: list[str], *, fetch, pace, sleep, fund_map: dict | None, state: dict, now: datetime
+    tickers: list[str], *, fetch, pace, sleep, fund_map: dict | None, state: dict, now: datetime,
+    app_documents: dict[str, dict | None] | None = None,
 ) -> dict:
     """Resolve the universe, then fetch only funds whose latest accession is new. Pure: no lake I/O."""
 
@@ -326,16 +383,28 @@ def run_collection(
         response = get(url)
         return response.text if response is not None else None
 
+    def fund_name_for(rec: dict) -> str | None:
+        rows = series_feed_filings(get_text(SERIES_FEED_URL.format(series_id=rec["series_id"]))) \
+            if rec.get("series_id") else []
+        for row in rows[:1]:
+            xml_text = get_text(ARCHIVE_URL.format(cik=int(rec["cik"]), acc=row["accession"].replace("-", "")))
+            if xml_text:
+                return parse_nport(xml_text)["header"].get("series_name")
+        return None
+
+    apps = {t: app_identity((app_documents or {}).get(t)) for t in tickers}
     entries = dict((fund_map or {}).get("funds") or {})
-    stale = [t for t in tickers if not map_entry_fresh(entries.get(t), now)]
+    stale = [t for t in tickers if not map_entry_fresh(entries.get(t), now, app=apps[t])]
     mf_map, operating = {}, {}
     if stale:
         mf_map = mf_map_from_payload(get_json(MF_URL) or {})
         operating = cik_map_from_company_tickers(get_json(OPERATING_URL) or {})
     stamp = now.isoformat(timespec="seconds")
     for ticker in stale:
-        resolved = resolve_ticker(ticker, mf_map, operating, get_json)
-        entries[ticker] = {"ticker": ticker, **resolved, "resolved_at": stamp}
+        app = apps[ticker]
+        resolved = resolve_ticker(ticker, mf_map, operating, get_json, app=app, fund_name_for=fund_name_for)
+        entries[ticker] = {"ticker": ticker, **resolved, "app_kind": app["kind"], "app_cik": app["cik"],
+                           "app_name": app["name"], "resolved_at": stamp}
 
     def managers_for(ticker: str, entry: dict, subs: dict) -> None:
         """Derive the fund's 13F managers from its latest N-CEN adviser list (cached in the fund map)."""
@@ -497,6 +566,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             collected = run_collection(
                 planned["tickers"], fetch=lambda url: http.get(url), pace=pace, sleep=pace.sleep,
                 fund_map=read_json(FUND_MAP_KEY), state=read_json(STATE_KEY) or {}, now=datetime.now(UTC),
+                app_documents={t: read_json(f"serving/filings/{t}.json") for t in planned["tickers"]},
             )
         publish(collected, write_text=write_text, write_json=write_json, write_parquet=write_parquet)
         return {

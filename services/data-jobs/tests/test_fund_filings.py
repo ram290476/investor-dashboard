@@ -5,7 +5,7 @@ Fixtures are real SEC documents fetched 2026-10-14 and trimmed to a few holdings
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import fund_filings as ff
@@ -245,3 +245,66 @@ def test_managers_derived_from_ncen_and_13f_published():
     again, calls, _ = _run(["ARKK"], fund_map=out["fund_map"], state=out["state"], extra=extra)
     assert ff.ARCHIVE_URL.format(cik="1579982", acc="000094040026039198") not in calls
     assert again["managers"][0]["new"] is False
+
+
+# ---- ticker collisions (SPCX is SpaceX in this app, and also a SPAC ETF in company_tickers_mf.json) ----
+
+COLLISION_MF = {"fields": ["cik", "seriesId", "classId", "symbol"],
+                "data": [[1719812, "S000070261", "C000223446", "SPCX"]]}
+COLLISION_OPERATING = {"0": {"cik_str": 1181412, "ticker": "SPCX", "title": "SPACE EXPLORATION TECHNOLOGIES CORP"}}
+SPACEX_APP_DOC = {"ticker": "SPCX", "cik": "0001181412", "entity_name": "SPACE EXPLORATION TECHNOLOGIES CORP",
+                  "status": "ok"}
+
+
+def _collision_extra():
+    return {ff.MF_URL: _Resp(payload=COLLISION_MF), ff.OPERATING_URL: _Resp(payload=COLLISION_OPERATING)}
+
+
+def _collide(app_documents, fund_map=None):
+    fetch, calls = _fake_sec(_collision_extra())
+    out = ff.run_collection(["SPCX"], fetch=fetch, pace=_Pace(), sleep=lambda s: None, fund_map=fund_map,
+                            state={}, now=NOW, app_documents=app_documents)
+    return out, calls
+
+
+def test_collision_keeps_the_apps_operating_company():
+    out, calls = _collide({"SPCX": SPACEX_APP_DOC})
+    entry = out["fund_map"]["funds"]["SPCX"]
+    assert entry["kind"] == "operating" and entry["cik"] == "1181412" and entry["method"] == "app_sec_filer"
+    assert entry["collision"] == {"fund_cik": "1719812", "series_id": "S000070261"}
+    assert out["results"] == []  # no N-PORT fetched for the SPAC ETF
+    # Only the series name is looked up for the agreement check; the ETF's filings are never collected.
+    assert ff.SUBMISSIONS_URL.format(cik="0001719812") not in calls
+
+
+def test_collision_without_app_identity_is_unresolved_not_guessed():
+    out, _calls = _collide({})
+    entry = out["fund_map"]["funds"]["SPCX"]
+    assert entry["status"] == "unresolved" and entry["reason"] == "ticker_collision" and out["results"] == []
+    assert not ff.map_entry_fresh(entry, NOW + timedelta(days=2))  # retried within a day or two
+
+
+def test_cached_fund_entry_is_dropped_when_the_app_says_operating():
+    stale_wrong = {"funds": {"SPCX": {"ticker": "SPCX", "status": "resolved", "kind": "fund", "cik": "1719812",
+                                      "series_id": "S000070261", "resolved_at": NOW.isoformat(),
+                                      "app_kind": None, "app_cik": None}}}
+    out, _calls = _collide({"SPCX": SPACEX_APP_DOC}, fund_map=stale_wrong)
+    assert out["fund_map"]["funds"]["SPCX"]["kind"] == "operating" and out["results"] == []
+
+
+def test_fund_accepted_on_collision_only_when_series_name_matches_app_name():
+    fund = {"cik": "1", "series_id": "S1"}
+    app = {"kind": "operating", "cik": "2", "name": "The SPAC and New Issue ETF"}
+    hit = ff.resolve_ticker("ZZZ", {"ZZZ": fund}, {}, lambda u: None, app=app,
+                            fund_name_for=lambda rec: "SPAC and New Issue ETF")
+    assert hit["kind"] == "fund" and hit["method"] == "company_tickers_mf+app_name"
+    miss = ff.resolve_ticker("ZZZ", {"ZZZ": fund}, {}, lambda u: None, app=app,
+                             fund_name_for=lambda rec: "Something Else ETF")
+    assert miss["kind"] == "operating"
+
+
+def test_app_identity_reads_the_sec_filings_document():
+    assert ff.app_identity(SPACEX_APP_DOC) == {"kind": "operating", "status": "ok", "cik": "1181412",
+                                               "name": "SPACE EXPLORATION TECHNOLOGIES CORP"}
+    assert ff.app_identity({"status": "no_sec_filer"})["kind"] == "non_operating"
+    assert ff.app_identity(None)["kind"] is None

@@ -30,6 +30,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tickers", nargs="*", help="override the watchlist (still no hard-coded list)")
     parser.add_argument("--save-dir")
+    parser.add_argument("--lake-bucket", help="read serving/filings/<T>.json (read-only) for the app's own identity")
     args = parser.parse_args()
     if args.tickers:
         tickers = [t.upper() for t in args.tickers]
@@ -37,12 +38,23 @@ def main() -> int:
         from universe import user_ticker_union, watchlist_universe
 
         tickers = list(watchlist_universe(user_ticker_union()).get("tickers") or [])
+    app_documents: dict = {}
+    if args.lake_bucket:
+        import boto3
+
+        s3 = boto3.client("s3")
+        for t in tickers:
+            try:
+                body = s3.get_object(Bucket=args.lake_bucket, Key=f"serving/filings/{t}.json")["Body"].read()
+                app_documents[t] = json.loads(body)
+            except Exception:  # noqa: BLE001 - missing doc means unknown identity
+                app_documents[t] = None
     pace = Pace()
     headers = {"User-Agent": crawler_user_agent(), "Accept": "application/json,application/xml,*/*"}
     with get_client(headers=headers) as http:
         collected = ff.run_collection(
             tickers, fetch=lambda url: http.get(url), pace=pace, sleep=pace.sleep,
-            fund_map=None, state={}, now=datetime.now(UTC),
+            fund_map=None, state={}, now=datetime.now(UTC), app_documents=app_documents,
         )
     if args.save_dir:
         out = Path(args.save_dir)
@@ -56,7 +68,8 @@ def main() -> int:
                 (out / f"13f_{m['cik']}_table.xml").write_text(m["report"]["table_xml"])
     print(json.dumps({
         "universe": tickers,
-        "fund_map": {k: v for k, v in collected["fund_map"]["funds"].items() if v.get("kind") != "operating"},
+        "fund_map": {k: v for k, v in collected["fund_map"]["funds"].items()
+                     if v.get("kind") != "operating" or v.get("collision")},
         "funds": [ff.fund_summary(r) for r in collected["results"]],
         "managers": [
             {"cik": m["cik"], "name": m.get("name"), "status": m["status"],
