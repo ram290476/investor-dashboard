@@ -293,6 +293,15 @@ def _chart_rows(payload: dict, ticker: str) -> list[dict]:
     return yahoo.parse_chart(payload, ticker)
 
 
+# Yahoo answers 404 when it has no chart for a symbol (delisted, renamed, or mistyped in a watchlist).
+# One unresolvable symbol is a data-quality warning, not a failed DS-05 run (#234).
+UNRESOLVED_STATUSES = frozenset({404})
+
+
+def is_unresolved_status(status_code: int) -> bool:
+    return status_code in UNRESOLVED_STATUSES
+
+
 def handler(event, context):
     from collectors import yahoo
     from http_client import get_client, request_with_retry
@@ -308,10 +317,12 @@ def handler(event, context):
             yahoo.CHART_URL.format(ticker=ticker),
             params=params,
             retry_statuses=yahoo.CHART_RETRY_STATUSES,
-            return_statuses=yahoo.CHART_RETURN_STATUSES,
+            return_statuses=yahoo.CHART_RETURN_STATUSES | UNRESOLVED_STATUSES,
         )
         if response.status_code == 429:
             raise yahoo.YahooRateLimited("Yahoo returned HTTP 429; stopped until quota permits")
+        if is_unresolved_status(response.status_code):
+            return None
         response.raise_for_status()
         return response.json()
 
@@ -325,6 +336,7 @@ def handler(event, context):
         state = read_json(STATE_KEY) or {"tickers": {}}
         rebuilt: list[str] = []
         failed: list[str] = []
+        unresolved: list[str] = []
 
         with get_client() as http:
             for ticker in tickers:
@@ -332,32 +344,39 @@ def handler(event, context):
                 seen = set(entry.get("seen_events", []))
                 with source_run(YAHOO_SOURCE) as record:
                     recent = chart(http, ticker, today - timedelta(days=WINDOW_DAYS), tomorrow)
-                    events = yahoo.parse_events(recent)
-                    existing = read_prices(ticker)
-                    reason = needs_rebuild(existing, events, seen)
-                    if reason:
-                        payload = chart(http, ticker, existing["date"].min(), tomorrow)
-                        events = yahoo.parse_events(payload)
-                        rebuilt_rows = rebuild_history(existing, yahoo.parse_chart(payload, ticker), events)
-                        rows = reconcile_volume(rebuilt_rows, _chart_rows(payload, ticker), today)
-                        upsert_prices(rows)
-                        record["rows"] = rows.height
-                        rebuilt.append(ticker)
-                        entry.update(last_rebuild=today.isoformat(), last_reason=reason, rows_rebuilt=rows.height)
-                        logger.info("price_history_rebuilt", extra={"ticker": ticker, "reason": reason})
+                    if recent is None:
+                        unresolved.append(ticker)
+                        logger.warning(
+                            "symbol_unresolved",
+                            extra={"ticker": ticker, "source_id": YAHOO_SOURCE, "status": 404},
+                        )
                     else:
-                        rows = reconcile_volume(existing, _chart_rows(recent, ticker), today)
-                        if needs_volume_write(existing, rows):
+                        events = yahoo.parse_events(recent)
+                        existing = read_prices(ticker)
+                        reason = needs_rebuild(existing, events, seen)
+                        if reason:
+                            payload = chart(http, ticker, existing["date"].min(), tomorrow)
+                            events = yahoo.parse_events(payload)
+                            rebuilt_rows = rebuild_history(existing, yahoo.parse_chart(payload, ticker), events)
+                            rows = reconcile_volume(rebuilt_rows, _chart_rows(payload, ticker), today)
                             upsert_prices(rows)
                             record["rows"] = rows.height
-                            logger.info(
-                                "volume_reconciled",
-                                extra={"ticker": ticker, "sessions": VOLUME_WINDOW_SESSIONS, "rows": rows.height},
-                            )
-                    seen |= {event_id(e) for e in events}
-                    entry["seen_events"] = sorted(e for e in seen if _event_day(e) >= cutoff)
-                    entry["last_checked"] = today.isoformat()
-                    state["tickers"][ticker] = entry
+                            rebuilt.append(ticker)
+                            entry.update(last_rebuild=today.isoformat(), last_reason=reason, rows_rebuilt=rows.height)
+                            logger.info("price_history_rebuilt", extra={"ticker": ticker, "reason": reason})
+                        else:
+                            rows = reconcile_volume(existing, _chart_rows(recent, ticker), today)
+                            if needs_volume_write(existing, rows):
+                                upsert_prices(rows)
+                                record["rows"] = rows.height
+                                logger.info(
+                                    "volume_reconciled",
+                                    extra={"ticker": ticker, "sessions": VOLUME_WINDOW_SESSIONS, "rows": rows.height},
+                                )
+                        seen |= {event_id(e) for e in events}
+                        entry["seen_events"] = sorted(e for e in seen if _event_day(e) >= cutoff)
+                        entry["last_checked"] = today.isoformat()
+                        state["tickers"][ticker] = entry
                 if record["outcome"] == "failure":
                     failed.append(ticker)
                     if record["error_type"] == "YahooRateLimited":
@@ -370,6 +389,7 @@ def handler(event, context):
             "checked": len(tickers),
             "rebuilt": rebuilt,
             "failed_tickers": failed,
+            "unresolved_tickers": unresolved,
         }
         logger.info("price_reconcile_finished", extra=result)
         return result
