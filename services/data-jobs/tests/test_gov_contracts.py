@@ -266,3 +266,30 @@ def test_dod_feed_points_at_war_gov_and_parses_items():
         "link": "https://www.war.gov/News/Contracts/Contract/Article/4625668/contracts-for-oct-14-2026/",
         "published": "Wed, 14 Oct 2026 21:04:17 GMT",
     }]
+
+
+class _Resp:
+    def __init__(self, status, retry_after=None):
+        self.status_code = status
+        self.headers = {"Retry-After": retry_after} if retry_after is not None else {}
+
+
+def test_nasa_fetch_retries_429_honoring_retry_after_then_succeeds():
+    responses = iter([_Resp(429, "7"), _Resp(429), _Resp(200)])
+    waits = []
+    got = gov_contracts.fetch_with_rate_limit(lambda: next(responses), waits.append)
+    assert got.status_code == 200
+    assert waits == [7.0, gov_contracts.NASA_BASE_DELAY_S * 2]
+
+
+def test_nasa_fetch_returns_none_when_still_rate_limited():
+    waits = []
+    got = gov_contracts.fetch_with_rate_limit(lambda: _Resp(429, "999"), waits.append, attempts=3)
+    assert got is None
+    assert waits == [gov_contracts.NASA_MAX_DELAY_S] * 2  # capped, no sleep after the last try
+
+
+def test_retry_after_delay_handles_bad_header():
+    assert gov_contracts.retry_after_delay("soon", 0) == gov_contracts.NASA_BASE_DELAY_S
+    assert gov_contracts.retry_after_delay(None, 1) == gov_contracts.NASA_BASE_DELAY_S * 2
+    assert gov_contracts.retry_after_delay("Wed, 21 Oct 2015 07:28:00 GMT", 0) == 0.0
