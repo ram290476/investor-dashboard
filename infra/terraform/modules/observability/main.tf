@@ -167,12 +167,6 @@ locals {
       period      = 300, evals = 1, datapoints = 1
       op          = "GreaterThanThreshold", threshold = 0, missing = "notBreaching"
     }
-    failed-runs = {
-      description = "Two or more source runs failed within an hour"
-      namespace   = local.ns, metric = "FailedRuns", stat = "Sum", dims = jsonencode(local.app_dims)
-      period      = 3600, evals = 1, datapoints = 1
-      op          = "GreaterThanOrEqualToThreshold", threshold = 2, missing = "notBreaching"
-    }
     stale-p1-source = {
       description = "A P1 source has been stale for two hours in a row"
       namespace   = local.ns, metric = "StaleP1Sources", stat = "Maximum", dims = jsonencode(local.app_dims)
@@ -226,6 +220,35 @@ locals {
   # for-filters instead of conditionals keep the object types consistent.
   canary_alarms = { for k, v in local.canary_alarm_defs : k => v if local.canary_on }
   alarms        = merge(local.base_alarms, local.canary_alarms)
+}
+
+# failed-runs counts distinct failing sources, not raw failures (#233). A single source that fails
+# hourly used to trip the 1-hour Sum >= 2 whenever its datapoints landed at :19 and then :18.
+# FailedSources carries a source_id dimension; Maximum per source over the hour is 0/1, and the
+# SUM across sources is the number of distinct sources that failed in the window.
+resource "aws_cloudwatch_metric_alarm" "failed_runs" {
+  alarm_name          = "${var.name}-failed-runs"
+  alarm_description   = "Two or more distinct sources failed within an hour"
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 2
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.ops_topic_arn]
+  ok_actions          = [var.ops_topic_arn]
+
+  metric_query {
+    id          = "distinct_failed_sources"
+    expression  = "SUM(SEARCH('{${local.ns},service,source_id} MetricName=\"FailedSources\" service=\"${var.name}\"', 'Maximum', 3600))"
+    label       = "Distinct failed sources"
+    period      = 3600
+    return_data = true
+  }
+}
+
+moved {
+  from = aws_cloudwatch_metric_alarm.this["failed-runs"]
+  to   = aws_cloudwatch_metric_alarm.failed_runs
 }
 
 resource "aws_cloudwatch_metric_alarm" "this" {
@@ -419,7 +442,7 @@ locals {
       type = "alarm", x = 0, y = 0, width = 24, height = 3
       properties = {
         title  = "Alarm status"
-        alarms = [for a in aws_cloudwatch_metric_alarm.this : a.arn]
+        alarms = concat([for a in aws_cloudwatch_metric_alarm.this : a.arn], [aws_cloudwatch_metric_alarm.failed_runs.arn])
       }
     },
     {

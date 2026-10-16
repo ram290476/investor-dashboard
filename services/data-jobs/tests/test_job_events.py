@@ -202,3 +202,21 @@ def test_lease_held_skips_by_default_and_can_opt_out(monkeypatch, skip, expect):
                 with pytest.raises(lake.LeaseHeld):
                     run({}, _Context())
     assert published == [expect]
+
+
+def test_failed_source_emits_distinct_source_metric(capsys):
+    """#233: each failure also emits FailedSources with a source_id dimension."""
+    import json as _json
+
+    from observability import source_run
+
+    with source_run("DS-TEST") as record:
+        raise RuntimeError("boom")
+    assert record["outcome"] == "failure"
+    lines = [line for line in capsys.readouterr().out.splitlines() if '"FailedSources"' in line]
+    assert lines, "FailedSources EMF line not emitted"
+    blob = _json.loads(lines[-1])
+    assert blob["source_id"] == "DS-TEST"
+    assert blob["FailedSources"] == [1.0] or blob["FailedSources"] == 1.0
+    dims = blob["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0]
+    assert set(dims) == {"service", "source_id"}

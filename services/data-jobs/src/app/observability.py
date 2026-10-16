@@ -41,7 +41,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from aws_lambda_powertools import Logger, Metrics, Tracer
-from aws_lambda_powertools.metrics import MetricUnit
+from aws_lambda_powertools.metrics import MetricUnit, single_metric
 
 SERVICE = os.getenv("POWERTOOLS_SERVICE_NAME", "invdash")
 
@@ -231,6 +231,28 @@ def job_handler(
     return decorator
 
 
+FAILED_SOURCES_METRIC = "FailedSources"
+
+
+def _emit_failed_source(source_id: str) -> None:
+    """One FailedSources datapoint per failure, dimensioned by source_id (#233).
+
+    The failed-runs alarm takes Maximum per source_id and sums across sources, so a source that
+    fails once an hour counts once even when two of its hourly datapoints land in one window.
+    """
+    try:
+        with single_metric(
+            name=FAILED_SOURCES_METRIC,
+            unit=MetricUnit.Count,
+            value=1,
+            namespace=metrics.namespace,
+            default_dimensions={"service": SERVICE},
+        ) as metric:
+            metric.add_dimension(name="source_id", value=source_id)
+    except Exception:
+        logger.exception("failed_source_metric_failed")
+
+
 @contextmanager
 def source_run(source_id: str) -> Iterator[dict[str, Any]]:
     """Time one source fetch; log, trace and count its outcome.
@@ -255,6 +277,7 @@ def source_run(source_id: str) -> Iterator[dict[str, Any]]:
             run.update(outcome="failure", error_type=type(exc).__name__, error=str(exc)[:500])
             subsegment.add_exception(exc, stack=traceback.extract_tb(exc.__traceback__))
             metrics.add_metric(name="FailedRuns", unit=MetricUnit.Count, value=1)
+            _emit_failed_source(source_id)
         finally:
             run["duration_ms"] = round((time.monotonic() - started) * 1000)
             metrics.add_metric(name="RowsWritten", unit=MetricUnit.Count, value=run["rows"])
