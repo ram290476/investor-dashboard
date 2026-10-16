@@ -7,7 +7,9 @@ from news_sentiment import (
     catch_up_since,
     curated_row,
     dedupe_articles,
+    finnhub_skip_reason,
     finnhub_window,
+    fund_symbols,
     headline_relevance,
     label_for,
     lexicon_score,
@@ -257,3 +259,18 @@ def test_finnhub_window_is_yesterday_through_today_in_new_york():
 def test_finnhub_window_keeps_an_older_catch_up_watermark():
     monday = datetime(2026, 10, 12, 14, 0, tzinfo=UTC)
     assert finnhub_window("2026-10-09", monday) == ("2026-10-09", "2026-10-12")
+
+
+def test_fund_symbols_uses_is_fund_stamps_not_hardcoded_tickers():
+    stamps = {
+        "curated/fund_universe/is_fund/FNDX.json": {"ticker": "FNDX", "is_fund": True},
+        "curated/fund_universe/is_fund/EQTY.json": {"ticker": "EQTY", "is_fund": False},
+    }
+    assert fund_symbols(["FNDX", "EQTY", "NEWT"], stamps.get) == {"FNDX"}
+
+
+def test_finnhub_403_is_skip_for_non_equity_but_failure_for_equity():
+    equities = {"EQTY"}
+    assert finnhub_skip_reason(403, "FNDX", equities) == "finnhub_forbidden_non_equity"
+    assert finnhub_skip_reason(403, "EQTY", equities) is None
+    assert finnhub_skip_reason(200, "FNDX", equities) is None
