@@ -741,8 +741,34 @@ def publish_macro(rows: list[dict], ingested_at: str) -> list[str]:
     return keys
 
 
+# Numeric release fields are always Float64. Without this, polars infers a column's type from the
+# first 100 rows; a column that starts with nulls (or ints) and later carries a float such as
+# 334.576909 raised ComputeError and failed M1 on 2026-10-16.
+RELEASE_FLOAT_FIELDS = (
+    "actual", "prior", "revised_prior", "consensus", "surprise", "mom", "yoy", "surprise_z", "core_vs_headline",
+)
+RELEASE_STRING_FIELDS = ("series_id", "period", "release_ts", "units", "source")
+
+
+def _as_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def release_frame(rows: list[dict]) -> pl.DataFrame:
-    return pl.DataFrame([{field: row.get(field) for field in RELEASE_FIELDS} for row in rows])
+    records = []
+    for row in rows:
+        record = {field: row.get(field) for field in RELEASE_FIELDS}
+        for field in RELEASE_FLOAT_FIELDS:
+            record[field] = _as_float(record[field])
+        records.append(record)
+    overrides: dict[str, pl.DataType] = {field: pl.Float64() for field in RELEASE_FLOAT_FIELDS}
+    overrides.update({field: pl.String() for field in RELEASE_STRING_FIELDS})
+    return pl.DataFrame(records, schema_overrides=overrides, infer_schema_length=None)
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper

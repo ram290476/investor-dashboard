@@ -439,7 +439,7 @@ variable "jobs" {
       triggers       = []
       memory         = 512
       timeout        = 300 # per-ticker Finnhub + Google News for up to 27 tickers, paced
-      read_prefixes  = ["curated/news_articles/", "curated/news_daily/", "serving/filings/"]
+      read_prefixes  = ["curated/news_articles/", "curated/news_daily/", "serving/filings/", "curated/fund_universe/is_fund/"]
       write_prefixes = ["raw/news/", "curated/news_articles/", "curated/news_daily/"]
       api_keys       = ["finnhub", "alpha-vantage", "massive"]
       reads_prefs    = true

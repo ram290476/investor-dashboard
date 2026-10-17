@@ -283,3 +283,25 @@ def test_no_history_and_no_events_means_no_rebuild():
     later = {"type": "dividend", "date": date(2026, 1, 6), "amount": 1.0}
     assert pr.needs_rebuild(complete, [later], set()) == "new event dividend:2026-01-06:1.000000"
     assert pr.needs_rebuild(complete, [later], {pr.event_id(later)}) is None
+
+
+def test_unresolved_symbol_is_a_warning_not_a_failed_run(s3, monkeypatch):
+    """#234: Yahoo 404 (no chart for the symbol) marks it unresolved instead of failing DS-05."""
+    calls = []
+
+    def not_found(request):
+        calls.append(request)
+        return httpx.Response(404, request=request, json={"chart": {"result": None, "error": {"code": "Not Found"}}})
+
+    _use_yahoo(monkeypatch, not_found)
+    result = pr.handler({}, _Context())
+    assert result["status"] == "success"
+    assert result["failed_tickers"] == []
+    assert result["unresolved_tickers"]
+    assert len(calls) == len(result["unresolved_tickers"])  # no retries on 404
+
+
+def test_is_unresolved_status_only_for_404():
+    assert pr.is_unresolved_status(404)
+    assert not pr.is_unresolved_status(429)
+    assert not pr.is_unresolved_status(500)
