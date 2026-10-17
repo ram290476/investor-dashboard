@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 
 import polars as pl
@@ -116,6 +117,45 @@ def sam_budget(calls_today: int, wanted: int = SAM_CALLS_PER_RUN) -> int:
 SAM_OPPORTUNITIES_WINDOW_DAYS = 30
 # The Department of Defense site moved to war.gov. The HTML Contracts pages sit behind an
 # Akamai bot rule (403 for non-browser clients); the RSS feed is served to collectors.
+NASA_FEED = "https://www.nasa.gov/news/releases/latest/feed/"
+# NASA's feed rate-limits occasionally (429 at 2:45 PM PT Oct 15). Retry a few times honoring
+# Retry-After; if it is still limited, log a warning and move on rather than failing D5 (#235).
+NASA_RATE_LIMIT_ATTEMPTS = 4
+NASA_BASE_DELAY_S = 5.0
+NASA_MAX_DELAY_S = 60.0
+
+
+def retry_after_delay(header: str | None, attempt: int, base_s: float = NASA_BASE_DELAY_S,
+                      cap_s: float = NASA_MAX_DELAY_S) -> float:
+    """Seconds to wait before the next try: Retry-After (seconds or HTTP date) if given, else
+    exponential backoff, never above cap_s."""
+    backoff = base_s * (2**attempt)
+    wait = None
+    if header:
+        try:
+            wait = float(header)
+        except ValueError:
+            try:
+                wait = (parsedate_to_datetime(header) - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError):
+                wait = None
+    return max(0.0, min(cap_s, wait if wait is not None else backoff))
+
+
+def fetch_with_rate_limit(send, sleep, attempts: int = NASA_RATE_LIMIT_ATTEMPTS):
+    """Call send() until it returns a non-429 response. Returns None if every try was rate limited.
+
+    send() must return an httpx-like response and must not raise on 429.
+    """
+    for attempt in range(attempts):
+        response = send()
+        if response.status_code != 429:
+            return response
+        if attempt + 1 < attempts:
+            sleep(retry_after_delay(response.headers.get("Retry-After"), attempt))
+    return None
+
+
 DOD_CONTRACTS_FEED = "https://www.war.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=400&Site=945&max=10"
 
 
@@ -408,6 +448,8 @@ def rollup_contracts(rows: list[dict], as_of: date, tickers: list[str] | None = 
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
+    import time
+
     from api_keys import api_key
     from http_client import get_client, request_with_retry
     from lake import read_json, read_parquet_prefix, write_json, write_parquet
@@ -514,7 +556,19 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                         awards.extend(found)
                         record["rows"] = len(found)
             with source_run("nasa") as record:
-                text = request_with_retry(http, "GET", "https://www.nasa.gov/news/releases/latest/feed/").text
+                response = fetch_with_rate_limit(
+                    lambda: request_with_retry(http, "GET", NASA_FEED, return_statuses=frozenset({429})),
+                    time.sleep,
+                )
+                if response is None:
+                    logger.warning(
+                        "nasa_feed_rate_limited",
+                        extra={"job": JOB_ID, "url": NASA_FEED, "status": 429, "attempts": NASA_RATE_LIMIT_ATTEMPTS},
+                    )
+                    text = ""
+                else:
+                    response.raise_for_status()
+                    text = response.text
                 found = parse_dod(text, ingested_at, now.date()) if "contract" in text.lower() else []
                 awards.extend(found)
                 record["rows"] = len(found)
