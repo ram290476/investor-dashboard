@@ -32,6 +32,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import time
 import traceback
 import uuid
@@ -48,6 +49,18 @@ SERVICE = os.getenv("POWERTOOLS_SERVICE_NAME", "invdash")
 logger = Logger(service=SERVICE, utc=True)
 tracer = Tracer(service=SERVICE)
 metrics = Metrics(namespace=os.getenv("POWERTOOLS_METRICS_NAMESPACE", "InvestorDashboard"), service=SERVICE)
+
+# Query-string credentials (Finnhub token=, Massive apiKey=, ...) appear in httpx error text because it
+# quotes the full request URL. Scrub them before anything reaches CloudWatch Logs (#232).
+_SECRET_PARAM = re.compile(
+    r"(?i)\b(token|access_token|api_?key|apikey|key|secret|password|signature)=([^&\s'\"]+)"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Replace credential values in URL query strings with [REDACTED]."""
+    return _SECRET_PARAM.sub(lambda m: f"{m.group(1)}=[REDACTED]", text)
+
 
 # Max age before a source counts as stale, by refresh tier (matches the doc's freshness rules).
 MAX_AGE_HOURS = {"hourly": 2, "daily": 30, "weekly": 24 * 8, "monthly": 24 * 35, "quarterly": 24 * 100}
@@ -188,11 +201,11 @@ def job_handler(
                     )
                     return result
                 outcome = "failure"
-                logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})
+                _log_job_failed(outcome)
                 raise
             except Exception:
                 outcome = "failure"
-                logger.exception("job_failed", extra={"event": "job_run", "outcome": outcome})
+                _log_job_failed(outcome)
                 raise  # Lambda retries twice, then sends the event to the dead-letter queue.
             finally:
                 outcome = chain_outcome(result, outcome)
@@ -231,6 +244,14 @@ def job_handler(
     return decorator
 
 
+def _log_job_failed(outcome: str) -> None:
+    """job_failed with the traceback scrubbed of query-string credentials (#232)."""
+    logger.error(
+        "job_failed",
+        extra={"event": "job_run", "outcome": outcome, "exception": redact_secrets(traceback.format_exc())},
+    )
+
+
 @contextmanager
 def source_run(source_id: str) -> Iterator[dict[str, Any]]:
     """Time one source fetch; log, trace and count its outcome.
@@ -252,7 +273,7 @@ def source_run(source_id: str) -> Iterator[dict[str, Any]]:
         try:
             yield run
         except Exception as exc:  # noqa: BLE001 - bulkhead: record and continue with the next source
-            run.update(outcome="failure", error_type=type(exc).__name__, error=str(exc)[:500])
+            run.update(outcome="failure", error_type=type(exc).__name__, error=redact_secrets(str(exc))[:500])
             subsegment.add_exception(exc, stack=traceback.extract_tb(exc.__traceback__))
             metrics.add_metric(name="FailedRuns", unit=MetricUnit.Count, value=1)
         finally:

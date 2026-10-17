@@ -90,6 +90,29 @@ RSS_COVERED = frozenset({"TSLA", "SPCX"})
 _TAG = re.compile(r"<[^>]+>")
 
 
+FUND_FLAG_PREFIX = "curated/fund_universe/is_fund/"
+FINNHUB_SKIP_STATUSES = frozenset({403})
+
+
+def fund_symbols(symbols: list[str], read_json) -> set[str]:
+    """Symbols the dashboard has stamped is_fund=true (#223 stamps). Finnhub company-news returns 403
+    for funds such as mutual funds, so H2 skips them instead of failing DS-41 every hour (#232)."""
+    funds: set[str] = set()
+    for symbol in symbols:
+        stamp = read_json(f"{FUND_FLAG_PREFIX}{symbol.upper()}.json")
+        if isinstance(stamp, dict) and stamp.get("is_fund") is True:
+            funds.add(symbol)
+    return funds
+
+
+def finnhub_skip_reason(status_code: int, symbol: str, equities: set[str]) -> str | None:
+    """A 403 for a symbol outside the equity universe (fund, ETF, not yet stamped) is a skip, not a
+    failure. A 403 for an equity still fails, since it may mean the key or plan is wrong."""
+    if status_code in FINNHUB_SKIP_STATUSES and symbol not in equities:
+        return "finnhub_forbidden_non_equity"
+    return None
+
+
 def is_market_day(day: date) -> bool:
     if day.weekday() >= 5:
         return False
@@ -567,19 +590,37 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         finnhub_from, finnhub_to = finnhub_window(since_day, now)
         with get_client() as http:
             finnhub_failed = False
+            funds = fund_symbols(watchlist, read_json)
+            equity_set = set(equities)
             for position, symbol in enumerate(watchlist):
+                if symbol in funds:
+                    logger.info("finnhub_fund_skip", extra={"job": JOB_ID, "ticker": symbol, "reason": "is_fund"})
+                    skipped.append(f"finnhub-{symbol}")
+                    continue
                 if not time_left():
                     skipped.append(f"finnhub-{symbol}")
                     continue
                 if position:
                     time.sleep(FINNHUB_PAUSE_S)
                 with source_run("DS-41") as record:
-                    payload = request_with_retry(
+                    response = request_with_retry(
                         http,
                         "GET",
                         "https://finnhub.io/api/v1/company-news",
                         params={"symbol": symbol, "from": finnhub_from, "to": finnhub_to, "token": api_key("finnhub")},
-                    ).json()
+                        return_statuses=FINNHUB_SKIP_STATUSES,
+                    )
+                    reason = finnhub_skip_reason(response.status_code, symbol, equity_set)
+                    if reason:
+                        logger.warning(
+                            "finnhub_symbol_skipped",
+                            extra={"job": JOB_ID, "ticker": symbol, "status": response.status_code, "reason": reason},
+                        )
+                        skipped.append(f"finnhub-{symbol}")
+                        payload: list | dict = []
+                    else:
+                        response.raise_for_status()
+                        payload = response.json()
                     rows = parse_finnhub(payload, symbol, ingested_at)
                     logger.info(
                         "finnhub_fetch",
