@@ -769,3 +769,15 @@ def test_links_only_run_reports_tickers_over_the_cap(monkeypatch):
     assert result["mode"] == "links" and result["over_cap"] == "over the ticker cap"
     assert "NVDA" not in result["dropped"] and "SPY" not in result["dropped"]
     assert result["dropped"] == [f"T{i:02d}" for i in range(23, 30)]
+
+
+@pytest.mark.parametrize("first", [1, None])
+def test_release_frame_accepts_float_after_int_or_null_rows(first):
+    """M1 failed on 2026-10-16 with polars ComputeError when a float followed int/null rows."""
+    rows = [{"series_id": "S", "period": f"2026-{i % 12 + 1:02d}", "actual": first, "prior": 2} for i in range(150)]
+    rows.append({"series_id": "S", "period": "2026-09", "actual": 334.576909, "prior": 1.5, "release_history": ["x"]})
+    frame = release_day.release_frame(rows)
+    assert frame.schema["actual"] == release_day.pl.Float64
+    assert frame.schema["prior"] == release_day.pl.Float64
+    assert frame["actual"][-1] == pytest.approx(334.576909)
+    assert frame.height == 151
