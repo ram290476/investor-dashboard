@@ -204,19 +204,66 @@ def test_lease_held_skips_by_default_and_can_opt_out(monkeypatch, skip, expect):
     assert published == [expect]
 
 
-def test_failed_source_emits_distinct_source_metric(capsys):
-    """#233: each failure also emits FailedSources with a source_id dimension."""
+def _failed_sources_lines(out: str) -> list[dict]:
     import json as _json
 
+    return [_json.loads(line) for line in out.splitlines() if '"FailedSources"' in line]
+
+
+def test_failed_source_bucket_is_half_past_the_clock_hour():
+    from datetime import UTC, datetime
+
+    from observability import failed_source_bucket
+
+    assert failed_source_bucket(datetime(2026, 10, 16, 16, 18, 59, tzinfo=UTC)) == datetime(
+        2026, 10, 16, 16, 30, tzinfo=UTC
+    )
+    assert failed_source_bucket(datetime(2026, 10, 16, 16, 59, 59, tzinfo=UTC)) == datetime(
+        2026, 10, 16, 16, 30, tzinfo=UTC
+    )
+
+
+def test_hourly_failure_jitter_never_puts_two_buckets_in_one_alarm_window():
+    """#233 regression: :19 then :18 failures of one source, evaluated every minute over a 3600 s
+    start-inclusive, end-exclusive window, never sum to 2."""
+    from datetime import UTC, datetime, timedelta
+
+    from observability import failed_source_bucket
+
+    failures = [datetime(2026, 10, 16, h, 19 if h % 2 else 18, 40, tzinfo=UTC) for h in range(0, 24)]
+    stamps = [failed_source_bucket(t) for t in failures]
+    start = datetime(2026, 10, 16, 0, 0, tzinfo=UTC)
+    for minute in range(24 * 60):
+        end = start + timedelta(minutes=minute)
+        window = [s for s in stamps if end - timedelta(seconds=3600) <= s < end]
+        assert len(window) <= 1
+
+
+def test_failed_source_emits_service_only_metric_once_per_source_per_hour(capsys):
+    from datetime import UTC, datetime
+
+    import observability
+
+    observability._failed_source_buckets.clear()
+    now = datetime(2026, 10, 16, 16, 18, tzinfo=UTC)
+    assert observability._emit_failed_source("DS-TEST", now) is True
+    assert observability._emit_failed_source("DS-TEST", now.replace(minute=50)) is False  # same hour
+    assert observability._emit_failed_source("DS-OTHER", now) is True
+    lines = _failed_sources_lines(capsys.readouterr().out)
+    assert len(lines) == 2
+    for blob in lines:
+        meta = blob["_aws"]
+        assert meta["CloudWatchMetrics"][0]["Dimensions"] == [["service"]]
+        assert meta["Timestamp"] == int(datetime(2026, 10, 16, 16, 30, tzinfo=UTC).timestamp() * 1000)
+        assert "source_id" not in blob
+
+
+def test_source_run_failure_emits_failed_sources(capsys):
+    import observability
     from observability import source_run
 
-    with source_run("DS-TEST") as record:
+    observability._failed_source_buckets.clear()
+    with source_run("DS-TEST2") as record:
         raise RuntimeError("boom")
     assert record["outcome"] == "failure"
-    lines = [line for line in capsys.readouterr().out.splitlines() if '"FailedSources"' in line]
-    assert lines, "FailedSources EMF line not emitted"
-    blob = _json.loads(lines[-1])
-    assert blob["source_id"] == "DS-TEST"
-    assert blob["FailedSources"] == [1.0] or blob["FailedSources"] == 1.0
-    dims = blob["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0]
-    assert set(dims) == {"service", "source_id"}
+    assert _failed_sources_lines(capsys.readouterr().out)

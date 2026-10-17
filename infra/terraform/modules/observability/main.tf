@@ -222,13 +222,19 @@ locals {
   alarms        = merge(local.base_alarms, local.canary_alarms)
 }
 
-# failed-runs counts distinct failing sources, not raw failures (#233). A single source that fails
-# hourly used to trip the 1-hour Sum >= 2 whenever its datapoints landed at :19 and then :18.
-# FailedSources carries a source_id dimension; Maximum per source over the hour is 0/1, and the
-# SUM across sources is the number of distinct sources that failed in the window.
+# failed-runs (#233): a plain metric alarm on FailedSources (dimension service only). source_run stamps
+# every FailedSources datapoint at HH:30:00 UTC of the failure's clock hour and emits at most one per
+# source per hour per container, so the 1-hour Sum counts failures in one clock hour. A source that
+# fails once an hourly run counts 1 even when its logs land at :18 one hour and :19 the next.
+# (SEARCH is not supported on metric alarms; the first #233 attempt failed PutMetricAlarm.)
 resource "aws_cloudwatch_metric_alarm" "failed_runs" {
   alarm_name          = "${var.name}-failed-runs"
-  alarm_description   = "Two or more distinct sources failed within an hour"
+  alarm_description   = "Two or more source failures stamped in the same clock hour"
+  namespace           = local.ns
+  metric_name         = "FailedSources"
+  statistic           = "Sum"
+  dimensions          = local.app_dims
+  period              = 3600
   evaluation_periods  = 1
   datapoints_to_alarm = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
@@ -236,14 +242,6 @@ resource "aws_cloudwatch_metric_alarm" "failed_runs" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = [var.ops_topic_arn]
   ok_actions          = [var.ops_topic_arn]
-
-  metric_query {
-    id          = "distinct_failed_sources"
-    expression  = "SUM(SEARCH('{${local.ns},service,source_id} MetricName=\"FailedSources\" service=\"${var.name}\"', 'Maximum', 3600))"
-    label       = "Distinct failed sources"
-    period      = 3600
-    return_data = true
-  }
 }
 
 moved {

@@ -38,7 +38,7 @@ import traceback
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from aws_lambda_powertools import Logger, Metrics, Tracer
@@ -245,14 +245,33 @@ def job_handler(
 
 
 FAILED_SOURCES_METRIC = "FailedSources"
+# Seconds into the clock hour at which every FailedSources datapoint is stamped (#233).
+FAILED_SOURCES_STAMP_OFFSET_S = 30 * 60
+_failed_source_buckets: set[tuple[str, int]] = set()
 
 
-def _emit_failed_source(source_id: str) -> None:
-    """One FailedSources datapoint per failure, dimensioned by source_id (#233).
+def failed_source_bucket(now: datetime) -> datetime:
+    """The timestamp for a FailedSources datapoint: HH:30:00 UTC of the failure's clock hour.
 
-    The failed-runs alarm takes Maximum per source_id and sums across sources, so a source that
-    fails once an hour counts once even when two of its hourly datapoints land in one window.
+    Every failure in one clock hour lands on the same minute, and consecutive hours are exactly 3600 s
+    apart. A 3600 s alarm window (start-inclusive, end-exclusive) therefore holds exactly one bucket,
+    so a source that fails once an hour counts 1 no matter whether it logged at :18 or :19. HH:30 keeps
+    the stamp within 30 minutes of the real time (CloudWatch accepts 2 h ahead / 14 days back).
     """
+    hour = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    return hour + timedelta(seconds=FAILED_SOURCES_STAMP_OFFSET_S)
+
+
+def _emit_failed_source(source_id: str, now: datetime | None = None) -> bool:
+    """Emit FailedSources=1 at most once per source per clock hour from this container (#233).
+
+    Dimensions are only {service}, so the alarm is a plain metric alarm (no SEARCH, no metric math).
+    Returns True when a datapoint was emitted.
+    """
+    stamp = failed_source_bucket(now or datetime.now(UTC))
+    key = (source_id, int(stamp.timestamp()))
+    if key in _failed_source_buckets:
+        return False
     try:
         with single_metric(
             name=FAILED_SOURCES_METRIC,
@@ -261,9 +280,12 @@ def _emit_failed_source(source_id: str) -> None:
             namespace=metrics.namespace,
             default_dimensions={"service": SERVICE},
         ) as metric:
-            metric.add_dimension(name="source_id", value=source_id)
+            metric.set_timestamp(stamp)
+        _failed_source_buckets.add(key)
+        return True
     except Exception:
         logger.exception("failed_source_metric_failed")
+        return False
 
 
 def _log_job_failed(outcome: str) -> None:
