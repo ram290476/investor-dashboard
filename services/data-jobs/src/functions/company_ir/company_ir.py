@@ -2326,6 +2326,9 @@ def validate_catalog(document: dict) -> list[str]:
             errors.append(f"{metric_id} has unsupported disclosure_status {disclosure!r}")
         if not isinstance(item.get("aliases") or [], list):
             errors.append(f"{metric_id} aliases must be a list")
+    from deep_dive import validate_deep_dive
+
+    errors.extend(validate_deep_dive(document.get("deep_dive")))
     return errors
 
 
@@ -3995,6 +3998,18 @@ def run_serve(event: dict | None, *, read_json, write_json, now: str | None = No
         )
         if company_name:
             document["company_name"] = company_name
+        from deep_dive import assemble_deep_dive, read_optional
+
+        symbol = ticker.upper()
+        deep_dive = assemble_deep_dive(
+            catalog,
+            rows,
+            read_optional(read_json, f"curated/deep_dive/ticker={symbol}/observations.json"),
+            read_optional(read_json, f"manual/deep_dive/{symbol}.json"),
+            generated_at=generated_at,
+        )
+        if deep_dive:
+            document["deep_dive"] = deep_dive
         public = public_stock_document(document, ticker)
         write_json(serving_stock_key(ticker), json.loads(visible_html(public)))
         served.append(ticker)
