@@ -7,6 +7,20 @@ import { formatChange, formatMetricValue } from "./stock-page.js";
 
 const SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
 
+const ICON_PATHS = {
+  scoreboard: ["M2.5 2.5h4.5v4.5H2.5z", "M9 2.5h4.5v4.5H9z", "M2.5 9h4.5v4.5H2.5z", "M9 9h4.5v4.5H9z"],
+  "forecast-band": ["M2 12.5 5.5 9l2.5 2.2L13.5 5", "M11 5h2.5V7.5"],
+  "trend-bars": ["M3 13.5V8.5", "M3 13.5h10", "M6.5 13.5V5.5", "M10 13.5V7", "M13 13.5V4"],
+  "diverging-bars": ["M2 8h12", "M5 8V4.5", "M5 8v3.5", "M8.5 8V3.5", "M8.5 8v5", "M12 8V6", "M12 8v2"],
+  "small-multiples": ["M2.5 2.5h4.5v4.5H2.5z", "M9 2.5h4.5v4.5H9z", "M2.5 9h4.5v4.5H2.5z", "M9 9h4.5v4.5H9z"],
+  "milestone-timeline": ["M4 2.5v11", "M4 4h7.5L9.7 6.4 11.5 8.8H4"],
+  "map-sites": ["M8 2.2a3.6 3.6 0 0 0-3.6 3.6c0 2.7 3.6 7.8 3.6 7.8s3.6-5.1 3.6-7.8A3.6 3.6 0 0 0 8 2.2z", "M8 7.2a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8z"],
+  "map-us-bubbles": ["M2.5 4.5h11v8h-11z", "M6.2 8.8a1.1 1.1 0 1 1 0.01 0", "M10.2 7.6a0.9 0.9 0 1 1 0.01 0"],
+  "map-world-bubbles": ["M8 2.5a5.5 5.5 0 1 0 0.01 0", "M2.5 8h11", "M8 2.6c1.5 1.7 2.3 3.5 2.3 5.4s-.8 3.7-2.3 5.4c-1.5-1.7-2.3-3.5-2.3-5.4s.8-3.7 2.3-5.4z"],
+  table: ["M2.5 3.5h11v9h-11z", "M2.5 6.5h11", "M2.5 9.5h11", "M6.5 6.5v6"],
+  default: ["M8 2.5 12.5 5.5v5L8 13.5 3.5 10.5v-5z"],
+};
+
 export function hasDeepDive(payload) {
   return Array.isArray(payload?.deep_dive?.sections) && payload.deep_dive.sections.length > 0;
 }
@@ -108,6 +122,158 @@ function valueAt(series, period) {
   return point && point.reported ? point.value : null;
 }
 
+function finite(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function priorChange(latest, prior) {
+  const next = finite(latest);
+  const previous = finite(prior);
+  if (next == null || previous == null || previous === 0) return null;
+  return (next - previous) / Math.abs(previous);
+}
+
+function changeFromValues(values) {
+  const nums = (values || []).map(finite).filter((value) => value != null);
+  if (nums.length < 2) return null;
+  return priorChange(nums.at(-1), nums.at(-2));
+}
+
+function fromKpi(tile) {
+  if (!tile || typeof tile !== "object") return null;
+  const spark = Array.isArray(tile.sparkline) ? tile.sparkline : [];
+  const qoq = finite(tile.qoq);
+  return {
+    source: "kpi",
+    metric_id: String(tile.metric_id || ""),
+    field: "",
+    label: String(tile.label || tile.metric_id || ""),
+    unit: tile.unit || "",
+    value: finite(tile.value),
+    change: qoq != null ? qoq : changeFromValues(spark),
+    sparkline: spark,
+    inverse: Boolean(tile.inverse),
+    approval_state: tile.approval_state || "",
+    estimate: Boolean(tile.estimate_only || tile.source_kind === "news_estimate"),
+    empty_label: tile.empty_label || "",
+  };
+}
+
+function fromSeries(series) {
+  if (!series || typeof series !== "object") return null;
+  const points = (series.points || []).filter((point) => point && point.reported && finite(point.value) != null);
+  if (!series.metric_id && !points.length) return null;
+  const latest = points.at(-1);
+  const prior = points.length > 1 ? points.at(-2) : null;
+  return {
+    source: "series",
+    metric_id: String(series.metric_id || ""),
+    field: "",
+    label: String(series.label || series.metric_id || ""),
+    unit: series.unit || "",
+    value: latest ? finite(latest.value) : null,
+    change: latest && prior ? priorChange(latest.value, prior.value) : null,
+    sparkline: points.slice(-12).map((point) => point.value),
+    inverse: Boolean(series.inverse),
+    approval_state: series.approval_state || "",
+    estimate: Boolean(series.estimate || series.source_kind === "news_estimate" || series.role === "line-dashed"),
+    empty_label: series.empty_label || "",
+  };
+}
+
+function fromForecast(metric) {
+  if (!metric || typeof metric !== "object") return null;
+  const actuals = (metric.actuals || []).filter((point) => point && point.reported !== false && finite(point.value) != null);
+  const projectedPoints = (metric.forecast || []).filter((point) => point && point.reported && finite(point.value) != null);
+  const projected = actuals.length === 0;
+  const points = projected ? projectedPoints : actuals;
+  const latest = points.at(-1);
+  const prior = points.length > 1 ? points.at(-2) : null;
+  const label = metric.label
+    || (metric.field === "earnings" ? "EPS" : metric.field === "revenue" ? "Revenue" : (metric.metric_id || metric.field || ""));
+  return {
+    source: "forecast",
+    metric_id: String(metric.metric_id || ""),
+    field: String(metric.field || ""),
+    label: String(label),
+    unit: metric.unit || "",
+    value: latest ? finite(latest.value) : null,
+    change: latest && prior ? priorChange(latest.value, prior.value) : null,
+    sparkline: points.slice(-12).map((point) => point.value),
+    inverse: false,
+    approval_state: (latest && latest.approval_state) || metric.approval_state || "",
+    estimate: projected,
+    empty_label: metric.empty_label || "",
+  };
+}
+
+function collectCandidates(section) {
+  const items = [];
+  for (const panel of section?.panels || []) {
+    for (const tile of panel.kpis || []) items.push(fromKpi(tile));
+    for (const tile of panel.multiples || []) items.push(fromKpi(tile));
+    for (const mode of panel.modes || []) {
+      for (const tile of mode.kpis || []) items.push(fromKpi(tile));
+      for (const series of mode.series || []) items.push(fromSeries(series));
+    }
+    for (const series of panel.series || []) items.push(fromSeries(series));
+    for (const segment of panel.forecast?.segments || []) {
+      for (const metric of segment.metrics || []) items.push(fromForecast(metric));
+    }
+  }
+  return items.filter(Boolean);
+}
+
+/** Headline metric for a section tile. A catalog `headline` key wins; otherwise the first primary series. */
+export function sectionHeadline(section) {
+  const candidates = collectCandidates(section);
+  const key = String(section?.headline || "").trim();
+  if (key) {
+    const match = candidates.find((item) => item.metric_id === key || item.field === key);
+    if (match) return match;
+  }
+  for (const source of ["kpi", "series", "forecast"]) {
+    const pool = candidates.filter((item) => item.source === source && item.value != null);
+    const picked = pool.find((item) => !item.estimate) || pool[0];
+    if (picked) return picked;
+  }
+  return null;
+}
+
+function sectionIconKind(section) {
+  const kind = (section?.panels || []).find((panel) => panel?.kind)?.kind || "";
+  return ICON_PATHS[kind] ? kind : "default";
+}
+
+function sectionIcon(doc, kind) {
+  const svg = svgEl(doc, "svg", {
+    class: "deep-dive-section-icon",
+    viewBox: "0 0 16 16",
+    "aria-hidden": "true",
+    focusable: "false",
+  });
+  for (const d of ICON_PATHS[kind] || ICON_PATHS.default) {
+    svg.append(svgEl(doc, "path", {
+      d,
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "1.4",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+    }));
+  }
+  return svg;
+}
+
+function setClass(node, name, on) {
+  const parts = String(node?.className || "").split(/\s+/).filter(Boolean);
+  const has = parts.includes(name);
+  if (on && !has) node.className = [...parts, name].join(" ");
+  else if (!on && has) node.className = parts.filter((part) => part !== name).join(" ");
+}
+
 export function renderDeepDive(payload, doc = document, options = {}) {
   const dive = payload?.deep_dive;
   const root = el(doc, "div", "deep-dive");
@@ -123,19 +289,17 @@ export function renderDeepDive(payload, doc = document, options = {}) {
   root.append(banner);
 
   const ticker = options.ticker || payload?.ticker || "";
-  const jump = el(doc, "nav", "deep-dive-jump");
-  const label = el(doc, "span", "deep-dive-jump-label", "On this page");
-  label.id = "deep-dive-jump-label";
-  jump.append(label);
-  jump.setAttribute("aria-labelledby", "deep-dive-jump-label");
-  root.append(jump);
+  const jump = el(doc, "nav", "deep-dive-sections");
+  jump.setAttribute("aria-label", "Deep dive sections");
+  const nav = renderSectionNav(dive.sections, ticker, root, doc, options);
+  root.append(nav, jump);
 
   const secondary = [];
   for (const section of dive.sections) {
     const block = renderSection(section, doc);
     if (section.placement === "secondary") secondary.push(block);
     else root.append(block);
-    jump.append(renderBookmark(section, ticker, root, jump, doc, options));
+    jump.append(renderSectionTile(section, ticker, root, doc, options));
   }
   if (secondary.length) {
     const wrap = el(doc, "section", "deep-dive-secondary");
@@ -161,40 +325,197 @@ export function renderDeepDive(payload, doc = document, options = {}) {
     wrap.append(head, body);
     root.append(wrap);
   }
+  watchSectionNav(root, doc);
   return root;
 }
 
-function renderBookmark(section, ticker, root, jump, doc, options) {
-  const sectionId = String(section?.id || "");
-  const chip = el(doc, "a", "deep-dive-jump-chip");
-  const mark = el(doc, "span", "deep-dive-jump-mark", "#");
-  mark.setAttribute("aria-hidden", "true");
-  chip.append(mark, el(doc, "span", "deep-dive-jump-text", section.title || sectionId));
-  const href = stockHash(ticker, sectionId) || stockHash(ticker) || "";
-  if (href) chip.href = href;
-  chip.dataset.sectionId = sectionId;
-  if (options.currentSection && options.currentSection === sectionId) {
-    chip.setAttribute("aria-current", "location");
+function renderSectionNav(sections, ticker, root, doc, options) {
+  const nav = el(doc, "div", "deep-dive-section-nav");
+  nav.setAttribute("aria-hidden", "true");
+  const toggle = el(doc, "button", "deep-dive-sections-toggle");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-haspopup", "true");
+  toggle.setAttribute("aria-controls", "deep-dive-sections-menu");
+  toggle.setAttribute("aria-label", "Sections");
+  const chevron = el(doc, "span", "deep-dive-sections-chevron", "▾");
+  chevron.setAttribute("aria-hidden", "true");
+  toggle.append(el(doc, "span", "deep-dive-sections-toggle-label", "Sections"), chevron);
+  const menu = el(doc, "div", "deep-dive-sections-menu");
+  menu.id = "deep-dive-sections-menu";
+  menu.hidden = true;
+  menu.setAttribute("role", "group");
+  menu.setAttribute("aria-label", "Deep dive sections");
+  const back = el(doc, "button", "deep-dive-sections-back", "Back to tiles");
+  back.type = "button";
+  back.addEventListener("click", () => {
+    closeSectionMenu(root);
+    const grid = findByClass(root, "deep-dive-sections");
+    if (!grid) return;
+    if (typeof grid.hasAttribute !== "function" || !grid.hasAttribute("tabindex")) {
+      grid.tabIndex = -1;
+      grid.setAttribute?.("tabindex", "-1");
+    }
+    grid.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    grid.focus?.({ preventScroll: true });
+  });
+  menu.append(back);
+  for (const section of sections || []) {
+    const link = el(doc, "a", "deep-dive-section-link", section.title || section.id || "");
+    bindSectionLink(link, section, ticker, root, doc, options);
+    menu.append(link);
   }
-  chip.addEventListener("click", (event) => {
+  toggle.addEventListener("click", () => {
+    const open = Boolean(menu.hidden);
+    menu.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+  toggle.addEventListener("keydown", (event) => {
+    if (event?.key !== "Escape") return;
+    closeSectionMenu(root);
+  });
+  nav.append(toggle, menu);
+  return nav;
+}
+
+function renderSectionTile(section, ticker, root, doc, options) {
+  const sectionId = String(section?.id || "");
+  const tile = el(doc, "a", "deep-dive-section-tile");
+  const head = el(doc, "span", "deep-dive-section-tile-head");
+  head.append(
+    sectionIcon(doc, sectionIconKind(section)),
+    el(doc, "span", "deep-dive-section-tile-name", section.title || sectionId),
+  );
+  tile.append(head);
+  const headline = sectionHeadline(section);
+  if (headline) {
+    const value = el(doc, "span", "deep-dive-section-tile-value mono");
+    if (headline.value == null) {
+      value.textContent = headline.empty_label || "Not yet disclosed";
+      value.classList.add("is-empty");
+    } else {
+      value.textContent = formatDeepValue(headline.value, headline.unit);
+    }
+    tile.append(value);
+    if (headline.label) tile.append(el(doc, "span", "deep-dive-section-tile-metric", headline.label));
+    const meta = el(doc, "span", "deep-dive-section-tile-meta");
+    if (headline.estimate) meta.append(estimateBadge(doc));
+    if (headline.value != null && headline.approval_state === "proposed") meta.append(pendingBadge(doc));
+    const change = changeLine(doc, headline.change, headline.inverse);
+    if (change) meta.append(change);
+    if (meta.childNodes.length) tile.append(meta);
+    const spark = sparkline(doc, headline.sparkline || []);
+    if (spark) {
+      spark.setAttribute("aria-hidden", "true");
+      spark.removeAttribute?.("role");
+      tile.append(spark);
+    }
+  }
+  bindSectionLink(tile, section, ticker, root, doc, options);
+  return tile;
+}
+
+function changeLine(doc, change, inverse) {
+  const number = finite(change);
+  if (number == null) return null;
+  const tone = trendTone(number, inverse);
+  const arrow = number > 0 ? "▲" : number < 0 ? "▼" : "▬";
+  const word = tone === "up" ? (inverse ? "Improved" : "Up")
+    : tone === "down" ? (inverse ? "Worsened" : "Down")
+    : "Flat";
+  const formatted = formatChange(number);
+  const line = el(doc, "span", `deep-dive-section-change direction-mark-${tone}`);
+  line.append(el(doc, "span", "deep-dive-section-arrow", arrow), el(doc, "span", "mono", formatted || ""));
+  line.setAttribute("aria-label", `${word} ${formatted} versus the prior period`);
+  return line;
+}
+
+function bindSectionLink(node, section, ticker, root, doc, options) {
+  const sectionId = String(section?.id || "");
+  const href = stockHash(ticker, sectionId) || stockHash(ticker) || "";
+  if (href && String(node.tagName || "").toUpperCase() === "A") node.href = href;
+  node.dataset.sectionId = sectionId;
+  if (options.currentSection && options.currentSection === sectionId) {
+    node.setAttribute("aria-current", "location");
+  }
+  node.addEventListener("click", (event) => {
     if (event && event.button != null && event.button !== 0) return;
     if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) return;
     event?.preventDefault();
-    markCurrentBookmark(jump, chip);
+    markCurrentSection(root, sectionId);
+    closeSectionMenu(root);
     revealDeepDiveSection(root, sectionId);
     // Pass the hash, not the element's resolved href. In a browser, a.href is absolute
     // and would replace the `#stock/<T>` route if it were written into the history URL.
     if (typeof options.onBookmark === "function") options.onBookmark(sectionId, href);
   });
-  return chip;
+  return node;
 }
 
-function markCurrentBookmark(jump, chip) {
-  for (const link of jump.children || []) {
-    if (!String(link.className || "").split(/\s+/).includes("deep-dive-jump-chip")) continue;
-    link.removeAttribute?.("aria-current");
+function markCurrentSection(root, sectionId) {
+  const wanted = new Set(["deep-dive-section-tile", "deep-dive-section-link"]);
+  const stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    const names = String(node?.className || "").split(/\s+/);
+    if (names.some((name) => wanted.has(name))) {
+      if (node.dataset?.sectionId === sectionId) node.setAttribute("aria-current", "location");
+      else node.removeAttribute?.("aria-current");
+    }
+    if (node?.children) stack.push(...node.children);
   }
-  chip.setAttribute("aria-current", "location");
+}
+
+function closeSectionMenu(root) {
+  const menu = findByClass(root, "deep-dive-sections-menu");
+  const toggle = findByClass(root, "deep-dive-sections-toggle");
+  if (menu) menu.hidden = true;
+  if (toggle) toggle.setAttribute("aria-expanded", "false");
+}
+
+function findByClass(node, className) {
+  if (String(node?.className || "").split(/\s+/).includes(className)) return node;
+  for (const child of node?.children || []) {
+    const found = findByClass(child, className);
+    if (found) return found;
+  }
+  return null;
+}
+
+function watchSectionNav(root, doc) {
+  const Observer = doc.defaultView?.IntersectionObserver;
+  if (typeof Observer !== "function") return;
+  const grid = findByClass(root, "deep-dive-sections");
+  const nav = findByClass(root, "deep-dive-section-nav");
+  if (!grid || !nav) return;
+  const gridObserver = new Observer((entries) => {
+    const visible = entries.some((entry) => entry.isIntersecting);
+    setClass(nav, "is-visible", !visible);
+    if (visible) {
+      nav.setAttribute("aria-hidden", "true");
+      closeSectionMenu(root);
+    } else {
+      nav.removeAttribute("aria-hidden");
+    }
+  });
+  gridObserver.observe(grid);
+  const sections = [];
+  const stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    if (String(node?.className || "").split(/\s+/).includes("deep-dive-section")) sections.push(node);
+    if (node?.children) stack.push(...node.children);
+  }
+  if (!sections.length) return;
+  const sectionObserver = new Observer((entries) => {
+    const best = entries
+      .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!best) return;
+    const id = String(best.target?.id || "").replace(/^deep-dive-/, "");
+    if (id) markCurrentSection(root, id);
+  }, { rootMargin: "-15% 0px -50% 0px", threshold: [0.15, 0.4, 0.7] });
+  for (const section of sections) sectionObserver.observe(section);
 }
 
 function findById(node, id) {

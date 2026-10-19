@@ -132,6 +132,10 @@ def validate_deep_dive(block) -> list[str]:
         seen.add(sid)
         if section.get("placement", "primary") not in PLACEMENTS:
             errors.append(f"{sid or 'section'} has unsupported placement")
+        headline = section.get("headline")
+        if headline not in (None, ""):
+            if not isinstance(headline, str) or not _METRIC_ID.match(headline):
+                errors.append(f"{sid or 'section'} headline must be a metric id")
         panels = section.get("panels")
         if not isinstance(panels, list) or not panels:
             errors.append(f"{sid or 'section'} needs panels")
@@ -959,12 +963,16 @@ def assemble_deep_dive(
         panels = []
         for panel in section.get("panels") or []:
             panels.append(_fill_panel(panel, metrics, estimates, catalog, forecast))
-        sections.append({
+        built = {
             "id": section.get("id"),
             "title": section.get("title"),
             "placement": section.get("placement") or "primary",
             "panels": panels,
-        })
+        }
+        headline = str(section.get("headline") or "").strip()
+        if headline:
+            built["headline"] = headline
+        sections.append(built)
     return {
         "version": 1,
         "title": block.get("title") or "Deep dive",

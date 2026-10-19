@@ -1424,6 +1424,7 @@
       {
         "id": "scoreboard",
         "title": "Trend scoreboard",
+        "headline": "total_deliveries",
         "placement": "primary",
         "panels": [
           {
@@ -1492,6 +1493,7 @@
       {
         "id": "forecast",
         "title": "Revenue & earnings forecast",
+        "headline": "revenue_gaap",
         "placement": "primary",
         "panels": [
           {
@@ -1508,6 +1510,7 @@
       {
         "id": "robotaxi",
         "title": "Robotaxi & autonomy",
+        "headline": "robotaxi_fleet",
         "placement": "primary",
         "panels": [
           {
@@ -1646,6 +1649,7 @@
       {
         "id": "energy",
         "title": "Commercial energy",
+        "headline": "energy_storage_deployed",
         "placement": "primary",
         "panels": [
           {
@@ -1719,6 +1723,7 @@
       {
         "id": "semi",
         "title": "Tesla Semi",
+        "headline": "semi_production",
         "placement": "primary",
         "panels": [
           {
@@ -1822,6 +1827,7 @@
       {
         "id": "chargers",
         "title": "Chargers",
+        "headline": "supercharger_stations",
         "placement": "primary",
         "panels": [
           {
@@ -1889,6 +1895,7 @@
       {
         "id": "fsd",
         "title": "FSD by region",
+        "headline": "fsd_subscriptions",
         "placement": "primary",
         "panels": [
           {
@@ -1947,6 +1954,7 @@
       {
         "id": "vehicles",
         "title": "Production & deliveries",
+        "headline": "total_deliveries",
         "placement": "secondary",
         "panels": [
           {
@@ -2024,6 +2032,7 @@
       {
         "id": "optimus",
         "title": "Optimus",
+        "headline": "optimus",
         "placement": "secondary",
         "panels": [
           {
@@ -2080,6 +2089,7 @@
       {
         "id": "factories",
         "title": "Manufacturing footprint",
+        "headline": "factory_capacity",
         "placement": "secondary",
         "panels": [
           {
@@ -2127,6 +2137,7 @@
       {
         "id": "energy-secondary",
         "title": "Energy projects & news",
+        "headline": "energy_pipeline_announced",
         "placement": "secondary",
         "panels": [
           {
