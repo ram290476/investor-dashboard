@@ -5197,6 +5197,34 @@ a.catalyst-edgar-link:hover {
   font-size: 9px;
 }
 
+.deep-dive-axis-year {
+  font-size: 8px;
+}
+
+.deep-dive-estimate {
+  color: var(--amber);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.deep-dive-estimate-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.deep-dive-source-link {
+  color: var(--amber);
+}
+
+.deep-dive-bubble-estimate {
+  fill: none;
+  stroke: var(--amber);
+  stroke-dasharray: 2 2;
+}
+
 .deep-dive-legend {
   display: flex;
   flex-wrap: wrap;

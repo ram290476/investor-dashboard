@@ -26,6 +26,47 @@ export function confidenceLabel(level) {
 }
 
 /** Favorable direction. Inverse metrics treat a decline as favorable. */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Quarter or month label. Quarters keep the year on every tick. Months keep the year only when it changes. */
+export function axisLabel(period) {
+  const text = String(period || "");
+  const quarter = /^(\d{4})Q([1-4])$/.exec(text);
+  if (quarter) return { period: text, primary: `Q${quarter[2]}`, secondary: quarter[1], kind: "quarter" };
+  const month = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(text);
+  if (month) {
+    return { period: text, primary: MONTHS[Number(month[2]) - 1], secondary: month[1], kind: "month" };
+  }
+  return { period: text, primary: text, secondary: "", kind: "other" };
+}
+
+export function axisLabels(periods) {
+  const items = (periods || []).map((period) => axisLabel(period));
+  const monthly = items.length > 0 && items.every((item) => item.kind === "month");
+  if (!monthly) return items;
+  let previous = "";
+  return items.map((item) => {
+    const show = Boolean(item.secondary) && item.secondary !== previous;
+    if (item.secondary) previous = item.secondary;
+    return { ...item, secondary: show ? item.secondary : "" };
+  });
+}
+
+/** Drop ticks that would collide. Shown quarter ticks still carry the year underneath. */
+export function axisTicks(periods, slotWidth = 48) {
+  const labels = axisLabels(periods);
+  if (!labels.length) return [];
+  const monthly = labels.every((item) => item.kind === "month");
+  const min = monthly ? 22 : 34;
+  const step = slotWidth < min ? Math.ceil(min / Math.max(slotWidth, 1)) : 1;
+  if (step <= 1) return labels;
+  return labels.filter((item, index) => {
+    if (index === 0 || index === labels.length - 1) return true;
+    if (monthly && item.secondary) return true;
+    return index % step === 0;
+  });
+}
+
 export function trendTone(change, inverse = false) {
   const number = Number(change);
   if (change == null || Number.isNaN(number) || number === 0) return "flat";
@@ -204,9 +245,21 @@ function renderTile(tile, doc, withSpark) {
   }
   card.append(value);
   const meta = el(doc, "div", "deep-dive-tile-meta");
+  if (tile.estimate_only || tile.source_kind === "news_estimate") meta.append(estimateBadge(doc));
   if (tile.value != null && tile.approval_state === "proposed") meta.append(pendingBadge(doc));
   const confidence = confidenceLabel(tile.confidence);
   if (confidence) meta.append(el(doc, "span", "deep-dive-confidence", confidence));
+  if (!tile.estimate_only && tile.estimate_value != null) {
+    const line = el(doc, "span", "deep-dive-estimate-line");
+    line.append(estimateBadge(doc), el(doc, "span", "mono", formatDeepValue(tile.estimate_value, tile.unit)));
+    const link = sourceLink(doc, tile.estimate_source_url, "Source");
+    if (link) line.append(link);
+    meta.append(line);
+  }
+  if (tile.estimate_only) {
+    const link = sourceLink(doc, tile.estimate_source_url || tile.source_url, "Source");
+    if (link) meta.append(link);
+  }
   if (tile.qoq != null) meta.append(directionMark(doc, "QoQ", tile.qoq, tile.inverse));
   if (tile.yoy != null) meta.append(directionMark(doc, "YoY", tile.yoy, tile.inverse));
   if (meta.childNodes.length) card.append(meta);
@@ -220,6 +273,19 @@ function renderTile(tile, doc, withSpark) {
 function pendingBadge(doc) {
   const badge = el(doc, "span", "review-badge", "Pending review");
   return badge;
+}
+
+function estimateBadge(doc) {
+  return el(doc, "span", "deep-dive-estimate", "Estimate");
+}
+
+function sourceLink(doc, url, title) {
+  if (!url || !String(url).startsWith("https://")) return null;
+  const link = el(doc, "a", "deep-dive-source-link", title || "Source");
+  link.setAttribute("href", url);
+  link.setAttribute("rel", "noreferrer");
+  link.setAttribute("target", "_blank");
+  return link;
 }
 
 function directionMark(doc, kind, change, inverse) {
@@ -263,8 +329,8 @@ function renderChart(seriesList, doc) {
   const periods = periodsOf(drawn);
   if (!periods.length) return el(doc, "p", "deep-dive-empty", "Not yet disclosed");
   const width = 640;
-  const height = 200;
-  const pad = { l: 36, r: 36, t: 12, b: 28 };
+  const height = 220;
+  const pad = { l: 36, r: 36, t: 12, b: 36 };
   const innerW = width - pad.l - pad.r;
   const innerH = height - pad.t - pad.b;
   const bars = drawn.filter((series) => series.role !== "line" && series.role !== "line-dashed");
@@ -313,10 +379,26 @@ function renderChart(seriesList, doc) {
       }));
     }
   }
-  const first = periods[0];
-  const last = periods[periods.length - 1];
-  svg.append(svgEl(doc, "text", { x: pad.l, y: height - 8, class: "deep-dive-axis" }, first));
-  svg.append(svgEl(doc, "text", { x: width - pad.r, y: height - 8, class: "deep-dive-axis", "text-anchor": "end" }, last));
+  const slotWidth = periods.length ? innerW / periods.length : innerW;
+  for (const label of axisTicks(periods, slotWidth)) {
+    const index = periods.indexOf(label.period);
+    if (index < 0) continue;
+    const x = (pad.l + index * slot + slot / 2).toFixed(1);
+    svg.append(svgEl(doc, "text", {
+      x,
+      y: height - 18,
+      class: "deep-dive-axis",
+      "text-anchor": "middle",
+    }, label.primary));
+    if (label.secondary) {
+      svg.append(svgEl(doc, "text", {
+        x,
+        y: height - 6,
+        class: "deep-dive-axis deep-dive-axis-year",
+        "text-anchor": "middle",
+      }, label.secondary));
+    }
+  }
   const wrap = el(doc, "div", "deep-dive-chart-wrap");
   wrap.append(svg, legend(doc, drawn));
   return wrap;
@@ -423,7 +505,7 @@ function renderMap(panel, doc) {
       cx: point[0],
       cy: point[1],
       r: radius.toFixed(1),
-      class: marker.reported ? "deep-dive-bubble" : "deep-dive-bubble-empty",
+      class: marker.estimate ? "deep-dive-bubble deep-dive-bubble-estimate" : (marker.reported ? "deep-dive-bubble" : "deep-dive-bubble-empty"),
     });
     const label = marker.reported
       ? `${marker.place}: ${formatDeepValue(marker.value, "")}`
@@ -449,8 +531,10 @@ function renderMap(panel, doc) {
     table.append(head);
     for (const marker of listed) {
       const row = el(doc, "tr");
+      const place = el(doc, "td", "", marker.place);
+      if (marker.estimate) place.append(estimateBadge(doc));
       row.append(
-        el(doc, "td", "", marker.place),
+        place,
         el(doc, "td", "mono", marker.reported ? formatDeepValue(marker.value, "") : (marker.reported === false ? "Not yet disclosed" : "")),
         el(doc, "td", "", marker.status || ""),
       );
@@ -476,7 +560,10 @@ function renderMilestones(items, doc) {
       ? [item.date, item.state].filter(Boolean).join(" · ")
       : (item.empty_label || "Not yet disclosed");
     row.append(el(doc, "span", "deep-dive-milestone-detail", detail));
+    if (item.estimate) row.append(estimateBadge(doc));
     if (item.reported && item.approval_state === "proposed") row.append(pendingBadge(doc));
+    const link = sourceLink(doc, item.source_url, "Source");
+    if (item.estimate && link) row.append(link);
     list.append(row);
   }
   return list;
@@ -499,8 +586,14 @@ function renderTable(table, doc, emptyLabel) {
   }
   for (const record of table.rows) {
     const row = el(doc, "tr");
-    (record.cells || []).forEach((value) => {
-      row.append(el(doc, "td", "", value == null || value === "" ? "—" : String(value)));
+    (record.cells || []).forEach((value, index) => {
+      const cell = el(doc, "td", "", value == null || value === "" ? "—" : String(value));
+      if (index === 0 && record.estimate) {
+        cell.append(estimateBadge(doc));
+        const link = sourceLink(doc, record.source_url, "Source");
+        if (link) cell.append(link);
+      }
+      row.append(cell);
     });
     node.append(row);
   }
@@ -554,7 +647,40 @@ function renderForecast(panel, doc) {
   wrap.append(forecastTable(forecast, doc));
   if (forecast.consensus_note) wrap.append(el(doc, "p", "deep-dive-note", forecast.consensus_note));
   if (forecast.prior_projection_note) wrap.append(el(doc, "p", "deep-dive-note", forecast.prior_projection_note));
+  const compared = forecast.prior_projection || [];
+  const waiting = (forecast.stored_headlines || []).filter((row) => !compared.some((item) => (
+    item.period === row.period && item.field === row.field && item.segment_id === row.segment_id
+  )));
+  if (compared.length || waiting.length) wrap.append(renderPrior(compared, waiting, doc));
   return wrap;
+}
+
+function renderPrior(compared, waiting, doc) {
+  const table = el(doc, "table", "deep-dive-table");
+  const head = el(doc, "tr");
+  ["Segment", "Quarter", "Stored headline", "Actual"].forEach((label) => head.append(el(doc, "th", "", label)));
+  table.append(head);
+  for (const row of compared) {
+    const line = el(doc, "tr");
+    line.append(
+      el(doc, "td", "", `${row.segment_label || row.segment_id || ""} ${row.field || ""}`.trim()),
+      el(doc, "td", "", row.period || ""),
+      el(doc, "td", "mono", formatDeepValue(row.projected, row.unit)),
+      el(doc, "td", "mono", formatDeepValue(row.actual, row.unit)),
+    );
+    table.append(line);
+  }
+  for (const row of waiting) {
+    const line = el(doc, "tr");
+    line.append(
+      el(doc, "td", "", `${row.segment_label || row.segment_id || ""} ${row.field || ""}`.trim()),
+      el(doc, "td", "", row.period || ""),
+      el(doc, "td", "mono", formatDeepValue(row.value, row.unit)),
+      el(doc, "td", "", "Waiting for the report"),
+    );
+    table.append(line);
+  }
+  return table;
 }
 
 function forecastHeadline(metric, doc) {

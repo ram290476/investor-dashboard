@@ -759,6 +759,74 @@
       "Terraform is a voice label. The program name is unconfirmed. It is not HashiCorp Terraform.",
       "Starmind is a voice label. The program name is unconfirmed and may be Starshield."
     ],
+    "sources": [
+      {
+        "id": "launch_library",
+        "lsp_name": "SpaceX",
+        "base_url": "https://ll.thespacedevs.com/2.3.0",
+        "page_limit": 100,
+        "max_pages": 4,
+        "schedule_limit": 40,
+        "total_metric": "total_launches",
+        "projected_metric": "launch_count_projected",
+        "schedule_metric": "launches_schedule",
+        "vehicles": [
+          {
+            "id": "falcon_heavy",
+            "label": "Falcon Heavy",
+            "metric_id": "launch_count_falcon_heavy",
+            "terms": ["falcon heavy"]
+          },
+          {
+            "id": "starship",
+            "label": "Starship",
+            "metric_id": "launch_count_starship_vehicle",
+            "flights_metric": "starship_flights",
+            "terms": ["starship"]
+          },
+          {
+            "id": "falcon9",
+            "label": "Falcon 9",
+            "metric_id": "launch_count_falcon9",
+            "terms": ["falcon 9", "falcon"]
+          }
+        ]
+      },
+      {
+        "id": "celestrak",
+        "url": "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json",
+        "metric_id": "starlink_constellation",
+        "unit": "satellites"
+      },
+      {
+        "id": "news_estimates",
+        "rules": [
+          {
+            "metric_id": "factory_sites",
+            "kind": "site",
+            "match": ["factory", "gigafactory", "plant", "facility"],
+            "milestones": [
+              {"id": "announced", "label": "Announced", "terms": ["announc", "planned"]},
+              {"id": "construction", "label": "Construction", "terms": ["construction", "break ground", "groundbreak"]},
+              {"id": "production", "label": "Production", "terms": ["production", "operational"]}
+            ]
+          },
+          {
+            "metric_id": "ai_deals",
+            "kind": "deal",
+            "match": ["artificial intelligence", "ai"],
+            "require": ["deal", "contract", "partnership", "agreement"],
+            "segments": [
+              {"id": "launch", "metric_id": "ai_deals_launch", "terms": ["launch", "falcon"]},
+              {"id": "starlink", "metric_id": "ai_deals_starlink", "terms": ["starlink"]},
+              {"id": "starmind", "metric_id": "ai_deals_starmind", "terms": ["starmind", "starshield"]},
+              {"id": "starship", "metric_id": "ai_deals_starship", "terms": ["starship"]},
+              {"id": "ai", "metric_id": "ai_deals_ai", "terms": ["xai", "compute", "data center", "datacenter"]}
+            ]
+          }
+        ]
+      }
+    ],
     "forecast": {
       "segments": [
         {
@@ -888,7 +956,7 @@
             "subtitle": "Counts by vehicle. Monthly points appear when a manual row uses a month period.",
             "width": "wide",
             "cadence": "quarterly",
-            "source_note": "No launch-library key is configured for this page. Counts stay pending until a sourced manual entry exists. The regulatory feed's upcoming-launch headlines are not copied here.",
+            "source_note": "Launch Library 2 public schedule. No API key. Counts stay pending review. Booster reuse stays blank unless that launch payload includes it.",
             "kpis": [
               {
                 "metric_id": "total_launches",
@@ -932,7 +1000,7 @@
             "subtitle": "Historical and upcoming rows. Outcome and booster reuse stay blank until sourced.",
             "width": "wide",
             "empty_label": "Not yet disclosed",
-            "source_note": "Each row needs an https source. Rows stay pending review.",
+            "source_note": "Rows come from the public launch schedule and stay pending review. The free list often omits booster reuse, so that cell stays blank instead of being guessed.",
             "table": {
               "metric_id": "launches_schedule",
               "columns": [
@@ -974,10 +1042,10 @@
             "id": "projected-launches",
             "kind": "trend-bars",
             "title": "Projected launches",
-            "subtitle": "Shown beside actual cadence. The dashed series is not estimated.",
+            "subtitle": "Upcoming launches on the public schedule, beside actual cadence. Not a forecast model.",
             "width": "wide",
             "cadence": "quarterly",
-            "source_note": "The placeholder forecast does not project launch counts. No range is stored.",
+            "source_note": "Projected counts are upcoming launches grouped by quarter. Not a forecast model and not a news estimate.",
             "series": [
               {
                 "metric_id": "total_launches",
@@ -1035,7 +1103,7 @@
             "subtitle": "Named sites only. No date until a sourced entry exists.",
             "width": "half",
             "milestone_metric": "factory_sites",
-            "source_note": "Manual and pending review.",
+            "source_note": "A news mention of a named site is an estimate, shown separately, with its source link. It stays pending review and is not auto-approved.",
             "milestones": [
               {
                 "id": "announced",
@@ -1058,7 +1126,7 @@
             "subtitle": "Site, status, and note.",
             "width": "half",
             "empty_label": "Not yet disclosed",
-            "source_note": "Manual and pending review.",
+            "source_note": "Site rows from news are estimates and stay pending review. A missing place name is not invented.",
             "table": {
               "metric_id": "factory_sites",
               "columns": [
@@ -1091,7 +1159,7 @@
             "subtitle": "Cadence of flight tests. The company metric stays in its existing review state.",
             "width": "half",
             "cadence": "quarterly",
-            "source_note": "The packaged company metric is narrative until a numeric series is sourced.",
+            "source_note": "Flight counts come from Launch Library 2 when the vehicle matches the catalog terms. Pending review.",
             "series": [
               {
                 "metric_id": "starship_flights",
@@ -1139,7 +1207,7 @@
             "cadence": "quarterly",
             "map": "world",
             "map_metric": "starlink_deployed_by_country",
-            "source_note": "Subscriber totals can come from the company metric when it has points. Satellite counts and places are manual and pending review. No map key is used.",
+            "source_note": "Constellation size is the count of objects in the public CelesTrak group. No API key. It stays pending review. Built and deployed totals are still manual.",
             "kpis": [
               {
                 "metric_id": "starlink_subscribers",
@@ -1226,7 +1294,7 @@
             "subtitle": "One trend per segment, not only a total.",
             "width": "wide",
             "cadence": "quarterly",
-            "source_note": "Deal rows are manual and pending review. No partner list is invented.",
+            "source_note": "News-derived deal counts are estimates, one series per segment, pending review, and are not blended into reported revenue.",
             "series": [
               {
                 "metric_id": "ai_deals_launch",
@@ -1267,7 +1335,7 @@
             "subtitle": "Partner, segment, size, date, and status.",
             "width": "wide",
             "empty_label": "Not yet disclosed",
-            "source_note": "Each row needs an https source and stays pending review.",
+            "source_note": "Each news-derived row is an estimate with its source link and stays pending review. Dollar size is blank unless the article states one.",
             "table": {
               "metric_id": "ai_deals",
               "columns": [
