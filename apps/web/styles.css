@@ -3749,6 +3749,7 @@ a.catalyst-edgar-link:hover {
 
 .stock-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
 }
 
@@ -3756,6 +3757,11 @@ a.catalyst-edgar-link:hover {
   padding: 14px 16px 16px;
   color: var(--text);
   font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+.company-section-target,
+#stock-panel-price {
+  scroll-margin-top: 56px;
 }
 
 .stock-section-title {
@@ -3810,14 +3816,15 @@ a.catalyst-edgar-link:hover {
   flex: 0 0 auto;
   height: auto;
   min-height: 36px;
-  padding: 0 12px;
+  padding: 0 14px;
   border-color: transparent;
   border-radius: 8px;
   background: transparent;
   box-shadow: none;
   color: var(--muted);
   font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  font-weight: 500;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .stock-page-tabs .stock-tab:hover {
@@ -5188,13 +5195,15 @@ a.catalyst-edgar-link:hover {
   gap: 4px;
   min-width: 0;
   min-height: 112px;
-  padding: 10px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--text);
   font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--page) 45%, transparent);
 }
 
 .deep-dive-section-tile:hover {

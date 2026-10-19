@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseStockHash, parseStockSection, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, tickerResearchPath } from "./routes.js";
+import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 
 test("dashboard and Cognito callback paths resolve to the dashboard", () => {
   assert.deepEqual(routeFromPath("/"), { page: "dashboard" });
@@ -61,6 +61,26 @@ test("a deep-dive bookmark hash stays on that company's route", () => {
       selected: "QQQ",
     },
   );
+});
+
+test("company tab hashes stay on that company's route and restore the section", () => {
+  assert.equal(parseStockHash("#stock/nvda/kpis"), "NVDA");
+  assert.equal(parseStockTab("#stock/NVDA/kpis/revenue_gaap"), "kpis");
+  assert.equal(parseStockPanel("#stock/nvda/kpis/revenue_gaap"), "revenue_gaap");
+  assert.equal(parseStockSection("#stock/NVDA/kpis/revenue_gaap"), "");
+  assert.equal(parseStockTab("#stock/AAPL"), "");
+  assert.equal(parseStockPanel("#stock/AAPL"), "");
+  assert.equal(parseStockTab("#stock/MSFT/deep-dive"), "deep-dive");
+  assert.equal(parseStockSection("#stock/MSFT/deep-dive"), "");
+  assert.equal(parseStockHash("#stock/NVDA/nope"), null);
+  assert.equal(stockTabHash("abcd", "overview"), "#stock/ABCD");
+  assert.equal(stockTabHash("abcd", "kpis"), "#stock/ABCD/kpis");
+  assert.equal(stockTabHash("abcd", "deep-dive"), "#stock/ABCD/deep-dive");
+  assert.equal(stockPanelHash("abcd", "overview", "price"), "#stock/ABCD/overview/price");
+  assert.equal(stockPanelHash("abcd", "calls", "notes"), "#stock/ABCD/calls/notes");
+  assert.equal(stockPanelHash("abcd", "deep-dive", "forecast"), "#stock/ABCD/deep-dive/forecast");
+  assert.equal(stockPanelHash("abcd", "kpis", "../x"), "#stock/ABCD/kpis");
+  assert.deepEqual(routeFromLocation("/", "#stock/BRK.B/fundamentals/revenue"), { page: "stock", ticker: "BRK.B" });
 });
 
 test("research navigation preserves and restores the dashboard ticker", () => {
