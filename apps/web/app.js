@@ -16,7 +16,7 @@ import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAm
 import { applyTheme, overlayColor } from "./theme.js";
 import { clearRefreshToken, createAuthClient, performAuthorizedRequest } from "./auth-session.js";
 import { createSafeStorage } from "./safe-storage.js";
-import { parseStockHash, parseStockSection, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
+import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, stockTabHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
   catalystDateLabel, catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
@@ -48,6 +48,7 @@ import {
   stockTabs,
 } from "./stock-page.js";
 import { hasDeepDive, renderDeepDive, revealDeepDiveSection } from "./deep-dive.js";
+import { companyBookmarks, renderCompanyBookmarks, revealCompanySection, sectionSlug } from "./company-sections.js";
 import { curveView, fomcView, policyPathView, sparklinePath } from "./rates-panel.js";
 import {
   companyMetricLine,
@@ -3564,6 +3565,12 @@ function renderMetricCard(metric) {
   ].filter(Boolean);
   const card = node("article", classes.join(" "));
   card.dataset.metricId = metric.id;
+  const slug = sectionSlug(metric.id);
+  if (slug) {
+    card.id = `stock-metric-${slug}`;
+    card.dataset.companySection = slug;
+    card.classList.add("company-section-target");
+  }
   const heading = node("div", "stock-metric-heading");
   const title = node("h3", "stock-metric-title", metric.name);
   heading.append(title);
@@ -3697,8 +3704,9 @@ async function submitMetricReview(metricId, status) {
 }
 
 function renderCompanyMetrics(panels, pageState) {
-  const block = node("section", "panel stock-section company-metrics");
+  const block = node("section", "panel stock-section company-metrics company-section-target");
   block.dataset.stockPanel = "overview";
+  block.dataset.companySection = "metrics";
   block.id = "stock-panel-metrics";
   block.append(node("h3", "stock-section-title", "Company metrics"));
   if (session.metricReviewError) {
@@ -3810,9 +3818,10 @@ function renderMacroSignals(row) {
 
 function renderTechnicalSummary(ticker, history) {
   const view = technicalSummaryView(technicalSummaryFor(ticker));
-  const panel = node("section", "panel technical-summary");
+  const panel = node("section", "panel technical-summary company-section-target");
   panel.id = "stock-panel-technical";
   panel.dataset.stockPanel = "overview";
+  panel.dataset.companySection = "technical";
   panel.dataset.technicalSummary = view.example ? "example" : "live";
   const header = node("div", "panel-header");
   const titleBlock = node("div");
@@ -3955,7 +3964,14 @@ function renderStockPage() {
 
   const pageTabs = stockTabs(payload);
   const hashSection = parseStockSection(location.hash);
-  if (hashSection && pageTabs.some((item) => item.id === "deep-dive")) session.stockTab = "deep-dive";
+  // A stock hash names the tab. `#stock/<T>` is Overview, including after Back.
+  // A deep-dive hash waits until that tab exists in the payload.
+  if (parseStockHash(location.hash) === session.selected) {
+    const hashTab = parseStockTab(location.hash);
+    if (hashTab && pageTabs.some((item) => item.id === hashTab)) session.stockTab = hashTab;
+    else if (!hashTab) session.stockTab = "overview";
+    else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
+  } else if (hashSection && pageTabs.some((item) => item.id === "deep-dive")) session.stockTab = "deep-dive";
   else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
   const page = node("main", "stock-page");
   page.dataset.stockTab = session.stockTab;
@@ -3963,10 +3979,13 @@ function renderStockPage() {
   page.setAttribute("aria-label", `${session.selected} company page`);
 
   const chart = renderChartPanel("company", session.selected);
+  chart.id = "stock-panel-price";
+  chart.dataset.companySection = "price";
 
   const section = (id, label, cards, empty) => {
-    const block = node("section", "panel stock-section");
+    const block = node("section", "panel stock-section company-section-target");
     block.dataset.stockPanel = id;
+    block.dataset.companySection = id;
     block.id = `stock-panel-${id}`;
     if (id === "kpis") block.append(renderMetricReview());
     block.append(node("h3", "stock-section-title", label));
@@ -3975,8 +3994,9 @@ function renderStockPage() {
   };
 
   const calls = callsCopy();
-  const callsBlock = node("section", "panel stock-section");
+  const callsBlock = node("section", "panel stock-section company-section-target");
   callsBlock.dataset.stockPanel = "calls";
+  callsBlock.dataset.companySection = "calls";
   callsBlock.id = "stock-panel-calls";
   callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
   if (charts.guidance.length) {
@@ -4052,6 +4072,28 @@ function renderStockPage() {
   });
   // Same slot for every company page, with or without a deep dive, so the row does not jump.
   page.prepend(tabs);
+  requestAnimationFrame(() => {
+    const selectedTab = tabs.querySelector('[aria-selected="true"]');
+    if (!selectedTab || tabs.scrollWidth <= tabs.clientWidth + 1) return;
+    const left = selectedTab.offsetLeft - (tabs.clientWidth - selectedTab.offsetWidth) / 2;
+    tabs.scrollLeft = Math.max(0, left);
+  });
+  if (session.stockTab !== "deep-dive") {
+    const bookmarks = renderCompanyBookmarks(companyBookmarks(session.stockTab, {
+      history,
+      technical: technicalSummaryView(technicalSummaryFor(session.selected)),
+      operating: charts.operating,
+      fundamentals: charts.fundamentals,
+      guidance: charts.guidance,
+    }), document, {
+      ticker: session.selected,
+      tab: session.stockTab,
+      currentSection: parseStockPanel(location.hash),
+      scrollRoot: root,
+      onBookmark: openCompanyBookmark,
+    });
+    if (bookmarks) tabs.after(bookmarks);
+  }
   if (hasDeepDive(payload)) {
     page.append(renderDeepDive(payload, document, {
       ticker: session.selected,
@@ -4143,12 +4185,19 @@ function renderNotFoundPage() {
 function selectStockTab(id) {
   session.stockTab = id;
   session.scrolledStockSection = "";
-  const hash = stockHash(session.selected);
+  const hash = stockTabHash(session.selected, id);
   if (hash && parseStockHash(location.hash) === session.selected && location.hash !== hash) {
     history.pushState(history.state, "", `${location.pathname}${location.search}${hash}`);
   }
   renderDashboard();
   root.querySelector(`#stock-tab-${id}`)?.focus();
+}
+
+function openCompanyBookmark(sectionId, href) {
+  session.scrolledStockSection = `${session.selected}:${session.stockTab}:${sectionId}`;
+  if (href && href.startsWith("#") && location.hash !== href) {
+    history.pushState(history.state, "", `${location.pathname}${location.search}${href}`);
+  }
 }
 
 function openDeepDiveBookmark(sectionId, href) {
@@ -4161,12 +4210,22 @@ function openDeepDiveBookmark(sectionId, href) {
 
 function scheduleStockSectionScroll() {
   const section = parseStockSection(location.hash);
-  if (!section || session.stockTab !== "deep-dive") return;
-  const key = `${session.selected}:${section}`;
+  if (section && session.stockTab === "deep-dive") {
+    const key = `${session.selected}:${section}`;
+    if (session.scrolledStockSection === key) return;
+    session.scrolledStockSection = key;
+    requestAnimationFrame(() => {
+      revealDeepDiveSection(document.getElementById("stock-panel-deep-dive"), section);
+    });
+    return;
+  }
+  const panel = parseStockPanel(location.hash);
+  if (!panel || session.stockTab === "deep-dive") return;
+  const key = `${session.selected}:${session.stockTab}:${panel}`;
   if (session.scrolledStockSection === key) return;
   session.scrolledStockSection = key;
   requestAnimationFrame(() => {
-    revealDeepDiveSection(document.getElementById("stock-panel-deep-dive"), section);
+    revealCompanySection(root, panel);
   });
 }
 

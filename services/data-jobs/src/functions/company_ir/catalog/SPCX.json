@@ -866,6 +866,7 @@
       {
         "id": "scoreboard",
         "title": "Trend scoreboard",
+        "headline": "total_launches",
         "placement": "primary",
         "panels": [
           {
@@ -931,6 +932,7 @@
       {
         "id": "forecast",
         "title": "Revenue and earnings forecast",
+        "headline": "revenue_gaap",
         "placement": "primary",
         "panels": [
           {
@@ -947,6 +949,7 @@
       {
         "id": "launches",
         "title": "Launches",
+        "headline": "total_launches",
         "placement": "primary",
         "panels": [
           {
@@ -1036,6 +1039,7 @@
       {
         "id": "projected-launches",
         "title": "Projected launches",
+        "headline": "launch_count_projected",
         "placement": "primary",
         "panels": [
           {
@@ -1064,6 +1068,7 @@
       {
         "id": "terraform",
         "title": "Terraform",
+        "headline": "terraform_progress",
         "placement": "primary",
         "panels": [
           {
@@ -1094,6 +1099,7 @@
       {
         "id": "factories",
         "title": "New factories",
+        "headline": "factory_sites",
         "placement": "primary",
         "panels": [
           {
@@ -1150,6 +1156,7 @@
       {
         "id": "starship",
         "title": "Starship",
+        "headline": "starship_flights",
         "placement": "primary",
         "panels": [
           {
@@ -1196,6 +1203,7 @@
       {
         "id": "starlink",
         "title": "Starlink",
+        "headline": "starlink_subscribers",
         "placement": "primary",
         "panels": [
           {
@@ -1247,6 +1255,7 @@
       {
         "id": "starmind",
         "title": "Starmind",
+        "headline": "starmind_production",
         "placement": "primary",
         "panels": [
           {
@@ -1285,6 +1294,7 @@
       {
         "id": "ai-deals",
         "title": "AI deals",
+        "headline": "ai_deals",
         "placement": "primary",
         "panels": [
           {
@@ -1367,6 +1377,7 @@
       {
         "id": "revenue",
         "title": "Revenue by segment",
+        "headline": "revenue_gaap",
         "placement": "primary",
         "panels": [
           {

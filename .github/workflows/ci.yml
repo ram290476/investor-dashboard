@@ -95,6 +95,7 @@ jobs:
           node --check apps/web/roadmap.js
           node --check apps/web/routes.js
           node --check apps/web/stock-page.js
+          node --check apps/web/company-sections.js
           node --check apps/web/deep-dive.js
           node --check apps/web/geo.js
           node --check apps/web/rates-panel.js

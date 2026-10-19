@@ -62,6 +62,36 @@ def test_spcx_deep_dive_is_catalog_data_and_stays_proposed():
     assert all(point.get("band_low") is None for metric in total["metrics"] for point in metric["forecast"])
 
 
+def test_optional_section_headline_passes_through():
+    catalog = ir.load_catalog("TSLA")
+    headlines = {section["id"]: section.get("headline") for section in catalog["deep_dive"]["sections"]}
+    assert headlines["robotaxi"] == "robotaxi_fleet"
+    assert headlines["forecast"] == "revenue_gaap"
+    assert headlines["scoreboard"] == "total_deliveries"
+    document = dd.assemble_deep_dive(catalog, [])
+    assert document["sections"][0]["headline"] == "total_deliveries"
+    spcx = ir.load_catalog("SPCX")
+    spcx_headlines = {section["id"]: section.get("headline") for section in spcx["deep_dive"]["sections"]}
+    assert spcx_headlines["launches"] == "total_launches"
+    assert spcx_headlines["starlink"] == "starlink_subscribers"
+    errors = dd.validate_deep_dive({
+        "sections": [{
+            "id": "a",
+            "title": "A",
+            "headline": "Not A Metric",
+            "panels": [{"id": "p", "kind": "table", "title": "P"}],
+        }],
+    })
+    assert any("headline" in error for error in errors)
+    assert dd.validate_deep_dive({
+        "sections": [{
+            "id": "a",
+            "title": "A",
+            "panels": [{"id": "p", "kind": "table", "title": "P"}],
+        }],
+    }) == []
+
+
 def test_sgo_parser_dedupes_versions_and_ignores_other_entities():
     text = _csv(
         "1,1,Example Motors,8,2026,Passenger Car,Y,,,,Stopped",
