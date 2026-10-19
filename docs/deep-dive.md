@@ -17,8 +17,28 @@ A second catalog, `catalog/SPCX.json`, uses the same block for the SpaceX page (
 | Energy news volume and sentiment | Catalog topic terms tagged by the news collector. The news job writes `curated/news_topics/ticker={TICKER}/topics.json`. | `proposed` |
 | News-derived estimates (orders, pipeline, fleet, milestones, factories, deals) | Same stored articles. A number is kept only when the catalog terms sit next to it. Each estimate has source links and a confidence of low or medium. | Always `proposed`. Never approved. Drawn separately from reported figures. |
 | Rarely disclosed figures a person enters | `manual/deep_dive/{TICKER}.json`, written by `scripts/add_deep_dive_entry.py` | Always `proposed`. The script ignores any approval flag. |
+| AV permits held, and permitted vehicles when a public page states the count | Catalog `av_regulator` feeds. No API key. See the source survey below. | Always `proposed`. A failed fetch is not stored as zero. |
 
 `deep-dive-collect` runs Monday 08:00 America/New_York and when a ticker is added. It writes `curated/deep_dive/ticker={TICKER}/observations.json` and then the company-IR serve job republishes `serving/stock/{TICKER}.json`. The job is created by the GitHub deploy workflow from `infra/terraform/variables.tf`. Do not apply Terraform locally.
+
+## Regulator records (#252)
+
+Any ticker whose catalog declares `av_regulator` gets the same collector. The Python does not name a company. The catalog lists the entity strings and the feeds.
+
+The Robotaxi section shows two labels when both numbers exist: **Estimate** on the news-derived fleet figure, and **Regulator records** on the public count. The monthly chart uses month names. Quarter-end snapshots are stored as separate series (`*_quarter`) so a quarterly chart can label `Q1`–`Q4` with the year underneath. Those quarter series are the latest month in each quarter, not a sum. They are not drawn on the monthly chart, so the two axes stay separate.
+
+### Source survey
+
+| Source | What is on the public page | Vehicle count | Update | Terms |
+|---|---|---|---|---|
+| California DMV, Autonomous Vehicle Permit Holders | Holder lists for testing with a driver, driverless testing, and deployment. `https://www.dmv.ca.gov/portal/vehicle-industry-services/autonomous-vehicles/autonomous-vehicle-testing-permit-holders/` | Not published. Rosters from records requests are not fetched. | The page changes when DMV adds or drops a holder. The collector reads it weekly. | Public web page. No key. |
+| California CPUC, Autonomous Vehicle Program Permits Issued | One row per carrier and permit type (pilot or deployment). | Not a vehicle census. Quarterly XLSX program reports are separate downloads and are not parsed. | When CPUC issues a permit. Weekly read. | Public web page. No key. |
+| Texas DMV, Automated Motor Vehicles program | Program page at `https://www.txdmv.gov/AVprogram`. | Kept only when the page puts a number next to the catalog entity and the words vehicles, registered, or permitted. | Weekly read. | Public web page. No key. |
+| NHTSA Standing General Order CSVs | Already collected on the same deep dive as crash counts. | Not a registration. Used as the crash-report cross-check. | Weekly, with the existing SGO collect. | Public CSV. No key. |
+| California DMV OL 316 collision reports | One PDF per report. | Not a fleet count. Not fetched. | — | Public, per report. |
+| California DMV disengagement reports | Annual files. | Miles and disengagements, not a weekly roster. Not fetched. | Annual. | Public files. |
+
+Permits held is the number of roster sections plus permit-table rows that name a catalog entity. Zero is stored when the pages were read and the entity is absent. If every feed fails, the previous series is kept.
 
 ## Forecast contract
 

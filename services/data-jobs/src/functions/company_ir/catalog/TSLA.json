@@ -1249,6 +1249,34 @@
         ]
       },
       {
+        "id": "av_regulator",
+        "entities": ["Tesla Robotaxi", "Tesla"],
+        "permits_metric": "av_permits_held",
+        "vehicles_metric": "av_registered_vehicles",
+        "permits_quarter_metric": "av_permits_held_quarter",
+        "vehicles_quarter_metric": "av_registered_vehicles_quarter",
+        "feeds": [
+          {
+            "id": "ca_dmv_permits",
+            "kind": "permit_roster",
+            "jurisdiction": "California DMV",
+            "url": "https://www.dmv.ca.gov/portal/vehicle-industry-services/autonomous-vehicles/autonomous-vehicle-testing-permit-holders/"
+          },
+          {
+            "id": "cpuc_permits",
+            "kind": "permit_table",
+            "jurisdiction": "California CPUC",
+            "url": "https://www.cpuc.ca.gov/regulatory-services/licensing/transportation-licensing-and-analysis-branch/autonomous-vehicle-programs/autonomous-vehicle-program-permits-issued"
+          },
+          {
+            "id": "txdmv_program",
+            "kind": "stated_count",
+            "jurisdiction": "Texas DMV",
+            "url": "https://www.txdmv.gov/AVprogram"
+          }
+        ]
+      },
+      {
         "id": "news_topics",
         "metric_id": "energy_news_topics",
         "window_days": 90,
@@ -1519,11 +1547,12 @@
             "cadence": "quarterly",
             "map": "us",
             "map_metric": "robotaxi_markets",
-            "source_note": "A reported fleet figure stays on its own series. A news-derived estimate is drawn separately, with its source link and confidence, and stays pending review.",
+            "source_note": "A reported fleet figure stays on its own series. A news-derived estimate is labeled Estimate. A public regulator count, when a roster states one, is labeled Regulator records. Both stay pending review. NHTSA SGO counts are the crash-report cross-check, not a registration.",
             "kpis": [
               {
                 "metric_id": "robotaxi_fleet",
-                "label": "Fleet"
+                "label": "Fleet",
+                "regulator_metric_id": "av_registered_vehicles"
               },
               {
                 "metric_id": "robotaxi_metros",
@@ -1546,6 +1575,38 @@
               {
                 "metric_id": "robotaxi_metros",
                 "label": "Active metros",
+                "role": "line",
+                "axis": "right"
+              }
+            ]
+          },
+          {
+            "id": "robotaxi-regulator",
+            "kind": "trend-bars",
+            "title": "Regulator records",
+            "subtitle": "Permits held, and permitted vehicles only when a public page states the count. Shown beside the fleet estimate.",
+            "width": "wide",
+            "cadence": "monthly",
+            "source_note": "California DMV permit-holder page, CPUC permit table, and the Texas DMV AV program page, only when this catalog declares them. Weekly. Pending review. Vehicle rosters that are not on the page stay blank, not zero. OL 316 collision PDFs and annual disengagement files are not fetched. NHTSA SGO on this page is the crash-report cross-check.",
+            "kpis": [
+              {
+                "metric_id": "av_permits_held",
+                "label": "Permits held"
+              },
+              {
+                "metric_id": "av_registered_vehicles",
+                "label": "Permitted vehicles"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "av_registered_vehicles",
+                "label": "Permitted vehicles",
+                "role": "bar"
+              },
+              {
+                "metric_id": "av_permits_held",
+                "label": "Permits held",
                 "role": "line",
                 "axis": "right"
               }
