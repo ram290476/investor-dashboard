@@ -4,6 +4,8 @@ A company page shows a **Deep dive** tab only when that ticker's packaged catalo
 
 The block is served on the existing company document, `GET /stock/{ticker}` (`serving/stock/{TICKER}.json`), under `deep_dive`.
 
+A second catalog, `catalog/SPCX.json`, uses the same block for the SpaceX page (#243). Collector code does not mention that ticker. "Terraform" and "Starmind" are voice labels stored in the catalog: the program names are unconfirmed, Starmind may be Starshield, and Terraform is not HashiCorp. Launch counts, satellite counts, factories, deals, and those two programs are manual and stay pending review. No launch-library key and no consensus key are added. Revenue and earnings use the same seasonal-naive placeholder as the other deep dive. The placeholder does not project launch counts.
+
 ## What is collected
 
 | Series | Source | Approval |
