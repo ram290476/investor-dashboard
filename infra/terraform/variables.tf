@@ -295,9 +295,9 @@ variable "site_logout_urls" {
 }
 
 variable "site_domain" {
-  description = "Custom hostname for the dashboard, such as investor.vellamsetti.com. Empty leaves the CloudFront certificate, aliases, Cognito URLs and CORS unchanged. DNS is not created here; the registrar adds the records from acm_dns_validation_records."
+  description = "Custom hostname for the dashboard. Production default is investor.vellamsetti.com. terraform.tfvars is not in git; Deploy production drops any site_domain assignment from the TERRAFORM_TFVARS secret so this default is what the apply uses. Set to empty only to keep the CloudFront default certificate. DNS is not created here; the registrar adds the records from acm_dns_validation_records."
   type        = string
-  default     = ""
+  default     = "investor.vellamsetti.com"
 
   validation {
     condition     = var.site_domain == "" || can(regex("^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$", var.site_domain))

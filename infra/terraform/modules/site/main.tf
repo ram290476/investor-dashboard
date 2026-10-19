@@ -115,6 +115,15 @@ resource "aws_acm_certificate" "site" {
     create_before_destroy = true
   }
 
+  # Prints the GoDaddy validation CNAME as soon as ACM creates the certificate,
+  # while aws_acm_certificate_validation is still waiting. Public DNS record only.
+  provisioner "local-exec" {
+    command = join("", [
+      for dvo in self.domain_validation_options :
+      "echo \"ACM_VALIDATION_CNAME name=${dvo.resource_record_name} type=${dvo.resource_record_type} value=${dvo.resource_record_value}\"\n"
+    ])
+  }
+
   tags = {
     Name      = "${var.name}-site"
     ManagedBy = "terraform"
