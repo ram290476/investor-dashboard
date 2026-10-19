@@ -258,3 +258,113 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.match(ci, /node --check apps\/web\/deep-dive\.js/);
   assert.match(ci, /node --check apps\/web\/geo\.js/);
 });
+
+test("a second company page uses the same panels for launches, forecast, and voice labels", () => {
+  const payload = {
+    deep_dive: {
+      title: "Deep dive",
+      disclaimer: "Figures appear when a source has been collected.",
+      sections: [
+        {
+          id: "forecast",
+          title: "Revenue and earnings forecast",
+          placement: "primary",
+          panels: [{
+            id: "forecast",
+            kind: "forecast-band",
+            title: "Revenue and earnings forecast",
+            width: "wide",
+            forecast: {
+              disclaimer: "Seasonal copy of the same quarter a year earlier. Not a forecast model.",
+              consensus_note: "No licensed consensus source is configured.",
+              segments: [
+                { id: "launch", label: "Launch", metrics: [{ field: "revenue", unit: "USD", actuals: [], forecast: [] }] },
+                { id: "total", label: "Total", metrics: [
+                  { field: "revenue", unit: "USD", actuals: [], forecast: [{ period: "next", value: null, reported: false }] },
+                  { field: "earnings", unit: "per_share", actuals: [], forecast: [{ period: "next", value: null, reported: false }] },
+                ] },
+              ],
+            },
+          }],
+        },
+        {
+          id: "launches",
+          title: "Launches",
+          placement: "primary",
+          panels: [{
+            id: "schedule",
+            kind: "table",
+            title: "Launch schedule",
+            width: "wide",
+            empty_label: "Not yet disclosed",
+            table: {
+              columns: [
+                { id: "date", label: "Date" },
+                { id: "vehicle", label: "Vehicle" },
+                { id: "mission", label: "Mission / customer" },
+                { id: "orbit", label: "Orbit" },
+                { id: "outcome", label: "Outcome" },
+                { id: "booster", label: "Booster reuse" },
+              ],
+              rows: [],
+            },
+          }],
+        },
+        {
+          id: "projected",
+          title: "Projected launches",
+          placement: "primary",
+          panels: [{
+            id: "projected",
+            kind: "trend-bars",
+            title: "Projected launches",
+            width: "wide",
+            source_note: "The placeholder does not project launch counts.",
+            series: [],
+          }],
+        },
+        {
+          id: "terraform",
+          title: "Terraform",
+          placement: "primary",
+          panels: [{
+            id: "terraform",
+            kind: "milestone-timeline",
+            title: "Terraform progress",
+            subtitle: "Voice label. The program name is unconfirmed.",
+            width: "wide",
+            source_note: "Not HashiCorp Terraform.",
+            milestones: [{ id: "goal", label: "Stated goal", reported: false, empty_label: "Not yet disclosed" }],
+          }],
+        },
+        {
+          id: "starmind",
+          title: "Starmind",
+          placement: "primary",
+          panels: [{
+            id: "starmind",
+            kind: "trend-bars",
+            title: "Production and deployments",
+            subtitle: "Voice label. The program name is unconfirmed and may be Starshield.",
+            width: "wide",
+            series: [],
+          }],
+        },
+      ],
+    },
+  };
+  const view = renderDeepDive(payload, fakeDocument(false));
+  const text = textOf(view);
+  assert.match(text, /Not a real model/);
+  assert.match(text, /Not yet disclosed/);
+  assert.match(text, /Launch schedule/);
+  assert.match(text, /Mission \/ customer/);
+  assert.match(text, /Booster reuse/);
+  assert.match(text, /Voice label\. The program name is unconfirmed/);
+  assert.match(text, /may be Starshield/);
+  assert.match(text, /Not HashiCorp Terraform/);
+  assert.match(text, /does not project launch counts/);
+  assert.equal(byClass(view, "deep-dive-secondary").length, 0);
+  assert.doesNotMatch(text, /EXAMPLE|TSLA|SPCX/);
+  assert.doesNotMatch(source, /SPCX|SpaceX|Terraform|Starmind/);
+});
