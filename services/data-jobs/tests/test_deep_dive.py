@@ -778,3 +778,174 @@ def test_packaged_free_sources_validate_and_name_no_ticker_in_code():
 
     assert "ll.thespacedevs.com" in ALLOWED_HOSTS
     assert "celestrak.org" in ALLOWED_HOSTS
+    assert "www.dmv.ca.gov" in ALLOWED_HOSTS
+    assert "www.cpuc.ca.gov" in ALLOWED_HOSTS
+    assert "www.txdmv.gov" in ALLOWED_HOSTS
+
+
+_DMV_HTML = """
+<h2>Permit Holders (Testing with a Driver)</h2>
+<ul><li>EXAMPLE MOTORS LLC</li><li>OTHER CO</li></ul>
+<h2>Permit Holders (Driverless Testing)</h2>
+<ul><li>OTHER CO</li></ul>
+<h2>Permit Holders (Deployment)</h2>
+<ul><li>OTHER CO</li></ul>
+"""
+_CPUC_HTML = """
+<table>
+<tr><td>TCP 1</td><td>Other Carrier</td><td>Driverless Deployment</td></tr>
+<tr><td>TCP 2</td><td>Example Motors LLC</td><td>Drivered Pilot</td></tr>
+</table>
+"""
+_TX_HTML = """
+<h1>Automated vehicles</h1>
+<p>Example Motors</p>
+<p>Registered vehicles: 476 as of September 21, 2026.</p>
+"""
+
+
+def _regulator_source():
+    return {
+        "id": "av_regulator",
+        "entities": ["Example Motors"],
+        "permits_metric": "av_permits_held",
+        "vehicles_metric": "av_registered_vehicles",
+        "feeds": [
+            {"id": "ca", "kind": "permit_roster", "jurisdiction": "California DMV", "url": "https://regulator.example/dmv"},
+            {"id": "cpuc", "kind": "permit_table", "jurisdiction": "California CPUC", "url": "https://regulator.example/cpuc"},
+            {"id": "tx", "kind": "stated_count", "jurisdiction": "Texas DMV", "url": "https://regulator.example/tx"},
+        ],
+    }
+
+
+def test_av_regulator_counts_permits_and_stated_vehicles_and_stays_pending():
+    pages = {
+        "https://regulator.example/dmv": _DMV_HTML,
+        "https://regulator.example/cpuc": _CPUC_HTML,
+        "https://regulator.example/tx": _TX_HTML,
+    }
+    series, status = src.collect_av_regulator(
+        _regulator_source(),
+        pages.get,
+        "2026-10-19T12:00:00Z",
+        None,
+    )
+    assert status["status"] == "ok"
+    assert status["permits"] == 2
+    assert status["vehicles"] == 476
+    by_id = {item["metric_id"]: item for item in series}
+    permits = by_id["av_permits_held"]
+    assert permits["points"][0]["source_url"] == "https://regulator.example/dmv"
+    assert permits["points"][0]["retrieved_at"] == "2026-10-19T12:00:00Z"
+    assert permits["points"][0]["period"] == "2026-10"
+    assert permits["points"][0]["value"] == 2
+    assert permits["cadence"] == "monthly"
+    assert permits["approval_state"] == "proposed"
+    assert permits["approved"] is False
+    assert by_id["av_permits_held_quarter"]["points"][0]["period"] == "2026Q4"
+    assert by_id["av_permits_held_quarter"]["points"][0]["value"] == 2
+    assert by_id["av_registered_vehicles"]["points"][0]["value"] == 476
+    assert by_id["av_registered_vehicles"]["confidence"] == "low"
+    assert by_id["av_registered_vehicles_quarter"]["cadence"] == "quarterly"
+    assert all(item["approved"] is False and item["approval_state"] == "proposed" for item in series)
+    later, _status = src.collect_av_regulator(
+        _regulator_source(),
+        pages.get,
+        "2026-11-02T12:00:00Z",
+        {"series": series},
+    )
+    later_permits = next(item for item in later if item["metric_id"] == "av_permits_held")
+    assert [point["period"] for point in later_permits["points"]] == ["2026-10", "2026-11"]
+    quarter = next(item for item in later if item["metric_id"] == "av_permits_held_quarter")
+    assert quarter["points"][0]["value"] == 2
+    other, other_status = src.collect_av_regulator(
+        {**_regulator_source(), "entities": ["Unlisted Carrier"]},
+        pages.get,
+        "2026-10-19T12:00:00Z",
+        None,
+    )
+    assert other_status["permits"] == 0
+    assert other_status["vehicles"] is None
+    held = next(item for item in other if item["metric_id"] == "av_permits_held")
+    assert held["points"][0]["value"] == 0
+    assert all(item["metric_id"] != "av_registered_vehicles" for item in other)
+
+    def fail(_url):
+        raise OSError("down")
+
+    kept, failed = src.collect_av_regulator(_regulator_source(), fail, "2026-12-01T00:00:00Z", {"series": series})
+    assert failed["status"] == "failed"
+    assert any(item["metric_id"] == "av_permits_held" and item["points"][0]["period"] == "2026-10" for item in kept)
+
+
+def test_regulator_record_sits_beside_the_estimate_and_catalog_order_holds():
+    catalog = ir.load_catalog("TSLA")
+    assert ir.validate_catalog(catalog) == []
+    ids = [section["id"] for section in catalog["deep_dive"]["sections"]]
+    assert ids == [
+        "scoreboard", "forecast", "robotaxi", "energy", "semi", "chargers", "fsd",
+        "vehicles", "optimus", "factories", "energy-secondary",
+    ]
+    source_ids = [item["id"] for item in catalog["deep_dive"]["sources"]]
+    assert "av_regulator" in source_ids
+    robotaxi = next(section for section in catalog["deep_dive"]["sections"] if section["id"] == "robotaxi")
+    panel_ids = [panel["id"] for panel in robotaxi["panels"]]
+    assert panel_ids.index("robotaxi-fleet") < panel_ids.index("robotaxi-regulator")
+    fleet = next(panel for panel in robotaxi["panels"] if panel["id"] == "robotaxi-fleet")
+    assert fleet["kpis"][0]["regulator_metric_id"] == "av_registered_vehicles"
+    slim = {
+        "ticker": "EX",
+        "metrics": [],
+        "deep_dive": {
+            "title": "Deep dive",
+            "sections": [{
+                "id": "robotaxi",
+                "title": "Robotaxi",
+                "placement": "primary",
+                "panels": [{
+                    "id": "fleet",
+                    "kind": "trend-bars",
+                    "title": "Fleet",
+                    "kpis": [{
+                        "metric_id": "robotaxi_fleet",
+                        "label": "Fleet",
+                        "regulator_metric_id": "av_registered_vehicles",
+                    }],
+                    "series": [],
+                }],
+            }],
+        },
+    }
+    observations = {
+        "series": [
+            {
+                "metric_id": "robotaxi_fleet",
+                "source_kind": "news_estimate",
+                "estimate": True,
+                "approval_state": "proposed",
+                "approved": False,
+                "confidence": "low",
+                "points": [{"period": "2026Q3", "value": 40, "reported": True, "source_url": "https://news.example/fleet"}],
+            },
+            {
+                "metric_id": "av_registered_vehicles",
+                "source_kind": "av_regulator",
+                "approval_state": "proposed",
+                "approved": False,
+                "confidence": "low",
+                "source_url": "https://regulator.example/tx",
+                "points": [{"period": "2026-10", "value": 476, "reported": True, "source_url": "https://regulator.example/tx"}],
+            },
+        ],
+    }
+    document = dd.assemble_deep_dive(slim, [], observations, generated_at="2026-10-19T00:00:00Z")
+    tile = document["sections"][0]["panels"][0]["kpis"][0]
+    assert tile["estimate_only"] is True
+    assert tile["estimate_value"] == 40
+    assert tile["regulator_value"] == 476
+    assert tile["regulator_period"] == "2026-10"
+    assert tile["regulator_source_url"] == "https://regulator.example/tx"
+    assert tile["regulator_approval_state"] == "proposed"
+    assert tile["approved"] is False
+    spcx = [section["id"] for section in ir.load_catalog("SPCX")["deep_dive"]["sections"]]
+    assert spcx[:4] == ["scoreboard", "forecast", "launches", "projected-launches"]
