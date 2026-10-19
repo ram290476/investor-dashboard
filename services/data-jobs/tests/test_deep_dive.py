@@ -756,8 +756,25 @@ def test_packaged_free_sources_validate_and_name_no_ticker_in_code():
         assert "Tesla" not in text
     root = Path(__file__).resolve().parents[3]
     jobs = (root / "infra/terraform/variables.tf").read_text()
-    block = jobs.split("deep-dive-collect = {", 1)[1].split("short-interest = {", 1)[0]
-    for prefix in ("manual/deep_dive/", "curated/deep_dive/", "curated/company_metrics/", "curated/news_topics/"):
-        assert prefix in block
     news = jobs.split("news-sentiment = {", 1)[1].split("hourly-prices = {", 1)[0]
-    assert "curated/news_topics/" in news
+    assert '"curated/news_topics/"' in news.split("write_prefixes", 1)[1].split("api_keys", 1)[0]
+    assert '"curated/"' not in news
+    collect = jobs.split("deep-dive-collect = {", 1)[1].split("short-interest = {", 1)[0]
+    reads = collect.split("read_prefixes", 1)[1].split("write_prefixes", 1)[0]
+    writes = collect.split("write_prefixes", 1)[1].split("api_keys", 1)[0]
+    for prefix in ("manual/deep_dive/", "curated/deep_dive/", "curated/company_metrics/", "curated/news_topics/"):
+        assert f'"{prefix}"' in reads
+    assert writes.strip().startswith("= [\"curated/deep_dive/\"]")
+    assert "api_keys       = []" in collect
+    serve = jobs.split("q2-company-ir-serve = {", 1)[1].split("deep-dive-collect = {", 1)[0]
+    assert '"curated/news_topics/"' in serve.split("read_prefixes", 1)[1].split("write_prefixes", 1)[0]
+    assert 'write_prefixes = ["serving/stock/"]' in serve
+    role = (root / "infra/terraform/modules/jobs/main.tf").read_text()
+    assert "permissions_boundary = var.permissions_boundary_arn" in role
+    assert 'actions   = ["s3:GetObject"]' in role
+    assert 'actions   = ["s3:PutObject"]' in role
+    assert "vpc_config" not in role
+    from http_client import ALLOWED_HOSTS
+
+    assert "ll.thespacedevs.com" in ALLOWED_HOSTS
+    assert "celestrak.org" in ALLOWED_HOSTS
