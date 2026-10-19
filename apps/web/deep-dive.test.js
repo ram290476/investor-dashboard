@@ -9,6 +9,7 @@ import {
   formatDeepValue,
   hasDeepDive,
   renderDeepDive,
+  revealDeepDiveSection,
   trendTone,
 } from "./deep-dive.js";
 import { nextStockTab, stockTabs, STOCK_TABS } from "./stock-page.js";
@@ -42,12 +43,26 @@ function element(tag) {
     },
   };
   node.append = (...kids) => {
-    for (const kid of kids) if (kid != null) node.children.push(kid);
+    for (const kid of kids) {
+      if (kid == null) continue;
+      kid.parentElement = node;
+      kid.parentNode = node;
+      node.children.push(kid);
+    }
   };
   node.setAttribute = (key, value) => {
     node.attributes[key] = String(value);
   };
   node.getAttribute = (key) => node.attributes[key];
+  node.removeAttribute = (key) => {
+    delete node.attributes[key];
+  };
+  node.scrollIntoView = (options) => {
+    node.scrolled = options;
+  };
+  node.focus = (options) => {
+    node.focused = options;
+  };
   node.addEventListener = (type, fn) => {
     node.listeners[type] = node.listeners[type] || [];
     node.listeners[type].push(fn);
@@ -197,6 +212,88 @@ const sample = {
   },
 };
 
+test("deep dive bookmarks scroll in page and keep the company hash", () => {
+  let booked = "";
+  const view = renderDeepDive(sample, fakeDocument(false), {
+    ticker: "abcd",
+    currentSection: "forecast",
+    onBookmark: (id, href) => {
+      booked = `${id}|${href}`;
+    },
+  });
+  const chips = byClass(view, "deep-dive-jump-chip");
+  assert.equal(chips.length, sample.deep_dive.sections.length);
+  assert.equal(byClass(view, "deep-dive-jump-label")[0].textContent, "On this page");
+  assert.equal(byClass(view, "deep-dive-jump")[0].getAttribute("aria-labelledby"), "deep-dive-jump-label");
+  for (const chip of chips) {
+    assert.equal(chip.tagName, "A");
+    assert.equal(String(chip.className).includes("overlay-chip"), false);
+    assert.equal(chip.getAttribute("role"), undefined);
+    assert.doesNotMatch(chip.href, /^#deep-dive-/);
+    assert.match(chip.href, /^#stock\/ABCD\/deep-dive\//);
+  }
+  const forecast = chips.find((chip) => chip.dataset.sectionId === "forecast");
+  assert.equal(forecast.href, "#stock/ABCD/deep-dive/forecast");
+  assert.equal(forecast.getAttribute("aria-current"), "location");
+  const modified = {
+    button: 0,
+    metaKey: true,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    preventDefault() { this.defaultPrevented = true; },
+  };
+  forecast.listeners.click[0](modified);
+  assert.equal(modified.defaultPrevented, undefined);
+
+  const later = chips.find((chip) => chip.dataset.sectionId === "later");
+  const event = {
+    button: 0,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    preventDefault() { this.defaultPrevented = true; },
+  };
+  later.listeners.click[0](event);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(booked, "later|#stock/ABCD/deep-dive/later");
+  assert.equal(later.getAttribute("aria-current"), "location");
+  assert.equal(forecast.getAttribute("aria-current"), undefined);
+  const section = findId(view, "deep-dive-later");
+  assert.equal(section.scrolled.behavior, "smooth");
+  assert.equal(section.scrolled.block, "start");
+  assert.equal(section.tabIndex, -1);
+  assert.equal(section.focused.preventScroll, true);
+  const body = byClass(view, "deep-dive-secondary-body")[0];
+  assert.equal(body.hidden, false);
+  assert.equal(byClass(view, "deep-dive-secondary-toggle")[0].getAttribute("aria-expanded"), "true");
+  assert.equal(revealDeepDiveSection(view, "missing"), null);
+
+  const phone = renderDeepDive(sample, fakeDocument(true), { ticker: "zzzz" });
+  assert.equal(byClass(phone, "deep-dive-secondary-body")[0].hidden, true);
+  const phoneLater = byClass(phone, "deep-dive-jump-chip").find((chip) => chip.dataset.sectionId === "later");
+  phoneLater.listeners.click[0]({
+    button: 0,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    preventDefault() {},
+  });
+  assert.equal(byClass(phone, "deep-dive-secondary-body")[0].hidden, false);
+  assert.equal(phoneLater.href, "#stock/ZZZZ/deep-dive/later");
+});
+
+function findId(node, id) {
+  if (node?.id === id) return node;
+  for (const child of node?.children || []) {
+    const found = findId(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
 test("deep dive helpers stay ticker-agnostic and label empty or placeholder values", () => {
   assert.equal(hasDeepDive({}), false);
   assert.equal(hasDeepDive(sample), true);
@@ -256,7 +353,14 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.match(deepStyles, /var\(--surface\)/);
   assert.match(deepStyles, /data-has-deep-dive/);
   assert.match(app, /stockTabs\(payload\)/);
-  assert.match(app, /renderDeepDive\(payload\)/);
+  assert.match(app, /renderDeepDive\(payload/);
+  assert.match(app, /openDeepDiveBookmark/);
+  assert.match(app, /revealDeepDiveSection\(/);
+  assert.match(source, /scrollIntoView/);
+  assert.match(source, /preventDefault/);
+  assert.match(source, /stockHash\(/);
+  assert.doesNotMatch(source, /#deep-dive-\$\{/);
+  assert.doesNotMatch(source, /overlay-chip deep-dive-jump-chip/);
   assert.match(app, /hasDeepDive\(payload\)/);
   assert.match(ci, /node --check apps\/web\/deep-dive\.js/);
   assert.match(ci, /node --check apps\/web\/geo\.js/);

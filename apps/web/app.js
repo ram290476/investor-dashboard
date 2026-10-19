@@ -15,7 +15,7 @@ import { createAccountSettings } from "./account-settings.js";
 import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAmount, indexAtPlotX, niceAmountTicks, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
 import { createSafeStorage } from "./safe-storage.js";
-import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
+import { parseStockHash, parseStockSection, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
   catalystDateLabel, catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
@@ -46,7 +46,7 @@ import {
   stockPanels,
   stockTabs,
 } from "./stock-page.js";
-import { hasDeepDive, renderDeepDive } from "./deep-dive.js";
+import { hasDeepDive, renderDeepDive, revealDeepDiveSection } from "./deep-dive.js";
 import { curveView, fomcView, policyPathView, sparklinePath } from "./rates-panel.js";
 import {
   companyMetricLine,
@@ -150,6 +150,7 @@ const session = {
   fundUi: {},
   stockPageError: {},
   stockTab: "overview",
+  scrolledStockSection: "",
   metricReview: readStoredMetricReview(),
   metricReviewError: "",
   metricSave: false,
@@ -3992,7 +3993,9 @@ function renderStockPage() {
   root.append(heading);
 
   const pageTabs = stockTabs(payload);
-  if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
+  const hashSection = parseStockSection(location.hash);
+  if (hashSection && pageTabs.some((item) => item.id === "deep-dive")) session.stockTab = "deep-dive";
+  else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
   const page = node("main", "stock-page");
   page.dataset.stockTab = session.stockTab;
   if (hasDeepDive(payload)) page.dataset.hasDeepDive = "true";
@@ -4056,13 +4059,22 @@ function renderStockPage() {
 
   const tabs = node("div", "stock-page-tabs");
   tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-orientation", "horizontal");
   tabs.setAttribute("aria-label", "Company page sections");
   pageTabs.forEach((item) => {
-    const tab = action(item.label, "overlay-chip stock-tab", () => {
-      session.stockTab = item.id;
-      renderDashboard();
-      root.querySelector(`#stock-tab-${item.id}`)?.focus();
+    if (item.id === "deep-dive") {
+      const separator = node("span", "stock-tab-separator");
+      separator.setAttribute("aria-hidden", "true");
+      tabs.append(separator);
+    }
+    const tab = action(item.label, item.id === "deep-dive" ? "overlay-chip stock-tab stock-tab-deep" : "overlay-chip stock-tab", () => {
+      selectStockTab(item.id);
     });
+    if (item.id === "deep-dive") {
+      const mark = node("span", "stock-tab-mark");
+      mark.setAttribute("aria-hidden", "true");
+      tab.prepend(mark);
+    }
     tab.id = `stock-tab-${item.id}`;
     tab.dataset.stockTab = item.id;
     tab.setAttribute("role", "tab");
@@ -4077,14 +4089,18 @@ function renderStockPage() {
     });
     tabs.append(tab);
   });
+  // Same slot for every company page, with or without a deep dive, so the row does not jump.
+  page.prepend(tabs);
   if (hasDeepDive(payload)) {
-    page.prepend(tabs);
-    page.append(renderDeepDive(payload));
-  } else {
-    page.append(tabs);
+    page.append(renderDeepDive(payload, document, {
+      ticker: session.selected,
+      currentSection: hashSection,
+      onBookmark: openDeepDiveBookmark,
+    }));
   }
   // Filings & events lives on the dashboard and research pages only (#194).
   root.append(page);
+  scheduleStockSectionScroll();
   settings.refresh();
 }
 
@@ -4163,6 +4179,36 @@ function renderNotFoundPage() {
   settings.refresh();
 }
 
+function selectStockTab(id) {
+  session.stockTab = id;
+  session.scrolledStockSection = "";
+  const hash = stockHash(session.selected);
+  if (hash && parseStockHash(location.hash) === session.selected && location.hash !== hash) {
+    history.pushState(history.state, "", `${location.pathname}${location.search}${hash}`);
+  }
+  renderDashboard();
+  root.querySelector(`#stock-tab-${id}`)?.focus();
+}
+
+function openDeepDiveBookmark(sectionId, href) {
+  session.stockTab = "deep-dive";
+  session.scrolledStockSection = `${session.selected}:${sectionId}`;
+  if (href && href.startsWith("#") && location.hash !== href) {
+    history.pushState(history.state, "", `${location.pathname}${location.search}${href}`);
+  }
+}
+
+function scheduleStockSectionScroll() {
+  const section = parseStockSection(location.hash);
+  if (!section || session.stockTab !== "deep-dive") return;
+  const key = `${session.selected}:${section}`;
+  if (session.scrolledStockSection === key) return;
+  session.scrolledStockSection = key;
+  requestAnimationFrame(() => {
+    revealDeepDiveSection(document.getElementById("stock-panel-deep-dive"), section);
+  });
+}
+
 function navigateToStock(ticker) {
   const hash = stockHash(ticker);
   if (!hash) return;
@@ -4172,6 +4218,7 @@ function navigateToStock(ticker) {
   session.route = routeFromLocation(location.pathname, hash);
   session.selected = symbol;
   session.stockTab = "overview";
+  session.scrolledStockSection = "";
   session.companyChart = null;
   renderDashboard();
   loadChartData(symbol);
@@ -4201,6 +4248,7 @@ function navigateToDashboard(ticker = session.dashboardSelection || session.sele
 }
 
 function handleRoutePopstate() {
+  session.scrolledStockSection = "";
   const state = routeStateForLocation(location.pathname, location.hash, session.dashboardSelection, session.selected);
   if (state.route.page !== "stock" || state.selected !== session.selected) session.companyChart = null;
   session.route = state.route;

@@ -25,3 +25,10 @@ monthly_budget_usd = 40
 # jobs_image_uri     = "<account>.dkr.ecr.us-west-1.amazonaws.com/invdash/jobs:<git-sha>"
 # sec_user_agent     = "investor-dashboard you@example.com"
 # vuln_window_minutes = 1440 # one mail per CVE (Inspector + Security Hub merged) per Pacific day
+
+# Custom domain. The variable default is investor.vellamsetti.com, and Deploy
+# production removes any site_domain line from TERRAFORM_TFVARS so this file
+# does not need to set it. No Route 53 records.
+# site_domain = "investor.vellamsetti.com"
+# Issue #103. Must stay false; the cloudfront.net to custom-domain redirect is not implemented.
+# redirect_cloudfront_to_custom_domain = false

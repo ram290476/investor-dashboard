@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseStockHash, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, tickerResearchPath } from "./routes.js";
+import { parseStockHash, parseStockSection, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, tickerResearchPath } from "./routes.js";
 
 test("dashboard and Cognito callback paths resolve to the dashboard", () => {
   assert.deepEqual(routeFromPath("/"), { page: "dashboard" });
@@ -39,6 +39,26 @@ test("stock pages open from a hash or a /stock path for any watchlist ticker", (
       route: { page: "stock", ticker: "AAPL" },
       dashboardSelection: "SPY",
       selected: "AAPL",
+    },
+  );
+});
+
+test("a deep-dive bookmark hash stays on that company's route", () => {
+  assert.equal(parseStockHash("#stock/NVDA/deep-dive/forecast"), "NVDA");
+  assert.equal(parseStockSection("#stock/nvda/deep-dive/forecast"), "forecast");
+  assert.equal(parseStockSection("#stock/AAPL"), "");
+  assert.equal(parseStockHash("#deep-dive-forecast"), null);
+  assert.equal(parseStockSection("#deep-dive-forecast"), "");
+  assert.equal(stockHash("abcd", "scoreboard"), "#stock/ABCD/deep-dive/scoreboard");
+  assert.equal(stockHash("ABCD", ""), "#stock/ABCD");
+  assert.equal(stockHash("ABCD", "../overview"), "#stock/ABCD");
+  assert.deepEqual(routeFromLocation("/", "#stock/BRK.B/deep-dive/fleet"), { page: "stock", ticker: "BRK.B" });
+  assert.deepEqual(
+    routeStateForLocation("/", "#stock/QQQ/deep-dive/scoreboard", "SPY", "DIA"),
+    {
+      route: { page: "stock", ticker: "QQQ" },
+      dashboardSelection: "SPY",
+      selected: "QQQ",
     },
   );
 });

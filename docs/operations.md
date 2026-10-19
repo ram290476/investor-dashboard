@@ -82,6 +82,7 @@ terraform apply tfplan
 The static-site module creates a private, versioned S3 bucket, CloudFront Origin Access Control,
 HTTPS-only CloudFront distribution, SPA fallback routing and security response headers. The site
 URL, bucket name and distribution ID are available through `terraform output -json site`.
+`public_url` is the custom domain when `site_domain` is set, and the CloudFront URL otherwise.
 CloudFront invalidations are required after publishing a new site version.
 
 Terraform outputs may be inspected with:
@@ -89,6 +90,7 @@ Terraform outputs may be inspected with:
 ```sh
 terraform output
 terraform output -json site_runtime_config
+terraform output -json acm_dns_validation_records
 terraform output -json cognito
 terraform output -raw ecr_repository_url
 ```
@@ -99,6 +101,56 @@ Lambda state, EventBridge schedules, Cognito pool status, CloudWatch alarms, and
 subscription confirmation emails. Each alert address gets three: the ops and security topics in the
 primary region and the CloudFront alarm topic in us-east-1 (`terraform output cloudfront_alarm_topic_arn`).
 The CloudFront alarm and the IAM/sign-in forwarding rules are in us-east-1, so look there in the console.
+The optional dashboard certificate is also in us-east-1; see [Custom domain](#custom-domain).
+
+## Custom domain
+
+`https://investor.vellamsetti.com` is the dashboard address in the README. `site_domain` defaults to that hostname. `terraform.tfvars` is not committed; Deploy production writes the `TERRAFORM_TFVARS` secret to that file and removes any `site_domain` assignment, so the variable default is what the apply uses. DNS for `vellamsetti.com` is at **GoDaddy, not Route 53**. Terraform does not create DNS records. It requests an ACM certificate in us-east-1 and prints the validation CNAME on `acm_dns_validation_records` and, as soon as the certificate exists, as `ACM_VALIDATION_CNAME` in the deploy log.
+
+Do not set `redirect_cloudfront_to_custom_domain`. It must stay `false`. [Issue #103](https://github.com/ram290476/investor-dashboard/issues/103) decides whether the plain `*.cloudfront.net` hostname should redirect to the custom domain. This stack does not install that redirect.
+
+### GoDaddy records
+
+Ram adds these in the GoDaddy DNS panel for `vellamsetti.com`. Terraform will not.
+
+1. **ACM validation CNAME.** After the certificate exists, copy the single object from `terraform output -json acm_dns_validation_records`. Type is `CNAME`. At GoDaddy the host is `name` without the zone suffix (GoDaddy appends `.vellamsetti.com`); the points-to value is `value`. Drop a trailing dot if GoDaddy rejects it. The name and value are known only after ACM creates the certificate, so they are not listed here.
+2. **Alias CNAME.** Host `investor`, type `CNAME`, value `dbkmugvl0zmt0.cloudfront.net`. Confirm that host still matches `terraform output -json site` → `domain_name` before saving it.
+3. **Remove URL forwarding** for `investor.vellamsetti.com`. GoDaddy forwarding currently answers with `301` to `http://dbkmugvl0zmt0.cloudfront.net/auth/callback`. A CNAME does not replace that forwarder; delete the forwarding rule.
+
+### Order
+
+The validation CNAME has to exist before ACM will issue the certificate, and CloudFront will not attach an alias until the certificate is issued. `deploy.yml` applies the whole stack and will wait on `aws_acm_certificate_validation` (up to 45 minutes, inside a 55-minute job). The production default is already `investor.vellamsetti.com`, so the next Deploy production creates the certificate and waits. Add the `ACM_VALIDATION_CNAME` from that log at GoDaddy while the job is still running.
+
+1. Leave `site_domain` out of the GitHub `TERRAFORM_TFVARS` secret. Deploy production removes that assignment and uses the variable default `investor.vellamsetti.com`. An apply that sets `site_domain` to empty deletes the certificate.
+2. As an administrator, create only the certificate (this does not wait for DNS):
+
+   ```sh
+   terraform apply -target='module.site_hosting.aws_acm_certificate.site[0]'
+   terraform output -json acm_dns_validation_records
+   ```
+
+3. Add the validation CNAME at GoDaddy. Wait until the certificate in **us-east-1** is `ISSUED` (`aws acm describe-certificate --region us-east-1`).
+4. Remove the GoDaddy forwarding rule and add the `investor` CNAME. Until the alias exists, CloudFront can answer that hostname with 403. The forwarder is the bug this replaces; the CloudFront URL keeps serving the site.
+5. Leave the production `TERRAFORM_TFVARS` secret without a `site_domain` line. Deploy production removes that assignment and uses the variable default.
+6. Run a full apply (Deploy production). If the certificate is already issued, validation finishes immediately. The apply then, still in us-west-1 except for the certificate:
+   - sets the CloudFront alias and `TLSv1.2_2021` (`sni-only`)
+   - adds `https://investor.vellamsetti.com/auth/callback` to Cognito callbacks and `https://investor.vellamsetti.com/` to logout URLs, and keeps the CloudFront URLs
+   - adds `https://investor.vellamsetti.com` to API CORS
+   - writes `config.json` `callbackUrl` / `logoutUrl` from `public_url` (the custom domain). The CloudFront URLs stay registered so a previous config still signs in
+
+The response-headers policy does not need a change. `connect-src` allows `'self'`, `https://*.amazoncognito.com` and `https://*.execute-api.<region>.amazonaws.com`. `form-action` allows `'self'` and `https://*.amazoncognito.com`. On the custom domain, `'self'` is that origin.
+
+### Checks after the alias and DNS are in place
+
+```sh
+curl -sI https://investor.vellamsetti.com/
+curl -sI http://investor.vellamsetti.com/
+openssl s_client -connect investor.vellamsetti.com:443 -tls1_2 </dev/null
+openssl s_client -connect investor.vellamsetti.com:443 -tls1 </dev/null
+openssl s_client -connect investor.vellamsetti.com:443 -tls1_1 </dev/null
+```
+
+`https://` should be `200` from CloudFront (`x-amz-cf-id` present) with no redirect to `http://` or to `*.cloudfront.net`. `http://` should redirect to `https://investor.vellamsetti.com/`. TLS 1.2 should negotiate; TLS 1.0 and 1.1 should be refused. Sign-in should return to `https://investor.vellamsetti.com/auth/callback`, and sign-out to `https://investor.vellamsetti.com/`. A preflight from that origin should pass CORS, and `https://dbkmugvl0zmt0.cloudfront.net/` should still load (it is not redirected).
 
 ## GitHub Actions CI/CD
 
@@ -260,8 +312,8 @@ attachments — **must be applied by an administrator** before CI can rely on th
 The workflow runs `terraform apply` for the whole stack, so the role is broad:
 
 - **AWS managed `PowerUserAccess`:** every service except IAM, Organizations and Account. It covers
-  S3, KMS, Lambda, ECR push, CloudFront invalidation, Config, GuardDuty, Security Hub and the rest
-  of the stack.
+  S3, KMS, Lambda, ECR push, CloudFront, ACM certificates in us-east-1, Config, GuardDuty,
+  Security Hub and the rest of the stack.
 - **IAM limited to this project (inline `iam-for-this-stack`):**
   - read IAM;
   - create, update and delete `invdash-*` roles. Every role write that IAM's
@@ -616,7 +668,9 @@ python3 -m http.server 8080 --directory apps/web
 
 Ensure `http://localhost:8080/` is in the Cognito callback/logout and API CORS settings for local
 development. The root callback is compatible with Python's basic static server. Production uses
-the CloudFront `/auth/callback` path and its SPA fallback. Open `http://localhost:8080/` and sign in
+`/auth/callback` on `public_url` (the custom domain when `site_domain` is set, otherwise the
+CloudFront URL) and its SPA fallback. Cognito still allows the CloudFront callback and logout
+URLs. The plain CloudFront hostname is not redirected. Open `http://localhost:8080/` and sign in
 with an invited Cognito user (MFA is currently off). The application keeps access tokens in memory,
 uses PKCE, and sends them only as Bearer authorization headers. `config.json` is git-ignored.
 
@@ -742,6 +796,9 @@ and [classic customization limitations](https://docs.aws.amazon.com/cognito/late
 | Preferences API returns 409 | Another tab updated the version; reload `/prefs` and retry. A 401 means sign-in expired; sign in again. |
 | API returns 5xx | Review API Gateway access logs and `invdash-prefs-api` Lambda logs; verify scoped DynamoDB role, KMS decrypt and S3 read permissions. |
 | Site does not load or sign-in loops | Check `config.json`, callback/logout URLs, CORS origin, Cognito domain/client, CloudFront status and browser network errors. Invalidate after config changes. |
+| Custom domain 301s to `http://*.cloudfront.net/auth/callback` | GoDaddy URL forwarding is still on. Remove it and add the CNAME in [Custom domain](#custom-domain). |
+| Sign-in `redirect_mismatch` on the custom domain | Cognito must allow `https://investor.vellamsetti.com/auth/callback` and logout `https://investor.vellamsetti.com/`. Re-apply with `site_domain` set. |
+| Browser CORS error on the custom domain | `site_origins` includes `https://investor.vellamsetti.com` only when `site_domain` is set. Re-apply, then confirm the preflight `Access-Control-Allow-Origin`. |
 | Collector fails or goes to DLQ | Inspect structured Lambda logs and `failed_sources`, verify SSM credentials and allowlisted host, fix the root cause, then manually replay an idempotent event. |
 | Database/DynamoDB failure | Check table status, provisioned capacity, KMS key state, API Lambda role assumptions, the API alarm, and `invdash-user-prefs-read-throttle` / `invdash-user-prefs-write-throttle`. Preferences use point-in-time recovery. |
 | Infrastructure apply fails | Read the first Terraform error, inspect state lock and AWS service quotas, then rerun `terraform plan`; do not force-unlock unless the lock owner is confirmed stopped. |

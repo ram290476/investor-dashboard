@@ -2,6 +2,7 @@
 // Nothing here names a ticker. Missing numbers stay empty; they are never drawn as zero
 // and example figures are never substituted.
 import { GEO } from "./geo.js";
+import { stockHash } from "./routes.js";
 import { formatChange, formatMetricValue } from "./stock-page.js";
 
 const SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
@@ -107,7 +108,7 @@ function valueAt(series, period) {
   return point && point.reported ? point.value : null;
 }
 
-export function renderDeepDive(payload, doc = document) {
+export function renderDeepDive(payload, doc = document, options = {}) {
   const dive = payload?.deep_dive;
   const root = el(doc, "div", "deep-dive");
   root.dataset.stockPanel = "deep-dive";
@@ -121,8 +122,12 @@ export function renderDeepDive(payload, doc = document) {
     || "Figures appear when a source has been collected. Pending review values stay labeled. Empty series are not zero.";
   root.append(banner);
 
+  const ticker = options.ticker || payload?.ticker || "";
   const jump = el(doc, "nav", "deep-dive-jump");
-  jump.setAttribute("aria-label", "Deep dive sections");
+  const label = el(doc, "span", "deep-dive-jump-label", "On this page");
+  label.id = "deep-dive-jump-label";
+  jump.append(label);
+  jump.setAttribute("aria-labelledby", "deep-dive-jump-label");
   root.append(jump);
 
   const secondary = [];
@@ -130,9 +135,7 @@ export function renderDeepDive(payload, doc = document) {
     const block = renderSection(section, doc);
     if (section.placement === "secondary") secondary.push(block);
     else root.append(block);
-    const chip = el(doc, "a", "overlay-chip deep-dive-jump-chip", section.title || section.id);
-    chip.href = `#deep-dive-${section.id}`;
-    jump.append(chip);
+    jump.append(renderBookmark(section, ticker, root, jump, doc, options));
   }
   if (secondary.length) {
     const wrap = el(doc, "section", "deep-dive-secondary");
@@ -159,6 +162,85 @@ export function renderDeepDive(payload, doc = document) {
     root.append(wrap);
   }
   return root;
+}
+
+function renderBookmark(section, ticker, root, jump, doc, options) {
+  const sectionId = String(section?.id || "");
+  const chip = el(doc, "a", "deep-dive-jump-chip");
+  const mark = el(doc, "span", "deep-dive-jump-mark", "#");
+  mark.setAttribute("aria-hidden", "true");
+  chip.append(mark, el(doc, "span", "deep-dive-jump-text", section.title || sectionId));
+  const href = stockHash(ticker, sectionId) || stockHash(ticker) || "";
+  if (href) chip.href = href;
+  chip.dataset.sectionId = sectionId;
+  if (options.currentSection && options.currentSection === sectionId) {
+    chip.setAttribute("aria-current", "location");
+  }
+  chip.addEventListener("click", (event) => {
+    if (event && event.button != null && event.button !== 0) return;
+    if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) return;
+    event?.preventDefault();
+    markCurrentBookmark(jump, chip);
+    revealDeepDiveSection(root, sectionId);
+    // Pass the hash, not the element's resolved href. In a browser, a.href is absolute
+    // and would replace the `#stock/<T>` route if it were written into the history URL.
+    if (typeof options.onBookmark === "function") options.onBookmark(sectionId, href);
+  });
+  return chip;
+}
+
+function markCurrentBookmark(jump, chip) {
+  for (const link of jump.children || []) {
+    if (!String(link.className || "").split(/\s+/).includes("deep-dive-jump-chip")) continue;
+    link.removeAttribute?.("aria-current");
+  }
+  chip.setAttribute("aria-current", "location");
+}
+
+function findById(node, id) {
+  if (!node || typeof node !== "object") return null;
+  if (node.id === id) return node;
+  for (const child of node.children || []) {
+    const found = findById(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function expandSecondary(target) {
+  let node = target;
+  while (node) {
+    const className = typeof node.className === "string" ? node.className : "";
+    if (className.split(/\s+/).includes("deep-dive-secondary-body")) {
+      node.hidden = false;
+      const wrap = node.parentElement;
+      const stack = [...(wrap?.children || [])];
+      while (stack.length) {
+        const child = stack.pop();
+        const name = typeof child.className === "string" ? child.className : "";
+        if (name.split(/\s+/).includes("deep-dive-secondary-toggle")) {
+          child.setAttribute("aria-expanded", "true");
+        }
+        if (child.children) stack.push(...child.children);
+      }
+      return;
+    }
+    node = node.parentElement;
+  }
+}
+
+/** Scroll a deep-dive section into view without changing the `#stock/<T>` route. */
+export function revealDeepDiveSection(root, sectionId) {
+  const target = findById(root, `deep-dive-${sectionId}`);
+  if (!target) return null;
+  expandSecondary(target);
+  if (typeof target.hasAttribute !== "function" || !target.hasAttribute("tabindex")) {
+    target.tabIndex = -1;
+    target.setAttribute?.("tabindex", "-1");
+  }
+  target.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  target.focus?.({ preventScroll: true });
+  return target;
 }
 
 function renderSection(section, doc) {

@@ -294,6 +294,28 @@ variable "site_logout_urls" {
   default     = ["http://localhost:8080/"]
 }
 
+variable "site_domain" {
+  description = "Custom hostname for the dashboard. Production default is investor.vellamsetti.com. terraform.tfvars is not in git; Deploy production drops any site_domain assignment from the TERRAFORM_TFVARS secret so this default is what the apply uses. Set to empty only to keep the CloudFront default certificate. DNS is not created here; the registrar adds the records from acm_dns_validation_records."
+  type        = string
+  default     = "investor.vellamsetti.com"
+
+  validation {
+    condition     = var.site_domain == "" || can(regex("^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$", var.site_domain))
+    error_message = "site_domain must be empty or a lowercase DNS hostname with no scheme, path or trailing dot."
+  }
+}
+
+variable "redirect_cloudfront_to_custom_domain" {
+  description = "Issue #103. Would 301 the *.cloudfront.net hostname to site_domain. The redirect is not implemented; this must stay false."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = var.redirect_cloudfront_to_custom_domain == false
+    error_message = "The CloudFront hostname redirect is not implemented. Leave redirect_cloudfront_to_custom_domain false until issue #103 is decided and implemented."
+  }
+}
+
 variable "jobs_image_uri" {
   description = "ECR image URI for the job Lambdas (built from Dockerfile). Leave empty until the first image is pushed; the jobs module creates nothing until then."
   type        = string
