@@ -44,8 +44,9 @@ import {
   LONG_PRESS_MS,
   nextStockTab,
   stockPanels,
-  STOCK_TABS,
+  stockTabs,
 } from "./stock-page.js";
+import { hasDeepDive, renderDeepDive } from "./deep-dive.js";
 import { curveView, fomcView, policyPathView, sparklinePath } from "./rates-panel.js";
 import {
   companyMetricLine,
@@ -3990,8 +3991,11 @@ function renderStockPage() {
   heading.append(copy, back);
   root.append(heading);
 
+  const pageTabs = stockTabs(payload);
+  if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
   const page = node("main", "stock-page");
   page.dataset.stockTab = session.stockTab;
+  if (hasDeepDive(payload)) page.dataset.hasDeepDive = "true";
   page.setAttribute("aria-label", `${session.selected} company page`);
 
   const chart = renderChartPanel("company", session.selected);
@@ -4053,7 +4057,7 @@ function renderStockPage() {
   const tabs = node("div", "stock-page-tabs");
   tabs.setAttribute("role", "tablist");
   tabs.setAttribute("aria-label", "Company page sections");
-  STOCK_TABS.forEach((item) => {
+  pageTabs.forEach((item) => {
     const tab = action(item.label, "overlay-chip stock-tab", () => {
       session.stockTab = item.id;
       renderDashboard();
@@ -4066,14 +4070,19 @@ function renderStockPage() {
     tab.setAttribute("aria-selected", String(item.id === session.stockTab));
     tab.tabIndex = item.id === session.stockTab ? 0 : -1;
     tab.addEventListener("keydown", (event) => {
-      const next = nextStockTab(item.id, event.key);
+      const next = nextStockTab(item.id, event.key, pageTabs);
       if (!next) return;
       event.preventDefault();
       root.querySelector(`#stock-tab-${next}`)?.click();
     });
     tabs.append(tab);
   });
-  page.append(tabs);
+  if (hasDeepDive(payload)) {
+    page.prepend(tabs);
+    page.append(renderDeepDive(payload));
+  } else {
+    page.append(tabs);
+  }
   // Filings & events lives on the dashboard and research pages only (#194).
   root.append(page);
   settings.refresh();

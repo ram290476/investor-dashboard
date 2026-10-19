@@ -176,8 +176,16 @@ export function companyDescription(payload, tickerData) {
   return "";
 }
 
-export function nextStockTab(current, key) {
-  const ids = STOCK_TABS.map((tab) => tab.id);
+/** Base tabs, plus Deep dive when this payload's catalog published a deep_dive block. */
+export function stockTabs(payload) {
+  const sections = payload?.deep_dive?.sections;
+  if (!Array.isArray(sections) || !sections.length) return STOCK_TABS;
+  const label = String(payload.deep_dive.title || "Deep dive").trim() || "Deep dive";
+  return [...STOCK_TABS, { id: "deep-dive", label }];
+}
+
+export function nextStockTab(current, key, tabs = STOCK_TABS) {
+  const ids = (Array.isArray(tabs) ? tabs : STOCK_TABS).map((tab) => tab.id);
   const index = Math.max(0, ids.indexOf(current));
   const next = key === "ArrowRight" ? (index + 1) % ids.length
     : key === "ArrowLeft" ? (index + ids.length - 1) % ids.length

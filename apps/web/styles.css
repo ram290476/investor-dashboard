@@ -5050,3 +5050,317 @@ a.catalyst-edgar-link:hover {
     padding: 10px 8px;
   }
 }
+
+/* Deep dive is a fifth company-page tab. The tab bar and panel filter apply only
+   when the stock payload includes deep_dive sections. Other company pages keep
+   every panel visible and hide this bar above 640px. */
+.stock-page[data-has-deep-dive="true"] .stock-page-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.stock-page[data-has-deep-dive="true"] .stock-page-tabs .stock-tab {
+  width: auto;
+  padding-inline: 12px;
+}
+
+.stock-page[data-has-deep-dive="true"] .stock-page-tabs [aria-selected="true"] {
+  border-color: var(--blue);
+  background: var(--selected);
+}
+
+.stock-page[data-has-deep-dive="true"] [data-stock-panel] {
+  display: none;
+}
+
+.stock-page[data-has-deep-dive="true"][data-stock-tab="overview"] [data-stock-panel="overview"],
+.stock-page[data-has-deep-dive="true"][data-stock-tab="kpis"] [data-stock-panel="kpis"],
+.stock-page[data-has-deep-dive="true"][data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
+.stock-page[data-has-deep-dive="true"][data-stock-tab="calls"] [data-stock-panel="calls"],
+.stock-page[data-has-deep-dive="true"][data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"] {
+  display: block;
+}
+
+.stock-page[data-has-deep-dive="true"][data-stock-tab="overview"] .company-metrics {
+  display: grid;
+}
+
+.deep-dive {
+  display: grid;
+  gap: 12px;
+}
+
+.deep-dive-banner {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 50%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--amber) 8%, var(--surface));
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.deep-dive-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deep-dive-section {
+  display: grid;
+  gap: 8px;
+}
+
+.deep-dive-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.deep-dive-panel[data-width="wide"] {
+  grid-column: 1 / -1;
+}
+
+.deep-dive-scoreboard {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.deep-dive-kpis,
+.deep-dive-multiples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px;
+}
+
+.deep-dive-tile {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.deep-dive-tile-label {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deep-dive-tile-value {
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.deep-dive-tile-value.is-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.deep-dive-tile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.deep-dive-confidence {
+  color: var(--amber);
+  font-size: 11px;
+}
+
+.deep-dive-chart,
+.deep-dive-map,
+.deep-dive-spark {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.deep-dive-spark {
+  width: 96px;
+  height: 28px;
+}
+
+.deep-dive-axis {
+  fill: var(--muted);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.deep-dive-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.deep-dive-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.deep-dive-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.deep-dive-land {
+  fill: color-mix(in srgb, var(--muted) 16%, var(--surface));
+  stroke: var(--line);
+  stroke-width: 0.4;
+}
+
+.deep-dive-mesh {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 0.35;
+}
+
+.deep-dive-bubble {
+  fill: var(--series-1);
+  fill-opacity: 0.75;
+  stroke: var(--surface);
+}
+
+.deep-dive-bubble-empty {
+  fill: none;
+  stroke: var(--muted);
+  stroke-dasharray: 2 2;
+}
+
+.deep-dive-empty,
+.deep-dive-note,
+.deep-dive-source {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.deep-dive-source {
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.deep-dive-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.deep-dive-table th,
+.deep-dive-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.deep-dive-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.deep-dive-model-flag {
+  display: inline-flex;
+  margin: 0 0 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--amber);
+  color: var(--page);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.deep-dive-milestones {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deep-dive-milestones li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.deep-dive-milestones .is-empty .deep-dive-milestone-detail {
+  color: var(--muted);
+}
+
+.deep-dive-secondary {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--control-line);
+}
+
+.deep-dive-secondary-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.deep-dive-secondary-toggle {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deep-dive-secondary-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.deep-dive-mode-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.deep-dive-tools {
+  display: flex;
+  gap: 6px;
+}
+
+@media (max-width: 640px) {
+  .deep-dive-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .deep-dive-scoreboard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stock-page[data-has-deep-dive="true"][data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"] {
+    display: block;
+  }
+}
