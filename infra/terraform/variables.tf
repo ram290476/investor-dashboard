@@ -567,13 +567,26 @@ variable "jobs" {
     q2-company-ir-serve = {
       handler        = "company_ir.serve_handler"
       schedule       = ""
-      triggers       = ["job:Q2X?partial"]
+      triggers       = ["job:Q2X?partial", "job:DEEP?partial"]
       memory         = 512
       timeout        = 120
-      read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/"]
+      read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/", "curated/deep_dive/", "manual/deep_dive/"]
       write_prefixes = ["serving/stock/"]
       api_keys       = []
       reads_prefs    = false
+    }
+    # Monday 08:00 ET. NHTSA SGO files are public CSVs (no API key). Manual deep-dive
+    # entries stay proposed. deploy.yml applies this map; do not terraform apply locally.
+    deep-dive-collect = {
+      handler        = "deep_dive.handler"
+      schedule       = "cron(0 8 ? * MON *)"
+      triggers       = ["ticker-added"]
+      memory         = 1024
+      timeout        = 120
+      read_prefixes  = ["manual/deep_dive/"]
+      write_prefixes = ["curated/deep_dive/"]
+      api_keys       = []
+      reads_prefs    = true
     }
     # Daily poll; writes only when FINRA publishes a new settlement date (twice a month).
     # ticker-added also runs a one-time full-history catch-up for tickers that have none stored.

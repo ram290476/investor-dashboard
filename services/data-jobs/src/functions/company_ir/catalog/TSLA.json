@@ -1064,7 +1064,9 @@
       "unit": "USD",
       "scale": 1,
       "definition": "Customer contract liabilities, including connectivity, FSD access, maintenance, free Supercharging and over-the-air updates. FSD is not broken out on its own. The current contract-liability tag is the XBRL mapping.",
-      "xbrl_tags": ["ContractWithCustomerLiabilityCurrent"],
+      "xbrl_tags": [
+        "ContractWithCustomerLiabilityCurrent"
+      ],
       "xbrl_kind": "instant",
       "xbrl_mode": "instant",
       "xbrl_unit": "USD",
@@ -1227,5 +1229,831 @@
   "blocked_hosts": [
     "www.tesla.com",
     "tesla.com"
-  ]
+  ],
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "sources": [
+      {
+        "id": "nhtsa_sgo",
+        "reporting_entity": "Tesla",
+        "outputs": {
+          "ads": "nhtsa_sgo_ads",
+          "adas": "nhtsa_sgo_adas"
+        },
+        "series_breaks": [
+          {
+            "period": "2025-06",
+            "note": "SGO amendments, including the 16 Jun 2025 reporting-threshold change, mean counts are not directly comparable across this break."
+          }
+        ]
+      }
+    ],
+    "forecast": {
+      "segments": [
+        {
+          "id": "automotive",
+          "label": "Automotive",
+          "revenue_metric": "automotive_revenue"
+        },
+        {
+          "id": "energy",
+          "label": "Energy generation & storage",
+          "revenue_metric": "energy_revenue"
+        },
+        {
+          "id": "services",
+          "label": "Services & other",
+          "revenue_metric": "services_revenue"
+        },
+        {
+          "id": "fsd",
+          "label": "FSD / software",
+          "revenue_metric": "fsd_revenue"
+        },
+        {
+          "id": "robotaxi",
+          "label": "Robotaxi (ride revenue)",
+          "revenue_metric": "robotaxi_revenue"
+        },
+        {
+          "id": "semi",
+          "label": "Semi",
+          "revenue_metric": "semi_revenue"
+        },
+        {
+          "id": "total",
+          "label": "Total",
+          "revenue_metric": "revenue_gaap",
+          "eps_metric": "eps_diluted"
+        }
+      ]
+    },
+    "sections": [
+      {
+        "id": "scoreboard",
+        "title": "Trend scoreboard",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "scoreboard",
+            "kind": "scoreboard",
+            "title": "Trend scoreboard",
+            "subtitle": "Latest value, sparkline, and QoQ / YoY. A decline is favorable for reports and days of supply.",
+            "width": "wide",
+            "source_note": "Derived from the series on this page. Pending values stay pending.",
+            "tiles": [
+              {
+                "metric_id": "robotaxi_fleet",
+                "label": "Robotaxi fleet"
+              },
+              {
+                "metric_id": "cybercab_production",
+                "label": "Cybercab built"
+              },
+              {
+                "metric_id": "nhtsa_sgo_ads",
+                "label": "NHTSA ADS reports",
+                "inverse": true,
+                "disclosure_status": "not_collected"
+              },
+              {
+                "metric_id": "energy_storage_deployed",
+                "label": "Storage deployed"
+              },
+              {
+                "metric_id": "energy_produced",
+                "label": "Energy produced"
+              },
+              {
+                "metric_id": "semi_production",
+                "label": "Semi production"
+              },
+              {
+                "metric_id": "supercharger_stations",
+                "label": "Supercharger sites"
+              },
+              {
+                "metric_id": "supercharger_connectors",
+                "label": "Connectors"
+              },
+              {
+                "metric_id": "fsd_subscriptions",
+                "label": "FSD subscribers"
+              },
+              {
+                "metric_id": "total_deliveries",
+                "label": "Deliveries"
+              },
+              {
+                "metric_id": "inventory_days_supply",
+                "label": "Days of supply",
+                "inverse": true
+              },
+              {
+                "metric_id": "optimus",
+                "label": "Optimus"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "forecast",
+        "title": "Revenue & earnings forecast",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "forecast",
+            "kind": "forecast-band",
+            "title": "Revenue & earnings forecast",
+            "subtitle": "Seasonal-naive baseline only. Not an in-house model. No consensus feed.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "source_note": "Actuals reuse SEC XBRL and approved company metrics when those series exist. The baseline copies the same quarter a year earlier. Bands and consensus are not estimated."
+          }
+        ]
+      },
+      {
+        "id": "robotaxi",
+        "title": "Robotaxi & autonomy",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "robotaxi-fleet",
+            "kind": "trend-bars",
+            "title": "Robotaxi fleet & markets",
+            "subtitle": "Fleet and active metros. The map uses disclosed places only.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "map": "us",
+            "map_metric": "robotaxi_markets",
+            "source_note": "Fleet size and per-metro counts are rarely disclosed. Manual entries stay pending review, with a confidence marker. No third-party estimate is stored as fact.",
+            "kpis": [
+              {
+                "metric_id": "robotaxi_fleet",
+                "label": "Fleet"
+              },
+              {
+                "metric_id": "robotaxi_metros",
+                "label": "Active metros"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "robotaxi_fleet_driverless",
+                "label": "Driverless",
+                "role": "bar",
+                "stack": "fleet"
+              },
+              {
+                "metric_id": "robotaxi_fleet_supervised",
+                "label": "With monitor",
+                "role": "bar",
+                "stack": "fleet"
+              },
+              {
+                "metric_id": "robotaxi_metros",
+                "label": "Active metros",
+                "role": "line",
+                "axis": "right"
+              }
+            ]
+          },
+          {
+            "id": "cybercab",
+            "kind": "trend-bars",
+            "title": "Cybercab production vs fleet",
+            "subtitle": "Units built against Cybercabs in the fleet and the total fleet.",
+            "width": "half",
+            "source_note": "Production units are often qualitative. A sourced manual entry can fill a quarter and stays pending review.",
+            "kpis": [
+              {
+                "metric_id": "cybercab_production",
+                "label": "Built"
+              },
+              {
+                "metric_id": "cybercab_in_fleet",
+                "label": "In fleet"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "cybercab_production",
+                "label": "Built",
+                "role": "bar"
+              },
+              {
+                "metric_id": "cybercab_in_fleet",
+                "label": "Cybercabs in fleet",
+                "role": "line"
+              },
+              {
+                "metric_id": "robotaxi_fleet",
+                "label": "Total fleet",
+                "role": "line"
+              }
+            ]
+          },
+          {
+            "id": "robotaxi-utilization",
+            "kind": "trend-bars",
+            "title": "Robotaxi utilization",
+            "subtitle": "Paid miles and miles per vehicle. Missing quarters stay blank.",
+            "width": "half",
+            "source_note": "Paid miles are often chart-only. Tiles say not reported when the number was not disclosed.",
+            "kpis": [
+              {
+                "metric_id": "robotaxi_paid_miles",
+                "label": "Paid miles"
+              },
+              {
+                "metric_id": "robotaxi_wait_time",
+                "label": "Wait time",
+                "inverse": true
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "robotaxi_paid_miles",
+                "label": "Paid miles",
+                "role": "bar"
+              },
+              {
+                "metric_id": "robotaxi_miles_per_vehicle",
+                "label": "Miles / vehicle / day",
+                "role": "line",
+                "axis": "right"
+              }
+            ]
+          },
+          {
+            "id": "nhtsa",
+            "kind": "trend-bars",
+            "title": "NHTSA SGO crash reports",
+            "subtitle": "Monthly counts by structured kind of issue. Reports are not fault findings.",
+            "width": "wide",
+            "cadence": "monthly",
+            "source_note": "NHTSA Standing General Order 2021-01 ADS and Level 2 CSVs. Filtered by the catalog reporting entity. Narratives are redacted, so kind comes from Crash With, contact area, and pre-crash movement. Latest report version only.",
+            "modes": [
+              {
+                "id": "ads",
+                "label": "ADS",
+                "metric_id": "nhtsa_sgo_ads",
+                "inverse": true
+              },
+              {
+                "id": "adas",
+                "label": "Level 2",
+                "metric_id": "nhtsa_sgo_adas",
+                "inverse": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "energy",
+        "title": "Commercial energy",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "energy-production",
+            "kind": "trend-bars",
+            "title": "Energy production",
+            "subtitle": "Megafactory output against deployed storage.",
+            "width": "wide",
+            "source_note": "Deployed GWh reuses the company energy-storage metric when it has been collected. Per-site output is rarely disclosed.",
+            "kpis": [
+              {
+                "metric_id": "energy_produced",
+                "label": "Produced"
+              },
+              {
+                "metric_id": "energy_storage_deployed",
+                "label": "Deployed"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "energy_produced",
+                "label": "Produced",
+                "role": "bar",
+                "stack": "output"
+              },
+              {
+                "metric_id": "energy_storage_deployed",
+                "label": "Deployed",
+                "role": "line"
+              }
+            ]
+          },
+          {
+            "id": "energy-deployments",
+            "kind": "trend-bars",
+            "title": "Storage deployments",
+            "subtitle": "Quarterly GWh. Country bubbles appear only for sourced manual entries.",
+            "width": "wide",
+            "map": "world",
+            "map_metric": "energy_deployed_by_country",
+            "source_note": "Total deployed GWh can come from the quarterly production and deliveries release. The Megapack / Powerwall split and the country split are not disclosed. Country figures, when entered, are estimates and stay pending review. They must not be shown as a complete census.",
+            "kpis": [
+              {
+                "metric_id": "energy_storage_deployed",
+                "label": "Deployed"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "energy_storage_megapack",
+                "label": "Megapack",
+                "role": "bar",
+                "stack": "deployed"
+              },
+              {
+                "metric_id": "energy_storage_powerwall",
+                "label": "Powerwall",
+                "role": "bar",
+                "stack": "deployed"
+              },
+              {
+                "metric_id": "energy_storage_deployed",
+                "label": "Total deployed",
+                "role": "line"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "semi",
+        "title": "Tesla Semi",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "semi-contracts",
+            "kind": "trend-bars",
+            "title": "Semi contracts",
+            "subtitle": "Cumulative fleet customers.",
+            "width": "half",
+            "source_note": "Orders and contracts are rarely disclosed. Manual, approval-gated entries only, each with a source URL. Nothing here is auto-approved.",
+            "kpis": [
+              {
+                "metric_id": "semi_contracts",
+                "label": "Fleet customers"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "semi_contracts",
+                "label": "Cumulative customers",
+                "role": "line"
+              }
+            ]
+          },
+          {
+            "id": "semi-orders",
+            "kind": "trend-bars",
+            "title": "Semi orders",
+            "subtitle": "Cumulative units on order.",
+            "width": "half",
+            "source_note": "Same manual path as contracts. A missing quarter is not zero.",
+            "kpis": [
+              {
+                "metric_id": "semi_orders",
+                "label": "Units on order"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "semi_orders",
+                "label": "Cumulative orders",
+                "role": "bar"
+              }
+            ]
+          },
+          {
+            "id": "semi-production",
+            "kind": "trend-bars",
+            "title": "Semi production",
+            "subtitle": "Quarterly production when a number is actually disclosed.",
+            "width": "wide",
+            "source_note": "The deck often gives factory status rather than a unit count. Narrative-only periods stay empty.",
+            "kpis": [
+              {
+                "metric_id": "semi_production",
+                "label": "Produced"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "semi_production",
+                "label": "Produced",
+                "role": "bar"
+              },
+              {
+                "metric_id": "semi_production_cumulative",
+                "label": "Cumulative",
+                "role": "line",
+                "axis": "right"
+              }
+            ]
+          },
+          {
+            "id": "semi-milestones",
+            "kind": "milestone-timeline",
+            "title": "Semi milestones",
+            "subtitle": "Named milestones. A date appears only after a sourced manual entry.",
+            "width": "wide",
+            "milestone_metric": "semi_milestones",
+            "source_note": "Milestone dates are manual and pending until a reviewer approves them.",
+            "milestones": [
+              {
+                "id": "pilot-fleet",
+                "label": "Pilot fleet"
+              },
+              {
+                "id": "nevada-factory",
+                "label": "Nevada factory"
+              },
+              {
+                "id": "volume-ramp",
+                "label": "Volume ramp"
+              },
+              {
+                "id": "megacharger-network",
+                "label": "Megacharger network"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "chargers",
+        "title": "Chargers",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "chargers",
+            "kind": "map-sites",
+            "title": "Chargers",
+            "subtitle": "Site totals from company metrics. Individual sites are not mapped yet.",
+            "width": "wide",
+            "map": "sites",
+            "map_metric": "charger_sites",
+            "source_note": "Station and connector totals reuse the quarterly operational summary when collected. Site coordinates need an NREL AFDC key or a licence review of supercharge.info / OpenChargeMap. No key is configured, so the map stays empty.",
+            "kpis": [
+              {
+                "metric_id": "supercharger_stations",
+                "label": "Supercharger sites"
+              },
+              {
+                "metric_id": "supercharger_connectors",
+                "label": "Connectors"
+              },
+              {
+                "metric_id": "megacharger_sites",
+                "label": "Megacharger sites"
+              },
+              {
+                "metric_id": "non_tesla_session_share",
+                "label": "Non-Tesla sessions"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "supercharger_stations_na",
+                "label": "North America",
+                "role": "bar",
+                "stack": "sites"
+              },
+              {
+                "metric_id": "supercharger_stations_europe",
+                "label": "Europe",
+                "role": "bar",
+                "stack": "sites"
+              },
+              {
+                "metric_id": "supercharger_stations_china",
+                "label": "China",
+                "role": "bar",
+                "stack": "sites"
+              },
+              {
+                "metric_id": "supercharger_stations_apac",
+                "label": "APAC / other",
+                "role": "bar",
+                "stack": "sites"
+              },
+              {
+                "metric_id": "megacharger_sites",
+                "label": "Megacharger sites",
+                "role": "line",
+                "axis": "right"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fsd",
+        "title": "FSD by region",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "fsd",
+            "kind": "small-multiples",
+            "title": "FSD by region",
+            "subtitle": "Regional small multiples, with a small map for orientation. Not a choropleth.",
+            "width": "wide",
+            "map": "world",
+            "map_metric": "fsd_regions",
+            "source_note": "Total subscriptions reuse the company FSD metric when collected. The regional split is not disclosed. Launch dates can be entered manually and stay pending review.",
+            "kpis": [
+              {
+                "metric_id": "fsd_subscriptions",
+                "label": "Paid users"
+              },
+              {
+                "metric_id": "fsd_take_rate",
+                "label": "Take rate"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "fsd_subscriptions",
+                "label": "Paid users",
+                "role": "bar"
+              },
+              {
+                "metric_id": "fsd_take_rate",
+                "label": "Take rate",
+                "role": "line",
+                "axis": "right"
+              }
+            ],
+            "multiples": [
+              {
+                "metric_id": "fsd_region_na",
+                "label": "North America"
+              },
+              {
+                "metric_id": "fsd_region_china",
+                "label": "China"
+              },
+              {
+                "metric_id": "fsd_region_europe",
+                "label": "Europe"
+              },
+              {
+                "metric_id": "fsd_region_apac",
+                "label": "APAC (ex-China)"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "vehicles",
+        "title": "Production & deliveries",
+        "placement": "secondary",
+        "panels": [
+          {
+            "id": "production-deliveries",
+            "kind": "trend-bars",
+            "title": "Production & deliveries",
+            "subtitle": "Model 3/Y, other models, and total deliveries.",
+            "width": "half",
+            "source_note": "Quarterly production and deliveries release, already collected as company metrics when the filing is parsed.",
+            "kpis": [
+              {
+                "metric_id": "total_production",
+                "label": "Production"
+              },
+              {
+                "metric_id": "total_deliveries",
+                "label": "Deliveries"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "production_model_3y",
+                "label": "Model 3/Y produced",
+                "role": "bar",
+                "stack": "production"
+              },
+              {
+                "metric_id": "production_other_models",
+                "label": "Other models produced",
+                "role": "bar",
+                "stack": "production"
+              },
+              {
+                "metric_id": "total_deliveries",
+                "label": "Deliveries",
+                "role": "line"
+              }
+            ]
+          },
+          {
+            "id": "inventory",
+            "kind": "diverging-bars",
+            "title": "Inventory & days of supply",
+            "subtitle": "Build versus deliveries, and days of supply when disclosed.",
+            "width": "half",
+            "source_note": "The build-versus-draw gap is production minus deliveries for quarters where both exist. Days of supply stays empty until disclosed.",
+            "kpis": [
+              {
+                "metric_id": "inventory_days_supply",
+                "label": "Days of supply",
+                "inverse": true
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "total_production",
+                "label": "Production",
+                "role": "bar"
+              },
+              {
+                "metric_id": "total_deliveries",
+                "label": "Deliveries",
+                "role": "bar"
+              },
+              {
+                "metric_id": "inventory_days_supply",
+                "label": "Days of supply",
+                "role": "line",
+                "axis": "right"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "optimus",
+        "title": "Optimus",
+        "placement": "secondary",
+        "panels": [
+          {
+            "id": "optimus",
+            "kind": "trend-bars",
+            "title": "Optimus",
+            "subtitle": "Counts when disclosed. Otherwise the milestone list is the signal.",
+            "width": "wide",
+            "milestone_metric": "optimus_milestones",
+            "source_note": "Unit counts are usually qualitative. Milestone status is the reliable signal and stays pending until reviewed.",
+            "kpis": [
+              {
+                "metric_id": "optimus",
+                "label": "Optimus"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "optimus_built",
+                "label": "Built",
+                "role": "bar"
+              },
+              {
+                "metric_id": "optimus_in_use",
+                "label": "In use",
+                "role": "line"
+              }
+            ],
+            "milestones": [
+              {
+                "id": "gen-2",
+                "label": "Gen 2"
+              },
+              {
+                "id": "gen-3",
+                "label": "Gen 3"
+              },
+              {
+                "id": "pilot-line",
+                "label": "Pilot line"
+              },
+              {
+                "id": "volume-line",
+                "label": "Volume line"
+              },
+              {
+                "id": "external-sales",
+                "label": "External sales"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "factories",
+        "title": "Manufacturing footprint",
+        "placement": "secondary",
+        "panels": [
+          {
+            "id": "factories",
+            "kind": "milestone-timeline",
+            "title": "New factories",
+            "subtitle": "One row per site. Dates appear only from sourced entries.",
+            "width": "wide",
+            "milestone_metric": "factory_milestones",
+            "source_note": "Installed capacity can come from the deck's capacity table once that metric is collected. Construction milestones are manual.",
+            "milestones": [
+              {
+                "id": "announced",
+                "label": "Announced"
+              },
+              {
+                "id": "construction",
+                "label": "Under construction"
+              },
+              {
+                "id": "sop",
+                "label": "Start of production"
+              }
+            ],
+            "table": {
+              "metric_id": "factory_capacity",
+              "columns": [
+                {
+                  "id": "site",
+                  "label": "Site"
+                },
+                {
+                  "id": "capacity",
+                  "label": "Installed capacity"
+                },
+                {
+                  "id": "utilization",
+                  "label": "Utilization"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "energy-secondary",
+        "title": "Energy projects & news",
+        "placement": "secondary",
+        "panels": [
+          {
+            "id": "energy-pipeline",
+            "kind": "trend-bars",
+            "title": "Energy projects pipeline",
+            "subtitle": "GWh by stage, only when a curator has sourced it.",
+            "width": "half",
+            "source_note": "The company does not report a project pipeline. Manual entries from utility filings stay pending review and are judgement calls.",
+            "series": [
+              {
+                "metric_id": "energy_pipeline_announced",
+                "label": "Announced",
+                "role": "bar",
+                "stack": "pipeline"
+              },
+              {
+                "metric_id": "energy_pipeline_construction",
+                "label": "Under construction",
+                "role": "bar",
+                "stack": "pipeline"
+              },
+              {
+                "metric_id": "energy_pipeline_commissioning",
+                "label": "Commissioning",
+                "role": "bar",
+                "stack": "pipeline"
+              }
+            ]
+          },
+          {
+            "id": "energy-news",
+            "kind": "table",
+            "title": "Energy news",
+            "subtitle": "Volume and sentiment by topic. Not an article list.",
+            "width": "half",
+            "empty_label": "Not yet collected",
+            "source_note": "The news collector does not yet tag energy topics. No classifier is run for this panel.",
+            "table": {
+              "metric_id": "energy_news_topics",
+              "columns": [
+                {
+                  "id": "topic",
+                  "label": "Topic"
+                },
+                {
+                  "id": "volume",
+                  "label": "Volume"
+                },
+                {
+                  "id": "sentiment",
+                  "label": "Net sentiment"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
 }

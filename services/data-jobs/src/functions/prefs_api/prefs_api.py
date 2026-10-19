@@ -379,7 +379,7 @@ def _public_stock(document: dict | None, ticker: str) -> dict:
     metrics.sort(key=lambda metric: (
         0 if metric.get("approved") is True and metric.get("approval_state") != "proposed" else 1
     ))
-    return {
+    published = {
         "ticker": ticker.upper(),
         "generated_at": source.get("generated_at"),
         "run_status": source.get("run_status") or "ok",
@@ -392,6 +392,10 @@ def _public_stock(document: dict | None, ticker: str) -> dict:
         "company_name": source.get("company_name") or None,
         "company_description": source.get("company_description") or None,
     }
+    deep_dive = source.get("deep_dive")
+    if isinstance(deep_dive, dict) and deep_dive.get("sections"):
+        published["deep_dive"] = deep_dive
+    return published
 
 
 def _accepts_gzip(event: dict | None) -> bool:

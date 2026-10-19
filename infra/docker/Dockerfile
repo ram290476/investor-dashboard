@@ -46,6 +46,7 @@ COPY services/data-jobs/src/functions/gov_contracts/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/price_reconcile/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/release_day/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/company_ir/ ${LAMBDA_TASK_ROOT}/
+COPY services/data-jobs/src/functions/deep_dive/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/sec_filings/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/kalshi_fomc/ ${LAMBDA_TASK_ROOT}/
 COPY services/data-jobs/src/functions/fund_filings/ services/data-jobs/src/functions/fund_profile/ ${LAMBDA_TASK_ROOT}/
