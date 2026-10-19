@@ -1,13 +1,26 @@
 const TICKER = /^[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
+const SECTION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$/;
+// Optional `/deep-dive/<section>` stays inside the company route. A bare `#section`
+// is not a stock hash: the hash is the router, and replacing `#stock/<T>` leaves the page.
+const STOCK_HASH = /^#stock\/([A-Za-z][A-Za-z0-9.\-]{0,9})(?:\/deep-dive\/([A-Za-z0-9][A-Za-z0-9_-]{0,80}))?$/;
 
 export function parseStockHash(hash) {
-  const match = /^#stock\/([A-Za-z][A-Za-z0-9.\-]{0,9})$/.exec(String(hash || ""));
+  const match = STOCK_HASH.exec(String(hash || ""));
   return match ? match[1].toUpperCase() : null;
 }
 
-export function stockHash(ticker) {
+/** Bookmark id in `#stock/<T>/deep-dive/<section>`, or "" when the hash is only the company route. */
+export function parseStockSection(hash) {
+  const match = STOCK_HASH.exec(String(hash || ""));
+  return match?.[2] || "";
+}
+
+export function stockHash(ticker, sectionId = "") {
   const symbol = String(ticker || "").trim().toUpperCase();
-  return TICKER.test(symbol) ? `#stock/${symbol}` : null;
+  if (!TICKER.test(symbol)) return null;
+  const section = String(sectionId || "").trim();
+  if (!section || !SECTION_ID.test(section)) return `#stock/${symbol}`;
+  return `#stock/${symbol}/deep-dive/${section}`;
 }
 
 export function routeFromPath(pathname) {
