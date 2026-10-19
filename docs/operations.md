@@ -105,7 +105,7 @@ The optional dashboard certificate is also in us-east-1; see [Custom domain](#cu
 
 ## Custom domain
 
-`https://investor.vellamsetti.com` is the dashboard address in the README. `site_domain` defaults to empty, so a normal apply does not change the distribution, Cognito, or CORS. DNS for `vellamsetti.com` is at **GoDaddy, not Route 53**. Terraform does not create DNS records. It requests an ACM certificate in us-east-1 and prints the validation CNAME on `acm_dns_validation_records`.
+`https://investor.vellamsetti.com` is the dashboard address in the README. `site_domain` defaults to that hostname. `terraform.tfvars` is not committed; Deploy production writes the `TERRAFORM_TFVARS` secret to that file and removes any `site_domain` assignment, so the variable default is what the apply uses. DNS for `vellamsetti.com` is at **GoDaddy, not Route 53**. Terraform does not create DNS records. It requests an ACM certificate in us-east-1 and prints the validation CNAME on `acm_dns_validation_records` and, as soon as the certificate exists, as `ACM_VALIDATION_CNAME` in the deploy log.
 
 Do not set `redirect_cloudfront_to_custom_domain`. It must stay `false`. [Issue #103](https://github.com/ram290476/investor-dashboard/issues/103) decides whether the plain `*.cloudfront.net` hostname should redirect to the custom domain. This stack does not install that redirect.
 
@@ -119,9 +119,9 @@ Ram adds these in the GoDaddy DNS panel for `vellamsetti.com`. Terraform will no
 
 ### Order
 
-The validation CNAME has to exist before ACM will issue the certificate, and CloudFront will not attach an alias until the certificate is issued. `deploy.yml` applies the whole stack and will wait on `aws_acm_certificate_validation` (up to 45 minutes, inside a 55-minute job). Keep Deploy production from running in the middle of this sequence.
+The validation CNAME has to exist before ACM will issue the certificate, and CloudFront will not attach an alias until the certificate is issued. `deploy.yml` applies the whole stack and will wait on `aws_acm_certificate_validation` (up to 45 minutes, inside a 55-minute job). The production default is already `investor.vellamsetti.com`, so the next Deploy production creates the certificate and waits. Add the `ACM_VALIDATION_CNAME` from that log at GoDaddy while the job is still running.
 
-1. Put `site_domain = "investor.vellamsetti.com"` in the tfvars used for the administrator apply. Leave it **out** of the GitHub `TERRAFORM_TFVARS` secret until step 6. If a later apply runs with `site_domain` empty, Terraform deletes the certificate.
+1. Leave `site_domain` out of the GitHub `TERRAFORM_TFVARS` secret. Deploy production removes that assignment and uses the variable default `investor.vellamsetti.com`. An apply that sets `site_domain` to empty deletes the certificate.
 2. As an administrator, create only the certificate (this does not wait for DNS):
 
    ```sh
@@ -131,8 +131,8 @@ The validation CNAME has to exist before ACM will issue the certificate, and Clo
 
 3. Add the validation CNAME at GoDaddy. Wait until the certificate in **us-east-1** is `ISSUED` (`aws acm describe-certificate --region us-east-1`).
 4. Remove the GoDaddy forwarding rule and add the `investor` CNAME. Until the alias exists, CloudFront can answer that hostname with 403. The forwarder is the bug this replaces; the CloudFront URL keeps serving the site.
-5. Put the same `site_domain` line in the production `TERRAFORM_TFVARS` secret.
-6. Run a full apply (local, or Deploy production). Validation should finish immediately because the certificate is already issued. The apply then, still in us-west-1 except for the certificate:
+5. Leave the production `TERRAFORM_TFVARS` secret without a `site_domain` line. Deploy production removes that assignment and uses the variable default.
+6. Run a full apply (Deploy production). If the certificate is already issued, validation finishes immediately. The apply then, still in us-west-1 except for the certificate:
    - sets the CloudFront alias and `TLSv1.2_2021` (`sni-only`)
    - adds `https://investor.vellamsetti.com/auth/callback` to Cognito callbacks and `https://investor.vellamsetti.com/` to logout URLs, and keeps the CloudFront URLs
    - adds `https://investor.vellamsetti.com` to API CORS

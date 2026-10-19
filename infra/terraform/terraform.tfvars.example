@@ -26,8 +26,9 @@ monthly_budget_usd = 40
 # sec_user_agent     = "investor-dashboard you@example.com"
 # vuln_window_minutes = 1440 # one mail per CVE (Inspector + Security Hub merged) per Pacific day
 
-# Custom domain. Leave unset until the GoDaddy steps in docs/operations.md are done.
-# Empty keeps today's CloudFront certificate, Cognito URLs and CORS. No Route 53 records.
+# Custom domain. The variable default is investor.vellamsetti.com, and Deploy
+# production removes any site_domain line from TERRAFORM_TFVARS so this file
+# does not need to set it. No Route 53 records.
 # site_domain = "investor.vellamsetti.com"
 # Issue #103. Must stay false; the cloudfront.net to custom-domain redirect is not implemented.
 # redirect_cloudfront_to_custom_domain = false
