@@ -711,7 +711,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
 
         if skipped:
             logger.warning("news_time_budget_skip", extra={"job": JOB_ID, "skipped": skipped})
-        fresh = dedupe_articles(tag_mentions(collected, aliases))
+        from company_ir import load_catalog
+        from deep_dive import prepare_news_articles, write_news_rollups
+
+        fresh = prepare_news_articles(dedupe_articles(tag_mentions(collected, aliases)), watchlist, load_catalog)
         existing = read_parquet_prefix("curated/news_articles/")
         seen: set[str] = set()
         if not existing.is_empty() and "url_hash" in existing.columns:
@@ -734,6 +737,13 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             ):
                 key = f"curated/news_daily/ticker={ticker_name}/year={int(year)}/news.parquet"
                 upsert_parquet(part.drop("_year"), key)
+        write_news_rollups(
+            watchlist,
+            [*combined, *novel],
+            load_catalog,
+            lambda key, obj: write_json(obj, key),
+            ingested_at,
+        )
         state["watermark"] = ingested_at
         write_json(state, STATE_KEY)
         return {

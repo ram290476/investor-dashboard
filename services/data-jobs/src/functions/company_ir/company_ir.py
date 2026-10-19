@@ -4001,11 +4001,15 @@ def run_serve(event: dict | None, *, read_json, write_json, now: str | None = No
         from deep_dive import assemble_deep_dive, read_optional
 
         symbol = ticker.upper()
+        observations = read_optional(read_json, f"curated/deep_dive/ticker={symbol}/observations.json")
+        stored = observations.get("stored_headlines")
         deep_dive = assemble_deep_dive(
             catalog,
             rows,
-            read_optional(read_json, f"curated/deep_dive/ticker={symbol}/observations.json"),
+            observations,
             read_optional(read_json, f"manual/deep_dive/{symbol}.json"),
+            projections=stored if isinstance(stored, list) else None,
+            news=read_optional(read_json, f"curated/news_topics/ticker={symbol}/topics.json"),
             generated_at=generated_at,
         )
         if deep_dive:

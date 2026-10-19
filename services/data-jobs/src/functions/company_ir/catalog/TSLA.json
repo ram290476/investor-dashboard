@@ -1247,6 +1247,137 @@
             "note": "SGO amendments, including the 16 Jun 2025 reporting-threshold change, mean counts are not directly comparable across this break."
           }
         ]
+      },
+      {
+        "id": "news_topics",
+        "metric_id": "energy_news_topics",
+        "window_days": 90,
+        "topics": [
+          {"id": "megapack", "label": "Megapack", "terms": ["megapack"]},
+          {"id": "powerwall", "label": "Powerwall", "terms": ["powerwall"]},
+          {"id": "megafactory", "label": "Megafactory", "terms": ["megafactory", "mega factory"]},
+          {"id": "utility", "label": "Utility storage", "terms": ["energy storage", "battery storage"]}
+        ]
+      },
+      {
+        "id": "news_estimates",
+        "rules": [
+          {
+            "metric_id": "semi_contracts",
+            "unit": "contracts",
+            "match": ["semi", "semis"],
+            "quantity": ["contract", "agreement"],
+            "aggregate": "sum",
+            "max_value": 100000
+          },
+          {
+            "metric_id": "semi_orders",
+            "unit": "vehicles",
+            "match": ["semi", "semis"],
+            "quantity": ["order", "ordered"],
+            "aggregate": "sum",
+            "max_value": 100000
+          },
+          {
+            "metric_id": "semi_production",
+            "unit": "vehicles",
+            "match": ["semi", "semis"],
+            "quantity": ["produced", "production", "built"],
+            "aggregate": "sum",
+            "max_value": 100000
+          },
+          {
+            "metric_id": "energy_pipeline_announced",
+            "unit": "GWh",
+            "match": ["megapack", "powerwall", "energy storage"],
+            "quantity": ["announc", "planned", "plans"],
+            "aggregate": "sum",
+            "units": ["gwh", "mwh"],
+            "max_value": 500
+          },
+          {
+            "metric_id": "energy_pipeline_construction",
+            "unit": "GWh",
+            "match": ["megapack", "powerwall", "energy storage"],
+            "quantity": ["construction", "building", "under way", "underway"],
+            "aggregate": "sum",
+            "units": ["gwh", "mwh"],
+            "max_value": 500
+          },
+          {
+            "metric_id": "energy_pipeline_commissioning",
+            "unit": "GWh",
+            "match": ["megapack", "powerwall", "energy storage"],
+            "quantity": ["commission", "energized", "operational"],
+            "aggregate": "sum",
+            "units": ["gwh", "mwh"],
+            "max_value": 500
+          },
+          {
+            "metric_id": "energy_storage_megapack",
+            "unit": "GWh",
+            "match": ["megapack"],
+            "quantity": ["deployed", "deployment", "installed"],
+            "aggregate": "sum",
+            "units": ["gwh", "mwh"],
+            "max_value": 500
+          },
+          {
+            "metric_id": "energy_storage_powerwall",
+            "unit": "GWh",
+            "match": ["powerwall"],
+            "quantity": ["deployed", "deployment", "installed"],
+            "aggregate": "sum",
+            "units": ["gwh", "mwh"],
+            "max_value": 500
+          },
+          {
+            "metric_id": "energy_deployed_by_country",
+            "kind": "place",
+            "unit": "GWh",
+            "match": ["megapack", "powerwall", "energy storage"],
+            "quantity": ["deployed", "deployment", "installed", "gwh", "mwh"],
+            "aggregate": "sum",
+            "units": ["gwh", "mwh"],
+            "max_value": 500
+          },
+          {
+            "metric_id": "robotaxi_fleet",
+            "unit": "vehicles",
+            "match": ["robotaxi", "robotaxis", "cybercab", "cybercabs"],
+            "quantity": ["fleet", "robotaxi", "robotaxis", "cybercab", "cybercabs"],
+            "aggregate": "max",
+            "max_value": 100000
+          },
+          {
+            "metric_id": "cybercab_production",
+            "unit": "vehicles",
+            "match": ["cybercab", "cybercabs"],
+            "quantity": ["produc", "built", "build", "output"],
+            "aggregate": "sum",
+            "max_value": 10000000
+          },
+          {
+            "metric_id": "optimus_built",
+            "unit": "units",
+            "match": ["optimus"],
+            "quantity": ["built", "produc", "build"],
+            "aggregate": "sum",
+            "max_value": 1000000
+          },
+          {
+            "metric_id": "optimus_milestones",
+            "kind": "milestone",
+            "match": ["optimus"],
+            "milestones": [
+              {"id": "gen-2", "terms": ["gen 2", "generation 2"]},
+              {"id": "gen-3", "terms": ["gen 3", "generation 3"]},
+              {"id": "pilot-line", "terms": ["pilot line", "pilot production"]},
+              {"id": "volume-line", "terms": ["volume production", "volume line"]},
+              {"id": "external-sales", "terms": ["external sale", "customer delivery"]}
+            ]
+          }
+        ]
       }
     ],
     "forecast": {
@@ -1388,7 +1519,7 @@
             "cadence": "quarterly",
             "map": "us",
             "map_metric": "robotaxi_markets",
-            "source_note": "Fleet size and per-metro counts are rarely disclosed. Manual entries stay pending review, with a confidence marker. No third-party estimate is stored as fact.",
+            "source_note": "A reported fleet figure stays on its own series. A news-derived estimate is drawn separately, with its source link and confidence, and stays pending review.",
             "kpis": [
               {
                 "metric_id": "robotaxi_fleet",
@@ -1426,7 +1557,7 @@
             "title": "Cybercab production vs fleet",
             "subtitle": "Units built against Cybercabs in the fleet and the total fleet.",
             "width": "half",
-            "source_note": "Production units are often qualitative. A sourced manual entry can fill a quarter and stays pending review.",
+            "source_note": "News-derived production figures are estimates, shown separately from any reported count, and stay pending review.",
             "kpis": [
               {
                 "metric_id": "cybercab_production",
@@ -1556,7 +1687,7 @@
             "width": "wide",
             "map": "world",
             "map_metric": "energy_deployed_by_country",
-            "source_note": "Total deployed GWh can come from the quarterly production and deliveries release. The Megapack / Powerwall split and the country split are not disclosed. Country figures, when entered, are estimates and stay pending review. They must not be shown as a complete census.",
+            "source_note": "Reported deployed GWh stays on its own series. Megapack, Powerwall, and country figures from news are estimates, labeled and pending review, and are not a complete census.",
             "kpis": [
               {
                 "metric_id": "energy_storage_deployed",
@@ -1596,7 +1727,7 @@
             "title": "Semi contracts",
             "subtitle": "Cumulative fleet customers.",
             "width": "half",
-            "source_note": "Orders and contracts are rarely disclosed. Manual, approval-gated entries only, each with a source URL. Nothing here is auto-approved.",
+            "source_note": "News-derived contract figures are estimates with a source link and confidence. They stay pending review and are not auto-approved.",
             "kpis": [
               {
                 "metric_id": "semi_contracts",
@@ -1617,7 +1748,7 @@
             "title": "Semi orders",
             "subtitle": "Cumulative units on order.",
             "width": "half",
-            "source_note": "Same manual path as contracts. A missing quarter is not zero.",
+            "source_note": "News-derived order figures are estimates, shown separately from any reported count. A missing quarter is not zero.",
             "kpis": [
               {
                 "metric_id": "semi_orders",
@@ -1638,7 +1769,7 @@
             "title": "Semi production",
             "subtitle": "Quarterly production when a number is actually disclosed.",
             "width": "wide",
-            "source_note": "The deck often gives factory status rather than a unit count. Narrative-only periods stay empty.",
+            "source_note": "A reported production count stays on its own series. A news-derived estimate is separate, pending review, and is not treated as a disclosure.",
             "kpis": [
               {
                 "metric_id": "semi_production",
@@ -1902,7 +2033,7 @@
             "subtitle": "Counts when disclosed. Otherwise the milestone list is the signal.",
             "width": "wide",
             "milestone_metric": "optimus_milestones",
-            "source_note": "Unit counts are usually qualitative. Milestone status is the reliable signal and stays pending until reviewed.",
+            "source_note": "Milestone dates taken from news are estimates. They stay pending review and are not auto-approved.",
             "kpis": [
               {
                 "metric_id": "optimus",
@@ -2004,7 +2135,7 @@
             "title": "Energy projects pipeline",
             "subtitle": "GWh by stage, only when a curator has sourced it.",
             "width": "half",
-            "source_note": "The company does not report a project pipeline. Manual entries from utility filings stay pending review and are judgement calls.",
+            "source_note": "Pipeline GWh from news is an estimate by stage, shown separately, with its source link. It stays pending review.",
             "series": [
               {
                 "metric_id": "energy_pipeline_announced",
@@ -2033,7 +2164,7 @@
             "subtitle": "Volume and sentiment by topic. Not an article list.",
             "width": "half",
             "empty_label": "Not yet collected",
-            "source_note": "The news collector does not yet tag energy topics. No classifier is run for this panel.",
+            "source_note": "The news collector tags catalog energy topics. Volume is an article count and sentiment is the mean score. Pending review. Not a production figure.",
             "table": {
               "metric_id": "energy_news_topics",
               "columns": [

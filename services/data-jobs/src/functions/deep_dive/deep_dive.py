@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 
+import deep_dive_sources as sources
+
 PANEL_KINDS = frozenset({
     "scoreboard",
     "trend-bars",
@@ -60,6 +62,18 @@ PLACEHOLDER_DISCLAIMER = (
     "Each future quarter copies the reported actual from the same fiscal quarter a year earlier "
     "(a seasonal-naive baseline). Bands are not estimated. "
     "Consensus is omitted until a licensed estimates feed exists."
+)
+PRIOR_EMPTY = (
+    "No prior projection is stored yet. "
+    "Deep-dive collect locks each next-quarter headline so it can be compared after the report."
+)
+PRIOR_WAITING = (
+    "Each next-quarter headline from this placeholder is stored when deep-dive collect runs. "
+    "It is compared with the reported actual after that quarter is in. A stored headline is not replaced."
+)
+PRIOR_COMPARE = (
+    "Stored headline versus the reported actual. "
+    "The stored figure is the seasonal-naive placeholder from before that quarter was reported, and it is not replaced."
 )
 FORECAST_TODOS = (
     "Build and backtest an in-house model on the deep-dive series. This baseline is not that model.",
@@ -130,6 +144,7 @@ def validate_deep_dive(block) -> list[str]:
             continue
         if source.get("id") == "nhtsa_sgo" and not str(source.get("reporting_entity") or "").strip():
             errors.append("nhtsa_sgo source needs reporting_entity")
+        errors.extend(sources.validate_extra_source(source))
     forecast = block.get("forecast")
     if forecast is not None:
         if not isinstance(forecast, dict) or not isinstance(forecast.get("segments"), list):
@@ -513,11 +528,19 @@ def _chart_series(spec: dict, found: dict | None, color_index: int) -> dict:
         "unit": spec.get("unit") or (found or {}).get("unit") or "",
         "color_index": color_index,
         "points": [
-            {"period": point.get("period"), "value": point.get("value"), "reported": bool(point.get("reported"))}
+            {
+                "period": point.get("period"),
+                "value": point.get("value"),
+                "reported": bool(point.get("reported")),
+                "estimate": bool(point.get("estimate") or (found or {}).get("estimate")),
+                "source_url": point.get("source_url") or "",
+            }
             for point in points
         ],
         "approval_state": (found or {}).get("approval_state") or "proposed",
         "approved": bool((found or {}).get("approved")),
+        "estimate": bool((found or {}).get("estimate")),
+        "source_url": (found or {}).get("source_url") or "",
         "confidence": (found or {}).get("confidence"),
         "disclosure_status": (found or {}).get("disclosure_status") or ("numeric" if reported else "not_disclosed"),
         "empty_label": "" if reported else EMPTY_LABELS.get(
@@ -574,12 +597,14 @@ def _markers(found: dict | None) -> list[dict]:
             "place": place,
             "value": point.get("value"),
             "reported": bool(point.get("reported")) and point.get("value") is not None,
+            "estimate": bool(point.get("estimate") or (found or {}).get("estimate")),
             "status": str(dimensions.get("status") or ""),
             "delta": _as_float(dimensions.get("delta")),
             "approval_state": "proposed",
-            "confidence": (found or {}).get("confidence") or "low",
+            "confidence": point.get("confidence") or (found or {}).get("confidence") or "low",
             "period": point.get("period"),
             "note": point.get("note") or "",
+            "source_url": point.get("source_url") or (found or {}).get("source_url") or "",
         })
     return markers
 
@@ -589,7 +614,12 @@ def _milestones(specs: list[dict], found: dict | None) -> list[dict]:
     for point in (found or {}).get("points") or []:
         dimensions = point.get("dimensions") if isinstance(point.get("dimensions"), dict) else {}
         key = str(dimensions.get("milestone_id") or "")
-        if key:
+        if not key:
+            continue
+        current = by_id.get(key)
+        new_date = str(dimensions.get("date") or "")
+        old_date = str(((current or {}).get("dimensions") or {}).get("date") or "")
+        if current is None or (new_date and (not old_date or new_date < old_date)):
             by_id[key] = point
     rendered = []
     for spec in specs or []:
@@ -605,9 +635,11 @@ def _milestones(specs: list[dict], found: dict | None) -> list[dict]:
             "state": dimensions.get("state") or "",
             "note": (point or {}).get("note") or "",
             "reported": reported,
+            "estimate": bool(reported and ((point or {}).get("estimate") or (found or {}).get("estimate"))),
+            "source_url": (point or {}).get("source_url") or "",
             "empty_label": "" if reported else "Not yet disclosed",
             "approval_state": "proposed" if reported else "",
-            "confidence": (found or {}).get("confidence") if reported else None,
+            "confidence": (point or {}).get("confidence") or (found or {}).get("confidence") if reported else None,
         })
     return rendered
 
@@ -626,7 +658,15 @@ def _table(spec: dict | None, found: dict | None) -> dict | None:
                 cells.append(point.get(key))
             else:
                 cells.append(dimensions.get(key))
-        rows.append({"cells": cells, "approval_state": "proposed", "confidence": (found or {}).get("confidence")})
+        rows.append({
+            "cells": cells,
+            "approval_state": "proposed",
+            "approved": False,
+            "confidence": point.get("confidence") or (found or {}).get("confidence"),
+            "estimate": bool(point.get("estimate") or (found or {}).get("estimate")),
+            "source_url": point.get("source_url") or "",
+            "source_title": point.get("source_title") or (found or {}).get("source_title") or "",
+        })
     return {"columns": columns, "rows": rows}
 
 
@@ -657,9 +697,116 @@ def placeholder_forecast(forecast_spec: dict | None, metrics: dict[str, dict]) -
         "consensus": None,
         "consensus_note": "Consensus needs a licensed estimates feed. None is configured.",
         "prior_projection": [],
-        "prior_projection_note": "No prior projection is stored. This placeholder does not keep a backtest.",
+        "prior_projection_note": PRIOR_EMPTY,
+        "stored_headlines": [],
         "segments": segments_out,
     }
+
+
+def _headline_key(item: dict) -> tuple:
+    return (item.get("segment_id"), item.get("field"), item.get("period"))
+
+
+def lock_headlines(forecast: dict, stored: list | None, generated_at: str | None) -> list[dict]:
+    """Keep every stored next-quarter headline. Add one only before that quarter is reported."""
+    headlines = [dict(item) for item in stored or [] if isinstance(item, dict)]
+    known = {_headline_key(item) for item in headlines}
+    actuals = set()
+    for segment in forecast.get("segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        for metric in segment.get("metrics") or []:
+            if not isinstance(metric, dict):
+                continue
+            for point in metric.get("actuals") or []:
+                if point.get("value") is not None:
+                    actuals.add((segment.get("id"), metric.get("field"), point.get("period")))
+    for segment in forecast.get("segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        for metric in segment.get("metrics") or []:
+            if not isinstance(metric, dict):
+                continue
+            points = [
+                point for point in metric.get("forecast") or []
+                if point.get("value") is not None and point.get("reported")
+            ]
+            if not points:
+                continue
+            head = points[0]
+            key = (segment.get("id"), metric.get("field"), head.get("period"))
+            if key in known or key in actuals or not head.get("period"):
+                continue
+            headlines.append({
+                "segment_id": segment.get("id"),
+                "segment_label": segment.get("label") or segment.get("id"),
+                "field": metric.get("field"),
+                "metric_id": metric.get("metric_id"),
+                "period": head.get("period"),
+                "value": head.get("value"),
+                "unit": metric.get("unit"),
+                "stored_at": generated_at,
+                "model_id": forecast.get("model_id"),
+                "model_status": "placeholder",
+                "approval_state": "proposed",
+            })
+            known.add(key)
+    return headlines
+
+
+def projection_comparisons(forecast: dict, stored: list | None) -> list[dict]:
+    actuals = {}
+    for segment in forecast.get("segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        for metric in segment.get("metrics") or []:
+            if not isinstance(metric, dict):
+                continue
+            for point in metric.get("actuals") or []:
+                if point.get("value") is not None:
+                    actuals[(segment.get("id"), metric.get("field"), point.get("period"))] = point.get("value")
+    rows = []
+    for item in stored or []:
+        if not isinstance(item, dict):
+            continue
+        key = _headline_key(item)
+        if key not in actuals:
+            continue
+        projected = item.get("value")
+        actual = actuals[key]
+        delta = None if projected is None or actual is None else actual - projected
+        rows.append({
+            "segment_id": item.get("segment_id"),
+            "segment_label": item.get("segment_label") or item.get("segment_id"),
+            "field": item.get("field"),
+            "metric_id": item.get("metric_id"),
+            "period": item.get("period"),
+            "projected": projected,
+            "actual": actual,
+            "delta": delta,
+            "unit": item.get("unit"),
+            "stored_at": item.get("stored_at"),
+            "model_id": item.get("model_id"),
+            "model_status": "placeholder",
+            "approval_state": "proposed",
+        })
+    return rows
+
+
+def apply_projections(forecast: dict, stored: list | None, generated_at: str | None, *, lock: bool) -> dict:
+    headlines = lock_headlines(forecast, stored, generated_at) if lock else [
+        dict(item) for item in stored or [] if isinstance(item, dict)
+    ]
+    compared = projection_comparisons(forecast, headlines)
+    forecast["stored_headlines"] = headlines
+    forecast["prior_projection"] = compared
+    if compared:
+        forecast["prior_projection_note"] = PRIOR_COMPARE
+    elif headlines:
+        forecast["prior_projection_note"] = PRIOR_WAITING
+    else:
+        forecast["prior_projection_note"] = PRIOR_EMPTY
+    return forecast
 
 
 def _empty_forecast_metric(field: str) -> dict:
@@ -762,6 +909,9 @@ def assemble_deep_dive(
     manual: dict | None = None,
     *,
     generated_at: str | None = None,
+    projections: list | None = None,
+    news: dict | None = None,
+    lock_projections: bool = False,
 ) -> dict | None:
     """Layout from the catalog, filled with real series. Missing series stay empty, never zero."""
     block = catalog.get("deep_dive") if isinstance(catalog, dict) else None
@@ -780,8 +930,12 @@ def assemble_deep_dive(
             metrics[metric_id] = built
     observed = _index_series(list((observations or {}).get("series") or []))
     manual_series = _index_series(series_from_manual(list((manual or {}).get("entries") or [])))
-    # Collected series fill gaps. A manual entry replaces that metric and stays pending.
+    estimates: dict[str, dict] = {}
+    # Collected series fill gaps. A news estimate never replaces a reported or manual series.
     for metric_id, series in observed.items():
+        if series.get("estimate") or series.get("source_kind") == "news_estimate":
+            estimates[metric_id] = _force_news_estimate(series)
+            continue
         metrics.setdefault(metric_id, series)
     for metric_id, series in manual_series.items():
         current = metrics.get(metric_id)
@@ -789,12 +943,22 @@ def assemble_deep_dive(
         if current and current.get("source_kind") == "company_metrics" and reported:
             continue
         metrics[metric_id] = series
-    forecast = placeholder_forecast(block.get("forecast"), metrics)
+    topic_rows, estimate_rows = sources.series_from_rollup(news)
+    for series in topic_rows:
+        metrics[series["metric_id"]] = series
+    for series in estimate_rows:
+        estimates[series["metric_id"]] = series
+    forecast = apply_projections(
+        placeholder_forecast(block.get("forecast"), metrics),
+        projections if projections is not None else (observations or {}).get("stored_headlines"),
+        generated_at,
+        lock=lock_projections,
+    )
     sections = []
     for section in block.get("sections") or []:
         panels = []
         for panel in section.get("panels") or []:
-            panels.append(_fill_panel(panel, metrics, catalog, forecast))
+            panels.append(_fill_panel(panel, metrics, estimates, catalog, forecast))
         sections.append({
             "id": section.get("id"),
             "title": section.get("title"),
@@ -813,14 +977,93 @@ def assemble_deep_dive(
     }
 
 
-def _fill_panel(panel: dict, metrics: dict[str, dict], catalog: dict, forecast: dict) -> dict:
+def _force_news_estimate(series: dict) -> dict:
+    series["approval_state"] = "proposed"
+    series["approved"] = False
+    series["estimate"] = True
+    series["source_kind"] = "news_estimate"
+    if series.get("confidence") == "high":
+        series["confidence"] = "medium"
+    return series
+
+
+def _estimate_points(series: dict | None) -> list[dict]:
+    return [
+        point for point in (series or {}).get("points") or []
+        if point.get("value") is not None and point.get("reported")
+    ]
+
+
+def _attach_estimate(tile: dict, estimate: dict | None) -> dict:
+    """Show a news estimate beside a reported value, or alone when nothing was reported."""
+    points = _estimate_points(estimate)
+    if not points:
+        return tile
+    latest = points[-1]
+    tile["estimate"] = True
+    tile["estimate_value"] = latest.get("value")
+    tile["estimate_period"] = latest.get("period")
+    tile["estimate_confidence"] = (estimate or {}).get("confidence") or latest.get("confidence")
+    tile["estimate_source_url"] = latest.get("source_url") or (estimate or {}).get("source_url") or ""
+    tile["estimate_source_title"] = latest.get("source_title") or (estimate or {}).get("source_title") or ""
+    if tile.get("value") is None:
+        tile["value"] = latest.get("value")
+        tile["period"] = latest.get("period")
+        tile["approval_state"] = "proposed"
+        tile["approved"] = False
+        tile["confidence"] = tile["estimate_confidence"]
+        tile["source_kind"] = "news_estimate"
+        tile["source_url"] = tile["estimate_source_url"]
+        tile["empty_label"] = ""
+        tile["estimate_only"] = True
+        tile["sparkline"] = [point.get("value") for point in points[-11:]]
+    return tile
+
+
+def _merge_points(reported: dict | None, estimate: dict | None) -> dict | None:
+    extra = [point for point in (estimate or {}).get("points") or [] if isinstance(point, dict)]
+    if not extra:
+        return reported
+    if not reported:
+        return estimate
+    merged = dict(reported)
+    merged["points"] = [*list(reported.get("points") or []), *extra]
+    return merged
+
+
+def _estimate_companion(spec: dict, estimate: dict, color: int) -> dict:
+    label = spec.get("label") or spec.get("metric_id") or "Estimate"
+    companion = _chart_series(
+        {
+            "metric_id": spec.get("metric_id"),
+            "label": f"{label} estimate",
+            "role": "line-dashed",
+            "axis": spec.get("axis") or "left",
+            "stack": "",
+            "unit": spec.get("unit"),
+        },
+        estimate,
+        color,
+    )
+    companion["estimate"] = True
+    return companion
+
+
+def _fill_panel(
+    panel: dict,
+    metrics: dict[str, dict],
+    estimates: dict[str, dict],
+    catalog: dict,
+    forecast: dict,
+) -> dict:
     kind = panel.get("kind")
     kpis = []
     for spec in panel.get("kpis") or panel.get("tiles") or []:
         if isinstance(spec, str):
             spec = {"metric_id": spec}
         metric_id = spec.get("metric_id")
-        kpis.append(_tile(metric_id, _lookup_metric(metric_id, metrics, catalog), spec))
+        found = _lookup_metric(metric_id, metrics, catalog)
+        kpis.append(_attach_estimate(_tile(metric_id, found, spec), estimates.get(metric_id)))
     chart = []
     color = 1
     for spec in panel.get("series") or []:
@@ -831,14 +1074,19 @@ def _fill_panel(panel: dict, metrics: dict[str, dict], catalog: dict, forecast: 
             chart.extend(_stacked_from_breakdown(found))
             continue
         chart.append(_chart_series(spec, found, color))
+        estimate = estimates.get(spec.get("metric_id"))
+        if estimate and _estimate_points(estimate):
+            chart.append(_estimate_companion(spec, estimate, color))
         color = color % 6 + 1
     map_metric = _lookup_metric(panel.get("map_metric"), metrics, catalog)
+    map_estimate = estimates.get(panel.get("map_metric"))
     multiples = []
     for spec in panel.get("multiples") or []:
         if not isinstance(spec, dict):
             continue
         found = _lookup_metric(spec.get("metric_id"), metrics, catalog)
-        multiples.append(_tile(spec.get("metric_id"), found, spec))
+        estimate = estimates.get(spec.get("metric_id"))
+        multiples.append(_attach_estimate(_tile(spec.get("metric_id"), found, spec), estimate))
     modes = []
     for spec in panel.get("modes") or []:
         if not isinstance(spec, dict):
@@ -860,9 +1108,15 @@ def _fill_panel(panel: dict, metrics: dict[str, dict], catalog: dict, forecast: 
             "notes": list((found or {}).get("notes") or []),
             "series_breaks": list((found or {}).get("series_breaks") or []),
         })
-    milestone_series = _lookup_metric(panel.get("milestone_metric"), metrics, catalog)
+    milestone_series = _merge_points(
+        _lookup_metric(panel.get("milestone_metric"), metrics, catalog),
+        estimates.get(panel.get("milestone_metric")),
+    )
     table_spec = panel.get("table") if isinstance(panel.get("table"), dict) else {}
-    table_series = _lookup_metric(table_spec.get("metric_id"), metrics, catalog)
+    table_series = _merge_points(
+        _lookup_metric(table_spec.get("metric_id"), metrics, catalog),
+        estimates.get(table_spec.get("metric_id")),
+    )
     any_value = any(item.get("value") is not None for item in kpis) or any(
         point.get("reported") for series in chart for point in series.get("points") or []
     )
@@ -878,7 +1132,7 @@ def _fill_panel(panel: dict, metrics: dict[str, dict], catalog: dict, forecast: 
         "series": chart,
         "modes": modes,
         "map": panel.get("map"),
-        "markers": _markers(map_metric),
+        "markers": [*_markers(map_metric), *_markers(map_estimate)],
         "multiples": multiples,
         "milestones": _milestones(panel.get("milestones") or [], milestone_series),
         "table": _table(panel.get("table") if isinstance(panel.get("table"), dict) else None, table_series),
@@ -898,6 +1152,8 @@ def build_observations(
     manual: dict | None = None,
     source_statuses: list[dict] | None = None,
     generated_at: str,
+    extra_series: list[dict] | None = None,
+    news: dict | None = None,
 ) -> dict:
     """Curated deep-dive file. Every series is proposed."""
     block = catalog.get("deep_dive") if isinstance(catalog, dict) else {}
@@ -911,13 +1167,23 @@ def build_observations(
             if not parsed or not metric_id:
                 continue
             series.append(_series_from_counts(str(metric_id), parsed, source))
+    for item in extra_series or []:
+        if isinstance(item, dict) and item.get("metric_id"):
+            series.append(item)
     # Manual series are stored too, still proposed, so a later serve can show them
     # even when the manual object is unreadable.
     for item in series_from_manual(list((manual or {}).get("entries") or [])):
         series.append(item)
+    topic_rows, estimate_rows = sources.series_from_rollup(news)
+    series.extend(topic_rows)
+    series.extend(estimate_rows)
     for item in series:
-        item["approval_state"] = "proposed"
-        item["approved"] = False
+        if item.get("estimate") or item.get("source_kind") == "news_estimate":
+            _force_news_estimate(item)
+        else:
+            item["approval_state"] = "proposed"
+            item["approved"] = False
+            item["estimate"] = False
     return {
         "ticker": str(catalog.get("ticker") or "").upper(),
         "generated_at": generated_at,
@@ -929,6 +1195,69 @@ def build_observations(
             "disclaimer": PLACEHOLDER_DISCLAIMER,
         },
     }
+
+
+def _collect_catalog_sources(
+    catalog: dict,
+    fetch,
+    *,
+    generated_at: str,
+    previous: dict | None,
+) -> tuple[list[dict], list[dict]]:
+    """Launch Library 2 and CelesTrak, only when that catalog declares the source."""
+    series: list[dict] = []
+    statuses: list[dict] = []
+    for source in (catalog.get("deep_dive") or {}).get("sources") or []:
+        if not isinstance(source, dict):
+            continue
+        if source.get("id") == "launch_library":
+            found, status = sources.collect_launches(source, fetch)
+            series.extend(found)
+            statuses.append(status)
+        elif source.get("id") == "celestrak":
+            found, status = sources.collect_constellation(source, fetch, generated_at, previous)
+            series.extend(found)
+            statuses.append(status)
+    return series, statuses
+
+
+def prepare_news_articles(rows: list[dict], tickers: list[str], load_catalog) -> list[dict]:
+    """Tag catalog energy topics onto articles. Tickers without a deep dive are unchanged."""
+    catalogs = {}
+    for ticker in tickers or []:
+        symbol = str(ticker or "").upper()
+        if symbol:
+            catalogs[symbol] = load_catalog(symbol) or {}
+    return sources.tag_catalog_topics(rows, sources.topic_rules_for(catalogs))
+
+
+def write_news_rollups(
+    tickers: list[str],
+    articles: list[dict],
+    load_catalog,
+    write_json,
+    generated_at: str,
+) -> list[str]:
+    """Write one small topic-and-estimate file per deep-dive ticker. The news job already holds the articles."""
+    written = []
+    for ticker in tickers or []:
+        symbol = str(ticker or "").upper()
+        if not symbol:
+            continue
+        catalog = load_catalog(symbol) or {}
+        block = catalog.get("deep_dive") if isinstance(catalog, dict) else None
+        if not isinstance(block, dict):
+            continue
+        wanted = {"news_topics", "news_estimates"}
+        if not any(isinstance(item, dict) and item.get("id") in wanted for item in block.get("sources") or []):
+            continue
+        owned = [
+            row for row in articles or []
+            if isinstance(row, dict) and symbol in {str(item).upper() for item in (row.get("tickers") or []) if item}
+        ]
+        write_json(sources.news_topics_key(symbol), sources.build_news_rollup(owned, block, generated_at))
+        written.append(symbol)
+    return written
 
 
 def run_collect(
@@ -985,13 +1314,37 @@ def run_collect(
                 "note": "Aggregated counts only. Report rows are not stored.",
             })
         manual = read_optional(read_json, manual_key(ticker))
+        previous = read_optional(read_json, observations_key(ticker))
+        company_doc = read_optional(read_json, f"curated/company_metrics/ticker={ticker}/observations.json")
+        news_doc = read_optional(read_json, f"curated/news_topics/ticker={ticker}/topics.json")
+        extra, extra_status = _collect_catalog_sources(
+            catalog,
+            fetch,
+            generated_at=generated_at,
+            previous=previous,
+        )
+        statuses.extend(extra_status)
         document = build_observations(
             catalog,
             parsed_by_mode=parsed,
             manual=manual,
             source_statuses=statuses,
             generated_at=generated_at,
+            extra_series=extra,
+            news=news_doc,
         )
+        rows = company_doc.get("rows") if isinstance(company_doc.get("rows"), list) else []
+        preview = assemble_deep_dive(
+            catalog,
+            rows,
+            document,
+            manual,
+            projections=previous.get("stored_headlines") if isinstance(previous.get("stored_headlines"), list) else [],
+            news=news_doc,
+            lock_projections=True,
+            generated_at=generated_at,
+        )
+        document["stored_headlines"] = (preview or {}).get("forecast", {}).get("stored_headlines") or []
         write_json(observations_key(ticker), document)
         written.append(ticker)
         source_rows.extend(statuses)

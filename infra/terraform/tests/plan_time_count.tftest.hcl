@@ -92,3 +92,46 @@ run "plan_with_cloudfront_alarm_but_notifier_off" {
     alert_notifier_enabled   = false
   }
 }
+
+# The job role policy is the overlap of these prefixes and the workload permissions
+# boundary. Launch Library 2 and CelesTrak add no IAM action: the functions run
+# outside a VPC and the HTTP client already allowlists those hosts.
+run "deep_dive_lake_prefixes_stay_least_privilege" {
+  command = plan
+
+  assert {
+    condition     = contains(var.jobs["news-sentiment"].write_prefixes, "curated/news_topics/")
+    error_message = "news-sentiment must be allowed to write curated/news_topics/."
+  }
+
+  assert {
+    condition     = contains(var.jobs["news-sentiment"].write_prefixes, "curated/") == false
+    error_message = "news-sentiment must not be granted the whole curated/ tree."
+  }
+
+  assert {
+    condition = (
+      contains(var.jobs["deep-dive-collect"].read_prefixes, "curated/company_metrics/")
+      && contains(var.jobs["deep-dive-collect"].read_prefixes, "curated/news_topics/")
+    )
+    error_message = "deep-dive-collect must read company metrics and the news rollup."
+  }
+
+  assert {
+    condition     = join(",", var.jobs["deep-dive-collect"].write_prefixes) == "curated/deep_dive/"
+    error_message = "deep-dive-collect must write only curated/deep_dive/."
+  }
+
+  assert {
+    condition     = length(var.jobs["deep-dive-collect"].api_keys) == 0
+    error_message = "Launch Library 2 and CelesTrak use no API key."
+  }
+
+  assert {
+    condition = (
+      contains(var.jobs["q2-company-ir-serve"].read_prefixes, "curated/news_topics/")
+      && join(",", var.jobs["q2-company-ir-serve"].write_prefixes) == "serving/stock/"
+    )
+    error_message = "company-IR serve may read the news rollup and must still write only serving/stock/."
+  }
+}

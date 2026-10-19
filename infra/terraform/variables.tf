@@ -462,7 +462,7 @@ variable "jobs" {
       memory         = 512
       timeout        = 300 # per-ticker Finnhub + Google News for up to 27 tickers, paced
       read_prefixes  = ["curated/news_articles/", "curated/news_daily/", "serving/filings/", "curated/fund_universe/is_fund/"]
-      write_prefixes = ["raw/news/", "curated/news_articles/", "curated/news_daily/"]
+      write_prefixes = ["raw/news/", "curated/news_articles/", "curated/news_daily/", "curated/news_topics/"]
       api_keys       = ["finnhub", "alpha-vantage", "massive"]
       reads_prefs    = true
     }
@@ -592,20 +592,21 @@ variable "jobs" {
       triggers       = ["job:Q2X?partial", "job:DEEP?partial"]
       memory         = 512
       timeout        = 120
-      read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/", "curated/deep_dive/", "manual/deep_dive/"]
+      read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/", "curated/deep_dive/", "manual/deep_dive/", "curated/news_topics/"]
       write_prefixes = ["serving/stock/"]
       api_keys       = []
       reads_prefs    = false
     }
-    # Monday 08:00 ET. NHTSA SGO files are public CSVs (no API key). Manual deep-dive
-    # entries stay proposed. deploy.yml applies this map; do not terraform apply locally.
+    # Monday 08:00 ET. NHTSA SGO files, Launch Library 2, and CelesTrak are public
+    # (no API key). News estimates are read from the news job's rollup. Manual
+    # deep-dive entries stay proposed. deploy.yml applies this map; do not terraform apply locally.
     deep-dive-collect = {
       handler        = "deep_dive.handler"
       schedule       = "cron(0 8 ? * MON *)"
       triggers       = ["ticker-added"]
       memory         = 1024
       timeout        = 120
-      read_prefixes  = ["manual/deep_dive/"]
+      read_prefixes  = ["manual/deep_dive/", "curated/deep_dive/", "curated/company_metrics/", "curated/news_topics/"]
       write_prefixes = ["curated/deep_dive/"]
       api_keys       = []
       reads_prefs    = true

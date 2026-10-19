@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  axisLabel,
+  axisLabels,
+  axisTicks,
   confidenceLabel,
   formatDeepValue,
   hasDeepDive,
@@ -471,4 +474,166 @@ test("a second company page uses the same panels for launches, forecast, and voi
   assert.equal(byClass(view, "deep-dive-secondary").length, 0);
   assert.doesNotMatch(text, /EXAMPLE|TSLA|SPCX/);
   assert.doesNotMatch(source, /SPCX|SpaceX|Terraform|Starmind/);
+});
+
+function nodesWithClass(node, className, { excluded = "" } = {}) {
+  const found = [];
+  walk(node, (item) => {
+    const classes = `${item.className || ""} ${item.attributes?.class || ""}`.split(/\s+/);
+    if (classes.includes(className) && !(excluded && classes.includes(excluded))) found.push(item);
+  });
+  return found;
+}
+
+test("axis labels put the quarter above the year and month names on monthly charts", () => {
+  assert.deepEqual(axisLabel("2026Q2"), { period: "2026Q2", primary: "Q2", secondary: "2026", kind: "quarter" });
+  assert.deepEqual(axisLabel("2026-01"), { period: "2026-01", primary: "Jan", secondary: "2026", kind: "month" });
+  const months = axisLabels(["2025-12", "2026-01", "2026-02"]);
+  assert.deepEqual(months.map((item) => [item.primary, item.secondary]), [
+    ["Dec", "2025"],
+    ["Jan", "2026"],
+    ["Feb", ""],
+  ]);
+  const crowded = ["2024Q1", "2024Q2", "2024Q3", "2024Q4", "2025Q1", "2025Q2", "2025Q3", "2025Q4", "2026Q1", "2026Q2"];
+  const ticks = axisTicks(crowded, 10);
+  assert.equal(ticks[0].primary, "Q1");
+  assert.equal(ticks[0].secondary, "2024");
+  assert.equal(ticks.at(-1).primary, "Q2");
+  assert.equal(ticks.at(-1).secondary, "2026");
+  assert.ok(ticks.length < crowded.length);
+  assert.ok(ticks.every((item) => item.secondary));
+  const monthTicks = axisTicks(["2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04"], 8);
+  assert.ok(monthTicks.some((item) => item.primary === "Jan" && item.secondary === "2026"));
+  assert.equal(monthTicks[0].primary, "Nov");
+
+  const quarterly = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "bars",
+        title: "Bars",
+        panels: [{
+          id: "bars",
+          kind: "trend-bars",
+          title: "Bars",
+          series: [{
+            label: "Reported",
+            role: "bar",
+            points: [
+              { period: "2026Q1", value: 2, reported: true },
+              { period: "2026Q2", value: 4, reported: true },
+            ],
+          }],
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  const quarterText = nodesWithClass(quarterly, "deep-dive-axis", { excluded: "deep-dive-axis-year" }).map((node) => node.textContent);
+  const quarterYears = nodesWithClass(quarterly, "deep-dive-axis-year").map((node) => node.textContent);
+  assert.deepEqual(quarterText, ["Q1", "Q2"]);
+  assert.deepEqual(quarterYears, ["2026", "2026"]);
+  assert.equal(quarterText.some((label) => label === "2026Q2"), false);
+
+  const monthly = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "months",
+        title: "Months",
+        panels: [{
+          id: "months",
+          kind: "trend-bars",
+          title: "Months",
+          cadence: "monthly",
+          series: [{
+            label: "Reports",
+            role: "bar",
+            points: [
+              { period: "2025-12", value: 1, reported: true },
+              { period: "2026-01", value: 2, reported: true },
+              { period: "2026-02", value: 3, reported: true },
+            ],
+          }],
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  const monthText = nodesWithClass(monthly, "deep-dive-axis", { excluded: "deep-dive-axis-year" }).map((node) => node.textContent);
+  const monthYears = nodesWithClass(monthly, "deep-dive-axis-year").map((node) => node.textContent);
+  assert.deepEqual(monthText, ["Dec", "Jan", "Feb"]);
+  assert.deepEqual(monthYears, ["2025", "2026"]);
+  assert.equal(monthText.includes("2026-01"), false);
+});
+
+test("an estimate stays beside the reported figure and a stored headline waits for the actual", () => {
+  const view = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "score",
+        title: "Score",
+        panels: [{
+          id: "tiles",
+          kind: "scoreboard",
+          title: "Score",
+          kpis: [{
+            label: "Fleet",
+            unit: "count",
+            value: 12,
+            approval_state: "approved",
+            approved: true,
+            estimate: true,
+            estimate_value: 40,
+            estimate_source_url: "https://news.example/fleet",
+          }, {
+            label: "Output",
+            unit: "count",
+            value: 9,
+            estimate_only: true,
+            source_kind: "news_estimate",
+            approval_state: "proposed",
+            confidence: "low",
+            source_url: "https://news.example/output",
+            estimate_source_url: "https://news.example/output",
+          }],
+        }, {
+          id: "forecast",
+          kind: "forecast-band",
+          title: "Forecast",
+          forecast: {
+            disclaimer: "Seasonal copy of the same quarter a year earlier. Not a forecast model.",
+            prior_projection_note: "Stored headline versus the reported actual.",
+            prior_projection: [{
+              segment_id: "total",
+              segment_label: "Total",
+              field: "revenue",
+              period: "2026Q2",
+              projected: 20,
+              actual: 25,
+              unit: "USD",
+            }],
+            stored_headlines: [
+              { segment_id: "total", field: "revenue", period: "2026Q2", value: 20, unit: "USD" },
+              { segment_id: "total", segment_label: "Total", field: "revenue", period: "2026Q3", value: 28, unit: "USD" },
+            ],
+            segments: [{ id: "total", label: "Total", metrics: [{ field: "revenue", unit: "USD", actuals: [], forecast: [] }] }],
+          },
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  const fleet = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Fleet"));
+  assert.equal(byClass(fleet, "deep-dive-tile-value")[0].textContent, "12");
+  assert.equal(byClass(fleet, "deep-dive-estimate").length, 1);
+  assert.match(textOf(byClass(fleet, "deep-dive-estimate-line")[0]), /40/);
+  assert.equal(byClass(fleet, "deep-dive-source-link")[0].getAttribute("href"), "https://news.example/fleet");
+  const output = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Output"));
+  assert.match(textOf(output), /Estimate/);
+  assert.match(textOf(output), /Pending review/);
+  assert.match(textOf(output), /Low confidence/);
+  const prior = textOf(view);
+  assert.match(prior, /Stored headline/);
+  assert.match(prior, /Waiting for the report/);
+  assert.match(prior, /2026Q3/);
+  assert.match(prior, /2026Q2/);
 });
