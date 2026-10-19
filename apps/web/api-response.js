@@ -86,8 +86,9 @@ export function refreshErrorMessage(dashboardResult, statusResult) {
 
 // Fold one refresh into the session fields a later redraw will read.
 // The error string stays until a later refresh has nothing to report.
-// A 401 still applies any successful payload, then leaves the previous banner alone;
-// the caller replaces the page with the sign-in gate.
+// A rejected refresh token (sessionExpired) still applies any successful payload,
+// then leaves the previous banner alone; the caller shows the sign-in gate.
+// A bare 401 or a network error is transient: keep the session and surface the banner.
 // Ordinary redraws (watchlist, period, preferences) read this instead of a passed-in message.
 export function dashboardBanner(session) {
   return session?.dashboardError || "";
@@ -110,7 +111,7 @@ export function applyRefresh(session, dashboardResult, statusResult) {
     next.dashboardState = unpublished ? "unpublished" : "error";
   }
   if (statusResult?.status === "fulfilled") next.status = statusResult.value;
-  if (settledFailures(dashboardResult, statusResult).some((error) => error.status === 401)) {
+  if (settledFailures(dashboardResult, statusResult).some((error) => error.sessionExpired)) {
     next.unauthorized = true;
     return next;
   }

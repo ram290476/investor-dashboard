@@ -85,6 +85,7 @@ jobs:
           node --check apps/web/chart-scale.js
           node --check apps/web/chart-period.js
           node --check apps/web/api-response.js
+          node --check apps/web/auth-session.js
           node --check apps/web/trend-state.js
           node --check apps/web/settings-model.js
           node --check apps/web/account-settings.js
