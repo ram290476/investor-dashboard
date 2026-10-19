@@ -11,6 +11,18 @@ export function hasDeepDive(payload) {
   return Array.isArray(payload?.deep_dive?.sections) && payload.deep_dive.sections.length > 0;
 }
 
+/** Primary sections first, then secondary, so the tile row matches the page. */
+export function orderedDeepDiveSections(sections) {
+  const list = Array.isArray(sections) ? sections : [];
+  const primary = [];
+  const secondary = [];
+  for (const section of list) {
+    if (section?.placement === "secondary") secondary.push(section);
+    else primary.push(section);
+  }
+  return [...primary, ...secondary];
+}
+
 export function formatDeepValue(value, unit) {
   if (value == null || Number.isNaN(Number(value))) return "";
   if (unit === "per_share") {
@@ -124,14 +136,14 @@ export function renderDeepDive(payload, doc = document, options = {}) {
 
   const ticker = options.ticker || payload?.ticker || "";
   const jump = el(doc, "nav", "deep-dive-jump");
-  const label = el(doc, "span", "deep-dive-jump-label", "On this page");
+  const label = el(doc, "span", "deep-dive-jump-label", "Sections");
   label.id = "deep-dive-jump-label";
   jump.append(label);
   jump.setAttribute("aria-labelledby", "deep-dive-jump-label");
   root.append(jump);
 
   const secondary = [];
-  for (const section of dive.sections) {
+  for (const section of orderedDeepDiveSections(dive.sections)) {
     const block = renderSection(section, doc);
     if (section.placement === "secondary") secondary.push(block);
     else root.append(block);
@@ -164,12 +176,34 @@ export function renderDeepDive(payload, doc = document, options = {}) {
   return root;
 }
 
+function sectionHeadline(section) {
+  for (const panel of section?.panels || []) {
+    const tiles = [...(panel.kpis || []), ...(panel.tiles || [])];
+    for (const tile of tiles) {
+      if (tile && tile.value != null && tile.value !== "") return tile;
+    }
+  }
+  return null;
+}
+
+function headlineNote(tile) {
+  if (!tile) return "";
+  if (tile.estimate_only || tile.source_kind === "news_estimate") return "Estimate";
+  if (tile.source_kind === "av_regulator") return "Regulator records";
+  return tile.label || "";
+}
+
 function renderBookmark(section, ticker, root, jump, doc, options) {
   const sectionId = String(section?.id || "");
   const chip = el(doc, "a", "deep-dive-jump-chip");
-  const mark = el(doc, "span", "deep-dive-jump-mark", "#");
-  mark.setAttribute("aria-hidden", "true");
-  chip.append(mark, el(doc, "span", "deep-dive-jump-text", section.title || sectionId));
+  const title = section.title || sectionId;
+  chip.append(el(doc, "span", "deep-dive-jump-text", title));
+  const headline = sectionHeadline(section);
+  if (headline) {
+    chip.append(el(doc, "span", "deep-dive-jump-value mono", formatDeepValue(headline.value, headline.unit)));
+    const note = headlineNote(headline);
+    if (note && note !== title) chip.append(el(doc, "span", "deep-dive-jump-note", note));
+  }
   const href = stockHash(ticker, sectionId) || stockHash(ticker) || "";
   if (href) chip.href = href;
   chip.dataset.sectionId = sectionId;
@@ -328,6 +362,7 @@ function renderTile(tile, doc, withSpark) {
   card.append(value);
   const meta = el(doc, "div", "deep-dive-tile-meta");
   if (tile.estimate_only || tile.source_kind === "news_estimate") meta.append(estimateBadge(doc));
+  if (tile.source_kind === "av_regulator" && !tile.estimate_only) meta.append(regulatorBadge(doc));
   if (tile.value != null && tile.approval_state === "proposed") meta.append(pendingBadge(doc));
   const confidence = confidenceLabel(tile.confidence);
   if (confidence) meta.append(el(doc, "span", "deep-dive-confidence", confidence));
@@ -341,6 +376,13 @@ function renderTile(tile, doc, withSpark) {
   if (tile.estimate_only) {
     const link = sourceLink(doc, tile.estimate_source_url || tile.source_url, "Source");
     if (link) meta.append(link);
+  }
+  if (tile.regulator_value != null && tile.regulator_value !== "") {
+    const line = el(doc, "span", "deep-dive-regulator-line");
+    line.append(regulatorBadge(doc), el(doc, "span", "mono", formatDeepValue(tile.regulator_value, tile.unit)));
+    const link = sourceLink(doc, tile.regulator_source_url, "Source");
+    if (link) line.append(link);
+    meta.append(line);
   }
   if (tile.qoq != null) meta.append(directionMark(doc, "QoQ", tile.qoq, tile.inverse));
   if (tile.yoy != null) meta.append(directionMark(doc, "YoY", tile.yoy, tile.inverse));
@@ -359,6 +401,10 @@ function pendingBadge(doc) {
 
 function estimateBadge(doc) {
   return el(doc, "span", "deep-dive-estimate", "Estimate");
+}
+
+function regulatorBadge(doc) {
+  return el(doc, "span", "deep-dive-regulator", "Regulator records");
 }
 
 function sourceLink(doc, url, title) {

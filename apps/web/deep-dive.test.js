@@ -8,6 +8,7 @@ import {
   confidenceLabel,
   formatDeepValue,
   hasDeepDive,
+  orderedDeepDiveSections,
   renderDeepDive,
   revealDeepDiveSection,
   trendTone,
@@ -223,7 +224,9 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
   });
   const chips = byClass(view, "deep-dive-jump-chip");
   assert.equal(chips.length, sample.deep_dive.sections.length);
-  assert.equal(byClass(view, "deep-dive-jump-label")[0].textContent, "On this page");
+  assert.equal(byClass(view, "deep-dive-jump-label")[0].textContent, "Sections");
+  assert.deepEqual(chips.map((chip) => chip.dataset.sectionId), ["scoreboard", "forecast", "places", "later"]);
+  assert.equal(byClass(view, "deep-dive-jump-chip").every((chip) => chip.getAttribute("role") == null), true);
   assert.equal(byClass(view, "deep-dive-jump")[0].getAttribute("aria-labelledby"), "deep-dive-jump-label");
   for (const chip of chips) {
     assert.equal(chip.tagName, "A");
@@ -285,6 +288,62 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
   assert.equal(phoneLater.href, "#stock/ZZZZ/deep-dive/later");
 });
 
+test("section tiles follow primary then secondary, and regulator records sit beside the estimate", () => {
+  const payload = {
+    deep_dive: {
+      title: "Deep dive",
+      sections: [
+        {
+          id: "later",
+          title: "Later",
+          placement: "secondary",
+          panels: [{ id: "later", kind: "trend-bars", title: "Later", kpis: [{ label: "Plants", value: 2, unit: "count" }] }],
+        },
+        {
+          id: "fleet",
+          title: "Fleet",
+          placement: "primary",
+          panels: [{
+            id: "fleet",
+            kind: "trend-bars",
+            title: "Fleet",
+            kpis: [{
+              label: "Fleet",
+              unit: "count",
+              value: 40,
+              estimate_only: true,
+              source_kind: "news_estimate",
+              approval_state: "proposed",
+              regulator_value: 12,
+              regulator_source_url: "https://regulator.example/roster",
+            }, {
+              label: "Permits held",
+              unit: "permits",
+              value: 1,
+              source_kind: "av_regulator",
+              approval_state: "proposed",
+            }],
+          }],
+        },
+      ],
+    },
+  };
+  assert.deepEqual(orderedDeepDiveSections(payload.deep_dive.sections).map((section) => section.id), ["fleet", "later"]);
+  const view = renderDeepDive(payload, fakeDocument(false), { ticker: "abcd" });
+  const chips = byClass(view, "deep-dive-jump-chip");
+  assert.deepEqual(chips.map((chip) => chip.dataset.sectionId), ["fleet", "later"]);
+  assert.equal(chips[0].getAttribute("role"), undefined);
+  const fleet = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Fleet"));
+  assert.match(textOf(fleet), /Estimate/);
+  assert.match(textOf(fleet), /Regulator records/);
+  assert.match(textOf(fleet), /12/);
+  const permits = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Permits held"));
+  assert.equal(byClass(permits, "deep-dive-regulator").length, 1);
+  assert.equal(byClass(permits, "deep-dive-estimate").length, 0);
+  const sections = byClass(view, "deep-dive-section").map((section) => section.id);
+  assert.deepEqual(sections, ["deep-dive-fleet", "deep-dive-later"]);
+});
+
 function findId(node, id) {
   if (node?.id === id) return node;
   for (const child of node?.children || []) {
@@ -307,6 +366,7 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(trendTone(0, true), "flat");
   assert.equal(STOCK_TABS.length, 4);
   assert.equal(stockTabs(null).length, 4);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["overview", "kpis", "fundamentals", "calls", "deep-dive"]);
   assert.equal(stockTabs(sample).at(-1).id, "deep-dive");
   assert.equal(stockTabs(sample).at(-1).label, "Deep dive");
   assert.equal(nextStockTab("calls", "ArrowRight", stockTabs(sample)), "deep-dive");
@@ -362,6 +422,9 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.doesNotMatch(source, /#deep-dive-\$\{/);
   assert.doesNotMatch(source, /overlay-chip deep-dive-jump-chip/);
   assert.match(app, /hasDeepDive\(payload\)/);
+  assert.match(app, /stock-tab-mark", "\+"/);
+  assert.match(deepStyles, /grid-template-columns:\s*repeat\(6/);
+  assert.match(styles, /\.stock-page-tabs\s*\{[^}]*display:\s*flex/);
   assert.match(ci, /node --check apps\/web\/deep-dive\.js/);
   assert.match(ci, /node --check apps\/web\/geo\.js/);
 });

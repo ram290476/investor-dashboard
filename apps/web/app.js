@@ -4071,7 +4071,7 @@ function renderStockPage() {
       selectStockTab(item.id);
     });
     if (item.id === "deep-dive") {
-      const mark = node("span", "stock-tab-mark");
+      const mark = node("span", "stock-tab-mark", "+");
       mark.setAttribute("aria-hidden", "true");
       tab.prepend(mark);
     }
