@@ -113,6 +113,8 @@ jobs:
           terraform fmt -check -recursive
           terraform init -backend=false
           terraform validate
+          terraform -chdir=tests/site_domain init -backend=false -input=false
+          terraform -chdir=tests/site_domain test
 
       # Mock-provider plans of the root module on a fresh stack. They fail with
       # "Invalid count argument" if a count or for_each reads a value known only

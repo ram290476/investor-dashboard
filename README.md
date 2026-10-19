@@ -13,6 +13,8 @@ Use the following link and demo credentials to log in to the dashboard:
 | Email | `ram.vellamsetti@gmail.com` |
 | Password | `Serious-investor77` |
 
+That hostname is the dashboard's CloudFront alias. DNS for `vellamsetti.com` is at GoDaddy, not Route 53; the records to add are in the [operations guide](docs/operations.md#custom-domain). The plain `cloudfront.net` hostname keeps working and is not redirected ([#103](https://github.com/ram290476/investor-dashboard/issues/103)).
+
 This demo account is not an admin and cannot approve company metrics.
 
 ![Dashboard on desktop, Industrial Dark, local preview of the current app](docs/design-roadmap/current-app/industrial-dark-1440.png)
@@ -144,7 +146,7 @@ The deployment workflow is already defined. It is not live in AWS yet; the AWS s
 
 4. **Start deployment.** Open **Actions → Deploy production → Run workflow**, select `main`, and run it. Or merge a PR to `main`: `CI` must pass first, then `Deploy production` waits for the production environment approval. On the first run it provisions the base stack if needed, builds/pushes the arm64 job image, applies the job Lambdas, generates the ignored `Web/site/config.json`, publishes the site, invalidates CloudFront, and checks the public site/config URLs.
 
-5. **Verify and invite yourself.** From `infra/terraform/`, run `terraform output -json site` for the CloudFront URL and `terraform output -json cognito` for the user-pool ID. Invite the user in `us-west-1` (an AWS CLI profile often defaults to `us-east-1`) and mark the email verified so Forgot password can send a recovery code:
+5. **Verify and invite yourself.** From `infra/terraform/`, run `terraform output -json site` for the CloudFront URL (`url`) and the custom-domain origin (`public_url`, same as `url` until `site_domain` is set) and `terraform output -json cognito` for the user-pool ID. Invite the user in `us-west-1` (an AWS CLI profile often defaults to `us-east-1`) and mark the email verified so Forgot password can send a recovery code:
 
    ```sh
    aws cognito-idp admin-create-user \
@@ -155,7 +157,7 @@ The deployment workflow is already defined. It is not live in AWS yet; the AWS s
      --desired-delivery-mediums EMAIL
    ```
 
-   Open the CloudFront URL and complete sign-in (MFA is currently off). To repair a user
+   Open the site (`public_url`) and complete sign-in (MFA is currently off). The custom domain steps are in the [operations guide](docs/operations.md#custom-domain). To repair a user
    created without a verified email, see [Fix an existing user](docs/operations.md#fix-an-existing-user).
 
 6. **Start the initial price history load.** After the workflow has deployed the `backfill` Lambda, invoke it with the project prefix (default `invdash`). Include the index ETF proxies; `trend_metrics` uses them as drivers:

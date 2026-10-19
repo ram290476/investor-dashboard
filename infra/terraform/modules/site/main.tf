@@ -1,7 +1,8 @@
 terraform {
   required_providers {
     aws = {
-      source = "hashicorp/aws"
+      source                = "hashicorp/aws"
+      configuration_aliases = [aws.us_east_1]
     }
   }
 }
@@ -12,6 +13,12 @@ variable "name" {
 
 variable "region" {
   type = string
+}
+
+variable "site_domain" {
+  description = "Hostname this distribution serves, such as investor.vellamsetti.com. Empty keeps the default CloudFront certificate and adds no alias. This module does not create DNS records."
+  type        = string
+  default     = ""
 }
 
 data "aws_caller_identity" "current" {}
@@ -89,9 +96,50 @@ resource "aws_cloudfront_origin_access_control" "site" {
   signing_protocol                  = "sigv4"
 }
 
+# CloudFront only accepts an ACM certificate from us-east-1. DNS validation records are
+# outputs for the registrar (GoDaddy); this module does not create them.
+resource "aws_acm_certificate" "site" {
+  #checkov:skip=CKV2_AWS_71:Single hostname from site_domain; no wildcard
+  count    = var.site_domain == "" ? 0 : 1
+  provider = aws.us_east_1
+
+  domain_name       = var.site_domain
+  validation_method = "DNS"
+  key_algorithm     = "RSA_2048"
+
+  options {
+    certificate_transparency_logging_preference = "ENABLED"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = {
+    Name      = "${var.name}-site"
+    ManagedBy = "terraform"
+  }
+}
+
+resource "aws_acm_certificate_validation" "site" {
+  count    = var.site_domain == "" ? 0 : 1
+  provider = aws.us_east_1
+
+  certificate_arn = one(aws_acm_certificate.site[*].arn)
+  validation_record_fqdns = flatten([
+    for cert in aws_acm_certificate.site : [
+      for dvo in cert.domain_validation_options : dvo.resource_record_name
+    ]
+  ])
+
+  timeouts {
+    create = "45m"
+  }
+}
+
 resource "aws_cloudfront_distribution" "site" {
-  #checkov:skip=CKV_AWS_174:Default *.cloudfront.net certificate, for which CloudFront always allows TLSv1; TLS 1.2 minimum needs a custom domain and ACM certificate
-  #checkov:skip=CKV2_AWS_42:No custom domain yet; uses the default CloudFront certificate
+  #checkov:skip=CKV_AWS_174:With site_domain empty, the default certificate only allows TLSv1. A set site_domain uses the us-east-1 ACM certificate at TLSv1.2_2021.
+  #checkov:skip=CKV2_AWS_42:ACM certificate is attached only when site_domain is set; empty keeps the default CloudFront certificate.
   #checkov:skip=CKV_AWS_68:Accepted risk: no WAF on the static site (cost); data is behind the Cognito-authorized API
   #checkov:skip=CKV2_AWS_47:No WAF attached (see CKV_AWS_68)
   #checkov:skip=CKV_AWS_86:Accepted gap: no CloudFront access logs for static assets; API access is logged by API Gateway
@@ -139,12 +187,27 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
-  viewer_certificate {
-    cloudfront_default_certificate = true
-    # With the default certificate CloudFront always applies TLSv1 (it ignored the TLSv1.2_2021
-    # previously set here, which showed as a change on every plan). TLS 1.2 minimum needs a custom
-    # domain with an ACM certificate.
-    minimum_protocol_version = "TLSv1"
+  # Empty site_domain matches the previous distribution: no alias, default certificate, TLSv1.
+  # CloudFront ignores TLSv1.2_2021 on its default certificate. A set site_domain is the alias.
+  aliases = var.site_domain == "" ? null : [var.site_domain]
+
+  # No viewer-request function. Redirecting the *.cloudfront.net hostname to site_domain is
+  # issue #103 and stays off (root variable redirect_cloudfront_to_custom_domain).
+  dynamic "viewer_certificate" {
+    for_each = var.site_domain == "" ? [1] : []
+    content {
+      cloudfront_default_certificate = true
+      minimum_protocol_version       = "TLSv1"
+    }
+  }
+
+  dynamic "viewer_certificate" {
+    for_each = var.site_domain == "" ? [] : [1]
+    content {
+      acm_certificate_arn      = one(aws_acm_certificate_validation.site[*].certificate_arn)
+      ssl_support_method       = "sni-only"
+      minimum_protocol_version = "TLSv1.2_2021"
+    }
   }
 
   tags = {
@@ -158,6 +221,8 @@ resource "aws_cloudfront_response_headers_policy" "site" {
 
   security_headers_config {
     content_security_policy {
+      # 'self' follows the viewer host, so investor.vellamsetti.com needs no extra source.
+      # connect-src and form-action already allow the Cognito hosted UI and the regional API.
       content_security_policy = "default-src 'self'; base-uri 'none'; form-action 'self' https://*.amazoncognito.com; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.amazoncognito.com https://*.execute-api.${var.region}.amazonaws.com"
       override                = true
     }
@@ -248,5 +313,37 @@ output "domain_name" {
 }
 
 output "url" {
-  value = "https://${aws_cloudfront_distribution.site.domain_name}"
+  description = "CloudFront origin. Stays allowed for Cognito and CORS when a custom domain is primary."
+  value       = "https://${aws_cloudfront_distribution.site.domain_name}"
+}
+
+output "public_url" {
+  description = "Origin written into config.json. The custom domain when site_domain is set; otherwise the CloudFront URL."
+  value       = var.site_domain == "" ? "https://${aws_cloudfront_distribution.site.domain_name}" : "https://${var.site_domain}"
+}
+
+output "domain_attachment" {
+  description = "Alias and TLS mode actually set on the distribution, for plan tests and for checking an empty site_domain still matches today's certificate."
+  value = {
+    aliases                        = aws_cloudfront_distribution.site.aliases
+    minimum_protocol_version       = one(aws_cloudfront_distribution.site.viewer_certificate[*].minimum_protocol_version)
+    cloudfront_default_certificate = one(aws_cloudfront_distribution.site.viewer_certificate[*].cloudfront_default_certificate)
+    ssl_support_method             = one(aws_cloudfront_distribution.site.viewer_certificate[*].ssl_support_method)
+    acm_domain_names               = aws_acm_certificate.site[*].domain_name
+    acm_validation_methods         = aws_acm_certificate.site[*].validation_method
+    acm_validation_count           = length(aws_acm_certificate_validation.site)
+  }
+}
+
+output "acm_dns_validation_records" {
+  description = "CNAME records the DNS host must add before ACM will issue the certificate. Empty when site_domain is empty."
+  value = [
+    for dvo in flatten([
+      for cert in aws_acm_certificate.site : tolist(cert.domain_validation_options)
+      ]) : {
+      name  = dvo.resource_record_name
+      type  = dvo.resource_record_type
+      value = dvo.resource_record_value
+    }
+  ]
 }
