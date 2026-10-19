@@ -82,7 +82,7 @@ def test_metric_review_route_cors_integration_and_iam_prefixes():
     assert "admin-add-user-to-group" in auth
     jobs = (MAIN_TF.parents[2] / "variables.tf").read_text()
     serve = jobs[jobs.index("q2-company-ir-serve = {"):jobs.index("short-interest = {")]
-    assert 'read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/"]' in serve
+    assert 'read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/", "curated/deep_dive/", "manual/deep_dive/"]' in serve
     assert 'write_prefixes = ["serving/stock/"]' in serve
     extract = jobs[jobs.index("q2-company-ir-extract = {"):jobs.index("q2-company-ir-serve = {")]
     assert '"catalog/"' in extract
