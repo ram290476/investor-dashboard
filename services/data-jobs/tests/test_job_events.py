@@ -18,8 +18,53 @@ def test_rejected_event_publish_is_not_silently_successful(monkeypatch):
     monkeypatch.setattr(observability, "_events", Bus())
     with pytest.raises(RuntimeError, match="EventBridge rejected"):
         observability.emit_job_finished("TREND", "run", "success")
+    with pytest.raises(RuntimeError, match="EventBridge rejected"):
+        observability.emit_job_finished("Q2X", "run", "partial")
     # Preserve the original exception when reporting an already failed job.
     observability.emit_job_finished("TREND", "run", "failure")
+
+
+class _Context:
+    function_name = "test"
+    memory_limit_in_mb = 128
+    invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:test"
+    aws_request_id = "test"
+
+
+def test_run_status_sets_the_logged_and_published_outcome(monkeypatch):
+    captured = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: captured.append((outcome, detail)),
+    )
+
+    @observability.job_handler("Q2C")
+    def partial(event, context):
+        with observability.source_run("edgar:TSLA:8-K"):
+            raise RuntimeError("index 404")
+        return {"status": "partial", "run_status": "partial", "documents": 1}
+
+    partial({}, _Context())
+    assert captured[-1][0] == "partial"
+    assert captured[-1][1]["run_status"] == "partial"
+    assert captured[-1][1]["failed_sources"] == 1
+
+    @observability.job_handler("Q2C")
+    def failed(event, context):
+        return {"status": "failed", "run_status": "failed", "documents": 0}
+
+    failed({}, _Context())
+    assert captured[-1][0] == "failure"
+
+    @observability.job_handler("D1")
+    def still_success(event, context):
+        with observability.source_run("fred:SOFR"):
+            raise ValueError("down")
+        return {"status": "success"}
+
+    still_success({}, _Context())
+    assert captured[-1][0] == "success"
+    assert captured[-1][1]["failed_sources"] == 1
 
 
 def test_partial_source_ids_and_skipped_status_are_actionable():
@@ -83,6 +128,37 @@ def test_job_lease_excludes_concurrent_publishers_and_recovers_after_expiry(monk
             pass
 
 
+def test_leased_job_can_exit_cleanly_instead_of_failing(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    published = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: published.append(outcome),
+    )
+    entered = []
+
+    @observability.job_handler(
+        "DASHBOARD", emit_event=True, lease_key="serving/dashboard-build/_lease.json", skip_when_leased=True,
+    )
+    def run(event, context):
+        entered.append(True)
+        return {"status": "ok"}
+
+    with mock_aws():
+        client = boto3.client("s3")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        with lake.job_lease("serving/dashboard-build/_lease.json"):
+            skipped = run({}, _Context())
+        finished = run({}, _Context())
+    assert skipped == {"status": "skipped", "reason": "lease held"}
+    assert entered == [True]
+    assert finished["status"] == "ok"
+    assert published == ["skipped", "success"]
+
+
 def test_job_lease_is_released_after_exception(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
@@ -96,3 +172,98 @@ def test_job_lease_is_released_after_exception(monkeypatch):
                 raise ValueError("build failed")
         with lake.job_lease("lease"):
             pass
+
+
+@pytest.mark.parametrize("skip,expect", [(None, "skipped"), (False, "failure")])
+def test_lease_held_skips_by_default_and_can_opt_out(monkeypatch, skip, expect):
+    """Overlapping sec-filings/trend-metrics invokes used to raise LeaseHeld -> retries -> DLQ."""
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    published = []
+    monkeypatch.setattr(
+        observability, "emit_job_finished",
+        lambda job, run, outcome, detail=None: published.append(outcome),
+    )
+    kwargs = {} if skip is None else {"skip_when_leased": skip}
+
+    @observability.job_handler("SEC", emit_event=True, lease_key="raw/sec_filings/_lease.json", **kwargs)
+    def run(event, context):
+        return {"status": "ok"}
+
+    with mock_aws():
+        client = boto3.client("s3")
+        client.create_bucket(Bucket="lake")
+        monkeypatch.setattr(lake, "LAKE_BUCKET", "lake")
+        monkeypatch.setattr(lake, "_s3", client)
+        with lake.job_lease("raw/sec_filings/_lease.json"):
+            if expect == "skipped":
+                assert run({}, _Context()) == {"status": "skipped", "reason": "lease held"}
+            else:
+                with pytest.raises(lake.LeaseHeld):
+                    run({}, _Context())
+    assert published == [expect]
+
+
+def _failed_sources_lines(out: str) -> list[dict]:
+    import json as _json
+
+    return [_json.loads(line) for line in out.splitlines() if '"FailedSources"' in line]
+
+
+def test_failed_source_bucket_is_half_past_the_clock_hour():
+    from datetime import UTC, datetime
+
+    from observability import failed_source_bucket
+
+    assert failed_source_bucket(datetime(2026, 10, 16, 16, 18, 59, tzinfo=UTC)) == datetime(
+        2026, 10, 16, 16, 30, tzinfo=UTC
+    )
+    assert failed_source_bucket(datetime(2026, 10, 16, 16, 59, 59, tzinfo=UTC)) == datetime(
+        2026, 10, 16, 16, 30, tzinfo=UTC
+    )
+
+
+def test_hourly_failure_jitter_never_puts_two_buckets_in_one_alarm_window():
+    """#233 regression: :19 then :18 failures of one source, evaluated every minute over a 3600 s
+    start-inclusive, end-exclusive window, never sum to 2."""
+    from datetime import UTC, datetime, timedelta
+
+    from observability import failed_source_bucket
+
+    failures = [datetime(2026, 10, 16, h, 19 if h % 2 else 18, 40, tzinfo=UTC) for h in range(0, 24)]
+    stamps = [failed_source_bucket(t) for t in failures]
+    start = datetime(2026, 10, 16, 0, 0, tzinfo=UTC)
+    for minute in range(24 * 60):
+        end = start + timedelta(minutes=minute)
+        window = [s for s in stamps if end - timedelta(seconds=3600) <= s < end]
+        assert len(window) <= 1
+
+
+def test_failed_source_emits_service_only_metric_once_per_source_per_hour(capsys):
+    from datetime import UTC, datetime
+
+    import observability
+
+    observability._failed_source_buckets.clear()
+    now = datetime(2026, 10, 16, 16, 18, tzinfo=UTC)
+    assert observability._emit_failed_source("DS-TEST", now) is True
+    assert observability._emit_failed_source("DS-TEST", now.replace(minute=50)) is False  # same hour
+    assert observability._emit_failed_source("DS-OTHER", now) is True
+    lines = _failed_sources_lines(capsys.readouterr().out)
+    assert len(lines) == 2
+    for blob in lines:
+        meta = blob["_aws"]
+        assert meta["CloudWatchMetrics"][0]["Dimensions"] == [["service"]]
+        assert meta["Timestamp"] == int(datetime(2026, 10, 16, 16, 30, tzinfo=UTC).timestamp() * 1000)
+        assert "source_id" not in blob
+
+
+def test_source_run_failure_emits_failed_sources(capsys):
+    import observability
+    from observability import source_run
+
+    observability._failed_source_buckets.clear()
+    with source_run("DS-TEST2") as record:
+        raise RuntimeError("boom")
+    assert record["outcome"] == "failure"
+    assert _failed_sources_lines(capsys.readouterr().out)

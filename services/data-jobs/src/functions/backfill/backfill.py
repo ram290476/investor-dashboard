@@ -57,6 +57,7 @@ def new_backfill_state(tickers: list[str], today: date, years: int = DEFAULT_YEA
         "tickers": {
             ticker: {
                 "cursor": today.isoformat(),
+                "earliest_date": earliest.isoformat(),
                 "complete": False,
                 "batches": 0,
                 "rows_stored": 0,
@@ -66,20 +67,68 @@ def new_backfill_state(tickers: list[str], today: date, years: int = DEFAULT_YEA
     }
 
 
+def earliest_for(state: dict, ticker: str) -> date:
+    """Historical start for one ticker. Falls back to the checkpoint's original start."""
+    progress = (state.get("tickers") or {}).get(ticker) or {}
+    raw = progress.get("earliest_date") or state.get("earliest_date")
+    if not raw:
+        raise ValueError(f"{ticker} has no earliest_date")
+    return date.fromisoformat(str(raw))
+
+
+def _is_pending(progress: dict) -> bool:
+    return not progress.get("complete") and not progress.get("invalid")
+
+
+def _chart_error_message(payload: dict) -> str:
+    chart = payload.get("chart") or {}
+    error = chart.get("error") or {}
+    return str(error.get("description") or error.get("message") or "").lower()
+
+
 def _is_empty_historical_window(payload: dict) -> bool:
     chart = payload.get("chart") or {}
     result = chart.get("result") or []
     if result:
         return not (result[0].get("timestamp") or [])
-    error = chart.get("error") or {}
-    message = str(error.get("description") or error.get("message") or "").lower()
-    return "no data found" in message
+    message = _chart_error_message(payload)
+    return (
+        "no data found" in message
+        or "doesn't exist for startdate" in message
+        or "does not exist for startdate" in message
+    )
+
+
+def chart_window_disposition(status_code: int, payload: dict) -> str:
+    """Classify a Yahoo chart response as rows, no_data, invalid, or error.
+
+    A 400 whose body says the start/end window has no data is the listing boundary
+    (SPCX before it traded). A 404, including APPL's "No data found, symbol may be
+    delisted", is an unknown symbol and must not stay pending.
+    """
+    message = _chart_error_message(payload)
+    window_missing = "doesn't exist for startdate" in message or "does not exist for startdate" in message
+    if window_missing:
+        return "no_data"
+    if status_code == 404 or "quote not found" in message or "invalid ticker" in message:
+        return "invalid"
+    if status_code == 200 and _is_empty_historical_window(payload):
+        return "no_data"
+    if status_code == 400 and "no data found" in message:
+        return "no_data"
+    if status_code == 200:
+        return "rows"
+    return "error"
 
 
 def _queue_requested_tickers(state: dict, tickers: list[str], force: bool, today: date) -> None:
     if not tickers:
         return
-    existing = state.get("tickers", {})
+    existing = state.setdefault("tickers", {})
+    shared = state.get("earliest_date")
+    for progress in existing.values():
+        if isinstance(progress, dict) and shared and not progress.get("earliest_date"):
+            progress["earliest_date"] = shared
     for ticker in tickers:
         if not ticker:
             continue
@@ -87,8 +136,12 @@ def _queue_requested_tickers(state: dict, tickers: list[str], force: bool, today
             continue
         reset = new_backfill_state([ticker], today, int(state.get("years", DEFAULT_YEARS)))
         existing[ticker] = reset["tickers"][ticker]
-        state["earliest_date"] = reset["earliest_date"]
     state["tickers"] = existing
+    if "earliest_date" not in state:
+        for progress in existing.values():
+            if isinstance(progress, dict) and progress.get("earliest_date"):
+                state["earliest_date"] = progress["earliest_date"]
+                break
     state.setdefault("started_at", datetime.now(UTC).isoformat(timespec="seconds"))
 
 
@@ -123,24 +176,28 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
         state["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         write_json(state, STATE_KEY, bucket, cache_seconds=0)
 
+        import httpx
+
         from collectors import yahoo
         from http_client import get_client, request_with_retry
 
         ticker_order = list(state.get("tickers", {}))
         if not ticker_order:
-            return {"status": "idle", "batches": 0, "pending_tickers": []}
+            return {"status": "idle", "batches": 0, "pending_tickers": [], "tickers_completed": 0}
 
-        earliest = date.fromisoformat(state["earliest_date"])
-        pending_before = [t for t in ticker_order if not state["tickers"][t].get("complete")]
+        pending_before = [t for t in ticker_order if _is_pending(state["tickers"][t])]
         batches_done = 0
         stored_rows = 0
+        tickers_completed = 0
         no_data_tickers: list[str] = []
+        invalid_tickers: list[str] = []
         failed_tickers: list[str] = []
+        rate_limited = False
         index = int(state.get("next_index", 0)) % len(ticker_order)
 
         with get_client() as http:
-            while batches_done < max_batches:
-                pending = [t for t in ticker_order if not state["tickers"][t].get("complete")]
+            while batches_done < max_batches and not rate_limited:
+                pending = [t for t in ticker_order if _is_pending(state["tickers"][t])]
                 if not pending:
                     break
                 if set(pending) <= set(failed_tickers):
@@ -148,22 +205,39 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 ticker = ticker_order[index % len(ticker_order)]
                 index = (index + 1) % len(ticker_order)
                 progress = state["tickers"][ticker]
-                if progress.get("complete") or ticker in failed_tickers:
+                if not _is_pending(progress) or ticker in failed_tickers:
                     continue
 
+                earliest = earliest_for(state, ticker)
                 cursor = date.fromisoformat(progress["cursor"])
                 start, end = batch_bounds(cursor, earliest, batch_days)
                 params = yahoo.chart_params(start=start, end=end)
                 with source_run("DS-05") as record:
-                    response = request_with_retry(
-                        http,
-                        "GET",
-                        yahoo.CHART_URL.format(ticker=ticker),
-                        params=params,
-                    )
-                    payload = response.json()
-                    empty_window = _is_empty_historical_window(payload)
-                    rows = [] if empty_window else yahoo.parse_chart(payload, ticker)
+                    try:
+                        response = request_with_retry(
+                            http,
+                            "GET",
+                            yahoo.CHART_URL.format(ticker=ticker),
+                            params=params,
+                            retry_statuses=yahoo.CHART_RETRY_STATUSES,
+                            return_statuses=yahoo.CHART_RETURN_STATUSES,
+                        )
+                    except httpx.HTTPStatusError as exc:
+                        response = exc.response
+                    if response.status_code == 429:
+                        record["coverage"] = "rate_limited"
+                        raise yahoo.YahooRateLimited("Yahoo returned HTTP 429; stopped until quota permits")
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = {}
+                    disposition = chart_window_disposition(response.status_code, payload)
+                    # A symbol that already stored bars has a listing boundary, not an invalid name.
+                    if disposition == "invalid" and int(progress.get("rows_stored") or 0) > 0:
+                        disposition = "no_data"
+                    if disposition == "error":
+                        raise RuntimeError(f"Yahoo chart failed for {ticker} ({response.status_code})")
+                    rows = [] if disposition != "rows" else yahoo.parse_chart(payload, ticker)
                     received = len((payload.get("chart", {}).get("result") or [{}])[0].get("timestamp") or [])
                     if rows:
                         frame = pl.DataFrame(rows).sort("date")
@@ -197,9 +271,16 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                             "rows_processed": len(rows),
                             "rows_rejected": max(0, received - len(rows)),
                             "rows_stored": len(rows),
+                            "disposition": disposition,
                         },
                     )
-                    if not rows and empty_window:
+                    if disposition == "invalid":
+                        message = _chart_error_message(payload) or f"HTTP {response.status_code}"
+                        progress["invalid"] = True
+                        progress["invalid_reason"] = message[:300]
+                        progress["complete"] = True
+                        invalid_tickers.append(ticker)
+                    elif disposition == "no_data":
                         progress["complete"] = True
                         progress["no_data_before"] = end.isoformat()
                         no_data_tickers.append(ticker)
@@ -211,15 +292,23 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
 
                 if record["outcome"] == "failure":
                     failed_tickers.append(ticker)
+                    if record.get("error_type") == "YahooRateLimited":
+                        rate_limited = True
+                        break
                     continue
 
+                if progress.get("complete") and not progress.get("invalid"):
+                    tickers_completed += 1
                 batches_done += 1
                 state["next_index"] = index
                 state["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
                 write_json(state, STATE_KEY, bucket, cache_seconds=0)
 
-        pending_after = [t for t in ticker_order if not state["tickers"][t].get("complete")]
-        state["status"] = "running" if pending_after else "complete"
+        pending_after = [t for t in ticker_order if _is_pending(state["tickers"][t])]
+        if rate_limited:
+            state["status"] = "rate_limited"
+        else:
+            state["status"] = "running" if pending_after else "complete"
         state["completed_at"] = None if pending_after else datetime.now(UTC).isoformat(timespec="seconds")
         state["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         write_json(state, STATE_KEY, bucket, cache_seconds=0)
@@ -231,8 +320,11 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
                 "batches_this_run": batches_done,
                 "rows_stored_this_run": stored_rows,
                 "tickers_pending": pending_after,
+                "tickers_completed": tickers_completed,
                 "no_data_tickers": no_data_tickers,
+                "invalid_tickers": invalid_tickers,
                 "failed_tickers": failed_tickers,
+                "rate_limited": rate_limited,
                 "tickers_pending_before": pending_before,
             },
         )
@@ -241,9 +333,12 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper over collect
             "batches": batches_done,
             "rows_stored": stored_rows,
             "rows_written": stored_rows,
+            "tickers_completed": tickers_completed,
             "pending_tickers": pending_after,
             "no_data_tickers": no_data_tickers,
+            "invalid_tickers": invalid_tickers,
             "failed_tickers": failed_tickers,
+            "rate_limited": rate_limited,
         }
 
     return run(event, context)

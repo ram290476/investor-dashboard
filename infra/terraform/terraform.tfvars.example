@@ -1,7 +1,13 @@
 project            = "invdash"
 region             = "us-west-1"
 dr_region          = "us-west-2" # must differ from region
-alert_emails       = ["you@example.com"] # also receive the us-east-1 CloudFront alarm topic
+alert_emails       = ["you@example.com"] # confirm the invdash-ops-alerts topic; CloudFront mail uses this list too
+# security_alert_emails = ["you@example.com"] # optional; confirm the invdash-security-alerts topic
+# email_window_minutes = 60           # fixed Pacific clock buckets from local midnight; 60 is one clock hour
+# email_max_per_window = 1            # emails per issue per window
+# alert_sms_e164     = "+14155552671" # optional; confirm the text, then do not subscribe this number to the intake (-alarms) topics
+# sms_window_minutes = 60             # independent of email_window_minutes
+# sms_max_per_window = 1              # texts per issue per SMS window
 monthly_budget_usd = 40
 
 # Fill in once the dashboard is deployed behind CloudFront:
@@ -18,6 +24,7 @@ monthly_budget_usd = 40
 # site_logout_urls   = ["https://dXXXXXXXXXXXX.cloudfront.net/"]
 # jobs_image_uri     = "<account>.dkr.ecr.us-west-1.amazonaws.com/invdash/jobs:<git-sha>"
 # sec_user_agent     = "investor-dashboard you@example.com"
+# vuln_window_minutes = 1440 # one mail per CVE (Inspector + Security Hub merged) per Pacific day
 
 # Custom domain. Leave unset until the GoDaddy steps in docs/operations.md are done.
 # Empty keeps today's CloudFront certificate, Cognito URLs and CORS. No Route 53 records.

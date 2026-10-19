@@ -143,3 +143,27 @@ def test_cleveland_html_tables():
     }
     with pytest.raises(fed_sources.LayoutChangedError):
         fed_sources.parse_cleveland_html("<p>redesigned</p>", date(2026, 10, 3))
+
+
+def test_cleveland_transposed_layout_oct_2026():
+    """Live layout as of 2026-10-13: periods are rows, measures are columns, blank = released."""
+    note = "<tr><td>Note: If the cell is blank, it implies that the actual data ... released.</td></tr>"
+    html = f"""
+    <table class="table-default"><tr><th>Month</th><th>CPI</th><th>Core CPI</th><th>PCE</th>
+      <th>Core PCE</th><th>Updated</th></tr>
+      <tr><td>October 2026</td><td>0.27</td><td>0.20</td><td>0.28</td><td>0.25</td><td>10/13</td></tr>
+      <tr><td>September 2026</td><td>0.53</td><td></td><td>0.43</td><td>0.25</td><td>10/13</td></tr>{note}</table>
+    <table class="table-default"><tr><th>Month</th><th>CPI</th><th>Core CPI</th><th>PCE</th>
+      <th>Core PCE</th><th>Updated</th></tr>
+      <tr><td>October 2026</td><td>3.63</td><td>2.30</td><td>3.69</td><td>3.10</td><td>10/13</td></tr>{note}</table>
+    <table class="table-default"><tr><th>Quarter</th><th>CPI</th><th>Core CPI</th><th>PCE</th>
+      <th>Core PCE</th><th>Updated</th></tr>
+      <tr><td>2026:Q4</td><td>4.50</td><td>2.56</td><td>4.06</td><td>3.05</td><td>10/13</td></tr>{note}</table>"""
+    rows = fed_sources.parse_cleveland_html(html, date(2026, 10, 13))
+    mom = {(r["measure"], r["period"]): r["value"] for r in rows if r["table"] == 0}
+    assert mom[("CPI", "September 2026")] == 0.53
+    assert mom[("Core PCE", "October 2026")] == 0.25
+    assert ("Core CPI", "September 2026") not in mom
+    assert {r["table"] for r in rows} == {0, 1, 2}
+    assert ("CPI", "2026:Q4", 4.50) in {(r["measure"], r["period"], r["value"]) for r in rows}
+    assert not any(r["period"].startswith("Note") for r in rows)

@@ -28,6 +28,7 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         "api.polygon.io",  # DS-01, DS-42
         "query1.finance.yahoo.com",
         "query2.finance.yahoo.com",  # DS-05 backfill
+        "fc.yahoo.com",  # cookie for quoteSummary crumb: fund profiles (#223)
         "finnhub.io",  # DS-04, DS-13, DS-41
         "www.alphavantage.co",  # DS-03, DS-40
         # Rates, inflation, macro
@@ -49,6 +50,7 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         # Filings, regulation, government
         "www.sec.gov",
         "data.sec.gov",  # DS-06, DS-10, DS-11, DS-75
+        "efts.sec.gov",  # EDGAR full-text search: fund CIK fallback (#223)
         "www.federalregister.gov",
         "www.whitehouse.gov",
         "ustr.gov",
@@ -75,6 +77,7 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         "www.nasa.gov",
         "www.ssc.spaceforce.mil",
         "www.defense.gov",
+        "www.war.gov",  # DoD Contracts RSS (defense.gov redirects here)
         "www.gao.gov",
         "api.usaspending.gov",
         "api.sam.gov",
@@ -141,11 +144,19 @@ def request_with_retry(
     *,
     max_attempts: int = 4,
     base_delay_s: float = 0.5,
+    retry_statuses: frozenset[int] | None = None,
+    return_statuses: frozenset[int] | None = None,
     **kwargs,
 ) -> httpx.Response:
-    """Retry transient network/upstream failures with bounded exponential backoff and jitter."""
+    """Retry transient network/upstream failures with bounded exponential backoff and jitter.
+
+    retry_statuses replaces the default transient set. return_statuses come back to the
+    caller without a raise and without a retry, so a 429 or a 400 body can be classified.
+    """
     if max_attempts < 1:
         raise ValueError("max_attempts must be positive")
+    retryable = RETRYABLE_STATUS_CODES if retry_statuses is None else retry_statuses
+    passthrough = return_statuses or frozenset()
     for attempt in range(max_attempts):
         try:
             response = client.request(method, url, **kwargs)
@@ -156,7 +167,9 @@ def request_with_retry(
             time.sleep(delay)
             continue
 
-        if response.status_code not in RETRYABLE_STATUS_CODES:
+        if response.status_code in passthrough:
+            return response
+        if response.status_code not in retryable:
             response.raise_for_status()
             return response
         if attempt + 1 == max_attempts:

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { formatConsumerDate } from "./panel-dates.js";
 import {
   resolveTrend,
   servingPriceTrend,
@@ -162,7 +163,7 @@ test("a run that reaches the first 50-day session says at least, and names that 
   const sentence = trendSentence(trend);
   for (const copy of [title, sentence]) {
     assert.match(copy, /at least 31 sessions/);
-    assert.match(copy, new RegExp(trend.since));
+    assert.ok(copy.includes(formatConsumerDate(trend.since)));
     assert.match(copy, /Earlier sessions have no 50-day average/);
     assert.doesNotMatch(copy, /start of history/);
   }
@@ -185,7 +186,7 @@ test("not enough history still speaks the 20-day comparison when that average ex
   const sentence = trendSentence(partial);
   assert.match(sentence, /Not enough history/);
   assert.match(sentence, /34 available/);
-  assert.match(sentence, /history starts 2026-06-12/);
+  assert.match(sentence, /history starts Jun 12, 2026/);
   assert.match(sentence, /versus the 20-day average/);
   assert.match(sentence, /\+[\d.]+%/);
 

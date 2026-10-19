@@ -74,16 +74,29 @@ locals {
   region       = data.aws_region.current.region
   fn_name      = "${var.name}-prefs-api"
   event_source = "${var.name}.prefs"
+  # Always-free provisioned DynamoDB is 25 RCU and 25 WCU per account per Region.
+  # This is the only DynamoDB table in the stack, so that ceiling belongs here.
+  prefs_capacity_floor   = 5
+  prefs_capacity_ceiling = 25
+  prefs_scaling_target   = 70
 }
 
 # ---------------------------------------------------------------------------
 # Per-user preferences, one item per Cognito user (partition key user_sub).
+# Provisioned 5/5 stays inside the always-free 25 RCU / 25 WCU allowance.
+# Auto scaling may move either dimension from 5 to 25 at 70% utilization.
+# ignore_changes is not set on capacity: on an on-demand to provisioned
+# switch the AWS provider would seed 1 instead of these values
+# (hashicorp/terraform-provider-aws#38100). Apply in a quiet window so a
+# later plan does not pull a scaled-up table back to 5.
 # Encrypted with the data key, point-in-time recovery, deletion protection
 # (SC-28, CP-9, CP-10).
 # ---------------------------------------------------------------------------
 resource "aws_dynamodb_table" "prefs" {
   name                        = "${var.name}-user-prefs"
-  billing_mode                = "PAY_PER_REQUEST"
+  billing_mode                = "PROVISIONED"
+  read_capacity               = local.prefs_capacity_floor
+  write_capacity              = local.prefs_capacity_floor
   hash_key                    = "user_sub"
   deletion_protection_enabled = true
 
@@ -100,6 +113,86 @@ resource "aws_dynamodb_table" "prefs" {
   point_in_time_recovery {
     enabled = true
   }
+}
+
+# RegisterScalableTarget must follow the billing-mode update. On-demand tables
+# reject a scalable target.
+resource "aws_appautoscaling_target" "prefs_read" {
+  max_capacity       = local.prefs_capacity_ceiling
+  min_capacity       = local.prefs_capacity_floor
+  resource_id        = "table/${aws_dynamodb_table.prefs.name}"
+  scalable_dimension = "dynamodb:table:ReadCapacityUnits"
+  service_namespace  = "dynamodb"
+
+  depends_on = [aws_dynamodb_table.prefs]
+}
+
+resource "aws_appautoscaling_policy" "prefs_read" {
+  name               = "${var.name}-user-prefs-read"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.prefs_read.resource_id
+  scalable_dimension = aws_appautoscaling_target.prefs_read.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.prefs_read.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "DynamoDBReadCapacityUtilization"
+    }
+    target_value       = local.prefs_scaling_target
+    scale_in_cooldown  = 60
+    scale_out_cooldown = 60
+  }
+}
+
+resource "aws_appautoscaling_target" "prefs_write" {
+  max_capacity       = local.prefs_capacity_ceiling
+  min_capacity       = local.prefs_capacity_floor
+  resource_id        = "table/${aws_dynamodb_table.prefs.name}"
+  scalable_dimension = "dynamodb:table:WriteCapacityUnits"
+  service_namespace  = "dynamodb"
+
+  depends_on = [aws_dynamodb_table.prefs]
+}
+
+resource "aws_appautoscaling_policy" "prefs_write" {
+  name               = "${var.name}-user-prefs-write"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.prefs_write.resource_id
+  scalable_dimension = aws_appautoscaling_target.prefs_write.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.prefs_write.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "DynamoDBWriteCapacityUtilization"
+    }
+    target_value       = local.prefs_scaling_target
+    scale_in_cooldown  = 60
+    scale_out_cooldown = 60
+  }
+}
+
+# A throttle means a request arrived before auto scaling raised capacity.
+# Ops email, same topic as the API 5xx alarm. Missing data is idle, not an outage.
+resource "aws_cloudwatch_metric_alarm" "prefs_throttle" {
+  for_each = {
+    read  = "ReadThrottleEvents"
+    write = "WriteThrottleEvents"
+  }
+
+  alarm_name          = "${var.name}-user-prefs-${each.key}-throttle"
+  alarm_description   = "User prefs table saw ${each.key} throttle events"
+  namespace           = "AWS/DynamoDB"
+  metric_name         = each.value
+  statistic           = "Sum"
+  dimensions          = { TableName = aws_dynamodb_table.prefs.name }
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.ops_topic_arn]
+  ok_actions          = [var.ops_topic_arn]
 }
 
 # ---------------------------------------------------------------------------
@@ -183,12 +276,26 @@ resource "aws_cloudwatch_log_group" "api_fn" {
   name              = "/aws/lambda/${local.fn_name}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name change. In-place retention updates stay allowed.
+  # See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_cloudwatch_log_group" "api_access" {
   name              = "/aws/apigateway/${var.name}-site-api"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name change. In-place retention updates stay allowed.
+  # See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "aws_iam_policy_document" "api" {
@@ -212,14 +319,49 @@ data "aws_iam_policy_document" "api" {
     actions = ["s3:GetObject"]
     resources = [
       "${var.lake_bucket_arn}/serving/dashboard.json",
+      "${var.lake_bucket_arn}/serving/dashboard.json.gz",
       "${var.lake_bucket_arn}/serving/status.json",
       "${var.lake_bucket_arn}/serving/chart_data/*",
+      "${var.lake_bucket_arn}/serving/stock/*",
+      "${var.lake_bucket_arn}/serving/funds/*",
+    ]
+  }
+  statement {
+    sid       = "ReadMetricCatalog"
+    actions   = ["s3:GetObject"]
+    resources = ["${var.lake_bucket_arn}/catalog/*"]
+  }
+  # Admin-only is_fund reset (#223): read the old stamp for the audit line, then delete it. The
+  # handler checks the admin group (never the demo account); IAM limits it to this prefix.
+  statement {
+    sid       = "ResetFundFlag"
+    actions   = ["s3:GetObject", "s3:DeleteObject"]
+    resources = ["${var.lake_bucket_arn}/curated/fund_universe/is_fund/*"]
+  }
+  # A missing catalog/<TICKER>.json (first approval for a ticker), serving/stock/<TICKER>.json or
+  # serving/chart_data/<TICKER>.json or serving/funds/<TICKER>.json (ticker not built yet) must read as NoSuchKey, not
+  # AccessDenied. S3 only returns 404 when the caller may list the prefix.
+  statement {
+    sid       = "ListMetricCatalog"
+    actions   = ["s3:ListBucket"]
+    resources = [var.lake_bucket_arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["catalog/*", "serving/stock/*", "serving/chart_data/*", "serving/funds/*", "curated/fund_universe/is_fund/*"]
+    }
+  }
+  statement {
+    sid     = "WriteMetricReview"
+    actions = ["s3:PutObject"]
+    resources = [
+      "${var.lake_bucket_arn}/catalog/*",
       "${var.lake_bucket_arn}/serving/stock/*",
     ]
   }
   statement {
     sid       = "DecryptDashboardServingObjects"
-    actions   = ["kms:Decrypt"]
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
     resources = [var.data_key_arn]
     condition {
       test     = "StringEquals"
@@ -306,8 +448,10 @@ resource "aws_apigatewayv2_api" "site" {
 
   cors_configuration {
     allow_origins = var.site_origins
-    allow_methods = ["GET", "PUT"]
-    allow_headers = ["authorization", "content-type"]
+    # #229: must list every method used by aws_apigatewayv2_route.site, or the browser preflight fails
+    # ("Load failed") before the request reaches the Lambda (tests/test_api_route_permissions.py).
+    allow_methods = ["GET", "PUT", "POST"]
+    allow_headers = ["authorization", "content-type", "accept"]
     max_age       = 300
   }
 }
@@ -332,7 +476,7 @@ resource "aws_apigatewayv2_integration" "prefs" {
 }
 
 resource "aws_apigatewayv2_route" "site" {
-  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /stock/{ticker}"])
+  for_each           = toset(["GET /prefs", "PUT /prefs", "GET /dashboard", "GET /status", "GET /chart/{ticker}", "GET /fund/{ticker}", "GET /stock/{ticker}", "PUT /stock/{ticker}/metrics/{metric_id}", "POST /admin/fund-flag/{ticker}/reset"])
   api_id             = aws_apigatewayv2_api.site.id
   route_key          = each.value
   target             = "integrations/${aws_apigatewayv2_integration.prefs.id}"
@@ -362,11 +506,15 @@ resource "aws_apigatewayv2_stage" "default" {
 
 resource "aws_lambda_permission" "api_route" {
   for_each = {
-    prefs     = "prefs"
-    dashboard = "dashboard"
-    status    = "status"
-    chart     = "chart/*"
-    stock     = "stock/*"
+    prefs        = "prefs"
+    dashboard    = "dashboard"
+    status       = "status"
+    chart        = "chart/*"
+    stock        = "stock/*"
+    stock_metric = "stock/*/metrics/*"
+    # #227: every route in aws_apigatewayv2_route.site needs an invoke grant (tests/test_api_route_permissions.py).
+    fund            = "fund/*"
+    fund_flag_reset = "admin/fund-flag/*"
   }
   statement_id  = "AllowApiGateway-${each.key}"
   action        = "lambda:InvokeFunction"
@@ -392,8 +540,10 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
   ok_actions          = [var.ops_topic_arn]
 }
 
-# Per-code visibility for prefs_api structured errors. The filter phrases match
-# _log_event() in prefs_api.py (json.dumps default spacing).
+# Per-code visibility for prefs_api structured errors. _log_event() in prefs_api.py
+# prints one JSON object per line, so match it with a JSON metric filter on the
+# "event" and "code" keys. (A quoted-term pattern such as `"event": "x"` is rejected
+# by PutMetricFilter: the bare colon is not valid filter syntax.)
 locals {
   prefs_api_error_alarms = {
     STS_UNAVAILABLE = {
@@ -416,6 +566,10 @@ locals {
       event       = "prefs_api_error"
       description = "Site API hit an unexpected error"
     }
+    CATALOG_WRITE_FAILED = {
+      event       = "prefs_api_error"
+      description = "Site API could not save a company-metric review"
+    }
     TICKER_ADDED_PUBLISH_FAILED = {
       event       = "ticker_added_publish_failed"
       description = "Site API saved preferences but could not publish TickerAdded"
@@ -427,7 +581,7 @@ resource "aws_cloudwatch_log_metric_filter" "prefs_api_error" {
   for_each       = local.prefs_api_error_alarms
   name           = "${var.name}-prefs-api-${lower(replace(each.key, "_", "-"))}"
   log_group_name = aws_cloudwatch_log_group.api_fn.name
-  pattern        = "\"event\": \"${each.value.event}\" \"code\": \"${each.key}\""
+  pattern        = "{ ($.event = \"${each.value.event}\") && ($.code = \"${each.key}\") }"
 
   metric_transformation {
     name      = each.key

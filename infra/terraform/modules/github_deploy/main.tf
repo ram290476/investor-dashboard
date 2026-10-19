@@ -240,6 +240,11 @@ data "aws_iam_policy_document" "iam_for_stack" {
     }
   }
 
+  # No iam:CreateServiceLinkedRole statement here: PowerUserAccess already
+  # allows it (it created the DynamoDB auto scaling service-linked role in
+  # Deploy #229). Editing this document needs an admin apply, because
+  # NoSelfModification denies this role PutRolePolicy on itself.
+
   statement {
     sid       = "AccountPasswordPolicy"
     actions   = ["iam:UpdateAccountPasswordPolicy", "iam:DeleteAccountPasswordPolicy"]

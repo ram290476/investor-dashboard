@@ -23,7 +23,10 @@
     "series-4",
     "series-5",
     "series-6",
-    "heat"
+    "heat",
+    "lane-volume",
+    "lane-si",
+    "lane-opt"
   ],
   "themes": [
     {
@@ -54,7 +57,10 @@
         "series-4": "#B392F0",
         "series-5": "#39C5B0",
         "series-6": "#E3C05C",
-        "heat": "#5B6BD6"
+        "heat": "#5B6BD6",
+        "lane-volume": "#F85149",
+        "lane-si": "#A3E635",
+        "lane-opt": "#C8A27A"
       }
     },
     {
@@ -85,7 +91,10 @@
         "series-4": "#B48CFF",
         "series-5": "#00D8FF",
         "series-6": "#F5F5F5",
-        "heat": "#7A4A00"
+        "heat": "#7A4A00",
+        "lane-volume": "#FF4136",
+        "lane-si": "#A3E635",
+        "lane-opt": "#C8A27A"
       }
     },
     {
@@ -116,7 +125,10 @@
         "series-4": "#A98BF5",
         "series-5": "#26C6DA",
         "series-6": "#FFD54F",
-        "heat": "#3D6FD6"
+        "heat": "#3D6FD6",
+        "lane-volume": "#EF5350",
+        "lane-si": "#A3E635",
+        "lane-opt": "#C8A27A"
       }
     },
     {
@@ -147,7 +159,10 @@
         "series-4": "#7047D1",
         "series-5": "#00897B",
         "series-6": "#A77B00",
-        "heat": "#7FA6F0"
+        "heat": "#7FA6F0",
+        "lane-volume": "#C62828",
+        "lane-si": "#4D7C0F",
+        "lane-opt": "#8B6A45"
       }
     },
     {
@@ -178,7 +193,10 @@
         "series-4": "#B9A3FF",
         "series-5": "#00B98A",
         "series-6": "#D55E00",
-        "heat": "#2F6FA8"
+        "heat": "#2F6FA8",
+        "lane-volume": "#E69F00",
+        "lane-si": "#A3E635",
+        "lane-opt": "#C8A27A"
       }
     },
     {
@@ -209,7 +227,10 @@
         "series-4": "#C084FC",
         "series-5": "#22D3EE",
         "series-6": "#FACC15",
-        "heat": "#6366F1"
+        "heat": "#6366F1",
+        "lane-volume": "#FB7185",
+        "lane-si": "#A3E635",
+        "lane-opt": "#C8A27A"
       }
     }
   ]

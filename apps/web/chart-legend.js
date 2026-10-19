@@ -1,4 +1,5 @@
 import { isNumericValue } from "./chart-period.js";
+import { formatConsumerDate } from "./panel-dates.js";
 
 // One dash definition for the plot and the legend. Averages share the price
 // axis and stay solid. Every other overlay is dashed, including market series
@@ -72,7 +73,8 @@ function macroText(definition, values, correlation) {
 function sentimentText(definition, values, observedOn) {
   const last = lastNumeric(values);
   if (!last) return `${definition.label} · not available`;
-  const when = observedOn ? ` · observed ${observedOn}` : "";
+  const observed = observedOn ? (formatConsumerDate(observedOn) || observedOn) : "";
+  const when = observed ? ` · observed ${observed}` : "";
   return `${definition.label} · ${last.value.toFixed(2)}${when} · own scale`;
 }
 
@@ -126,4 +128,49 @@ export function legendItems({ ticker, prices, adjustedMin, adjustedMax, overlays
     });
   }
   return items;
+}
+
+function compact(value) {
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function unitText(value, unit, formatMoney) {
+  if (unit === "%") return `${value.toFixed(2)}%`;
+  if (unit === "ratio") return `${(value * 100).toFixed(1)}%`;
+  if (unit === "USD") return Math.abs(value) >= 1e5 ? `$${compact(value)}` : formatMoney(value);
+  if (unit) return `${compact(value)} ${unit}`;
+  return Math.abs(value) >= 1e5 ? compact(value) : value.toFixed(2);
+}
+
+// Value of one overlay at the crosshair date (#218). Lines that are drawn
+// step-wise or sparse (macro, fundamental, sentiment) show the latest
+// observation on or before that date, marked "as of" when it is older.
+export function overlayPointValue({ definition, values, unit = "" }, index, formatMoney = money) {
+  if (!definition || !Array.isArray(values) || index == null || index < 0) return "—";
+  const at = Math.min(index, values.length - 1);
+  if (definition.kind === "average") {
+    return isNumericValue(values[at]) ? formatMoney(Number(values[at])) : "—";
+  }
+  if (definition.kind === "market") {
+    if (!isNumericValue(values[at])) return "—";
+    const value = Number(values[at]);
+    const first = values.find(isNumericValue);
+    const change = isNumericValue(first) && Number(first) !== 0 ? (value / Number(first) - 1) * 100 : null;
+    return `${value.toFixed(2)}${change == null ? "" : ` (${change > 0 ? "+" : ""}${change.toFixed(1)}%)`}`;
+  }
+  let found = -1;
+  for (let i = at; i >= 0; i -= 1) {
+    if (isNumericValue(values[i])) { found = i; break; }
+  }
+  if (found < 0) return "—";
+  return unitText(Number(values[found]), unit, formatMoney);
+}
+
+export function overlayReadoutItems(overlays, index, formatMoney = money) {
+  return (overlays || []).filter((overlay) => overlay?.definition).map((overlay) => ({
+    id: overlay.definition.id,
+    label: overlay.definition.short || overlay.definition.label,
+    color: overlay.color || "",
+    text: overlayPointValue(overlay, index, formatMoney),
+  }));
 }

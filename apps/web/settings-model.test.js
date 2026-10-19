@@ -7,6 +7,7 @@ import {
   PANEL_IDS,
   PIN_LIMIT_MESSAGE,
   addTicker,
+  canApproveMetrics,
   canRemove,
   drawerControls,
   emailFromIdToken,
@@ -24,6 +25,7 @@ import {
   restoreTicker,
   stripOrder,
   tabAfterKey,
+  settingsTabs,
   togglePin,
   validateNewTicker,
   withPanelState,
@@ -44,12 +46,16 @@ test("deep links open the matching tab and unknown tabs fall back to My tickers"
 
 test("tab keys wrap with arrows and jump with Home/End", () => {
   assert.equal(tabAfterKey("tickers", "ArrowRight"), "theme");
-  assert.equal(tabAfterKey("profile", "ArrowRight"), "refresh");
-  assert.equal(tabAfterKey("tickers", "ArrowLeft"), "refresh");
+  assert.equal(tabAfterKey("profile", "ArrowRight"), "tickers");
+  assert.equal(tabAfterKey("tickers", "ArrowLeft"), "profile");
   assert.equal(tabAfterKey("theme", "Home"), "tickers");
-  assert.equal(tabAfterKey("tickers", "End"), "refresh");
-  assert.equal(tabAfterKey("refresh", "ArrowRight"), "tickers");
+  assert.equal(tabAfterKey("tickers", "End"), "profile");
+  assert.equal(tabAfterKey("profile", "ArrowLeft"), "theme");
   assert.equal(tabAfterKey("tickers", "a"), null);
+  // Admins get the Admin tab last; it is in the arrow-key cycle only for them.
+  assert.equal(tabAfterKey("profile", "ArrowRight", settingsTabs(true)), "admin");
+  assert.equal(tabAfterKey("admin", "ArrowRight", settingsTabs(true)), "tickers");
+  assert.deepEqual(settingsTabs(false).map((t) => t.id), ["tickers", "theme", "profile"]);
 });
 
 test("new tickers are validated for format, duplicates and the cap", () => {
@@ -127,6 +133,24 @@ test("a removed selection falls back to the first pin, then the first ticker", (
   assert.equal(fallbackSelection(prefs(["A", "B"]), null), "A");
 });
 
+function accessToken(claims) {
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  return `header.${payload}.sig`;
+}
+
+test("only a non-demo admin group can approve company metrics", () => {
+  const admin = accessToken({ "cognito:groups": ["admin"], username: "owner@example.com" });
+  assert.equal(canApproveMetrics(admin, "owner@example.com"), true);
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": "admin" })), true);
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": "[admin]" })), true);
+  assert.equal(canApproveMetrics(accessToken({ username: "owner@example.com" })), false);
+  const demo = "ram.vellamsetti@gmail.com";
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": ["admin"], username: demo }), demo), false);
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": "admin", email: demo })), false);
+  assert.equal(canApproveMetrics(accessToken({ "cognito:groups": ["admin"], "cognito:username": demo })), false);
+  assert.equal(canApproveMetrics(admin, demo), false);
+});
+
 test("the email claim is read from the ID token payload", () => {
   const payload = Buffer.from(JSON.stringify({ email: "investor@example.com", sub: "abc" })).toString("base64url");
   assert.equal(emailFromIdToken(`h.${payload}.s`), "investor@example.com");
@@ -191,7 +215,7 @@ test("panel drawer state round-trips and keeps defaults for unsaved ids", () => 
   }
   assert.equal(isPanelOpen(again, "tariffs"), false);
   assert.equal(isPanelOpen(again, "news"), false);
-  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company", "news"]);
+  assert.deepEqual(PANEL_IDS.filter((id) => isPanelOpen({}, id)), ["rates", "inflation", "moving-averages", "company", "news", "filings-events"]);
 });
 
 test("dismissed panels stay dismissed until the user restores them", () => {

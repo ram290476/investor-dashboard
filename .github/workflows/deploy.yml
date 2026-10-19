@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 # Third-party actions are pinned to full commit SHAs (tag in the trailing comment).
@@ -25,6 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 55 # the OIDC session lasts 1 hour
     environment: production
+    env:
+      # Production environment variable, exact string true. Unset means false.
+      # workflow_run ignores it even when an admin has left the variable set.
+      ALLOW_DESTROY: ${{ (github.event_name == 'workflow_dispatch' && vars.DEPLOY_ALLOW_DESTROY == 'true') && 'true' || 'false' }}
     permissions:
       contents: read
       id-token: write # OIDC token for the AWS role; only this job gets it
@@ -94,21 +99,38 @@ jobs:
         run: |
           set -euo pipefail
           terraform init -input=false
-          # Snapshot state once. Do NOT use `terraform state list | grep -q` under pipefail:
-          # when grep -q exits early on a match, state list gets SIGPIPE, the pipeline fails,
-          # and `if ! …` treats "ECR exists" as "ECR missing", then applies with an empty
-          # jobs_image_uri and destroys every job Lambda/schedule (Deploy 37496345092).
-          mapfile -t TF_STATE < <(terraform state list)
-          state_has() { printf '%s\n' "${TF_STATE[@]}" | grep -qx "$1"; }
-          if state_has 'module.data_lake.aws_ecr_repository.jobs'; then
-            echo "ECR repository already in state; skipping bootstrap apply."
-          elif printf '%s\n' "${TF_STATE[@]}" | grep -q '^module\.jobs\.aws_lambda_function\.job\['; then
-            echo "::error::Job Lambdas exist in state but the ECR repository does not; refusing empty jobs_image_uri apply."
+          # Write state to a file and match it in bash (scripts/decide-bootstrap.sh).
+          # Do not pipe `terraform state list` or `printf` into `grep -q` under pipefail:
+          # grep -q exits at the first hit, the writer gets SIGPIPE, and the pipeline
+          # looks like a miss. Deploy 37496345092 and Deploy 38137774464 (f1f5af6) then
+          # bootstrapped with an empty jobs image and destroyed the job resources.
+          # A failed state list aborts. It is not an empty state and must not bootstrap.
+          # Bootstrap apply, when it runs, is the plan that plan-guard.sh already allowed.
+          state_file="$(mktemp)"
+          trap 'rm -f "${state_file}"' EXIT
+          if ! terraform state list > "${state_file}"; then
+            echo "::error::Could not list Terraform state; aborting deploy instead of bootstrapping with an empty jobs image."
             exit 1
-          else
-            echo "First-time bootstrap: creating base stack (no job image yet)."
-            terraform apply -input=false -auto-approve -var='jobs_image_uri='
           fi
+          decision="$(bash scripts/decide-bootstrap.sh "${state_file}")"
+          case "${decision}" in
+            skip)
+              echo "ECR repository already in state; skipping bootstrap apply."
+              ;;
+            refuse)
+              echo "::error::Job Lambdas exist in state but the ECR repository does not; refusing empty jobs_image_uri apply."
+              exit 1
+              ;;
+            bootstrap)
+              echo "First-time bootstrap: creating base stack (no job image yet)."
+              bash scripts/plan-guard.sh -var='jobs_image_uri='
+              terraform apply -input=false -auto-approve tfplan
+              ;;
+            *)
+              echo "::error::Bootstrap guard returned an unexpected result; aborting deploy."
+              exit 1
+              ;;
+          esac
           echo "ECR_REPOSITORY=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
 
       - name: Verify Cognito branding migration prerequisites
@@ -161,7 +183,9 @@ jobs:
             echo "::error::JOBS_IMAGE_URI is empty; refusing terraform apply."
             exit 1
           fi
-          terraform apply -input=false -auto-approve -var="jobs_image_uri=${JOBS_IMAGE_URI}"
+          # Apply the exact plan the destroy gate allowed. A second apply -var can differ.
+          bash scripts/plan-guard.sh -var="jobs_image_uri=${JOBS_IMAGE_URI}"
+          terraform apply -input=false -auto-approve tfplan
           terraform output -json site_runtime_config > ../../apps/web/config.json
           echo "Published sign-in origin (custom domain when site_domain is set):"
           jq '{callbackUrl, logoutUrl}' ../../apps/web/config.json

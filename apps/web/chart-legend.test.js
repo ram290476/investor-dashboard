@@ -58,7 +58,7 @@ test("legend items cover the price line and each overlay kind, including a missi
   assert.equal(byId["FUNDAMENTAL:revenue_gaap"].text, "Revenue · $1.2B · Q3 2026");
   assert.equal(byId["FUNDAMENTAL:revenue_gaap"].dash, "5 4");
   assert.equal(byId["FUNDAMENTAL:deliveries"].text, "Deliveries · not available");
-  assert.equal(byId["NEWS:SENTIMENT"].text, "7-day news sentiment · -0.20 · observed 2026-10-06 · own scale");
+  assert.equal(byId["NEWS:SENTIMENT"].text, "7-day news sentiment · -0.20 · observed Oct 6, 2026 · own scale");
   assert.equal(byId["NEWS:SENTIMENT"].dash, "5 4");
 });
 

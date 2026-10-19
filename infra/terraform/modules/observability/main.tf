@@ -98,6 +98,13 @@ resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${each.value}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.audit_key_arn
+
+  # prevent_destroy rejects a plan that would delete retained events, including a
+  # replacement from a name or for_each key change. In-place retention updates stay
+  # allowed. See docs/operations.md before renaming or retiring this group.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Saved Logs Insights queries for audit review (AU-6) and troubleshooting.
@@ -134,7 +141,8 @@ resource "aws_cloudwatch_query_definition" "trace_a_run" {
 }
 
 # ---------------------------------------------------------------------------
-# Alarms -> ops topic. Kept at 11 to stay near the 10-alarm free tier.
+# Alarms -> ops topic. Eight base alarms, including the 4 MiB dashboard payload alarm,
+# plus three canary alarms when the health URL is set.
 # ---------------------------------------------------------------------------
 locals {
   app_dims = { service = var.name } # Powertools adds this dimension; keep it constant across functions.
@@ -159,12 +167,6 @@ locals {
       period      = 300, evals = 1, datapoints = 1
       op          = "GreaterThanThreshold", threshold = 0, missing = "notBreaching"
     }
-    failed-runs = {
-      description = "Two or more source runs failed within an hour"
-      namespace   = local.ns, metric = "FailedRuns", stat = "Sum", dims = jsonencode(local.app_dims)
-      period      = 3600, evals = 1, datapoints = 1
-      op          = "GreaterThanOrEqualToThreshold", threshold = 2, missing = "notBreaching"
-    }
     stale-p1-source = {
       description = "A P1 source has been stale for two hours in a row"
       namespace   = local.ns, metric = "StaleP1Sources", stat = "Maximum", dims = jsonencode(local.app_dims)
@@ -182,6 +184,12 @@ locals {
       namespace   = local.ns, metric = "FreshP1Ratio", stat = "Average", dims = jsonencode(local.app_dims)
       period      = 21600, evals = 1, datapoints = 1
       op          = "LessThanThreshold", threshold = 1 - 6 * (1 - local.slo_freshness), missing = "notBreaching"
+    }
+    dashboard-payload-size = {
+      description = "Raw serving/dashboard.json is over 4 MiB, before the 6 MiB Lambda response limit"
+      namespace   = local.ns, metric = "DashboardRawBytes", stat = "Maximum", dims = jsonencode(local.app_dims)
+      period      = 21600, evals = 1, datapoints = 1
+      op          = "GreaterThanThreshold", threshold = 4194304, missing = "notBreaching"
     }
   }
 
@@ -212,6 +220,33 @@ locals {
   # for-filters instead of conditionals keep the object types consistent.
   canary_alarms = { for k, v in local.canary_alarm_defs : k => v if local.canary_on }
   alarms        = merge(local.base_alarms, local.canary_alarms)
+}
+
+# failed-runs (#233): a plain metric alarm on FailedSources (dimension service only). source_run stamps
+# every FailedSources datapoint at HH:30:00 UTC of the failure's clock hour and emits at most one per
+# source per hour per container, so the 1-hour Sum counts failures in one clock hour. A source that
+# fails once an hourly run counts 1 even when its logs land at :18 one hour and :19 the next.
+# (SEARCH is not supported on metric alarms; the first #233 attempt failed PutMetricAlarm.)
+resource "aws_cloudwatch_metric_alarm" "failed_runs" {
+  alarm_name          = "${var.name}-failed-runs"
+  alarm_description   = "Two or more source failures stamped in the same clock hour"
+  namespace           = local.ns
+  metric_name         = "FailedSources"
+  statistic           = "Sum"
+  dimensions          = local.app_dims
+  period              = 3600
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 2
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.ops_topic_arn]
+  ok_actions          = [var.ops_topic_arn]
+}
+
+moved {
+  from = aws_cloudwatch_metric_alarm.this["failed-runs"]
+  to   = aws_cloudwatch_metric_alarm.failed_runs
 }
 
 resource "aws_cloudwatch_metric_alarm" "this" {
@@ -405,7 +440,7 @@ locals {
       type = "alarm", x = 0, y = 0, width = 24, height = 3
       properties = {
         title  = "Alarm status"
-        alarms = [for a in aws_cloudwatch_metric_alarm.this : a.arn]
+        alarms = concat([for a in aws_cloudwatch_metric_alarm.this : a.arn], [aws_cloudwatch_metric_alarm.failed_runs.arn])
       }
     },
     {
@@ -449,6 +484,14 @@ locals {
       properties = {
         title   = "Dead-letter queue", region = local.region, stat = "Maximum", period = 300, view = "timeSeries"
         metrics = [["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", var.dlq_name]]
+      }
+    },
+    {
+      type = "metric", x = 0, y = 15, width = 24, height = 6
+      properties = {
+        title       = "Dashboard document size (bytes)", region = local.region, stat = "Maximum", period = 3600, view = "timeSeries"
+        metrics     = [[local.ns, "DashboardRawBytes", "service", var.name], [".", "DashboardGzipBytes", ".", ".", { yAxis = "right" }]]
+        annotations = { horizontal = [{ value = 4194304, label = "4 MiB alarm" }] }
       }
     },
   ])

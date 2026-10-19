@@ -83,6 +83,26 @@ def test_transient_http_failure_is_retried_with_retry_after(monkeypatch):
     assert delays == [2.0]
 
 
+def test_yahoo_429_is_returned_once_when_it_is_not_a_retry_status(monkeypatch):
+    calls = []
+    monkeypatch.setattr(http_client.time, "sleep", lambda _delay: pytest.fail("unexpected retry"))
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(429)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        response = http_client.request_with_retry(
+            client,
+            "GET",
+            "https://query1.finance.yahoo.com/v8/finance/chart/SPCX",
+            retry_statuses=frozenset({500, 502, 503, 504}),
+            return_statuses=frozenset({429}),
+        )
+    assert response.status_code == 429
+    assert len(calls) == 1
+
+
 def test_non_transient_http_failure_is_not_retried(monkeypatch):
     calls = []
     monkeypatch.setattr(http_client.time, "sleep", lambda _delay: pytest.fail("unexpected retry"))
@@ -102,3 +122,18 @@ def test_get_client_merges_caller_headers_with_user_agent():
     with http_client.get_client(headers={"APCA-API-KEY-ID": "k"}) as client:
         assert client.headers["APCA-API-KEY-ID"] == "k"
         assert client.headers["User-Agent"] == http_client.USER_AGENT
+
+
+def test_watchlist_tickers_is_capped_watchlist(monkeypatch):
+    import universe
+
+    monkeypatch.setattr(universe, "user_ticker_union", lambda *a, **k: [f"T{i}" for i in range(40)] + ["TSLA"])
+    tickers = universe.watchlist_tickers()
+    assert tickers[:2] == ["TSLA", "SPCX"] and len(tickers) == 2 + universe.MAX_USER_TICKERS
+
+
+def test_q1_fundamentals_uses_capped_watchlist():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "src/functions/q1_fundamentals/fundamentals.py").read_text()
+    assert "watchlist_tickers()" in source and "user_ticker_union()" not in source

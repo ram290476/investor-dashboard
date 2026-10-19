@@ -139,6 +139,13 @@ def test_added_ticker_collection_and_failure_does_not_publish(monkeypatch, provi
         def get_object(self, **_kwargs):
             raise self.exceptions.NoSuchKey
 
+        def get_paginator(self, _name):
+            class _Pager:
+                def paginate(self, **_kwargs):
+                    return iter([{}])
+
+            return _Pager()
+
     monkeypatch.setattr(lake, "s3", FakeS3)
     requests = []
 

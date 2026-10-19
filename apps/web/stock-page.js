@@ -1,5 +1,8 @@
-// View model for the per-stock page. Proposed metrics never become panels.
-// Text is plain; callers render it with textContent.
+// View model for the per-stock page. Approved metrics stay primary.
+// Proposed metrics stay in the data so the company metrics list can label them
+// Pending review. Chart cards do not repeat that status. Text is plain.
+import { periodQuote } from "./chart-period.js";
+import { catalystDateLabel } from "./roadmap.js";
 
 export const LONG_PRESS_MS = 550;
 
@@ -10,6 +13,8 @@ export const STOCK_TABS = [
   { id: "calls", label: "Calls" },
 ];
 
+// Last resort only: companyName() uses the API company_name / SEC entity name first.
+// SPCX has no SEC entity name, so it keeps a display name here.
 export const COMPANY_NAMES = {
   TSLA: "Tesla, Inc.",
   SPCX: "SpaceX",
@@ -27,12 +32,160 @@ const EDGAR_METRICS = [
 
 const QUARTER = /^(\d{4})Q([1-4])$/;
 
-export function companyName(ticker, payload) {
-  return payload?.company_name || COMPANY_NAMES[ticker] || ticker;
+// Periods shorter than one quarter. 3M is the first chip that can hold a quarter end.
+const SHORT_PERIODS = new Set(["1D", "1W", "5D", "1M"]);
+const PERIOD_DAYS = { "3M": 92, "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 };
+
+function isoDate(date) {
+  return date.toISOString().slice(0, 10);
 }
 
-export function nextStockTab(current, key) {
-  const ids = STOCK_TABS.map((tab) => tab.id);
+function addDays(iso, days) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return isoDate(date);
+}
+
+function lastWeekday(year, month, weekday) {
+  const last = new Date(Date.UTC(year, month, 0));
+  last.setUTCDate(last.getUTCDate() - ((last.getUTCDay() - weekday + 7) % 7));
+  return isoDate(last);
+}
+
+function saturdayNearest(year, month, day) {
+  const target = new Date(Date.UTC(year, month - 1, day));
+  const dow = target.getUTCDay();
+  const forward = (6 - dow + 7) % 7;
+  const back = (dow - 6 + 7) % 7;
+  target.setUTCDate(target.getUTCDate() + (forward <= back ? forward : -back));
+  return isoDate(target);
+}
+
+// Nvidia's fiscal year ends on the last Sunday in January. Quarter ends are the
+// last Sunday of April, July, October, and January — not the calendar quarter.
+function nvidiaQuarterEnd(year, quarter) {
+  const month = { 1: 4, 2: 7, 3: 10, 4: 1 }[quarter];
+  return lastWeekday(quarter === 4 ? year : year - 1, month, 0);
+}
+
+// Marvell's fiscal year ends on the Saturday closest to January 31. Q1–Q3 are
+// 13 weeks; a 53-week year keeps the extra week in Q4.
+function marvellQuarterEnd(year, quarter) {
+  if (quarter === 4) return saturdayNearest(year, 1, 31);
+  return addDays(saturdayNearest(year - 1, 1, 31), 13 * quarter * 7);
+}
+
+function calendarQuarterEnd(year, quarter) {
+  return isoDate(new Date(Date.UTC(year, quarter * 3, 0)));
+}
+
+/** Period-end date for a fiscal label. NVDA and MRVL use their fiscal calendars. */
+export function fiscalQuarterEnd(fiscalPeriod, ticker = "") {
+  const match = QUARTER.exec(String(fiscalPeriod || ""));
+  if (!match) return "";
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  const symbol = String(ticker || "").toUpperCase();
+  if (symbol === "NVDA") return nvidiaQuarterEnd(year, quarter);
+  if (symbol === "MRVL") return marvellQuarterEnd(year, quarter);
+  return calendarQuarterEnd(year, quarter);
+}
+
+/**
+ * Date window for a chart chip. A short chip asks for the latest quarter only.
+ * When the price window exists, its first and last session dates are the bounds.
+ * Otherwise the window is a calendar span ending on asOf.
+ */
+export function metricPeriodRange(periodId, history, asOf = "") {
+  const id = String(periodId || "");
+  if (!id) return null;
+  if (SHORT_PERIODS.has(id)) return { latestOnly: true };
+  let start = "";
+  let end = String(asOf || "").slice(0, 10);
+  if (Array.isArray(history) && history.length) {
+    const quote = periodQuote(history, id);
+    if (quote.available && quote.window.length) {
+      const first = quote.window[0];
+      const last = quote.window.at(-1);
+      start = String(first.date || first.ts || "").slice(0, 10);
+      end = String(last.date || last.ts || "").slice(0, 10);
+    }
+  }
+  if (!end) return null;
+  if (!start) {
+    if (id === "YTD") start = `${end.slice(0, 4)}-01-01`;
+    else if (PERIOD_DAYS[id]) start = addDays(end, -PERIOD_DAYS[id]);
+  }
+  if (!start) return null;
+  return { latestOnly: false, start, end };
+}
+
+function withPeriodEnd(point, ticker) {
+  const periodEnd = String(point?.period_end || fiscalQuarterEnd(point?.fiscal_period, ticker) || "").slice(0, 10);
+  return periodEnd ? { ...point, period_end: periodEnd } : null;
+}
+
+/** Quarters whose period-end falls in the chip. Short chips keep the latest quarter only. */
+export function quartersInPeriod(series, periodId, options = {}) {
+  const ticker = options.ticker || "";
+  const points = (series || []).map((point) => withPeriodEnd(point, ticker)).filter(Boolean);
+  const range = metricPeriodRange(periodId, options.history, options.asOf || "");
+  if (!range) return points.sort((a, b) => a.period_end.localeCompare(b.period_end));
+  if (range.latestOnly) {
+    const reported = points.filter((point) => point.reported !== false && point.value != null && point.value !== "");
+    const pool = reported.length ? reported : points;
+    const latestEnd = pool.reduce((max, point) => (point.period_end > max ? point.period_end : max), "");
+    return points.filter((point) => point.period_end === latestEnd);
+  }
+  return points
+    .filter((point) => point.period_end >= range.start && point.period_end <= range.end)
+    .sort((a, b) => a.period_end.localeCompare(b.period_end));
+}
+
+const COMPANY_NAME_FIELDS = ["company_name", "sec_company_name", "entity_name", "entityName", "name"];
+
+function recordCompanyName(record, ticker) {
+  if (!record || typeof record !== "object") return "";
+  const symbol = String(ticker || "").trim().toUpperCase();
+  for (const field of COMPANY_NAME_FIELDS) {
+    const value = String(record[field] ?? "").replace(/\s+/g, " ").trim();
+    if (value && value.toUpperCase() !== symbol) return value;
+  }
+  return "";
+}
+
+/** Full company name. Stock payload, then dashboard or SEC metadata, then the ticker. */
+export function companyName(ticker, payload, tickerData) {
+  return recordCompanyName(payload, ticker)
+    || recordCompanyName(tickerData, ticker)
+    || COMPANY_NAMES[ticker]
+    || ticker;
+}
+
+const COMPANY_DESCRIPTION_FIELDS = ["company_description", "description"];
+
+/** Short business description for the header. Stock payload, then dashboard data; "" when absent. */
+export function companyDescription(payload, tickerData) {
+  for (const record of [payload, tickerData]) {
+    if (!record || typeof record !== "object") continue;
+    for (const field of COMPANY_DESCRIPTION_FIELDS) {
+      const value = String(record[field] ?? "").replace(/\s+/g, " ").trim();
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
+/** Base tabs, plus Deep dive when this payload's catalog published a deep_dive block. */
+export function stockTabs(payload) {
+  const sections = payload?.deep_dive?.sections;
+  if (!Array.isArray(sections) || !sections.length) return STOCK_TABS;
+  const label = String(payload.deep_dive.title || "Deep dive").trim() || "Deep dive";
+  return [...STOCK_TABS, { id: "deep-dive", label }];
+}
+
+export function nextStockTab(current, key, tabs = STOCK_TABS) {
+  const ids = (Array.isArray(tabs) ? tabs : STOCK_TABS).map((tab) => tab.id);
   const index = Math.max(0, ids.indexOf(current));
   const next = key === "ArrowRight" ? (index + 1) % ids.length
     : key === "ArrowLeft" ? (index + ids.length - 1) % ids.length
@@ -46,6 +199,17 @@ export function safeHttpUrl(url) {
   return /^https?:\/\//i.test(String(url || "")) ? String(url) : "";
 }
 
+export function isRejectedMetric(metric) {
+  const state = metric?.approval_state || metric?.status;
+  return state === "rejected";
+}
+
+export function isPendingMetric(metric) {
+  if (!metric || isRejectedMetric(metric)) return false;
+  const state = metric.approval_state || metric.status;
+  return state === "proposed";
+}
+
 export function approvedMetrics(payload) {
   return (payload?.metrics || []).filter((metric) => (
     metric?.approved === true
@@ -54,6 +218,40 @@ export function approvedMetrics(payload) {
     && metric.status !== "proposed"
     && metric.status !== "rejected"
   ));
+}
+
+export function pendingMetrics(payload) {
+  return (payload?.metrics || []).filter(isPendingMetric);
+}
+
+/** Approved values first. "approved" hides proposed rows instead of mixing them in. */
+export function metricsForReview(payload, review = "all") {
+  const approved = approvedMetrics(payload);
+  if (review === "approved") return approved;
+  return [...approved, ...pendingMetrics(payload)];
+}
+
+const PANEL_TYPES = new Set(["chart", "kpi", "table", "text"]);
+
+/** Panel kind comes from the metric registry and the shape of the collected values. */
+export function panelType(metric) {
+  const explicit = metric?.panel_type || metric?.panel;
+  if (PANEL_TYPES.has(explicit)) return explicit;
+  if (Array.isArray(metric?.rows) && metric.rows.length) return "table";
+  if (Array.isArray(metric?.table) && metric.table.length) return "table";
+  const reported = (metric?.series || []).filter((point) => (
+    point && point.reported !== false && point.value != null && point.value !== ""
+  ));
+  const narrative = metric?.disclosure_status === "narrative"
+    || metric?.unit === "statement"
+    || metric?.text
+    || metric?.narrative;
+  if (narrative && reported.length < 2) return "text";
+  if (reported.length >= 2) return "chart";
+  if (reported.length === 1 || (metric?.latest && metric.latest.reported !== false && metric.latest.value != null)) {
+    return "kpi";
+  }
+  return "text";
 }
 
 function quarterIndex(fiscalPeriod) {
@@ -69,7 +267,7 @@ function shiftQuarter(fiscalPeriod, quarters) {
   return `${Math.floor(absolute / 4)}Q${absolute % 4 + 1}`;
 }
 
-export function fillQuarterGaps(series) {
+export function fillQuarterGaps(series, ticker = "") {
   const points = (series || []).filter((point) => quarterIndex(point.fiscal_period));
   if (!points.length) return [];
   const ordered = [...points].sort((a, b) => {
@@ -89,8 +287,10 @@ export function fillQuarterGaps(series) {
     const reported = Boolean(current && current.reported !== false && current.value != null && current.value !== "");
     filled.push({
       fiscal_period: fiscalPeriod,
+      period_end: (current && current.period_end) || fiscalQuarterEnd(fiscalPeriod, ticker),
       value: reported ? Number(current.value) : null,
       reported,
+      revised: Boolean(current?.revised),
     });
     quarter += 1;
     if (quarter === 5) {
@@ -121,52 +321,141 @@ export function formatChange(value) {
   return `${sign}${(number * 100).toFixed(1)}%`;
 }
 
-export function freshnessBadge(payload, state) {
+export function freshnessBadge(payload, state, ticker = "", review = "all") {
   if (state === "loading") return { tone: "unavailable", text: "Loading company metrics" };
-  if (state === "error") return { tone: "unavailable", text: "Company metrics could not be loaded" };
+  if (state === "forbidden") {
+    const symbol = ticker || "this ticker";
+    return { tone: "unavailable", text: `Add ${symbol} to your watchlist to see company metrics` };
+  }
+  if (state === "missing") return { tone: "unavailable", text: "No company-specific metrics discovered" };
+  if (state === "error") return { tone: "unavailable", text: "Company metrics could not be loaded. Retry" };
   if (!payload) return { tone: "unavailable", text: "No company-specific metrics discovered" };
   if (payload.stale || payload.run_status === "partial" || payload.run_status === "failed") {
     return { tone: "partial", text: payload.freshness_label || "Partial run · previous approved values kept" };
   }
-  if (!approvedMetrics(payload).length) {
-    return { tone: "unavailable", text: payload.freshness_label || "No approved company metrics" };
+  const approved = approvedMetrics(payload);
+  const pending = pendingMetrics(payload);
+  if (!approved.length && pending.length && review !== "approved") {
+    return { tone: "pending", text: payload.freshness_label || "Pending review" };
+  }
+  if (!approved.length) {
+    return { tone: "unavailable", text: "No approved company metrics" };
   }
   return { tone: "ok", text: payload.freshness_label || "IR data approved" };
 }
 
-function presentMetric(metric) {
-  const series = fillQuarterGaps(metric.series || []);
+export function monthDayLabel(value, now = new Date(), timeZone = "UTC") {
+  const label = catalystDateLabel(value, { now, timeZone });
+  return label && label !== "—" ? label : "";
+}
+
+export function stockFreshnessText(payload, state, ticker = "", now = new Date(), timeZone = "UTC", review = "all") {
+  const badge = freshnessBadge(payload, state, ticker, review);
+  if (state !== "ready" || !payload) return badge.text;
+  const extra = [payload.run_status, monthDayLabel(payload.generated_at, now, timeZone)].filter(Boolean);
+  return extra.length ? `${badge.text} · ${extra.join(" · ")}` : badge.text;
+}
+
+function ratioChange(latest, prior) {
+  if (!latest?.reported || !prior?.reported || prior.value == null || Number(prior.value) === 0) return null;
+  return (Number(latest.value) - Number(prior.value)) / Math.abs(Number(prior.value));
+}
+
+function applyPeriod(card, options, ticker) {
+  if (!options.period || card.panelType === "text" || card.panelType === "table" || card.unavailable) return card;
+  if (!card.series?.length) return card;
+  const kept = quartersInPeriod(card.series, options.period, {
+    ticker, history: options.history, asOf: options.asOf || "",
+  });
+  const reported = kept.filter((point) => point.reported);
+  if (!reported.length) {
+    return {
+      ...card,
+      series: [],
+      emptyPeriod: true,
+      latest: "not reported",
+      latestPeriod: "",
+      periodEnd: "",
+      qoq: null,
+      yoy: null,
+      qoqValue: null,
+      yoyValue: null,
+    };
+  }
+  const latest = reported.at(-1);
+  const same = latest.fiscal_period === card.latestPeriod;
+  const priorQ = card.series.find((point) => point.fiscal_period === shiftQuarter(latest.fiscal_period, 1));
+  const priorY = card.series.find((point) => point.fiscal_period === shiftQuarter(latest.fiscal_period, 4));
+  const qoqValue = same ? card.qoqValue : ratioChange(latest, priorQ);
+  const yoyValue = same ? card.yoyValue : ratioChange(latest, priorY);
+  return {
+    ...card,
+    series: kept,
+    emptyPeriod: false,
+    latest: formatMetricValue(latest.value, card.unit),
+    latestPeriod: latest.fiscal_period,
+    periodEnd: latest.period_end || "",
+    qoq: same ? card.qoq : formatChange(qoqValue),
+    yoy: same ? card.yoy : formatChange(yoyValue),
+    qoqValue,
+    yoyValue,
+  };
+}
+
+function presentMetric(metric, ticker = "") {
+  const series = fillQuarterGaps(metric.series || [], ticker);
+  const revisedFrom = metric.revised_from || "";
+  if (revisedFrom) {
+    series.forEach((point) => {
+      if (point.fiscal_period >= revisedFrom) point.revised = true;
+    });
+  }
   const reported = series.filter((point) => point.reported);
   const latest = metric.latest?.reported === false ? null : metric.latest;
+  const fiscal = latest?.fiscal_period || reported.at(-1)?.fiscal_period || "";
+  const matched = series.find((point) => point.fiscal_period === fiscal);
+  const pending = isPendingMetric(metric);
+  const capex = metric.metric_id === "capex";
   return {
     id: metric.metric_id,
-    name: metric.display_name || metric.metric_id,
+    name: capex ? "CapEx" : (metric.display_name || metric.metric_id),
+    detailName: capex ? (metric.display_name || "Capital expenditures") : "",
     unit: metric.unit || "",
     category: metric.category || "operating",
+    panelType: panelType(metric),
     series,
     latest: latest?.value == null ? "not reported" : formatMetricValue(latest.value, metric.unit),
-    latestPeriod: latest?.fiscal_period || reported.at(-1)?.fiscal_period || "",
+    latestPeriod: fiscal,
+    periodEnd: latest?.period_end || matched?.period_end || fiscalQuarterEnd(fiscal, ticker),
     qoq: formatChange(metric.qoq),
     yoy: formatChange(metric.yoy),
     qoqValue: metric.qoq,
     yoyValue: metric.yoy,
     sourceUrl: safeHttpUrl(metric.provenance?.source_url),
-    sourceTitle: metric.provenance?.source_title || "Source",
+    sourceTitle: metric.provenance?.source_title || metric.provenance?.source_kind || "Source",
     published: metric.provenance?.published_date || "",
     confidence: metric.provenance?.confidence == null ? "" : `confidence ${Number(metric.provenance.confidence).toFixed(2)}`,
-    approval: metric.provenance?.approval_state || "approved",
+    approval: pending ? "proposed" : (metric.provenance?.approval_state || metric.approval_state || "approved"),
+    pending,
+    capex,
+    rows: Array.isArray(metric.rows) ? metric.rows : (Array.isArray(metric.table) ? metric.table : []),
+    text: metric.text || metric.narrative || "",
+    definition: metric.definition || "",
+    revisedFrom,
+    revisionNote: metric.revision_note || "",
     xbrl: metric.xbrl?.status === "mismatch" ? "XBRL mismatch" : metric.xbrl?.status === "match" ? "XBRL reconciled" : "",
     unavailable: false,
   };
 }
 
-function edgarCards(chartData) {
+function edgarCards(chartData, ticker = "") {
   const rows = chartData?.fundamentals || [];
   return EDGAR_METRICS.map((metric) => {
     const series = rows
       .filter((row) => row.series_id === metric.id && row.fiscal_quarter && row.value != null)
       .map((row) => ({
         fiscal_period: row.fiscal_quarter,
+        period_end: row.period_end || fiscalQuarterEnd(row.fiscal_quarter, ticker),
         value: row.value,
         reported: true,
         source_id: row.source_id,
@@ -174,7 +463,7 @@ function edgarCards(chartData) {
       }))
       .sort((a, b) => String(a.fiscal_period).localeCompare(String(b.fiscal_period)));
     if (!series.length) return null;
-    const filled = fillQuarterGaps(series);
+    const filled = fillQuarterGaps(series, ticker);
     const latest = [...series].sort((a, b) => String(a.date || a.fiscal_period).localeCompare(String(b.date || b.fiscal_period))).at(-1);
     const prior = filled.find((point) => point.fiscal_period === shiftQuarter(latest.fiscal_period, 1));
     const qoq = prior?.reported && prior.value ? (latest.value - prior.value) / Math.abs(prior.value) : null;
@@ -186,6 +475,7 @@ function edgarCards(chartData) {
       series: filled,
       latest: formatMetricValue(latest.value, metric.unit),
       latestPeriod: latest.fiscal_period,
+      periodEnd: latest.period_end || fiscalQuarterEnd(latest.fiscal_period, ticker),
       qoq: formatChange(qoq),
       yoy: null,
       qoqValue: qoq,
@@ -195,6 +485,14 @@ function edgarCards(chartData) {
       published: latest.date || "",
       confidence: "reviewed",
       approval: "edgar",
+      pending: false,
+      capex: false,
+      panelType: "chart",
+      rows: [],
+      text: "",
+      definition: "",
+      revisedFrom: "",
+      revisionNote: "",
       xbrl: metric.source === "SEC XBRL" ? "SEC XBRL" : "",
       unavailable: false,
       edgar: true,
@@ -202,47 +500,87 @@ function edgarCards(chartData) {
   }).filter(Boolean);
 }
 
-export function stockPanels(payload, chartData) {
-  const approved = approvedMetrics(payload).map(presentMetric);
-  const operating = approved.filter((metric) => metric.category === "operating");
-  const guidance = approved.filter((metric) => metric.category === "guidance");
-  const irFundamentals = approved.filter((metric) => metric.category === "fundamentals");
-  const fundamentals = irFundamentals.length ? irFundamentals : edgarCards(chartData);
-  const unavailable = (payload?.unavailable || [])
-    .filter((item) => item?.approved !== false && item?.status !== "proposed")
-    .map((item) => ({
-      id: item.metric_id,
-      name: item.display_name || item.metric_id,
-      unit: item.unit || "",
-      category: item.category || "operating",
-      series: [],
-      latest: "not reported",
-      latestPeriod: "",
-      qoq: null,
-      yoy: null,
-      sourceUrl: safeHttpUrl(item.source_url),
-      sourceTitle: item.reason || "Unavailable",
-      published: "",
-      confidence: "",
-      approval: "unavailable",
-      xbrl: "",
-      unavailable: true,
-    }));
+function presentUnavailable(item) {
   return {
-    operating: [...operating, ...unavailable.filter((item) => item.category !== "fundamentals" && item.category !== "guidance")],
-    fundamentals,
-    guidance,
+    id: item.metric_id,
+    name: item.display_name || item.metric_id,
+    detailName: "",
+    unit: item.unit || "",
+    category: item.category || "operating",
+    panelType: "text",
+    series: [],
+    latest: "not reported",
+    latestPeriod: "",
+    periodEnd: "",
+    qoq: null,
+    yoy: null,
+    qoqValue: null,
+    yoyValue: null,
+    sourceUrl: safeHttpUrl(item.source_url),
+    sourceTitle: item.reason || "Unavailable",
+    published: "",
+    confidence: "",
+    approval: "unavailable",
+    pending: isPendingMetric(item),
+    capex: item.metric_id === "capex",
+    rows: [],
+    text: item.reason || "Not reported yet.",
+    definition: "",
+    revisedFrom: "",
+    revisionNote: "",
+    xbrl: "",
+    unavailable: true,
+  };
+}
+
+export function stockPanels(payload, chartData, options = {}) {
+  const review = options.review === "approved" ? "approved" : "all";
+  const ticker = options.ticker || payload?.ticker || "";
+  const chosen = metricsForReview(payload, review).map((metric) => presentMetric(metric, ticker));
+  const byId = new Map(chosen.map((metric) => [metric.id, metric]));
+  chosen.forEach((metric) => {
+    if (!metric.capex) return;
+    metric.context = ["operating_cash_flow", "free_cash_flow"]
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((item) => ({
+        name: item.detailName || item.name,
+        latest: item.latest,
+        latestPeriod: item.latestPeriod,
+        pending: item.pending,
+      }));
+  });
+  const operating = chosen.filter((metric) => metric.category === "operating");
+  const guidance = chosen.filter((metric) => metric.category === "guidance");
+  const irFundamentals = chosen.filter((metric) => metric.category === "fundamentals" || metric.capex);
+  const covered = new Set(irFundamentals.map((metric) => metric.id));
+  const edgar = edgarCards(chartData, ticker).filter((card) => !covered.has(String(card.id).replace(/^edgar:/, "")));
+  const fundamentals = irFundamentals.length ? [...irFundamentals, ...edgar] : edgar;
+  const unavailable = (payload?.unavailable || [])
+    .filter((item) => !isRejectedMetric(item))
+    .filter((item) => review === "all" || !isPendingMetric(item))
+    .filter((item) => item?.approved !== false || isPendingMetric(item))
+    .map(presentUnavailable);
+  const rank = (metric) => (metric.pending ? 2 : 0) + (metric.capex ? 0 : 1);
+  const sortCards = (cards) => cards.slice().sort((a, b) => rank(a) - rank(b));
+  const limit = (cards) => (options.period ? cards.map((card) => applyPeriod(card, options, ticker)) : cards);
+  return {
+    operating: limit(sortCards([...operating, ...unavailable.filter((item) => item.category !== "fundamentals" && item.category !== "guidance")])),
+    fundamentals: limit(sortCards(fundamentals)),
+    guidance: limit(sortCards([...guidance, ...unavailable.filter((item) => item.category === "guidance")])),
     fundamentalsSource: irFundamentals.length ? "ir" : fundamentals.length ? "edgar" : "none",
+    pendingCount: chosen.filter((metric) => metric.pending).length,
+    approvedCount: chosen.filter((metric) => !metric.pending).length,
   };
 }
 
 export function callsCopy() {
   return {
-    guidance: "Guidance and outlook statements appear here after Ram approves them. None are shown while they are proposed.",
+    guidance: "Show pending review includes proposed series on this page. Approved only hides those panels and list rows.",
     transcripts: "Quarterly call transcripts are not collected. They are added only where the company hosts them or the license explicitly allows it.",
   };
 }
 
 export function emptyKpiCopy() {
-  return "No company-specific metrics discovered. Proposed metrics stay off this page until they are approved.";
+  return "No operating metrics collected yet.";
 }

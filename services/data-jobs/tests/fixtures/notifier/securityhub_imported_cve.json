@@ -1,0 +1,138 @@
+{
+  "version": "0",
+  "id": "9f8e7d6c-5b4a-3928-1706-f5e4d3c2b1a0",
+  "detail-type": "Security Hub Findings - Imported",
+  "source": "aws.securityhub",
+  "account": "123456789012",
+  "time": "2026-10-11T17:46:41Z",
+  "region": "us-west-1",
+  "resources": [
+    "arn:aws:securityhub:us-west-1::product/aws/inspector/arn:aws:inspector2:us-west-1:123456789012:finding/e2a63f89f4239e946cbb8e1349777ebd"
+  ],
+  "detail": {
+    "findings": [
+      {
+        "SchemaVersion": "2018-10-08",
+        "Id": "arn:aws:inspector2:us-west-1:123456789012:finding/e2a63f89f4239e946cbb8e1349777ebd",
+        "ProductArn": "arn:aws:securityhub:us-west-1::product/aws/inspector",
+        "ProductName": "Inspector",
+        "CompanyName": "Amazon",
+        "Region": "us-west-1",
+        "GeneratorId": "AWSInspector",
+        "AwsAccountId": "123456789012",
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities/CVE"
+        ],
+        "FirstObservedAt": "2026-10-11T17:46:30.590Z",
+        "LastObservedAt": "2026-10-11T17:46:30.590Z",
+        "CreatedAt": "2026-10-11T17:46:30.590Z",
+        "UpdatedAt": "2026-10-11T17:46:30.590Z",
+        "Severity": {
+          "Label": "CRITICAL",
+          "Normalized": 90
+        },
+        "Title": "CVE-2026-56857 - go/stdlib",
+        "Description": "On Windows, when the target of Root.Mkdir or Root.MkdirAll is a junction pointing to an empty location, the operation can create a directory at the junction target even when that target is located outside the root. This only applies to operations where the last path component is a junction (path/to/junction, but not path/junction/target).",
+        "Remediation": {
+          "Recommendation": {
+            "Text": "Remediation is available. Please refer to the Fixed version in the vulnerability details section above.For detailed remediation guidance for each of the affected packages, refer to the vulnerabilities section of the detailed finding JSON."
+          }
+        },
+        "ProductFields": {
+          "aws/inspector/ProductVersion": "2",
+          "aws/inspector/FindingStatus": "ACTIVE",
+          "aws/inspector/inspectorScore": "9.8",
+          "aws/inspector/resources/1/resourceDetails/awsEcrContainerImageDetails/platform": "AMAZON_LINUX_2023",
+          "aws/inspector/packageVulnerabilityDetails/vulnerablePackages/sourceLayerHashes": "sha256:01182965da0515f455e364bca80c2339d11b979f6a2ce23c7fec207dc0c5fdb6",
+          "aws/securityhub/FindingId": "arn:aws:securityhub:us-west-1::product/aws/inspector/arn:aws:inspector2:us-west-1:123456789012:finding/e2a63f89f4239e946cbb8e1349777ebd",
+          "aws/securityhub/ProductName": "Inspector",
+          "aws/securityhub/CompanyName": "Amazon"
+        },
+        "Resources": [
+          {
+            "Type": "AwsEcrContainerImage",
+            "Id": "arn:aws:ecr:us-west-1:123456789012:repository/invdash/jobs/sha256:e0ef0623b885ef75b6b6f74855d3beace47cace60231cd05d62e467539b5a556",
+            "Partition": "aws",
+            "Region": "us-west-1",
+            "Provider": "AWS",
+            "Owner": {
+              "Account": {
+                "Id": "123456789012"
+              }
+            },
+            "Details": {
+              "AwsEcrContainerImage": {
+                "RegistryId": "123456789012",
+                "RepositoryName": "invdash/jobs",
+                "Architecture": "arm64",
+                "ImageDigest": "sha256:e0ef0623b885ef75b6b6f74855d3beace47cace60231cd05d62e467539b5a556",
+                "ImageTags": [
+                  "78dbb17da4b05353d03f1c77fafb6ddf589a0cdb-1"
+                ],
+                "ImagePublishedAt": "2026-10-11T17:45:19.805Z"
+              }
+            }
+          }
+        ],
+        "WorkflowState": "NEW",
+        "Workflow": {
+          "Status": "NEW"
+        },
+        "RecordState": "ACTIVE",
+        "Vulnerabilities": [
+          {
+            "Id": "CVE-2026-56857",
+            "VulnerablePackages": [
+              {
+                "Name": "go/stdlib",
+                "Version": "1.26.7",
+                "Epoch": "0",
+                "PackageManager": "GENERIC",
+                "FilePath": "/usr/local/bin/aws-lambda-rie",
+                "FixedInVersion": "1.27.2",
+                "SourceLayerHash": "sha256:01182965da0515f455e364bca80c2339d11b979f6a2ce23c7fec207dc0c5fdb6"
+              }
+            ],
+            "Cvss": [
+              {
+                "Version": "3.1",
+                "BaseScore": 9.8,
+                "BaseVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "Source": "NVD"
+              },
+              {
+                "Version": "3.1",
+                "BaseScore": 9.8,
+                "BaseVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "Source": "NVD"
+              }
+            ],
+            "Vendor": {
+              "Name": "NVD",
+              "Url": "https://nvd.nist.gov/vuln/detail/CVE-2026-56857",
+              "VendorSeverity": "CRITICAL",
+              "VendorCreatedAt": "2026-10-08T23:17:01.000Z",
+              "VendorUpdatedAt": "2026-10-09T16:35:35.000Z"
+            },
+            "ReferenceUrls": [
+              "https://groups.google.com/g/golang-announce/c/U2fTuyDJznI",
+              "https://nvd.nist.gov/vuln/detail/CVE-2026-56857"
+            ],
+            "FixAvailable": "YES",
+            "EpssScore": 0.00493,
+            "ExploitAvailable": "NO"
+          }
+        ],
+        "FindingProviderFields": {
+          "Severity": {
+            "Label": "CRITICAL"
+          },
+          "Types": [
+            "Software and Configuration Checks/Vulnerabilities/CVE"
+          ]
+        },
+        "ProcessedAt": "2026-10-11T17:46:45.256Z"
+      }
+    ]
+  }
+}

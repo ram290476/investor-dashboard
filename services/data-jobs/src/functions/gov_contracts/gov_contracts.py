@@ -1,4 +1,4 @@
-"""D5: government awards for SpaceX and Tesla.
+"""D5: government awards for every watchlist ticker (base tickers plus prefs, capped at 25).
 
 USAspending needs no key and does the backfill. SAM.gov is capped at about 3 calls
 a run and 10 a day. A 401 or 403 is a partial run, not a failed job.
@@ -6,7 +6,9 @@ a run and 10 a day. A 401 or 403 is a partial run, not a failed job.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 
 import polars as pl
@@ -20,11 +22,15 @@ STATE_KEY = "curated/contracts/_state.json"
 USASPENDING_CONTRACT_CODES = ("A", "B", "C", "D")
 USASPENDING_PAGE_SIZE = 100
 USASPENDING_MAX_PAGES = 20
-NAME_TO_TICKER = (
+# Recipient spellings SEC entity names do not cover. Watchlist names are added per run.
+NAME_OVERRIDES: tuple[tuple[str, str], ...] = (
     ("space exploration technologies", "SPCX"),
     ("spacex", "SPCX"),
     ("tesla", "TSLA"),
 )
+NAME_TO_TICKER: list[tuple[str, str]] = list(NAME_OVERRIDES)
+# USAspending recipient search term per ticker when the SEC name is not the contracting entity.
+RECIPIENT_OVERRIDES = {"SPCX": "Space Exploration Technologies", "TSLA": "Tesla"}
 # UEIs are filled as awards identify them. A listed UEI wins over the name match.
 UEI_TO_TICKER: dict[str, str] = {}
 
@@ -57,11 +63,49 @@ def fiscal_quarter(day: date) -> str:
 def ticker_for(name: str | None, uei: str | None = None) -> str | None:
     if uei and uei in UEI_TO_TICKER:
         return UEI_TO_TICKER[uei]
-    lowered = (name or "").lower()
+    lowered = f" {re.sub(r'[^a-z0-9]+', ' ', (name or '').lower())} "
     for needle, ticker in NAME_TO_TICKER:
-        if needle in lowered:
+        if f" {needle} " in lowered:
             return ticker
     return None
+
+
+def name_map_from_watchlist(names: dict[str, str | None]) -> list[tuple[str, str]]:
+    """Overrides first, then the cleaned SEC entity name of every watchlist ticker."""
+    from universe import short_company_name
+
+    entries = list(NAME_OVERRIDES)
+    for ticker, name in names.items():
+        needle = " ".join(short_company_name(name).lower().replace("&", " ").split())
+        needle = " ".join(re.sub(r"[^a-z0-9]+", " ", needle).split())
+        if needle and len(needle) >= 3 and all(needle != known for known, _ in entries):
+            entries.append((needle, ticker.upper()))
+    return entries
+
+
+def use_watchlist_names(names: dict[str, str | None]) -> list[tuple[str, str]]:
+    """Point ticker_for at this run's watchlist."""
+    NAME_TO_TICKER[:] = name_map_from_watchlist(names)
+    return NAME_TO_TICKER
+
+
+def recipient_searches(tickers: list[str], names: dict[str, str | None]) -> list[tuple[str, str]]:
+    """(ticker, USAspending recipient search text) for each watchlist ticker with a usable name."""
+    from universe import short_company_name
+
+    searches = []
+    for ticker in tickers:
+        text = RECIPIENT_OVERRIDES.get(ticker) or short_company_name(names.get(ticker))
+        if text:
+            searches.append((ticker, text))
+    return searches
+
+
+def sam_query_for(searches: list[tuple[str, str]], day: date) -> str:
+    """SAM.gov allows ~10 calls a day, so one watchlist name per day, in rotation."""
+    if not searches:
+        return "SpaceX"
+    return searches[day.toordinal() % len(searches)][1]
 
 
 def sam_budget(calls_today: int, wanted: int = SAM_CALLS_PER_RUN) -> int:
@@ -70,13 +114,96 @@ def sam_budget(calls_today: int, wanted: int = SAM_CALLS_PER_RUN) -> int:
     return max(0, min(SAM_CALLS_PER_RUN, wanted, remaining))
 
 
-def sam_status(status_code: int) -> str:
-    """An expired or rejected SAM key is partial. Other HTTP errors still surface."""
+SAM_OPPORTUNITIES_WINDOW_DAYS = 30
+# The Department of Defense site moved to war.gov. The HTML Contracts pages sit behind an
+# Akamai bot rule (403 for non-browser clients); the RSS feed is served to collectors.
+NASA_FEED = "https://www.nasa.gov/news/releases/latest/feed/"
+# NASA's feed rate-limits occasionally (429 at 2:45 PM PT Oct 15). Retry a few times honoring
+# Retry-After; if it is still limited, log a warning and move on rather than failing D5 (#235).
+NASA_RATE_LIMIT_ATTEMPTS = 4
+NASA_BASE_DELAY_S = 5.0
+NASA_MAX_DELAY_S = 60.0
+
+
+def retry_after_delay(header: str | None, attempt: int, base_s: float = NASA_BASE_DELAY_S,
+                      cap_s: float = NASA_MAX_DELAY_S) -> float:
+    """Seconds to wait before the next try: Retry-After (seconds or HTTP date) if given, else
+    exponential backoff, never above cap_s."""
+    backoff = base_s * (2**attempt)
+    wait = None
+    if header:
+        try:
+            wait = float(header)
+        except ValueError:
+            try:
+                wait = (parsedate_to_datetime(header) - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError):
+                wait = None
+    return max(0.0, min(cap_s, wait if wait is not None else backoff))
+
+
+def fetch_with_rate_limit(send, sleep, attempts: int = NASA_RATE_LIMIT_ATTEMPTS):
+    """Call send() until it returns a non-429 response. Returns None if every try was rate limited.
+
+    send() must return an httpx-like response and must not raise on 429.
+    """
+    for attempt in range(attempts):
+        response = send()
+        if response.status_code != 429:
+            return response
+        if attempt + 1 < attempts:
+            sleep(retry_after_delay(response.headers.get("Retry-After"), attempt))
+    return None
+
+
+DOD_CONTRACTS_FEED = "https://www.war.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=400&Site=945&max=10"
+
+
+def redact(text: str | None) -> str:
+    """Strip api_key values from URLs or bodies before they reach logs or errors."""
+    return re.sub(r"(api_key=)[^&\s\"']+", r"\1REDACTED", text or "")
+
+
+def sam_status(status_code: int, body: str | None = None) -> str:
+    """An expired or rejected SAM key is partial. Other HTTP errors still surface, with the body."""
     if status_code in {401, 403}:
         return "partial"
     if status_code >= 400:
-        raise RuntimeError(f"SAM.gov returned HTTP {status_code}")
+        detail = " ".join(redact(body).split())[:300]
+        raise RuntimeError(f"SAM.gov returned HTTP {status_code}" + (f": {detail}" if detail else ""))
     return "ok"
+
+
+def sam_opportunities_params(query: str, day: date, key: str) -> dict:
+    """Get Opportunities v2: postedFrom and postedTo are mandatory (MM/dd/yyyy, at most a year apart).
+
+    Without them SAM.gov answers HTTP 400.
+    """
+    start = day - timedelta(days=SAM_OPPORTUNITIES_WINDOW_DAYS)
+    return {
+        "api_key": key,
+        "title": query,
+        "postedFrom": start.strftime("%m/%d/%Y"),
+        "postedTo": day.strftime("%m/%d/%Y"),
+        "limit": 10,
+    }
+
+
+def parse_dod_feed(xml_text: str) -> list[dict]:
+    """Items of the war.gov Contracts RSS feed: title, link, pubDate."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml_text)
+    items = []
+    for item in root.iter("item"):
+        items.append(
+            {
+                "title": (item.findtext("title") or "").strip(),
+                "link": (item.findtext("link") or "").strip(),
+                "published": (item.findtext("pubDate") or "").strip(),
+            }
+        )
+    return items
 
 
 def catch_up_start(watermark: str | None, today: date) -> str:
@@ -252,14 +379,18 @@ def reconcile(rows: list[dict]) -> list[dict]:
     return merge_awards(kept)
 
 
-def rollup_contracts(rows: list[dict], as_of: date) -> list[dict]:
-    """Trailing-12-month obligations, agency mix, and the last 30 days of new awards."""
+def rollup_contracts(rows: list[dict], as_of: date, tickers: list[str] | None = None) -> list[dict]:
+    """Trailing-12-month obligations, agency mix, and the last 30 days of new awards.
+
+    Every watchlist ticker with matched awards is rolled up; None means any matched ticker.
+    """
+    wanted = None if tickers is None else {str(t).upper() for t in tickers}
     ttm_start = (as_of - timedelta(days=365)).isoformat()
     recent_start = (as_of - timedelta(days=30)).isoformat()
     by_ticker: dict[str, dict] = {}
     for row in rows:
         ticker = row.get("ticker")
-        if ticker not in {"TSLA", "SPCX"}:
+        if not ticker or (wanted is not None and ticker not in wanted):
             continue
         bucket = by_ticker.setdefault(
             ticker,
@@ -317,10 +448,13 @@ def rollup_contracts(rows: list[dict], as_of: date) -> list[dict]:
 
 
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
+    import time
+
     from api_keys import api_key
     from http_client import get_client, request_with_retry
     from lake import read_json, read_parquet_prefix, write_json, write_parquet
     from observability import job_handler, logger, source_run
+    from universe import watchlist_names, watchlist_tickers
 
     @job_handler(JOB_ID)
     def run(event, context):
@@ -337,10 +471,23 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         partial = False
         awards: list[dict] = []
         opportunities: list[dict] = []
+        tickers = watchlist_tickers()
+        names = watchlist_names(tickers, read_json)
+        use_watchlist_names(names)
+        searches = recipient_searches(tickers, names)
+        sam_query = sam_query_for(searches, now.date())
+
+        def time_left() -> bool:
+            remaining = getattr(context, "get_remaining_time_in_millis", None)
+            return remaining is None or remaining() > 60_000
 
         usaspending_ok = True
         with get_client() as http:
-            for index, name in enumerate(("Space Exploration Technologies", "Tesla")):
+            for index, (_ticker, name) in enumerate(searches):
+                if not time_left():
+                    logger.warning("usaspending_time_budget_skip", extra={"job": JOB_ID, "recipient": name})
+                    usaspending_ok = False
+                    continue
                 with source_run("usaspending") as record:
                     for page in range(1, USASPENDING_MAX_PAGES + 1):
                         payload = request_with_retry(
@@ -363,10 +510,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 with source_run("sam-awards") as record:
                     response = http.get(
                         "https://api.sam.gov/contract-awards/v1/search",
-                        params={"api_key": api_key("sam-gov"), "q": "SpaceX", "limit": 10},
+                        params={"api_key": api_key("sam-gov"), "q": sam_query, "limit": 10},
                     )
                     used += 1
-                    outcome = sam_status(response.status_code)
+                    outcome = sam_status(response.status_code, response.text)
                     if outcome == "partial":
                         partial = True
                         logger.warning("sam_key_rejected", extra={"hint": "rotate sam-gov"})
@@ -381,10 +528,10 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 with source_run("sam-opportunities") as record:
                     response = http.get(
                         "https://api.sam.gov/opportunities/v2/search",
-                        params={"api_key": api_key("sam-gov"), "title": "SpaceX", "limit": 10},
+                        params=sam_opportunities_params(sam_query, now.date(), api_key("sam-gov")),
                     )
                     used += 1
-                    if sam_status(response.status_code) == "partial":
+                    if sam_status(response.status_code, response.text) == "partial":
                         partial = True
                         logger.warning("sam_key_rejected", extra={"hint": "rotate sam-gov"})
                         raise RuntimeError("SAM.gov rejected the key")
@@ -393,12 +540,35 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                     opportunities.extend(found)
                     record["rows"] = len(found)
             with source_run("dod") as record:
-                text = request_with_retry(http, "GET", "https://www.defense.gov/News/Contracts/").text
-                found = parse_dod(text, ingested_at, now.date())
-                awards.extend(found)
-                record["rows"] = len(found)
+                feed = parse_dod_feed(request_with_retry(http, "GET", DOD_CONTRACTS_FEED).text)
+                latest = feed[0] if feed else None
+                if latest and latest["link"]:
+                    article = http.get(latest["link"])
+                    if article.status_code == 403:
+                        # Article HTML is bot-blocked; USAspending still carries these awards.
+                        logger.warning(
+                            "dod_article_blocked",
+                            extra={"job": JOB_ID, "url": latest["link"], "status": 403},
+                        )
+                    else:
+                        article.raise_for_status()
+                        found = parse_dod(article.text, ingested_at, now.date())
+                        awards.extend(found)
+                        record["rows"] = len(found)
             with source_run("nasa") as record:
-                text = request_with_retry(http, "GET", "https://www.nasa.gov/news/releases/latest/feed/").text
+                response = fetch_with_rate_limit(
+                    lambda: request_with_retry(http, "GET", NASA_FEED, return_statuses=frozenset({429})),
+                    time.sleep,
+                )
+                if response is None:
+                    logger.warning(
+                        "nasa_feed_rate_limited",
+                        extra={"job": JOB_ID, "url": NASA_FEED, "status": 429, "attempts": NASA_RATE_LIMIT_ATTEMPTS},
+                    )
+                    text = ""
+                else:
+                    response.raise_for_status()
+                    text = response.text
                 found = parse_dod(text, ingested_at, now.date()) if "contract" in text.lower() else []
                 awards.extend(found)
                 record["rows"] = len(found)
@@ -424,7 +594,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 f"curated/contract_opportunities/date={now.date().isoformat()}/{run_id}.parquet",
             )
         all_rows = read_parquet_prefix("curated/contracts/")
-        rolled = rollup_contracts(all_rows.to_dicts() if not all_rows.is_empty() else merged, now.date())
+        rolled = rollup_contracts(all_rows.to_dicts() if not all_rows.is_empty() else merged, now.date(), tickers)
         if rolled:
             write_json(rolled, "curated/contracts_rollup/latest.json")
         state.setdefault("sam_calls", {})[now.date().isoformat()] = calls_today + used

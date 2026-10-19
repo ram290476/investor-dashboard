@@ -1,0 +1,609 @@
+<!-- Trimmed from N-CEN 0000940400-26-039198 (ARK ETF Trust, filed 2026-10-06): header and two series blocks. -->
+<edgarSubmission xmlns="http://www.sec.gov/edgar/ncen" xmlns:com="http://www.sec.gov/edgar/common">
+  <schemaVersion>X0505</schemaVersion>
+  <headerData>
+    <submissionType>N-CEN</submissionType>
+    <filerInfo>
+      <liveTestFlag>LIVE</liveTestFlag>
+      <filer>
+        <issuerCredentials>
+          <cik>0001579982</cik>
+          <ccc>XXXXXXXX</ccc>
+        </issuerCredentials>
+        <fileNumber>811-22883</fileNumber>
+      </filer>
+      <flags>
+        <overrideInternetFlag>false</overrideInternetFlag>
+        <confirmingCopyFlag>false</confirmingCopyFlag>
+      </flags>
+      <investmentCompanyType>N-1A</investmentCompanyType>
+    </filerInfo>
+    <seriesClass>
+      <reportSeriesClass>
+        <rptSeriesClassInfo>
+          <seriesId>S000052298</seriesId>
+          <classInfo>
+            <classId>C000164426</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000095346</seriesId>
+          <classInfo>
+            <classId>C000264065</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000042977</seriesId>
+          <classInfo>
+            <classId>C000133121</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000095344</seriesId>
+          <classInfo>
+            <classId>C000264063</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000042976</seriesId>
+          <classInfo>
+            <classId>C000133120</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000071318</seriesId>
+          <classInfo>
+            <classId>C000226276</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000095345</seriesId>
+          <classInfo>
+            <classId>C000264064</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000052299</seriesId>
+          <classInfo>
+            <classId>C000164427</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000042978</seriesId>
+          <classInfo>
+            <classId>C000133122</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000042975</seriesId>
+          <classInfo>
+            <classId>C000133119</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000095343</seriesId>
+          <classInfo>
+            <classId>C000264062</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+        <rptSeriesClassInfo>
+          <seriesId>S000064752</seriesId>
+          <classInfo>
+            <classId>C000209702</classId>
+          </classInfo>
+        </rptSeriesClassInfo>
+      </reportSeriesClass>
+    </seriesClass>
+  </headerData>
+  <formData>
+    <managementInvestmentQuestionSeriesInfo>
+<managementInvestmentQuestion>
+        <mgmtInvFundName>ARK DIET Q4 Buffer ETF</mgmtInvFundName>
+        <mgmtInvSeriesId>S000095346</mgmtInvSeriesId>
+        <mgmtInvLei>529900ANDMDQMGTV1039</mgmtInvLei>
+        <isFirstFilingByFund>Y</isFirstFilingByFund>
+        <numAuthorizedClass>0</numAuthorizedClass>
+        <numAddedClass>0</numAddedClass>
+        <numTerminatedClass>0</numTerminatedClass>
+        <sharesOutstandings>
+          <sharesOutstanding sharesOutstandingClassName="ARK DIET Q4 Buffer ETF" sharesOutstandingClassId="C000264065" sharesOutstandingTickerSymbol="ARKT"/>
+        </sharesOutstandings>
+        <fundTypes>
+          <fundType>Exchange-Traded Fund</fundType>
+        </fundTypes>
+        <isNonDiversifiedCompany>Y</isNonDiversifiedCompany>
+        <isForeignSubsidiary>N</isForeignSubsidiary>
+        <isFundSecuritiesLending>N</isFundSecuritiesLending>
+        <didFundLendSecurities>N</didFundLendSecurities>
+        <paymentToAgentManagerType>N/A</paymentToAgentManagerType>
+        <avgPortfolioSecuritiesValue>N/A</avgPortfolioSecuritiesValue>
+        <netIncomeSecuritiesLending>N/A</netIncomeSecuritiesLending>
+        <relyOnRuleTypes>
+          <relyOnRuleType>Rule 22d-1 (17 CFR 270.22d-1)</relyOnRuleType>
+          <relyOnRuleType>Rule 6c-11 (17 CFR 270.6c-11)</relyOnRuleType>
+        </relyOnRuleTypes>
+        <isExpenseLimitationInPlace>Y</isExpenseLimitationInPlace>
+        <isExpenseReducedOrWaived>Y</isExpenseReducedOrWaived>
+        <isFeesWaivedRecoupable>N</isFeesWaivedRecoupable>
+        <isExpenseWaivedRecoupable>N</isExpenseWaivedRecoupable>
+        <investmentAdvisers>
+          <investmentAdviser>
+            <investmentAdviserName>ARK Investment Management LLC</investmentAdviserName>
+            <investmentAdviserFileNo>801-79081</investmentAdviserFileNo>
+            <investmentAdviserCrdNo>000169525</investmentAdviserCrdNo>
+            <investmentAdviserLei>2549006XVFMEF9PIPN63</investmentAdviserLei>
+            <investmentAdviserStateCountry investmentAdviserState="US-FL" investmentAdviserCountry="US"/>
+            <investmentAdviserHired isInvestmentAdviserHired="Y">
+              <investmentAdviserStartDate>2025-09-23</investmentAdviserStartDate>
+            </investmentAdviserHired>
+          </investmentAdviser>
+        </investmentAdvisers>
+        <subAdvisers>
+          <subAdviser>
+            <subAdviserName>Milliman Financial Risk Management LLC</subAdviserName>
+            <subAdviserFileNo>801-73056</subAdviserFileNo>
+            <subAdviserCrdNo>000159377</subAdviserCrdNo>
+            <subAdviserLei>5493002H8STET494T224</subAdviserLei>
+            <isSubAdviserAffiliated>N</isSubAdviserAffiliated>
+            <subAdviserStateCountry subAdviserState="US-IL" subAdviserCountry="US"/>
+            <subAdviserHired isSubAdviserHired="Y" subAdviserStartDate="2025-09-26"/>
+          </subAdviser>
+        </subAdvisers>
+        <transferAgents>
+          <transferAgent>
+            <transferAgentName>The Bank of New York Mellon</transferAgentName>
+            <transferAgentFileNo>085-05006</transferAgentFileNo>
+            <transferAgentLei>HPFHU0OQ28E4N0NFVK49</transferAgentLei>
+            <transferAgentStateCountry transferAgentState="US-NY" transferAgentCountry="US"/>
+            <isTransferAgentAffiliated>N</isTransferAgentAffiliated>
+            <isTransferAgentSubAgent>N</isTransferAgentSubAgent>
+          </transferAgent>
+        </transferAgents>
+        <isTransferAgentHiredOrTerminated>Y</isTransferAgentHiredOrTerminated>
+        <pricingServices>
+          <pricingService>
+            <pricingServiceName>CBOE GLOBAL MARKETS, INC.</pricingServiceName>
+            <pricingServiceLei>529900RLNSGA90UPEH54</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-IL" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>LSEG Data &amp; Analytics</pricingServiceName>
+            <pricingServiceLei>213800QAUUUP6I445N30</pricingServiceLei>
+            <pricingServiceCountry>GB</pricingServiceCountry>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>Intercontinental Exchange, Inc.</pricingServiceName>
+            <pricingServiceLei>5493000F4ZO33MV32P92</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-GA" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>Bloomberg Finance L.P.</pricingServiceName>
+            <pricingServiceLei>5493001KJTIIGC8Y1R12</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-NY" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+        </pricingServices>
+        <isPricingServiceHiredOrTerminated>Y</isPricingServiceHiredOrTerminated>
+        <custodians>
+          <custodian>
+            <custodianName>The Bank of New York Mellon</custodianName>
+            <custodianLei>HPFHU0OQ28E4N0NFVK49</custodianLei>
+            <custodianStateCountry custodianState="US-NY" custodianCountry="US"/>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>N</isSubCustodian>
+            <custodyType>Bank - section 17(f)(1) (15 U.S.C. 80a-17(f)(1))</custodyType>
+          </custodian>
+        </custodians>
+        <isCustodianHiredOrTerminated>Y</isCustodianHiredOrTerminated>
+        <shareholderServicingAgents>
+          <shareholderServicingAgent>
+            <shareholderServiceAgentName>The Bank of New York Mellon</shareholderServiceAgentName>
+            <shareholderServiceAgentLei>HPFHU0OQ28E4N0NFVK49</shareholderServiceAgentLei>
+            <shareholderServiceAgentStateCountry shareholderServiceAgentState="US-NY" shareholderServiceAgentCountry="US"/>
+            <isShareholderServiceAgentAffiliated>N</isShareholderServiceAgentAffiliated>
+            <isShareholderServiceAgentSubshare>N</isShareholderServiceAgentSubshare>
+          </shareholderServicingAgent>
+        </shareholderServicingAgents>
+        <isShareholderServiceHiredTerminated>Y</isShareholderServiceHiredTerminated>
+        <admins>
+          <admin>
+            <adminName>The Bank of New York Mellon</adminName>
+            <adminLei>HPFHU0OQ28E4N0NFVK49</adminLei>
+            <adminStateCountry adminState="US-NY" adminCountry="US"/>
+            <isAdminAffiliated>N</isAdminAffiliated>
+            <isAdminSubAdmin>N</isAdminSubAdmin>
+          </admin>
+        </admins>
+        <isAdminHiredOrTerminated>Y</isAdminHiredOrTerminated>
+        <brokers>
+          <broker>
+            <brokerName>Wolverine Execution Services LLC</brokerName>
+            <brokerFileNo>008-65336</brokerFileNo>
+            <brokerCrdNo>000120719</brokerCrdNo>
+            <brokerLei>2549003XDWF020DPX559</brokerLei>
+            <brokerStateCountry brokerState="US-IL" brokerCountry="US"/>
+            <grossCommission>3166.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>SUSQUEHANNA INVESTMENT GROUP</brokerName>
+            <brokerFileNo>008-37520</brokerFileNo>
+            <brokerCrdNo>000033875</brokerCrdNo>
+            <brokerLei>5493002012JJC75DLI27</brokerLei>
+            <brokerStateCountry brokerState="US-PA" brokerCountry="US"/>
+            <grossCommission>345.00000000</grossCommission>
+          </broker>
+        </brokers>
+        <aggregateCommission>3511.00000000</aggregateCommission>
+        <principalTransactions>
+          <principalTransaction>
+            <principalName>SUSQUEHANNA INVESTMENT GROUP</principalName>
+            <principalFileNo>008-37520</principalFileNo>
+            <principalCrdNo>000033875</principalCrdNo>
+            <principalLei>5493002012JJC75DLI27</principalLei>
+            <principalStateCountry principalState="US-PA" principalCountry="US"/>
+            <principalTotalPurchaseSale>246.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>JANE STREET EXECUTION SERVICES, LLC</principalName>
+            <principalFileNo>008-69254</principalFileNo>
+            <principalCrdNo>000167280</principalCrdNo>
+            <principalLei>549300HXJLXCPDWAH070</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>1023353.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>BOFA SECURITIES, INC.</principalName>
+            <principalFileNo>008-69787</principalFileNo>
+            <principalCrdNo>000283942</principalCrdNo>
+            <principalLei>549300HN4UKV1E2R3U73</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>940654.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+        </principalTransactions>
+        <principalAggregatePurchase>1964254.00000000</principalAggregatePurchase>
+        <isBrokerageResearchPayment>N</isBrokerageResearchPayment>
+        <mnthlyAvgNetAssets>2753847.00000000</mnthlyAvgNetAssets>
+        <hasLineOfCredit>N</hasLineOfCredit>
+        <isInterfundLending>N</isInterfundLending>
+        <isInterfundBorrowing>N</isInterfundBorrowing>
+        <liquidityClassifications>
+          <liquidityClassificationService>
+            <liquidityName>INNOCAP INVESTMENT ADVISERS, LLC</liquidityName>
+            <liquidityLei>254900BNAL3OHJI3FC29</liquidityLei>
+            <liquidityStateCountry liquidityCountry="US" liquidityState="US-NY"/>
+            <isAffiliatedPerson>N</isAffiliatedPerson>
+            <assetClassType>Short-term investment vehicle</assetClassType>
+            <assetClassType>Equity-common</assetClassType>
+            <assetClassType>Derivative-equity</assetClassType>
+          </liquidityClassificationService>
+        </liquidityClassifications>
+        <isLiquidityHiredTerminated>Y</isLiquidityHiredTerminated>
+      </managementInvestmentQuestion>
+<managementInvestmentQuestion>
+        <mgmtInvFundName>ARK Innovation ETF</mgmtInvFundName>
+        <mgmtInvSeriesId>S000042977</mgmtInvSeriesId>
+        <mgmtInvLei>254900636IK9WKHH6949</mgmtInvLei>
+        <isFirstFilingByFund>N</isFirstFilingByFund>
+        <numAuthorizedClass>0</numAuthorizedClass>
+        <numAddedClass>0</numAddedClass>
+        <numTerminatedClass>0</numTerminatedClass>
+        <sharesOutstandings>
+          <sharesOutstanding sharesOutstandingClassName="ARK Innovation ETF" sharesOutstandingClassId="C000133121" sharesOutstandingTickerSymbol="ARKK"/>
+        </sharesOutstandings>
+        <fundTypes>
+          <fundType>Exchange-Traded Fund</fundType>
+        </fundTypes>
+        <isNonDiversifiedCompany>Y</isNonDiversifiedCompany>
+        <isForeignSubsidiary>N</isForeignSubsidiary>
+        <isFundSecuritiesLending>Y</isFundSecuritiesLending>
+        <fundLendSecurities didFundLendSecurities="Y">
+          <isFundLiquidated>N</isFundLiquidated>
+          <isFundAdverselyImpacted>N</isFundAdverselyImpacted>
+        </fundLendSecurities>
+        <securityLendings>
+          <securityLending>
+            <securitiesAgentName>BNY Mellon</securitiesAgentName>
+            <securitiesAgentLei>HPFHU0OQ28E4N0NFVK49</securitiesAgentLei>
+            <isSecuritiesAgentAffiliated>N</isSecuritiesAgentAffiliated>
+            <securityAgentIdemnity isSecurityAgentIdemnity="Y">
+              <idemnityProviders>
+                <idemnityProvider idemnityProviderName="N/A" idemnityProviderLei="N/A" idemnityProviderRssdId="N/A"/>
+              </idemnityProviders>
+              <didIndemnificationRights>N</didIndemnificationRights>
+            </securityAgentIdemnity>
+          </securityLending>
+        </securityLendings>
+        <collateralManagers>
+          <collateralManager collateralManagerName="N/A" collateralManagerLei="N/A" collateralManagerRssdId="N/A" isCollateralManagerAffliliated="Y" isCollateralManagerAffliliatedWithFund="N"/>
+        </collateralManagers>
+        <paymentToAgentManagers>
+          <paymentToAgentManagerType>Revenue sharing split</paymentToAgentManagerType>
+        </paymentToAgentManagers>
+        <avgPortfolioSecuritiesValue>658354659.00000000</avgPortfolioSecuritiesValue>
+        <netIncomeSecuritiesLending>3132279.45000000</netIncomeSecuritiesLending>
+        <relyOnRuleTypes>
+          <relyOnRuleType>Rule 6c-11 (17 CFR 270.6c-11)</relyOnRuleType>
+          <relyOnRuleType>Rule 22d-1 (17 CFR 270.22d-1)</relyOnRuleType>
+        </relyOnRuleTypes>
+        <isExpenseLimitationInPlace>N</isExpenseLimitationInPlace>
+        <isExpenseReducedOrWaived>N</isExpenseReducedOrWaived>
+        <isFeesWaivedRecoupable>N</isFeesWaivedRecoupable>
+        <isExpenseWaivedRecoupable>N</isExpenseWaivedRecoupable>
+        <investmentAdvisers>
+          <investmentAdviser>
+            <investmentAdviserName>ARK Investment Management LLC</investmentAdviserName>
+            <investmentAdviserFileNo>801-79081</investmentAdviserFileNo>
+            <investmentAdviserCrdNo>000169525</investmentAdviserCrdNo>
+            <investmentAdviserLei>2549006XVFMEF9PIPN63</investmentAdviserLei>
+            <investmentAdviserStateCountry investmentAdviserState="US-FL" investmentAdviserCountry="US"/>
+            <isInvestmentAdviserHired>N</isInvestmentAdviserHired>
+          </investmentAdviser>
+        </investmentAdvisers>
+        <transferAgents>
+          <transferAgent>
+            <transferAgentName>The Bank of New York Mellon</transferAgentName>
+            <transferAgentFileNo>085-05006</transferAgentFileNo>
+            <transferAgentLei>HPFHU0OQ28E4N0NFVK49</transferAgentLei>
+            <transferAgentStateCountry transferAgentState="US-NY" transferAgentCountry="US"/>
+            <isTransferAgentAffiliated>N</isTransferAgentAffiliated>
+            <isTransferAgentSubAgent>N</isTransferAgentSubAgent>
+          </transferAgent>
+        </transferAgents>
+        <isTransferAgentHiredOrTerminated>N</isTransferAgentHiredOrTerminated>
+        <pricingServices>
+          <pricingService>
+            <pricingServiceName>LSEG Data &amp; Analytics</pricingServiceName>
+            <pricingServiceLei>213800QAUUUP6I445N30</pricingServiceLei>
+            <pricingServiceCountry>GB</pricingServiceCountry>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>Intercontinental Exchange, Inc.</pricingServiceName>
+            <pricingServiceLei>5493000F4ZO33MV32P92</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-GA" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>CBOE GLOBAL MARKETS, INC.</pricingServiceName>
+            <pricingServiceLei>529900RLNSGA90UPEH54</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-IL" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>Bloomberg Finance L.P.</pricingServiceName>
+            <pricingServiceLei>5493001KJTIIGC8Y1R12</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-NY" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+        </pricingServices>
+        <isPricingServiceHiredOrTerminated>Y</isPricingServiceHiredOrTerminated>
+        <custodians>
+          <custodian>
+            <custodianName>CIBC Mellon Trust Company</custodianName>
+            <custodianLei>549300IYUUH221WBZ505</custodianLei>
+            <custodianCountry>CA</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Bank of New York Mellon</custodianName>
+            <custodianLei>HPFHU0OQ28E4N0NFVK49</custodianLei>
+            <custodianStateCountry custodianState="US-NY" custodianCountry="US"/>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>N</isSubCustodian>
+            <custodyType>Bank - section 17(f)(1) (15 U.S.C. 80a-17(f)(1))</custodyType>
+          </custodian>
+        </custodians>
+        <isCustodianHiredOrTerminated>N</isCustodianHiredOrTerminated>
+        <shareholderServicingAgents>
+          <shareholderServicingAgent>
+            <shareholderServiceAgentName>The Bank of New York Mellon</shareholderServiceAgentName>
+            <shareholderServiceAgentLei>HPFHU0OQ28E4N0NFVK49</shareholderServiceAgentLei>
+            <shareholderServiceAgentStateCountry shareholderServiceAgentState="US-NY" shareholderServiceAgentCountry="US"/>
+            <isShareholderServiceAgentAffiliated>N</isShareholderServiceAgentAffiliated>
+            <isShareholderServiceAgentSubshare>N</isShareholderServiceAgentSubshare>
+          </shareholderServicingAgent>
+        </shareholderServicingAgents>
+        <isShareholderServiceHiredTerminated>N</isShareholderServiceHiredTerminated>
+        <admins>
+          <admin>
+            <adminName>The Bank of New York Mellon</adminName>
+            <adminLei>HPFHU0OQ28E4N0NFVK49</adminLei>
+            <adminStateCountry adminState="US-NY" adminCountry="US"/>
+            <isAdminAffiliated>N</isAdminAffiliated>
+            <isAdminSubAdmin>N</isAdminSubAdmin>
+          </admin>
+        </admins>
+        <isAdminHiredOrTerminated>N</isAdminHiredOrTerminated>
+        <brokers>
+          <broker>
+            <brokerName>J.P. Morgan Securities LLC</brokerName>
+            <brokerFileNo>008-35008</brokerFileNo>
+            <brokerCrdNo>000000079</brokerCrdNo>
+            <brokerLei>ZBUT11V806EZRVTWT807</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>133709.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>LIQUIDNET, INC.</brokerName>
+            <brokerFileNo>008-52461</brokerFileNo>
+            <brokerCrdNo>000103987</brokerCrdNo>
+            <brokerLei>213800HSKBBO1GCVRG79</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>507554.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>VIRTU AMERICAS LLC</brokerName>
+            <brokerFileNo>008-68193</brokerFileNo>
+            <brokerCrdNo>000149823</brokerCrdNo>
+            <brokerLei>549300RA02N3BNSWBV74</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>333412.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>INSTINET LLC</brokerName>
+            <brokerFileNo>008-23669</brokerFileNo>
+            <brokerCrdNo>000007897</brokerCrdNo>
+            <brokerLei>549300MGMN3RKMU8FT57</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>79266.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>RBC CAPITAL MARKETS, LLC</brokerName>
+            <brokerFileNo>008-45411</brokerFileNo>
+            <brokerCrdNo>000031194</brokerCrdNo>
+            <brokerLei>549300LCO2FLSSVFFR64</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>99502.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>RAYMOND JAMES &amp; ASSOCIATES, INC.</brokerName>
+            <brokerFileNo>008-10999</brokerFileNo>
+            <brokerCrdNo>000000705</brokerCrdNo>
+            <brokerLei>U4ONQX15J3RO8XCKE979</brokerLei>
+            <brokerStateCountry brokerState="US-FL" brokerCountry="US"/>
+            <grossCommission>92888.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>BOFA SECURITIES, INC.</brokerName>
+            <brokerFileNo>008-69787</brokerFileNo>
+            <brokerCrdNo>000283942</brokerCrdNo>
+            <brokerLei>549300HN4UKV1E2R3U73</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>109211.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>JEFFERIES LLC</brokerName>
+            <brokerFileNo>008-15074</brokerFileNo>
+            <brokerCrdNo>000002347</brokerCrdNo>
+            <brokerLei>58PU97L1C0WSRCWADL48</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>181497.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>PIPER SANDLER &amp; CO.</brokerName>
+            <brokerFileNo>008-15204</brokerFileNo>
+            <brokerCrdNo>000000665</brokerCrdNo>
+            <brokerLei>549300GRQCWQ3XGH0H10</brokerLei>
+            <brokerStateCountry brokerState="US-MN" brokerCountry="US"/>
+            <grossCommission>116772.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>GOLDMAN SACHS &amp; CO. LLC</brokerName>
+            <brokerFileNo>008-00129</brokerFileNo>
+            <brokerCrdNo>000000361</brokerCrdNo>
+            <brokerLei>FOR8UP27PHTHYVLBNG30</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>86104.00000000</grossCommission>
+          </broker>
+        </brokers>
+        <aggregateCommission>1993114.00000000</aggregateCommission>
+        <principalTransactions>
+          <principalTransaction>
+            <principalName>ABN AMRO CLEARING CHICAGO LLC</principalName>
+            <principalFileNo>008-34354</principalFileNo>
+            <principalCrdNo>000014020</principalCrdNo>
+            <principalLei>549300U16G4LU3V6C598</principalLei>
+            <principalStateCountry principalState="US-IL" principalCountry="US"/>
+            <principalTotalPurchaseSale>6602515258.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>VIRTU AMERICAS LLC</principalName>
+            <principalFileNo>008-68193</principalFileNo>
+            <principalCrdNo>000149823</principalCrdNo>
+            <principalLei>549300RA02N3BNSWBV74</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>2520789256.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>UBS SECURITIES LLC</principalName>
+            <principalFileNo>008-22651</principalFileNo>
+            <principalCrdNo>000007654</principalCrdNo>
+            <principalLei>T6FIZBDPKLYJKFCRVK44</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>2995029330.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>JANE STREET EXECUTION SERVICES, LLC</principalName>
+            <principalFileNo>008-69254</principalFileNo>
+            <principalCrdNo>000167280</principalCrdNo>
+            <principalLei>549300HXJLXCPDWAH070</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>2245302641.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>CitiGroup Global Markets Inc.</principalName>
+            <principalFileNo>008-08177</principalFileNo>
+            <principalCrdNo>000007059</principalCrdNo>
+            <principalLei>MBNUM2BPBDO7JBLYG310</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>1050843810.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>BNP PARIBAS SECURITIES CORP.</principalName>
+            <principalFileNo>008-32682</principalFileNo>
+            <principalCrdNo>000015794</principalCrdNo>
+            <principalLei>RCNB6OTYUAMMP879YW96</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>1533116645.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>J.P. Morgan Securities LLC</principalName>
+            <principalFileNo>008-35008</principalFileNo>
+            <principalCrdNo>000000079</principalCrdNo>
+            <principalLei>ZBUT11V806EZRVTWT807</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>1689314785.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>GOLDMAN SACHS &amp; CO. LLC</principalName>
+            <principalFileNo>008-00129</principalFileNo>
+            <principalCrdNo>000000361</principalCrdNo>
+            <principalLei>FOR8UP27PHTHYVLBNG30</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>14796920455.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>BOFA SECURITIES, INC.</principalName>
+            <principalFileNo>008-69787</principalFileNo>
+            <principalCrdNo>000283942</principalCrdNo>
+            <principalLei>549300HN4UKV1E2R3U73</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>37079473269.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>MORGAN STANLEY &amp; CO. LLC</principalName>
+            <principalFileNo>008-15869</principalFileNo>
+            <principalCrdNo>000008209</principalCrdNo>
+            <principalLei>9R7GPTSO7KV3UQJZQ078</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>5080282112.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+        </principalTransactions>
+        <principalAggregatePurchase>78290373507.00000000</principalAggregatePurchase>
+        <isBrokerageResearchPayment>Y</isBrokerageResearchPayment>
+        <mnthlyAvgNetAssets>7078719927.00000000</mnthlyAvgNetAssets>
+        <hasLineOfCredit>N</hasLineOfCredit>
+        <isInterfundLending>N</isInterfundLending>
+        <isInterfundBorrowing>N</isInterfundBorrowing>
+        <liquidityClassifications>
+          <liquidityClassificationService>
+            <liquidityName>INNOCAP INVESTMENT ADVISERS, LLC</liquidityName>
+            <liquidityLei>254900BNAL3OHJI3FC29</liquidityLei>
+            <liquidityStateCountry liquidityCountry="US" liquidityState="US-NY"/>
+            <isAffiliatedPerson>N</isAffiliatedPerson>
+            <assetClassType>Derivative-equity</assetClassType>
+            <assetClassType>Short-term investment vehicle</assetClassType>
+            <assetClassType>Equity-preferred</assetClassType>
+            <assetClassType>Equity-common</assetClassType>
+          </liquidityClassificationService>
+        </liquidityClassifications>
+        <isLiquidityHiredTerminated>N</isLiquidityHiredTerminated>
+      </managementInvestmentQuestion>
+    </managementInvestmentQuestionSeriesInfo>
+  </formData>
+</edgarSubmission>

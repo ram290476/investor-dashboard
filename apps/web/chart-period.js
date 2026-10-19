@@ -1,4 +1,6 @@
-// Period chips re-window the price chart using daily closes already in price_history.
+// Period chips re-window the price chart. The selected ticker's five-year closes
+// arrive on chart data; the dashboard keeps a short price_history tail for first
+// paint (sparklines, the 1M chip, and comparison mini charts).
 // Session counts match the live 1D (1 session) and 1M (21 sessions) definitions.
 // 5Y is the serving backfill cap (dashboard_build keeps 1,260 rows). A finished
 // five-year backfill can land a few sessions short of that cap, so it also unlocks
@@ -37,6 +39,14 @@ export function chartValue(row) {
 
 export function validBars(history) {
   return (Array.isArray(history) ? history : []).filter((row) => chartValue(row) !== null);
+}
+
+// Prefer the per-ticker chart series when it is at least as long as the dashboard tail.
+export function servedPriceHistory(tickerData, chartData) {
+  const summary = Array.isArray(tickerData?.price_history) ? tickerData.price_history : [];
+  const full = chartData?.price_history;
+  if (Array.isArray(full) && full.length >= summary.length && full.length) return full;
+  return summary;
 }
 
 export function sessionReturn(bars, offset) {

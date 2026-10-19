@@ -12,6 +12,13 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+# 429 is quota, not a transient upstream error: return it once instead of retrying it.
+CHART_RETRY_STATUSES = frozenset({500, 502, 503, 504})
+CHART_RETURN_STATUSES = frozenset({429})
+
+
+class YahooRateLimited(RuntimeError):
+    """HTTP 429 from the chart host. Do not send another chart request in this run."""
 
 
 def chart_params(years: int = 5, start: date | None = None, end: date | None = None) -> dict:
