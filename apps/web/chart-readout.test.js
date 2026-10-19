@@ -43,7 +43,7 @@ test("the shared chart panel feeds active overlays to the crosshair readout (#21
 
 test("the overlay groups panel stays pinned during scroll, drag and redraws (#218)", () => {
   assert.match(styles, /\.chart-controls \{[^}]*position: sticky;[^}]*top: 0;/);
-  assert.match(app, /function renderDashboard\(\) \{\n  const before = chartControlsTop\(\);\n  renderDashboardNow\(\);\n  keepChartControlsPinned\(before\);\n\}/);
+  assert.match(app, /function renderDashboard\(\) \{\n  if \(session\.ended\) return;\n  const before = chartControlsTop\(\);\n  renderDashboardNow\(\);\n  keepChartControlsPinned\(before\);\n\}/);
   assert.match(app, /window\.scrollBy\(0, after - before\)/);
   for (const selector of ["data-overlay-tab=", "data-overlay=\"\\$\\{overlay.id", "\\.overlay-all", "lane-toggle\\[data-lane=", "data-catalyst-category=\"\\$"]) {
     assert.match(app, new RegExp(`${selector}[^\\n]*\\?\\.focus\\(\\{ preventScroll: true \\}\\)`), selector);

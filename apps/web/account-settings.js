@@ -159,7 +159,7 @@ export function createAccountSettings(ctx) {
       window.clearTimeout(timer);
       dirty = false;
       addedSinceSave = [];
-      if (error.status === 401) {
+      if (error.sessionExpired) {
         ctx.onUnauthorized();
         return;
       }

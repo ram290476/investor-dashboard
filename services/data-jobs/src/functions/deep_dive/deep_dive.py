@@ -1028,6 +1028,24 @@ def _attach_estimate(tile: dict, estimate: dict | None) -> dict:
     return tile
 
 
+def _attach_regulator(tile: dict, series: dict | None) -> dict:
+    """Sit a public regulator count beside a news estimate. It stays pending review."""
+    points = [
+        point for point in (series or {}).get("points") or []
+        if isinstance(point, dict) and point.get("reported") and point.get("value") is not None
+    ]
+    if not points:
+        return tile
+    points.sort(key=lambda item: _period_sort_key(item.get("period") or ""))
+    latest = points[-1]
+    tile["regulator_value"] = latest.get("value")
+    tile["regulator_period"] = latest.get("period")
+    tile["regulator_source_url"] = latest.get("source_url") or (series or {}).get("source_url") or ""
+    tile["regulator_source_title"] = (series or {}).get("source_title") or "Regulator records"
+    tile["regulator_approval_state"] = (series or {}).get("approval_state") or "proposed"
+    return tile
+
+
 def _merge_points(reported: dict | None, estimate: dict | None) -> dict | None:
     extra = [point for point in (estimate or {}).get("points") or [] if isinstance(point, dict)]
     if not extra:
@@ -1071,7 +1089,11 @@ def _fill_panel(
             spec = {"metric_id": spec}
         metric_id = spec.get("metric_id")
         found = _lookup_metric(metric_id, metrics, catalog)
-        kpis.append(_attach_estimate(_tile(metric_id, found, spec), estimates.get(metric_id)))
+        tile = _attach_estimate(_tile(metric_id, found, spec), estimates.get(metric_id))
+        regulator_id = spec.get("regulator_metric_id")
+        if regulator_id:
+            tile = _attach_regulator(tile, _lookup_metric(regulator_id, metrics, catalog))
+        kpis.append(tile)
     chart = []
     color = 1
     for spec in panel.get("series") or []:
@@ -1212,7 +1234,7 @@ def _collect_catalog_sources(
     generated_at: str,
     previous: dict | None,
 ) -> tuple[list[dict], list[dict]]:
-    """Launch Library 2 and CelesTrak, only when that catalog declares the source."""
+    """Launch Library 2, CelesTrak, and AV regulator pages, only when the catalog declares them."""
     series: list[dict] = []
     statuses: list[dict] = []
     for source in (catalog.get("deep_dive") or {}).get("sources") or []:
@@ -1224,6 +1246,10 @@ def _collect_catalog_sources(
             statuses.append(status)
         elif source.get("id") == "celestrak":
             found, status = sources.collect_constellation(source, fetch, generated_at, previous)
+            series.extend(found)
+            statuses.append(status)
+        elif source.get("id") == "av_regulator":
+            found, status = sources.collect_av_regulator(source, fetch, generated_at, previous)
             series.extend(found)
             statuses.append(status)
     return series, statuses

@@ -1,9 +1,9 @@
 """Catalog-driven deep-dive sources that do not need an API key.
 
-Launch Library 2 and CelesTrak are public. News estimates are extracted from
-articles the news collector already stored. Nothing here approves a figure,
-and nothing here names a ticker. The catalog supplies provider filters,
-metric ids, and the words that mark a topic.
+Launch Library 2, CelesTrak, and public AV regulator pages are keyless.
+News estimates are extracted from articles the news collector already stored.
+Nothing here approves a figure, and nothing here names a ticker. The catalog
+supplies provider filters, metric ids, entity names, and the words that mark a topic.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime, timedelta
+from html.parser import HTMLParser
 from urllib.parse import urlencode
 
 import httpx
@@ -176,6 +177,8 @@ def validate_extra_source(source: dict) -> list[str]:
             for rule in rules:
                 if not isinstance(rule, dict) or not str(rule.get("metric_id") or "").strip():
                     errors.append("news estimate rule needs metric_id")
+    elif sid == "av_regulator":
+        errors.extend(_validate_av_regulator(source))
     return errors
 
 
@@ -528,6 +531,361 @@ def collect_constellation(source: dict, fetch, generated_at: str, previous: dict
         "status": "ok",
         "rows": count,
         "note": CONSTELLATION_NOTE,
+    }
+
+
+REGULATOR_NOTE = (
+    "Public regulator rosters. Pending review, never approved. "
+    "A missing page is not stored as zero. "
+    "Crash-report counts already on this page are a cross-check, not a registration."
+)
+_PERMIT_KINDS = frozenset({"permit_roster", "permit_table", "stated_count"})
+_VEHICLE_COUNT = re.compile(
+    r"(?:(?P<a>\d{1,6})\s+(?:registered\s+|permitted\s+|authorized\s+)?vehicles\b)"
+    r"|(?:\bvehicles\b\s*[:\-]\s*(?P<b>\d{1,6}))"
+    r"|(?:(?P<c>\d{1,6})\s+(?:registered|permitted)\b)",
+    re.IGNORECASE,
+)
+
+
+class _HTMLText(HTMLParser):
+    """Block tags become line breaks. Script and style text is dropped."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip = 0
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style", "noscript"}:
+            self._skip += 1
+        if tag in {"td", "th"}:
+            self.parts.append(" | ")
+        elif tag in {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "br", "section", "table"}:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style", "noscript"} and self._skip:
+            self._skip -= 1
+        if tag in {"p", "li", "tr", "h1", "h2", "h3", "h4", "section"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.parts.append(data)
+
+
+def html_to_text(html: str) -> str:
+    parser = _HTMLText()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except (ValueError, AssertionError, LookupError):
+        return re.sub(r"<[^>]+>", " ", html or "")
+    return "".join(parser.parts)
+
+
+def _validate_av_regulator(source: dict) -> list[str]:
+    errors = []
+    entities = source.get("entities")
+    if not isinstance(entities, list) or not any(str(item or "").strip() for item in entities):
+        errors.append("av_regulator source needs entities")
+    feeds = source.get("feeds")
+    if not isinstance(feeds, list) or not feeds:
+        errors.append("av_regulator source needs feeds")
+    else:
+        for feed in feeds:
+            if not isinstance(feed, dict):
+                errors.append("av_regulator feed must be an object")
+                continue
+            if not str(feed.get("url") or "").startswith("https://"):
+                errors.append("av_regulator feed url must be https")
+            if str(feed.get("kind") or "") not in _PERMIT_KINDS:
+                errors.append("av_regulator feed kind is unsupported")
+            if not str(feed.get("jurisdiction") or "").strip():
+                errors.append("av_regulator feed needs jurisdiction")
+    if not str(source.get("permits_metric") or "").strip():
+        errors.append("av_regulator source needs permits_metric")
+    if not str(source.get("vehicles_metric") or "").strip():
+        errors.append("av_regulator source needs vehicles_metric")
+    return errors
+
+
+def _entity_names(source: dict) -> list[str]:
+    names = []
+    for item in source.get("entities") or []:
+        text = str(item or "").strip()
+        if len(text) >= 3:
+            names.append(text)
+    return sorted(names, key=len, reverse=True)
+
+
+def entity_in_text(text: str, entities: list[str]) -> str:
+    """Longest catalog entity name that appears as its own words, or ""."""
+    low = str(text or "").lower()
+    for name in entities:
+        if re.search(rf"(?<![a-z0-9]){re.escape(name.lower())}(?![a-z0-9])", low):
+            return name
+    return ""
+
+
+def _lines(html: str) -> list[str]:
+    text = html_to_text(html)
+    return [re.sub(r"\s+", " ", line).strip() for line in text.splitlines() if line.strip()]
+
+
+def _heading_kind(line: str) -> str:
+    low = line.lower()
+    if len(low) > 140:
+        return ""
+    if "driverless" in low and "test" in low:
+        return "driverless_testing"
+    if "deployment" in low and "permit" in low:
+        return "deployment"
+    if "with a driver" in low or "safety driver" in low:
+        return "testing_with_driver"
+    return ""
+
+
+def parse_permit_roster(html: str, entities: list[str]) -> list[dict]:
+    """One hit per roster section that names an entity. The page's vehicle list is not guessed."""
+    found = []
+    section = ""
+    seen: set[str] = set()
+    for line in _lines(html):
+        kind = _heading_kind(line)
+        if kind:
+            section = kind
+            continue
+        if not section:
+            continue
+        name = entity_in_text(line, entities)
+        if not name or section in seen:
+            continue
+        seen.add(section)
+        found.append({"permit": section, "entity": name})
+    return found
+
+
+def parse_permit_table(html: str, entities: list[str]) -> list[dict]:
+    """One hit per table row that names an entity and reads as a permit."""
+    found = []
+    for line in _lines(html):
+        low = line.lower()
+        if not any(token in low for token in ("pilot", "deployment", "permit", "tcp")):
+            continue
+        name = entity_in_text(line, entities)
+        if not name:
+            continue
+        found.append({"permit": "table_row", "entity": name, "row": line[:180]})
+    return found
+
+
+def _vehicle_count(text: str) -> int | None:
+    match = _VEHICLE_COUNT.search(str(text or "").replace(",", ""))
+    if not match:
+        return None
+    raw = next(group for group in match.groups() if group)
+    value = int(raw)
+    if value < 0 or value > 100_000:
+        return None
+    return value
+
+
+def parse_stated_vehicle_count(html: str, entities: list[str]) -> int | None:
+    """Sum counts the page states next to the entity. No number means unknown, not zero."""
+    lines = _lines(html)
+    total = 0
+    found = False
+    index = 0
+    while index < len(lines):
+        if not entity_in_text(lines[index], entities):
+            index += 1
+            continue
+        window = " ".join(lines[index:index + 2])
+        count = _vehicle_count(window)
+        if count is None:
+            index += 1
+            continue
+        total += count
+        found = True
+        index += 2
+    return total if found else None
+
+
+def month_of(stamp: str) -> str | None:
+    day = _DAY.match(str(stamp or ""))
+    if day:
+        return f"{day.group(1)}-{day.group(2)}"
+    month = _MONTH.match(str(stamp or "")[:7])
+    return month.group(0) if month else None
+
+
+def quarter_of_month(period: str) -> str | None:
+    return quarter_of(f"{period}-01") if _MONTH.match(str(period or "")) else None
+
+
+def _regulator_ids(source: dict) -> tuple[str, str, str, str]:
+    permits = str(source.get("permits_metric") or "").strip()
+    vehicles = str(source.get("vehicles_metric") or "").strip()
+    permits_quarter = str(source.get("permits_quarter_metric") or f"{permits}_quarter").strip()
+    vehicles_quarter = str(source.get("vehicles_quarter_metric") or f"{vehicles}_quarter").strip()
+    return permits, vehicles, permits_quarter, vehicles_quarter
+
+
+def _carried_regulator_series(previous: dict | None, source: dict) -> list[dict]:
+    wanted = set(_regulator_ids(source))
+    carried = []
+    for series in (previous or {}).get("series") or []:
+        if not isinstance(series, dict):
+            continue
+        if series.get("source_kind") == "av_regulator" and series.get("metric_id") in wanted:
+            carried.append(series)
+    return carried
+
+
+def _quarter_series(monthly: dict, metric_id: str) -> dict:
+    latest: dict[str, dict] = {}
+    for point in monthly.get("points") or []:
+        quarter = quarter_of_month(str(point.get("period") or ""))
+        if quarter and point.get("value") is not None:
+            latest[quarter] = point
+    points = []
+    for quarter in sorted(latest, key=period_sort_key):
+        point = latest[quarter]
+        points.append({
+            "period": quarter,
+            "value": point.get("value"),
+            "reported": True,
+            "source_url": point.get("source_url") or monthly.get("source_url") or "",
+            "retrieved_at": point.get("retrieved_at") or "",
+        })
+    built = _collected_series(
+        metric_id,
+        points,
+        unit=monthly.get("unit") or "count",
+        source_url=monthly.get("source_url") or "",
+        source_title=monthly.get("source_title") or "Public AV regulator records",
+        source_kind="av_regulator",
+        confidence=monthly.get("confidence") or "medium",
+        notes=list(monthly.get("notes") or []),
+        cadence="quarterly",
+    )
+    return built
+
+
+def collect_av_regulator(source: dict, fetch, generated_at: str, previous: dict | None) -> tuple[list[dict], dict]:
+    """Permits held, and a vehicle count only when a page states one. Always pending review."""
+    if _validate_av_regulator(source):
+        return [], {"id": "av_regulator", "status": "failed", "note": "catalog source is incomplete"}
+    entities = _entity_names(source)
+    permits_metric, vehicles_metric, permits_quarter, vehicles_quarter = _regulator_ids(source)
+    period = month_of(generated_at)
+    if not period:
+        return _carried_regulator_series(previous, source), {
+            "id": "av_regulator",
+            "status": "failed",
+            "note": "no period",
+        }
+    permit_hits = []
+    vehicle_total = 0
+    vehicle_found = False
+    notes = [REGULATOR_NOTE]
+    errors = []
+    read = 0
+    source_url = ""
+    vehicle_url = ""
+    for feed in source.get("feeds") or []:
+        if not isinstance(feed, dict):
+            continue
+        url = str(feed.get("url") or "")
+        kind = str(feed.get("kind") or "")
+        jurisdiction = str(feed.get("jurisdiction") or "").strip() or "Regulator"
+        try:
+            html = fetch(url)
+        except _FETCH_ERRORS as exc:
+            errors.append(f"{jurisdiction}: {type(exc).__name__}")
+            continue
+        if not isinstance(html, str) or not html.strip():
+            errors.append(f"{jurisdiction}: empty")
+            continue
+        read += 1
+        if not source_url:
+            source_url = url
+        if kind == "permit_roster":
+            hits = parse_permit_roster(html, entities)
+            permit_hits.extend(hits)
+            notes.append(f"{jurisdiction}: {len(hits)} permit section(s) name the catalog entity.")
+        elif kind == "permit_table":
+            hits = parse_permit_table(html, entities)
+            permit_hits.extend(hits)
+            notes.append(f"{jurisdiction}: {len(hits)} permit row(s) name the catalog entity.")
+        elif kind == "stated_count":
+            count = parse_stated_vehicle_count(html, entities)
+            if count is None:
+                notes.append(f"{jurisdiction}: no permitted-vehicle count is stated.")
+            else:
+                vehicle_total += count
+                vehicle_found = True
+                vehicle_url = url
+                notes.append(f"{jurisdiction}: {count} permitted vehicles stated on the page.")
+    if read == 0:
+        return _carried_regulator_series(previous, source), {
+            "id": "av_regulator",
+            "status": "failed",
+            "note": "; ".join(errors) or "no feed",
+        }
+    permit_point = {
+        "period": period,
+        "value": len(permit_hits),
+        "reported": True,
+        "source_url": source_url,
+        "retrieved_at": generated_at,
+    }
+    permits = merge_level_series(previous, _collected_series(
+        permits_metric,
+        [permit_point],
+        unit="permits",
+        source_url=source_url,
+        source_title="Public AV regulator records",
+        source_kind="av_regulator",
+        confidence="medium",
+        notes=notes,
+        cadence="monthly",
+    ))
+    series = [permits, _quarter_series(permits, permits_quarter)]
+    if vehicle_found:
+        vehicles = merge_level_series(previous, _collected_series(
+            vehicles_metric,
+            [{
+                "period": period,
+                "value": vehicle_total,
+                "reported": True,
+                "source_url": vehicle_url or source_url,
+                "retrieved_at": generated_at,
+            }],
+            unit="vehicles",
+            source_url=vehicle_url or source_url,
+            source_title="Public AV regulator records",
+            source_kind="av_regulator",
+            confidence="low",
+            notes=notes,
+            cadence="monthly",
+        ))
+        series.extend([vehicles, _quarter_series(vehicles, vehicles_quarter)])
+    else:
+        # A page that stops stating a count must not wipe the earlier series.
+        series.extend(
+            item for item in _carried_regulator_series(previous, source)
+            if item.get("metric_id") in {vehicles_metric, vehicles_quarter}
+        )
+    status = "partial" if errors else "ok"
+    return series, {
+        "id": "av_regulator",
+        "status": status,
+        "permits": len(permit_hits),
+        "vehicles": vehicle_total if vehicle_found else None,
+        "note": REGULATOR_NOTE if not errors else "; ".join(errors),
     }
 
 

@@ -139,6 +139,47 @@ test("an unpublished 503 stays distinct from a serving-document failure", () => 
   assert.equal(dashboardBanner(rebuilding), "Dashboard data is being rebuilt; try again in a minute.");
 });
 
+test("a transient 401 keeps the session and shows the error", () => {
+  const loading = { dashboard: null, dashboardState: "loading", status: null, dashboardError: "" };
+  const failed = applyRefresh(
+    loading,
+    { status: "rejected", reason: new ApiError("Not signed in", 401) },
+    { status: "fulfilled", value: { jobs: [] } },
+  );
+  assert.equal(failed.unauthorized, false);
+  assert.equal(failed.dashboardState, "error");
+  assert.match(dashboardBanner(failed), /Not signed in/);
+});
+
+test("a rejected refresh token marks the session unauthorized without replacing the banner", () => {
+  const error = new ApiError("Your session expired. Sign in again to continue.", 401, "session_expired");
+  error.sessionExpired = true;
+  const current = {
+    dashboard: { tickers: { TSLA: {} } },
+    dashboardState: "ready",
+    status: null,
+    dashboardError: "earlier",
+  };
+  const failed = applyRefresh(
+    current,
+    { status: "rejected", reason: error },
+    { status: "fulfilled", value: { jobs: [] } },
+  );
+  assert.equal(failed.unauthorized, true);
+  assert.equal(failed.dashboardError, "earlier");
+  assert.equal(failed.dashboard.tickers.TSLA !== undefined, true);
+});
+
+test("a network error is not an unauthorized session", () => {
+  const failed = applyRefresh(
+    { dashboard: null, dashboardState: "loading", status: null, dashboardError: "" },
+    { status: "rejected", reason: networkError("Dashboard data", new TypeError("Load failed")) },
+    { status: "rejected", reason: networkError("Refresh status", new TypeError("Load failed")) },
+  );
+  assert.equal(failed.unauthorized, false);
+  assert.match(dashboardBanner(failed), /could not be reached/);
+});
+
 test("hasDashboardData requires a tickers map", () => {
   assert.equal(hasDashboardData({ tickers: { TSLA: {} } }), true);
   assert.equal(hasDashboardData({ tickers: {} }), true);

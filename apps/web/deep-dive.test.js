@@ -8,6 +8,7 @@ import {
   confidenceLabel,
   formatDeepValue,
   hasDeepDive,
+  orderedDeepDiveSections,
   renderDeepDive,
   revealDeepDiveSection,
   sectionHeadline,
@@ -237,6 +238,7 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
   assert.equal(toggle.getAttribute("aria-label"), "Sections");
   assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal(String(byClass(view, "deep-dive-section-nav")[0].className).includes("is-visible"), false);
+  assert.deepEqual(chips.map((chip) => chip.dataset.sectionId), ["scoreboard", "forecast", "places", "later"]);
   for (const chip of chips) {
     assert.equal(chip.tagName, "A");
     assert.equal(String(chip.className).includes("overlay-chip"), false);
@@ -414,6 +416,62 @@ test("section tiles use a catalog headline, then the first series, and omit a me
   assert.equal(section.scrolled.block, "start");
 });
 
+test("section tiles follow primary then secondary, and regulator records sit beside the estimate", () => {
+  const payload = {
+    deep_dive: {
+      title: "Deep dive",
+      sections: [
+        {
+          id: "later",
+          title: "Later",
+          placement: "secondary",
+          panels: [{ id: "later", kind: "trend-bars", title: "Later", kpis: [{ label: "Plants", value: 2, unit: "count" }] }],
+        },
+        {
+          id: "fleet",
+          title: "Fleet",
+          placement: "primary",
+          panels: [{
+            id: "fleet",
+            kind: "trend-bars",
+            title: "Fleet",
+            kpis: [{
+              label: "Fleet",
+              unit: "count",
+              value: 40,
+              estimate_only: true,
+              source_kind: "news_estimate",
+              approval_state: "proposed",
+              regulator_value: 12,
+              regulator_source_url: "https://regulator.example/roster",
+            }, {
+              label: "Permits held",
+              unit: "permits",
+              value: 1,
+              source_kind: "av_regulator",
+              approval_state: "proposed",
+            }],
+          }],
+        },
+      ],
+    },
+  };
+  assert.deepEqual(orderedDeepDiveSections(payload.deep_dive.sections).map((section) => section.id), ["fleet", "later"]);
+  const view = renderDeepDive(payload, fakeDocument(false), { ticker: "abcd" });
+  const chips = byClass(view, "deep-dive-section-tile");
+  assert.deepEqual(chips.map((chip) => chip.dataset.sectionId), ["fleet", "later"]);
+  assert.equal(chips[0].getAttribute("role"), undefined);
+  const fleet = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Fleet"));
+  assert.match(textOf(fleet), /Estimate/);
+  assert.match(textOf(fleet), /Regulator records/);
+  assert.match(textOf(fleet), /12/);
+  const permits = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Permits held"));
+  assert.equal(byClass(permits, "deep-dive-regulator").length, 1);
+  assert.equal(byClass(permits, "deep-dive-estimate").length, 0);
+  const sections = byClass(view, "deep-dive-section").map((section) => section.id);
+  assert.deepEqual(sections, ["deep-dive-fleet", "deep-dive-later"]);
+});
+
 function findId(node, id) {
   if (node?.id === id) return node;
   for (const child of node?.children || []) {
@@ -436,6 +494,7 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(trendTone(0, true), "flat");
   assert.equal(STOCK_TABS.length, 4);
   assert.equal(stockTabs(null).length, 4);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["overview", "kpis", "fundamentals", "calls", "deep-dive"]);
   assert.equal(stockTabs(sample).at(-1).id, "deep-dive");
   assert.equal(stockTabs(sample).at(-1).label, "Deep dive");
   assert.equal(nextStockTab("calls", "ArrowRight", stockTabs(sample)), "deep-dive");
@@ -500,6 +559,9 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   const phoneGrid = styles.slice(styles.lastIndexOf("@media (max-width: 640px)"));
   assert.match(phoneGrid, /\.deep-dive-sections\s*\{[^}]*repeat\(2/);
   assert.match(app, /hasDeepDive\(payload\)/);
+  assert.match(app, /stock-tab-mark", "\+"/);
+  assert.match(deepStyles, /grid-template-columns:\s*repeat\(6/);
+  assert.match(styles, /\.stock-page-tabs\s*\{[^}]*display:\s*flex/);
   assert.match(ci, /node --check apps\/web\/deep-dive\.js/);
   assert.match(ci, /node --check apps\/web\/geo\.js/);
 });

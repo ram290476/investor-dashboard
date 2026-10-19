@@ -14,6 +14,7 @@ import { applyRefresh, dashboardBanner, hasDashboardData, networkError, readApiR
 import { createAccountSettings } from "./account-settings.js";
 import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAmount, indexAtPlotX, niceAmountTicks, plotX } from "./chart-scale.js";
 import { applyTheme, overlayColor } from "./theme.js";
+import { clearRefreshToken, createAuthClient, performAuthorizedRequest } from "./auth-session.js";
 import { createSafeStorage } from "./safe-storage.js";
 import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, stockTabHash, tickerResearchPath } from "./routes.js";
 import {
@@ -99,6 +100,12 @@ const svgNS = "http://www.w3.org/2000/svg";
 // so sign-in, prefs (and with them the saved theme) still load (#214).
 const authStorage = createSafeStorage("sessionStorage", { cookieFallback: true });
 const localPrefs = createSafeStorage("localStorage");
+// Refresh token only. localStorage survives a reload and a new tab for the
+// 12-hour Cognito refresh-token lifetime, and it is scoped to this origin, so
+// investor.vellamsetti.com and the CloudFront host do not share a session.
+// No cookie fallback: a cookie would be sent on same-origin requests. The
+// access token stays in memory and is renewed with a silent refresh (#254).
+const tokenStorage = createSafeStorage("localStorage");
 const authKeys = {
   state: "oauth_state",
   verifier: "oauth_verifier",
@@ -155,6 +162,9 @@ const session = {
   metricReview: readStoredMetricReview(),
   metricReviewError: "",
   metricSave: false,
+  // Set when the refresh token is expired or revoked, so a late redraw cannot
+  // replace the sign-in gate.
+  ended: false,
 };
 const apiLabels = { dashboard: "Dashboard data", status: "Refresh status", prefs: "Your preferences" };
 let prefsSaveQueue = Promise.resolve();
@@ -193,12 +203,7 @@ function schedulePanelSave() {
       session.panelSaveError = "";
       root.querySelector("[data-panel-save-error]")?.remove();
     }).catch((error) => {
-      if (error.status === 401) {
-        settings.close();
-        session.accessToken = null;
-        showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
-        return;
-      }
+      if (error.sessionExpired) return;
       session.panelSaveError = error.message;
       renderDashboard();
     });
@@ -456,16 +461,17 @@ function apiUrl(path) {
   return `${session.config.apiBaseUrl.replace(/\/+$/, "")}/${path}`;
 }
 
-function showGate(title, message, error = "", showSignIn = false) {
+function showGate(title, message, error = "", showSignIn = false, onRetry = null) {
   root.replaceChildren();
   const gate = node("main", "gate");
   gate.append(node("p", "eyebrow", "INVESTOR DASHBOARD"));
   gate.append(node("h1", "", title));
   gate.append(node("p", "muted", message));
   if (error) gate.append(node("p", "error-copy", error));
-  if (showSignIn) {
+  if (showSignIn || onRetry) {
     const controls = node("div", "gate-actions");
-    controls.append(action("Sign in", "button-primary", beginSignIn));
+    if (onRetry) controls.append(action("Try again", "button-primary", onRetry));
+    if (showSignIn) controls.append(action("Sign in", showSignIn && onRetry ? "" : "button-primary", beginSignIn));
     gate.append(controls);
   }
   root.append(gate);
@@ -487,6 +493,31 @@ async function challengeFor(verifier) {
 
 function callbackUrl() {
   return session.config.callbackUrl || `${location.origin}/auth/callback`;
+}
+
+let authClient;
+
+function cognitoAuth() {
+  if (!authClient) {
+    authClient = createAuthClient({
+      fetchImpl: (url, init) => fetch(url, init),
+      cognitoDomain: () => session.config.cognitoDomain,
+      clientId: () => session.config.clientId,
+      redirectUri: () => callbackUrl(),
+      refreshStorage: tokenStorage,
+      pkceStorage: authStorage,
+      pkceKeys: authKeys,
+    });
+  }
+  return authClient;
+}
+
+function endSession() {
+  session.ended = true;
+  session.accessToken = null;
+  clearRefreshToken(tokenStorage);
+  settings.close();
+  showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
 }
 
 async function beginSignIn() {
@@ -524,124 +555,67 @@ async function beginSignIn() {
   }
 }
 
-async function completeSignIn() {
-  const query = new URLSearchParams(location.search);
-  const code = query.get("code");
-  if (!code) return false;
-  const expectedState = authStorage.getItem(authKeys.state);
-  const verifier = authStorage.getItem(authKeys.verifier);
-  authStorage.removeItem(authKeys.state);
-  authStorage.removeItem(authKeys.verifier);
-  if (!expectedState || query.get("state") !== expectedState || !verifier) {
-    throw new Error(authStorage.backend === "memory"
-      ? "This browser is blocking site storage and cookies (private browsing), so the sign-in state was lost. Allow site data for this site and sign in again."
-      : "The sign-in state did not match. Start sign-in again.");
-  }
-
-  const response = await fetch(new URL("/oauth2/token", session.config.cognitoDomain), {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: session.config.clientId,
-      code,
-      redirect_uri: callbackUrl(),
-      code_verifier: verifier,
-    }),
-  });
-  const tokens = await response.json();
-  if (!response.ok || !tokens.access_token) {
-    throw new Error(tokens.error_description || tokens.error || "Cognito did not return an access token.");
-  }
-  session.accessToken = tokens.access_token;
-  session.email = emailFromIdToken(tokens.id_token);
-  const pendingPath = authStorage.getItem(authKeys.path) || "/";
-  authStorage.removeItem(authKeys.path);
-  const pendingHash = authStorage.getItem(authKeys.hash) || "";
-  authStorage.removeItem(authKeys.hash);
-  history.replaceState({}, "", pendingPath + pendingHash);
-  return true;
-}
-
-function signOut() {
+async function signOut() {
+  session.ended = true;
   session.accessToken = null;
   session.prefs = null;
   session.dashboard = null;
-  const logout = new URL("/logout", session.config.cognitoDomain);
-  logout.search = new URLSearchParams({
-    client_id: session.config.clientId,
-    logout_uri: session.config.logoutUrl || `${location.origin}/`,
-  }).toString();
-  location.assign(logout);
+  const logoutUrl = await cognitoAuth().signOut(session.config.logoutUrl || `${location.origin}/`);
+  location.assign(logoutUrl);
 }
 
 // apiGet and putPrefs both surface prefs_api 502/503 codes through readApiResponse.
-async function apiGet(path) {
-  const what = apiLabels[path] || (String(path).startsWith("stock/") ? "Company page" : "The request");
-  let response;
+// A 401 refreshes the access token once. Only a rejected refresh token ends the session.
+async function authorizedApi(path, { method = "GET", body, label, cache } = {}) {
+  const what = label || apiLabels[path] || (String(path).startsWith("stock/") ? "Company page" : "The request");
   try {
-    response = await fetch(apiUrl(path), {
-      headers: {
-        Authorization: `Bearer ${session.accessToken}`,
-        Accept: "application/json",
+    const outcome = await performAuthorizedRequest({
+      accessToken: session.accessToken,
+      refresh: () => cognitoAuth().refresh(),
+      send: async (accessToken) => {
+        let response;
+        try {
+          const headers = {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          };
+          if (body !== undefined) headers["Content-Type"] = "application/json";
+          const init = { method, headers };
+          if (cache !== undefined) init.cache = cache;
+          if (body !== undefined) init.body = JSON.stringify(body);
+          response = await fetch(apiUrl(path), init);
+        } catch (cause) {
+          throw networkError(what, cause);
+        }
+        return readApiResponse(response, what);
       },
-      cache: "no-store",
     });
-  } catch (cause) {
-    throw networkError(what, cause);
+    session.accessToken = outcome.accessToken;
+    if (outcome.idToken) {
+      const email = emailFromIdToken(outcome.idToken);
+      if (email) session.email = email;
+    }
+    return outcome.result;
+  } catch (error) {
+    if (error.sessionExpired) endSession();
+    throw error;
   }
-  return readApiResponse(response, what);
+}
+
+async function apiGet(path) {
+  return authorizedApi(path, { cache: "no-store" });
 }
 
 async function apiPut(path, body, label) {
-  let response;
-  try {
-    response = await fetch(apiUrl(path), {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${session.accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
-  } catch (cause) {
-    throw networkError(label, cause);
-  }
-  return readApiResponse(response, label);
+  return authorizedApi(path, { method: "PUT", body, label, cache: "no-store" });
 }
 
 async function apiPost(path, label) {
-  let response;
-  try {
-    response = await fetch(apiUrl(path), {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.accessToken}`, Accept: "application/json" },
-      cache: "no-store",
-    });
-  } catch (cause) {
-    throw networkError(label, cause);
-  }
-  return readApiResponse(response, label);
+  return authorizedApi(path, { method: "POST", label, cache: "no-store" });
 }
 
 async function putPrefs(candidate) {
-  let response;
-  try {
-    response = await fetch(apiUrl("prefs"), {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${session.accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(candidate),
-    });
-  } catch (cause) {
-    throw networkError("Saving preferences", cause);
-  }
-  return readApiResponse(response, "Saving preferences");
+  return authorizedApi("prefs", { method: "PUT", body: candidate, label: "Saving preferences" });
 }
 
 async function savePrefs(update) {
@@ -680,12 +654,7 @@ async function loadChartData(ticker, force = false) {
     session.chartDataState[ticker] = "error";
     session.chartData[ticker] = null;
     session.chartDataError[ticker] = error.message;
-    if (error.status === 401) {
-      settings.close();
-      session.accessToken = null;
-      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
-      return;
-    }
+    if (error.sessionExpired) return;
   }
   if (selected || MARKET_OVERLAY_IDS.includes(ticker)) renderDashboard();
 }
@@ -705,12 +674,7 @@ async function loadStockPage(ticker, force = false) {
     else if (error.status === 404) session.stockPageState[ticker] = "missing";
     else session.stockPageState[ticker] = "error";
     session.stockPageError[ticker] = freshnessBadge(null, session.stockPageState[ticker], ticker).text;
-    if (error.status === 401) {
-      settings.close();
-      session.accessToken = null;
-      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
-      return;
-    }
+    if (error.sessionExpired) return;
   }
   if (session.selected === ticker) renderDashboard();
 }
@@ -733,12 +697,7 @@ async function loadFundHoldings(ticker, force = false) {
       const attempts = (force ? 0 : session.fundRetry[ticker]?.attempts || 0) + 1;
       session.fundRetry[ticker] = { attempts, notBefore: Date.now() + fundRetryDelayMs(attempts) };
     }
-    if (error.status === 401) {
-      settings.close();
-      session.accessToken = null;
-      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
-      return;
-    }
+    if (error.sessionExpired) return;
   }
   if (session.selected === ticker && session.route?.page === "stock") renderDashboard();
 }
@@ -3734,11 +3693,13 @@ async function submitMetricReview(metricId, status) {
     session.stockPageState[session.selected] = "ready";
     session.metricReviewError = "";
   } catch (error) {
-    session.metricReviewError = error.message || "The metric review could not be saved.";
+    if (!error.sessionExpired) session.metricReviewError = error.message || "The metric review could not be saved.";
   } finally {
     session.metricSave = false;
-    renderDashboard();
-    if (session.metricReviewError) focusMetricReviewError();
+    if (!session.ended) {
+      renderDashboard();
+      if (session.metricReviewError) focusMetricReviewError();
+    }
   }
 }
 
@@ -4091,7 +4052,7 @@ function renderStockPage() {
       selectStockTab(item.id);
     });
     if (item.id === "deep-dive") {
-      const mark = node("span", "stock-tab-mark");
+      const mark = node("span", "stock-tab-mark", "+");
       mark.setAttribute("aria-hidden", "true");
       tab.prepend(mark);
     }
@@ -4342,7 +4303,7 @@ async function selectChartPeriod(periodId) {
     renderDashboard();
     root.querySelector(`[data-period="${periodId}"]`)?.focus();
   } catch (error) {
-    notify(error.message, true);
+    if (!error.sessionExpired) notify(error.message, true);
   } finally {
     session.periodSave = false;
   }
@@ -4368,6 +4329,7 @@ function keepChartControlsPinned(before) {
 }
 
 function renderDashboard() {
+  if (session.ended) return;
   const before = chartControlsTop();
   renderDashboardNow();
   keepChartControlsPinned(before);
@@ -4517,9 +4479,7 @@ async function refreshData(showLoading) {
     .filter((result) => result.status === "rejected")
     .forEach((result) => console.error("Dashboard refresh failed:", result.reason));
   if (outcome.unauthorized) {
-    settings.close();
-    session.accessToken = null;
-    showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+    endSession();
     return;
   }
   session.dashboardError = outcome.dashboardError;
@@ -4548,15 +4508,36 @@ async function start() {
   }
   session.config = loadedConfig;
 
+  let outcome;
   try {
-    await completeSignIn();
+    outcome = await cognitoAuth().bootstrap({
+      pathname: location.pathname,
+      search: location.search,
+      hash: location.hash,
+    });
   } catch (error) {
-    history.replaceState({}, "", location.pathname);
     showGate("Sign-in failed", "Your Cognito session could not be established.", error.message, true);
     return;
   }
+  if (outcome.replaceUrl != null) history.replaceState({}, "", outcome.replaceUrl);
 
-  if (!session.accessToken) {
+  if (outcome.status === "signed-in") {
+    session.accessToken = outcome.accessToken;
+    const email = emailFromIdToken(outcome.idToken);
+    if (email) session.email = email;
+  } else if (outcome.status === "unavailable") {
+    showGate(
+      "Could not restore your session",
+      "The sign-in service could not be reached. Your session on this device is unchanged.",
+      outcome.message || "",
+      false,
+      () => location.reload(),
+    );
+    return;
+  } else if (outcome.status === "sign-in-failed") {
+    showGate("Sign-in failed", "Your Cognito session could not be established.", outcome.message || "", true);
+    return;
+  } else {
     showGate("Your market data, at a glance", "Sign in with your invited Cognito account to view the dashboard and manage your watchlist.", "", true);
     return;
   }
@@ -4585,10 +4566,7 @@ async function start() {
     settings.openFromHash();
     await refreshData(false);
   } catch (error) {
-    if (error.status === 401) {
-      showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
-      return;
-    }
+    if (error.sessionExpired) return;
     showGate("Dashboard could not load", "The preferences service did not return your account settings.", error.message, true);
   }
 }
@@ -4603,9 +4581,7 @@ const settings = createAccountSettings({
     refreshData(false);
   },
   onUnauthorized: () => {
-    settings.close();
-    session.accessToken = null;
-    showGate("Your session expired", "Sign in again to continue to your private dashboard.", "", true);
+    endSession();
   },
   onSaveError: (message, reopen) => {
     session.settingsError = { message, reopen };

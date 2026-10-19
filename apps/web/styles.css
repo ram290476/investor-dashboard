@@ -3855,11 +3855,14 @@ a.catalyst-edgar-link:hover {
 }
 
 .stock-tab-mark {
-  width: 7px;
-  height: 7px;
+  width: auto;
+  height: auto;
   flex: none;
-  border-radius: 999px;
-  background: var(--amber);
+  border-radius: 0;
+  background: transparent;
+  color: var(--amber);
+  font-weight: 700;
+  line-height: 1;
 }
 
 .stock-page-tabs .stock-tab-deep {
@@ -5505,6 +5508,21 @@ a.catalyst-edgar-link:hover {
   text-transform: uppercase;
 }
 
+.deep-dive-regulator {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.deep-dive-regulator-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
 .deep-dive-estimate-line {
   display: inline-flex;
   flex-wrap: wrap;
@@ -5674,6 +5692,12 @@ a.catalyst-edgar-link:hover {
 .deep-dive-tools {
   display: flex;
   gap: 6px;
+}
+
+@media (max-width: 1023px) {
+  .deep-dive-jump {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
