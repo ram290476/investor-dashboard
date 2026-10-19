@@ -671,8 +671,12 @@ development. The root callback is compatible with Python's basic static server. 
 `/auth/callback` on `public_url` (the custom domain when `site_domain` is set, otherwise the
 CloudFront URL) and its SPA fallback. Cognito still allows the CloudFront callback and logout
 URLs. The plain CloudFront hostname is not redirected. Open `http://localhost:8080/` and sign in
-with an invited Cognito user (MFA is currently off). The application keeps access tokens in memory,
-uses PKCE, and sends them only as Bearer authorization headers. `config.json` is git-ignored.
+with an invited Cognito user (MFA is currently off). The application keeps the access token in
+memory and the refresh token in `localStorage` for this origin only. A reload or a new tab stays
+signed in until that refresh token expires, is revoked, or the user signs out.
+`investor.vellamsetti.com` and the CloudFront hostname do not share a session. It uses PKCE,
+renews the access token with a silent refresh, and sends access tokens only as Bearer
+authorization headers. Tokens are not put in URLs, cookies, or logs. `config.json` is git-ignored.
 
 For deployment, use the protected Actions workflow or publish the generated config and site
 using the S3 bucket and CloudFront distribution in the `site` output. Verify the home page,
