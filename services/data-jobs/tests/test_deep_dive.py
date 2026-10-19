@@ -30,6 +30,33 @@ def test_packaged_catalog_deep_dive_is_valid_and_metrics_stay_proposed():
     source = Path(dd.__file__).read_text()
     assert "TSLA" not in source
     assert '== "TSLA"' not in source
+    assert "SPCX" not in source
+    assert "SpaceX" not in source
+
+
+def test_spcx_deep_dive_is_catalog_data_and_stays_proposed():
+    catalog = ir.load_catalog("SPCX")
+    assert ir.validate_catalog(catalog) == []
+    assert all(item["status"] == "proposed" for item in catalog["metrics"])
+    notes = " ".join(catalog["deep_dive"]["name_notes"])
+    assert "Terraform" in notes and "unconfirmed" in notes
+    assert "Starmind" in notes and "Starshield" in notes
+    document = dd.assemble_deep_dive(catalog, [], generated_at="2026-10-19T00:00:00Z")
+    assert document["model_status"] == "placeholder"
+    assert document["forecast"]["model_id"] == "seasonal_naive_v0"
+    assert document["forecast"]["consensus"] is None
+    ids = [section["id"] for section in document["sections"]]
+    for required in (
+        "scoreboard", "forecast", "launches", "projected-launches", "terraform",
+        "factories", "starship", "starlink", "starmind", "ai-deals", "revenue",
+    ):
+        assert required in ids
+    forecast = document["forecast"]["segments"]
+    assert [segment["id"] for segment in forecast] == [
+        "launch", "starlink", "starmind", "starship", "ai", "total",
+    ]
+    total = forecast[-1]
+    assert all(point.get("band_low") is None for metric in total["metrics"] for point in metric["forecast"])
 
 
 def test_sgo_parser_dedupes_versions_and_ignores_other_entities():

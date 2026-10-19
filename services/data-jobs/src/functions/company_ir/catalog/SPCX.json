@@ -329,6 +329,1026 @@
       ],
       "xbrl_kind": "instant",
       "xbrl_unit": "USD"
+    },
+    {
+      "metric_id": "launch_count_falcon9",
+      "display_name": "Falcon 9 launches",
+      "unit": "launches",
+      "definition": "Launch count for Falcon 9. Not collected by an API. A sourced manual row stays pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 160,
+      "aliases": [
+        "Falcon 9 launches"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "launch_count_falcon_heavy",
+      "display_name": "Falcon Heavy launches",
+      "unit": "launches",
+      "definition": "Launch count for Falcon Heavy. Not collected by an API. A sourced manual row stays pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 170,
+      "aliases": [
+        "Falcon Heavy launches"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "launch_count_starship_vehicle",
+      "display_name": "Starship launches",
+      "unit": "launches",
+      "definition": "Launch count when the vehicle is Starship. Not collected by an API. A sourced manual row stays pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 180,
+      "aliases": [
+        "Starship launches"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "launch_count_projected",
+      "display_name": "Projected launches",
+      "unit": "launches",
+      "definition": "Forward launch count. The seasonal-naive placeholder does not estimate this series.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 190,
+      "aliases": [
+        "Projected launches"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "launches_schedule",
+      "display_name": "Launch schedule",
+      "unit": "launches",
+      "definition": "Historical and upcoming launches: date, vehicle, mission or customer, orbit, outcome, and booster reuse. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 200,
+      "aliases": [
+        "Launch schedule",
+        "Upcoming launches"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starlink_satellites_built",
+      "display_name": "Starlink satellites built",
+      "unit": "satellites",
+      "definition": "Satellites built. Not disclosed as a collected series. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 210,
+      "aliases": [
+        "Starlink production"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starlink_satellites_deployed",
+      "display_name": "Starlink satellites deployed",
+      "unit": "satellites",
+      "definition": "Satellites launched or deployed. Not disclosed as a collected series. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 220,
+      "aliases": [
+        "Starlink deployments"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starlink_constellation",
+      "display_name": "Starlink constellation size",
+      "unit": "satellites",
+      "definition": "Constellation size. Not disclosed as a collected series. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 230,
+      "aliases": [
+        "Constellation size"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starlink_deployed_by_country",
+      "display_name": "Starlink deployments by place",
+      "unit": "satellites",
+      "definition": "Place-level deployment counts for the world map. Only sourced manual places are shown.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 240,
+      "aliases": [
+        "Starlink by country"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starmind_production",
+      "display_name": "Starmind production",
+      "unit": "units",
+      "definition": "Production count for the program labeled Starmind. The label comes from a voice note and is unconfirmed. It is not treated as a disclosed program name. It may be Starshield. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 250,
+      "aliases": [
+        "Starmind built"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "starmind_deployed",
+      "display_name": "Starmind deployments",
+      "unit": "units",
+      "definition": "Deployment count for the program labeled Starmind. The label comes from a voice note and is unconfirmed. It is not treated as a disclosed program name. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 260,
+      "aliases": [
+        "Starmind deployed"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "terraform_progress",
+      "display_name": "Terraform progress",
+      "unit": "narrative",
+      "definition": "Progress for the program labeled Terraform. The label comes from a voice note and is unconfirmed. It is not treated as a disclosed program name. This is not a HashiCorp Terraform metric.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 270,
+      "aliases": [
+        "Terraform"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "factory_sites",
+      "display_name": "New factories",
+      "unit": "sites",
+      "definition": "New factories and sites. Names and dates appear only from sourced manual entries.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 280,
+      "aliases": [
+        "Factories"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "ai_deals",
+      "display_name": "AI deals",
+      "unit": "deals",
+      "definition": "AI deals by segment: partner, size, date, and status. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 290,
+      "aliases": [
+        "AI deals"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "ai_deals_launch",
+      "display_name": "AI deals, launch",
+      "unit": "deals",
+      "definition": "AI deals tagged to the launch segment. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 300,
+      "aliases": [
+        "Launch AI deals"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "ai_deals_starlink",
+      "display_name": "AI deals, Starlink",
+      "unit": "deals",
+      "definition": "AI deals tagged to Starlink. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 310,
+      "aliases": [
+        "Starlink AI deals"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "ai_deals_starmind",
+      "display_name": "AI deals, Starmind",
+      "unit": "deals",
+      "definition": "AI deals tagged to the program labeled Starmind. The label comes from a voice note and is unconfirmed. It is not treated as a disclosed program name.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 320,
+      "aliases": [
+        "Starmind AI deals"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "ai_deals_starship",
+      "display_name": "AI deals, Starship",
+      "unit": "deals",
+      "definition": "AI deals tagged to Starship. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 330,
+      "aliases": [
+        "Starship AI deals"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "ai_deals_ai",
+      "display_name": "AI deals, AI segment",
+      "unit": "deals",
+      "definition": "AI deals tagged to the AI segment. Manual rows stay pending review.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 340,
+      "aliases": [
+        "AI segment deals"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_starmind",
+      "display_name": "Starmind revenue",
+      "unit": "USD",
+      "definition": "Revenue for the program labeled Starmind. The label comes from a voice note and is unconfirmed. It is not treated as a disclosed program name. No licensed consensus feed.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 350,
+      "aliases": [
+        "Starmind revenue"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
+    },
+    {
+      "metric_id": "revenue_starship",
+      "display_name": "Starship revenue",
+      "unit": "USD",
+      "definition": "Starship revenue. Not disclosed as its own series. Manual rows stay pending review.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 360,
+      "aliases": [
+        "Starship revenue"
+      ],
+      "disclosure_status": "not_disclosed",
+      "scale": 1,
+      "source_priority": [
+        "press_release",
+        "deck"
+      ]
     }
-  ]
+  ],
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "name_notes": [
+      "Terraform is a voice label. The program name is unconfirmed. It is not HashiCorp Terraform.",
+      "Starmind is a voice label. The program name is unconfirmed and may be Starshield."
+    ],
+    "forecast": {
+      "segments": [
+        {
+          "id": "launch",
+          "label": "Launch",
+          "revenue_metric": "revenue_space"
+        },
+        {
+          "id": "starlink",
+          "label": "Starlink",
+          "revenue_metric": "revenue_connectivity"
+        },
+        {
+          "id": "starmind",
+          "label": "Starmind",
+          "revenue_metric": "revenue_starmind"
+        },
+        {
+          "id": "starship",
+          "label": "Starship",
+          "revenue_metric": "revenue_starship"
+        },
+        {
+          "id": "ai",
+          "label": "AI",
+          "revenue_metric": "revenue_ai"
+        },
+        {
+          "id": "total",
+          "label": "Total",
+          "revenue_metric": "revenue_gaap",
+          "eps_metric": "eps_diluted"
+        }
+      ]
+    },
+    "sections": [
+      {
+        "id": "scoreboard",
+        "title": "Trend scoreboard",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "scoreboard",
+            "kind": "scoreboard",
+            "title": "Trend scoreboard",
+            "subtitle": "Latest value, sparkline, and QoQ / YoY. Empty tiles are not zero.",
+            "width": "wide",
+            "source_note": "Derived from the series on this page. Pending values stay pending.",
+            "tiles": [
+              {
+                "metric_id": "total_launches",
+                "label": "Launches"
+              },
+              {
+                "metric_id": "launch_count_projected",
+                "label": "Projected launches"
+              },
+              {
+                "metric_id": "starship_flights",
+                "label": "Starship flights"
+              },
+              {
+                "metric_id": "starlink_subscribers",
+                "label": "Starlink subscribers"
+              },
+              {
+                "metric_id": "starlink_satellites_deployed",
+                "label": "Starlink deployed"
+              },
+              {
+                "metric_id": "starlink_satellites_built",
+                "label": "Starlink built"
+              },
+              {
+                "metric_id": "starmind_production",
+                "label": "Starmind built"
+              },
+              {
+                "metric_id": "starmind_deployed",
+                "label": "Starmind deployed"
+              },
+              {
+                "metric_id": "terraform_progress",
+                "label": "Terraform"
+              },
+              {
+                "metric_id": "factory_sites",
+                "label": "New factories"
+              },
+              {
+                "metric_id": "ai_deals",
+                "label": "AI deals"
+              },
+              {
+                "metric_id": "revenue_space",
+                "label": "Launch revenue"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "forecast",
+        "title": "Revenue and earnings forecast",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "forecast",
+            "kind": "forecast-band",
+            "title": "Revenue and earnings forecast",
+            "subtitle": "Seasonal-naive baseline only. Not an in-house model. No consensus feed.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "source_note": "Actuals reuse company metrics when those series exist. The baseline copies the same quarter a year earlier. Bands and consensus are not estimated. Starmind is an unconfirmed voice label."
+          }
+        ]
+      },
+      {
+        "id": "launches",
+        "title": "Launches",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "launch-cadence",
+            "kind": "trend-bars",
+            "title": "Launch cadence",
+            "subtitle": "Counts by vehicle. Monthly points appear when a manual row uses a month period.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "source_note": "No launch-library key is configured for this page. Counts stay pending until a sourced manual entry exists. The regulatory feed's upcoming-launch headlines are not copied here.",
+            "kpis": [
+              {
+                "metric_id": "total_launches",
+                "label": "Total"
+              },
+              {
+                "metric_id": "mass_to_orbit",
+                "label": "Mass to orbit"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "launch_count_falcon9",
+                "label": "Falcon 9",
+                "role": "bar",
+                "stack": "vehicles"
+              },
+              {
+                "metric_id": "launch_count_falcon_heavy",
+                "label": "Falcon Heavy",
+                "role": "bar",
+                "stack": "vehicles"
+              },
+              {
+                "metric_id": "launch_count_starship_vehicle",
+                "label": "Starship",
+                "role": "bar",
+                "stack": "vehicles"
+              },
+              {
+                "metric_id": "total_launches",
+                "label": "Total",
+                "role": "line"
+              }
+            ]
+          },
+          {
+            "id": "launch-schedule",
+            "kind": "table",
+            "title": "Launch schedule",
+            "subtitle": "Historical and upcoming rows. Outcome and booster reuse stay blank until sourced.",
+            "width": "wide",
+            "empty_label": "Not yet disclosed",
+            "source_note": "Each row needs an https source. Rows stay pending review.",
+            "table": {
+              "metric_id": "launches_schedule",
+              "columns": [
+                {
+                  "id": "date",
+                  "label": "Date"
+                },
+                {
+                  "id": "vehicle",
+                  "label": "Vehicle"
+                },
+                {
+                  "id": "mission",
+                  "label": "Mission / customer"
+                },
+                {
+                  "id": "orbit",
+                  "label": "Orbit"
+                },
+                {
+                  "id": "outcome",
+                  "label": "Outcome"
+                },
+                {
+                  "id": "booster",
+                  "label": "Booster reuse"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "projected-launches",
+        "title": "Projected launches",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "projected-launches",
+            "kind": "trend-bars",
+            "title": "Projected launches",
+            "subtitle": "Shown beside actual cadence. The dashed series is not estimated.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "source_note": "The placeholder forecast does not project launch counts. No range is stored.",
+            "series": [
+              {
+                "metric_id": "total_launches",
+                "label": "Actual",
+                "role": "bar"
+              },
+              {
+                "metric_id": "launch_count_projected",
+                "label": "Projected",
+                "role": "line-dashed"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "terraform",
+        "title": "Terraform",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "terraform",
+            "kind": "milestone-timeline",
+            "title": "Terraform progress",
+            "subtitle": "Voice label. The program name is unconfirmed.",
+            "width": "wide",
+            "milestone_metric": "terraform_progress",
+            "source_note": "Terraform is the dictated label, not a confirmed program name, and it is not HashiCorp Terraform. Dates appear only from a sourced manual entry.",
+            "milestones": [
+              {
+                "id": "stated-goal",
+                "label": "Stated goal"
+              },
+              {
+                "id": "site-work",
+                "label": "Site work"
+              },
+              {
+                "id": "first-asset",
+                "label": "First asset"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "factories",
+        "title": "New factories",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "factory-milestones",
+            "kind": "milestone-timeline",
+            "title": "Factory progress",
+            "subtitle": "Named sites only. No date until a sourced entry exists.",
+            "width": "half",
+            "milestone_metric": "factory_sites",
+            "source_note": "Manual and pending review.",
+            "milestones": [
+              {
+                "id": "announced",
+                "label": "Announced"
+              },
+              {
+                "id": "construction",
+                "label": "Construction"
+              },
+              {
+                "id": "production",
+                "label": "Production"
+              }
+            ]
+          },
+          {
+            "id": "factory-table",
+            "kind": "table",
+            "title": "Factory sites",
+            "subtitle": "Site, status, and note.",
+            "width": "half",
+            "empty_label": "Not yet disclosed",
+            "source_note": "Manual and pending review.",
+            "table": {
+              "metric_id": "factory_sites",
+              "columns": [
+                {
+                  "id": "site",
+                  "label": "Site"
+                },
+                {
+                  "id": "status",
+                  "label": "Status"
+                },
+                {
+                  "id": "note",
+                  "label": "Note"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "starship",
+        "title": "Starship",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "starship-cadence",
+            "kind": "trend-bars",
+            "title": "Flight tests",
+            "subtitle": "Cadence of flight tests. The company metric stays in its existing review state.",
+            "width": "half",
+            "cadence": "quarterly",
+            "source_note": "The packaged company metric is narrative until a numeric series is sourced.",
+            "series": [
+              {
+                "metric_id": "starship_flights",
+                "label": "Flight tests",
+                "role": "bar"
+              }
+            ]
+          },
+          {
+            "id": "starship-milestones",
+            "kind": "milestone-timeline",
+            "title": "Starship milestones",
+            "subtitle": "Labels only until a date is sourced.",
+            "width": "half",
+            "milestone_metric": "starship_flights",
+            "source_note": "Manual dates stay pending review.",
+            "milestones": [
+              {
+                "id": "flight-test",
+                "label": "Flight test"
+              },
+              {
+                "id": "reuse",
+                "label": "Booster reuse"
+              },
+              {
+                "id": "cadence",
+                "label": "Sustained cadence"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "starlink",
+        "title": "Starlink",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "starlink",
+            "kind": "trend-bars",
+            "title": "Production and deployments",
+            "subtitle": "Built, deployed, and constellation size. The map uses disclosed places only.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "map": "world",
+            "map_metric": "starlink_deployed_by_country",
+            "source_note": "Subscriber totals can come from the company metric when it has points. Satellite counts and places are manual and pending review. No map key is used.",
+            "kpis": [
+              {
+                "metric_id": "starlink_subscribers",
+                "label": "Subscribers"
+              },
+              {
+                "metric_id": "starlink_arpu",
+                "label": "ARPU"
+              },
+              {
+                "metric_id": "starlink_constellation",
+                "label": "Constellation"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "starlink_satellites_built",
+                "label": "Built",
+                "role": "bar",
+                "stack": "sats"
+              },
+              {
+                "metric_id": "starlink_satellites_deployed",
+                "label": "Deployed",
+                "role": "bar",
+                "stack": "sats"
+              },
+              {
+                "metric_id": "starlink_constellation",
+                "label": "Constellation",
+                "role": "line"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "starmind",
+        "title": "Starmind",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "starmind",
+            "kind": "trend-bars",
+            "title": "Production and deployments",
+            "subtitle": "Voice label. The program name is unconfirmed and may be Starshield.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "source_note": "Starmind is the dictated label, not a confirmed program name. Counts stay undisclosed until a sourced manual entry exists.",
+            "kpis": [
+              {
+                "metric_id": "starmind_production",
+                "label": "Built"
+              },
+              {
+                "metric_id": "starmind_deployed",
+                "label": "Deployed"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "starmind_production",
+                "label": "Built",
+                "role": "bar"
+              },
+              {
+                "metric_id": "starmind_deployed",
+                "label": "Deployed",
+                "role": "line"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "ai-deals",
+        "title": "AI deals",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "ai-deal-trends",
+            "kind": "trend-bars",
+            "title": "Deals by segment",
+            "subtitle": "One trend per segment, not only a total.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "source_note": "Deal rows are manual and pending review. No partner list is invented.",
+            "series": [
+              {
+                "metric_id": "ai_deals_launch",
+                "label": "Launch",
+                "role": "bar",
+                "stack": "deals"
+              },
+              {
+                "metric_id": "ai_deals_starlink",
+                "label": "Starlink",
+                "role": "bar",
+                "stack": "deals"
+              },
+              {
+                "metric_id": "ai_deals_starmind",
+                "label": "Starmind",
+                "role": "bar",
+                "stack": "deals"
+              },
+              {
+                "metric_id": "ai_deals_starship",
+                "label": "Starship",
+                "role": "bar",
+                "stack": "deals"
+              },
+              {
+                "metric_id": "ai_deals_ai",
+                "label": "AI",
+                "role": "bar",
+                "stack": "deals"
+              }
+            ]
+          },
+          {
+            "id": "ai-deal-table",
+            "kind": "table",
+            "title": "Deal register",
+            "subtitle": "Partner, segment, size, date, and status.",
+            "width": "wide",
+            "empty_label": "Not yet disclosed",
+            "source_note": "Each row needs an https source and stays pending review.",
+            "table": {
+              "metric_id": "ai_deals",
+              "columns": [
+                {
+                  "id": "partner",
+                  "label": "Partner"
+                },
+                {
+                  "id": "segment",
+                  "label": "Segment"
+                },
+                {
+                  "id": "size",
+                  "label": "Size"
+                },
+                {
+                  "id": "date",
+                  "label": "Date"
+                },
+                {
+                  "id": "status",
+                  "label": "Status"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "revenue",
+        "title": "Revenue by segment",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "revenue-trends",
+            "kind": "trend-bars",
+            "title": "Reported revenue",
+            "subtitle": "Each segment on its own series, plus the total when GAAP revenue exists.",
+            "width": "wide",
+            "cadence": "quarterly",
+            "source_note": "Company metrics keep the review state they already have. Starmind and Starship revenue are undisclosed. Projected revenue is the forecast panel, not this chart.",
+            "series": [
+              {
+                "metric_id": "revenue_space",
+                "label": "Launch",
+                "role": "bar",
+                "stack": "revenue"
+              },
+              {
+                "metric_id": "revenue_connectivity",
+                "label": "Starlink",
+                "role": "bar",
+                "stack": "revenue"
+              },
+              {
+                "metric_id": "revenue_starmind",
+                "label": "Starmind",
+                "role": "bar",
+                "stack": "revenue"
+              },
+              {
+                "metric_id": "revenue_starship",
+                "label": "Starship",
+                "role": "bar",
+                "stack": "revenue"
+              },
+              {
+                "metric_id": "revenue_ai",
+                "label": "AI",
+                "role": "bar",
+                "stack": "revenue"
+              },
+              {
+                "metric_id": "revenue_gaap",
+                "label": "Total",
+                "role": "line"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }
