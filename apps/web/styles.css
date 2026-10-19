@@ -3811,6 +3811,9 @@ a.catalyst-edgar-link:hover {
   height: auto;
   min-height: 36px;
   padding-inline: 12px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
   font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   font-weight: 500;
 }
@@ -3820,7 +3823,7 @@ a.catalyst-edgar-link:hover {
   background: var(--selected);
   color: var(--text);
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--blue);
+  box-shadow: none;
 }
 
 .stock-tab-separator {
@@ -3832,11 +3835,14 @@ a.catalyst-edgar-link:hover {
 }
 
 .stock-tab-mark {
-  width: 7px;
-  height: 7px;
+  width: auto;
+  height: auto;
   flex: none;
-  border-radius: 999px;
-  background: var(--amber);
+  border-radius: 0;
+  background: transparent;
+  color: var(--amber);
+  font-weight: 700;
+  line-height: 1;
 }
 
 .stock-page-tabs .stock-tab-deep {
@@ -4184,13 +4190,19 @@ a.catalyst-edgar-link:hover {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
   min-height: 44px;
   margin: 0;
+  padding: 3px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
+  border: 1px solid var(--control-line);
+  border-radius: 10px;
+  background: var(--surface-raised);
 }
 
 .stock-page [data-stock-panel] {
@@ -5147,56 +5159,77 @@ a.catalyst-edgar-link:hover {
 }
 
 .deep-dive-jump {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
   margin: 0;
-  padding: 8px 12px;
-  border: 1px dashed var(--control-line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-raised) 65%, var(--surface));
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .deep-dive-jump-label {
-  margin-right: 2px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .deep-dive-jump-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-height: 28px;
-  padding: 2px 0;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  border-radius: 0;
-  background: transparent;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--control-line);
+  border-radius: 10px;
+  background: var(--surface-raised);
   color: var(--secondary);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.3;
   text-decoration: none;
 }
 
-.deep-dive-jump-mark {
-  color: var(--amber);
-  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+.deep-dive-jump-text {
+  overflow: hidden;
+  color: var(--text);
   font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deep-dive-jump-value {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.deep-dive-jump-note {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .deep-dive-jump-chip:hover,
 .deep-dive-jump-chip:focus-visible {
-  border-bottom-color: var(--amber);
+  border-color: var(--amber);
   color: var(--text);
 }
 
 .deep-dive-jump-chip[aria-current="location"] {
-  border-bottom: 2px solid var(--amber);
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, var(--surface));
   color: var(--text);
   font-weight: 600;
 }
@@ -5300,6 +5333,21 @@ a.catalyst-edgar-link:hover {
   font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.deep-dive-regulator {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.deep-dive-regulator-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
 }
 
 .deep-dive-estimate-line {
@@ -5473,6 +5521,12 @@ a.catalyst-edgar-link:hover {
   gap: 6px;
 }
 
+@media (max-width: 1023px) {
+  .deep-dive-jump {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 640px) {
   .deep-dive-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -5486,7 +5540,16 @@ a.catalyst-edgar-link:hover {
     display: grid;
   }
 
+  .deep-dive-jump {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
   .deep-dive-jump-chip {
-    min-height: 44px;
+    flex: 0 0 148px;
+    min-height: 64px;
   }
 }
