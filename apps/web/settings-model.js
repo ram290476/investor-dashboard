@@ -7,7 +7,7 @@ export const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 export const PIN_LIMIT_MESSAGE = `Pin limit reached (${MAX_PINNED}). Unpin one first.`;
 
 export const SETTINGS_TABS = [
-  { id: "tickers", label: "My tickers" },
+  { id: "tickers", label: "Watchlist" },
   { id: "theme", label: "Theme & display" },
   { id: "profile", label: "Profile & time zone" },
 ];
@@ -59,12 +59,12 @@ function clone(prefs) {
 }
 
 /** "#settings/theme" -> "theme". "#settings/refresh" opens the data refresh pop-up.
- * Unknown tabs fall back to My tickers. Other hashes return null. */
+ * Unknown tabs fall back to Watchlist. Other hashes return null. */
 export function parseSettingsHash(hash) {
   const match = /^#settings(?:\/([a-z-]*))?$/.exec(String(hash || ""));
   if (!match) return null;
   if (match[1] === "refresh") return "refresh";
-  if (match[1] === ADMIN_TAB.id) return ADMIN_TAB.id; // the pop-up falls back to My tickers for non-admins
+  if (match[1] === ADMIN_TAB.id) return ADMIN_TAB.id; // the pop-up falls back to Watchlist for non-admins
   return SETTINGS_TABS.some((tab) => tab.id === match[1]) ? match[1] : "tickers";
 }
 
@@ -87,7 +87,7 @@ export function validateNewTicker(raw, prefs) {
   const ticker = String(raw || "").trim().toUpperCase();
   if (!ticker) return { error: "Enter a ticker symbol." };
   if (!SYMBOL_RE.test(ticker)) return { error: `${ticker} is not a valid ticker symbol.` };
-  if ((prefs.tickers || []).includes(ticker)) return { error: `${ticker} is already in My tickers.` };
+  if ((prefs.tickers || []).includes(ticker)) return { error: `${ticker} is already on the watchlist.` };
   if ((prefs.tickers || []).length >= MAX_TICKERS) return { error: tickerLimitMessage(prefs.tickers.length) };
   return { ticker };
 }
@@ -114,7 +114,7 @@ export function removeTicker(prefs, ticker) {
   if (!canRemove(prefs)) return { error: "Keep at least one ticker." };
   const next = clone(prefs);
   const index = next.tickers.indexOf(ticker);
-  if (index < 0) return { error: `${ticker} is not in My tickers.` };
+  if (index < 0) return { error: `${ticker} is not on the watchlist.` };
   next.tickers.splice(index, 1);
   const pinIndex = next.pinned.indexOf(ticker);
   if (pinIndex >= 0) next.pinned.splice(pinIndex, 1);

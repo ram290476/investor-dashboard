@@ -15,21 +15,22 @@ function accessToken(claims) {
   return `e.${payload}.s`;
 }
 
-test("company tabs are Overview, Trends, Deep dive, Fundamentals, and KPIs", () => {
-  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["overview", "trends", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(deepDive).map((tab) => tab.label), ["Overview", "Trends", "Deep dive", "Fundamentals", "KPIs"]);
+test("company tabs are Trends, Technical, Deep dive, Fundamentals, and KPIs", () => {
+  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(deepDive).map((tab) => tab.label), ["Trends", "Technical", "Deep dive", "Fundamentals", "KPIs"]);
+  assert.equal(stockTabs(deepDive).some((tab) => tab.label === "Overview"), false);
   assert.equal(stockTabs({ deep_dive: { sections: [] } }).some((tab) => tab.id === "deep-dive"), false);
   assert.equal(stockTabs(null).some((tab) => tab.id === "calls"), false);
   assert.equal(stockTabs(deepDive).some((tab) => tab.id === "admin"), false);
   const tabs = stockTabs(deepDive);
-  assert.equal(nextStockTab("overview", "ArrowRight", tabs), "trends");
-  assert.equal(nextStockTab("trends", "ArrowRight", tabs), "deep-dive");
+  assert.equal(nextStockTab("trends", "ArrowRight", tabs), "overview");
+  assert.equal(nextStockTab("overview", "ArrowRight", tabs), "deep-dive");
   assert.equal(nextStockTab("deep-dive", "ArrowRight", tabs), "fundamentals");
   assert.equal(nextStockTab("fundamentals", "ArrowLeft", tabs), "deep-dive");
-  assert.equal(nextStockTab("kpis", "ArrowRight", tabs), "overview");
-  assert.equal(nextStockTab("kpis", "Home", tabs), "overview");
+  assert.equal(nextStockTab("kpis", "ArrowRight", tabs), "trends");
+  assert.equal(nextStockTab("kpis", "Home", tabs), "trends");
   assert.equal(nextStockTab("overview", "End", tabs), "kpis");
-  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(null)), "fundamentals");
+  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(null)), "overview");
 });
 
 test("Admin is last, only for a signed-in admin, and a non-admin hash cannot open it", () => {
@@ -46,13 +47,13 @@ test("Admin is last, only for a signed-in admin, and a non-admin hash cannot ope
   const ownerToken = accessToken({ "cognito:groups": ["admin"], email: owner, username: owner });
   assert.equal(canApproveMetrics(ownerToken, owner), true);
   const tabs = stockTabs(deepDive, { admin: canApproveMetrics(ownerToken, owner) });
-  assert.deepEqual(tabs.map((tab) => tab.id), ["overview", "trends", "deep-dive", "fundamentals", "kpis", "admin"]);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["trends", "overview", "deep-dive", "fundamentals", "kpis", "admin"]);
   assert.equal(tabs.at(-1).label, "Admin");
   assert.equal(nextStockTab("kpis", "ArrowRight", tabs), "admin");
-  assert.equal(nextStockTab("admin", "ArrowRight", tabs), "overview");
+  assert.equal(nextStockTab("admin", "ArrowRight", tabs), "trends");
   assert.equal(nextStockTab("admin", "ArrowLeft", tabs), "kpis");
   assert.equal(nextStockTab("overview", "End", tabs), "admin");
-  assert.equal(nextStockTab("admin", "Home", tabs), "overview");
+  assert.equal(nextStockTab("admin", "Home", tabs), "trends");
   assert.equal(visibleStockTab("admin", tabs, "overview"), "admin");
   assert.equal(visibleStockTab("", tabs, "admin"), "overview");
   assert.equal(stockTabs({ deep_dive: { sections: [] } }, { admin: true }).some((tab) => tab.id === "deep-dive"), false);
@@ -143,7 +144,8 @@ test("the company page renders former main-page panels on Trends and keeps the t
   assert.match(trends, /trends-layout dashboard-grid/);
   assert.match(trends, /dataset\.mobileView = "all"/);
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
-  assert.match(page, /renderTrendsLayout\(tickerData, chartData, chartDataState\)/);
+  assert.match(page, /renderTrendsLayout\(tickerData, chartData, chartDataState, payload\)/);
+  assert.match(app, /renderTrendDisclaimer\(payload, document\)/);
   assert.match(page, /page\.prepend\(trends\)/);
   assert.match(page, /renderQuarterlyNotes\(charts\.guidance\)/);
   assert.match(app.slice(app.indexOf("function renderQuarterlyNotes"), app.indexOf("function appendStatusAlerts")), /No quarterly notes yet/);

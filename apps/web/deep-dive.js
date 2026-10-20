@@ -11,6 +11,32 @@ export function hasDeepDive(payload) {
   return Array.isArray(payload?.deep_dive?.sections) && payload.deep_dive.sections.length > 0;
 }
 
+function scoreboardSection(sections) {
+  const list = Array.isArray(sections) ? sections : [];
+  return list.find((item) => {
+    if (!item || typeof item !== "object") return false;
+    if (item.id === "scoreboard") return true;
+    if (/scoreboard/i.test(String(item.title || ""))) return true;
+    return (item.panels || []).some((panel) => panel?.kind === "scoreboard");
+  }) || null;
+}
+
+/**
+ * Placeholder notice for the Trends tab. It sits under the scoreboard title when
+ * the payload has one, and it is not drawn inside the Deep dive tab.
+ */
+export function renderTrendDisclaimer(payload, doc = document) {
+  if (!hasDeepDive(payload)) return null;
+  const dive = payload.deep_dive;
+  const text = String(dive.disclaimer || "").trim()
+    || "Figures appear when a source has been collected. Pending review values stay labeled. Empty series are not zero.";
+  const block = el(doc, "div", "trend-scoreboard-notice");
+  const section = scoreboardSection(dive.sections);
+  if (section?.title) block.append(el(doc, "h3", "stock-section-title", section.title));
+  block.append(el(doc, "p", "deep-dive-banner", text));
+  return block;
+}
+
 /** Primary sections first, then secondary, so the section strip matches the page. */
 export function orderedDeepDiveSections(sections) {
   const list = Array.isArray(sections) ? sections : [];
@@ -90,6 +116,62 @@ export function trendTone(change, inverse = false) {
   return (inverse ? !up : up) ? "up" : "down";
 }
 
+// Visible text for the sticky section bar. Keys are catalog titles; the chip
+// tooltip keeps the original wording. Unknown titles pass through with the
+// same word abbreviations, so a new company does not need its own list.
+const SECTION_SHORT_LABELS = {
+  "trend scoreboard": "Scoreboard",
+  "revenue & earnings forecast": "Rev & EPS",
+  "revenue and earnings forecast": "Rev & EPS",
+  "robotaxi & autonomy": "Robotaxi",
+  "commercial energy": "Comm. energy",
+  "fsd by region": "FSD regions",
+  "production & deliveries": "Prod. & deliveries",
+  "manufacturing footprint": "Mfg. footprint",
+  "energy projects & news": "Energy news",
+  "public vehicle records": "Vehicle records",
+  "segment gross margin": "Seg. margin",
+  "government obligations": "Gov. obligations",
+  "projected launches": "Proj. launches",
+  "new factories": "Factories",
+  "revenue by segment": "Rev by segment",
+  "revenue mix": "Rev mix",
+  "segment operating income": "Seg. op. income",
+  "net sales by product": "Sales by product",
+  "operating income": "Op. income",
+  "sales by segment": "Sales by seg.",
+  "sales by product": "Sales by product",
+  "revenue by channel": "Rev by channel",
+  "gross profit and operating income": "GP & op. income",
+  "operating income by segment": "Op. income by seg.",
+  "revenue by end market": "Rev by market",
+  "reportable segments": "Segments",
+  "revenue by market": "Rev by market",
+  "revenue by customer": "Rev by customer",
+};
+
+/** Short chip label. The caller keeps the catalog title for the tooltip. */
+export function shortSectionLabel(title) {
+  const original = String(title || "").replace(/\s+/g, " ").trim();
+  if (!original) return "";
+  const known = SECTION_SHORT_LABELS[original.toLowerCase()];
+  if (known) return known;
+  // A leading maker name before Semi is not part of the chip.
+  if (/^[A-Z][a-z]+\s+Semi$/.test(original)) return "Semi";
+  return original
+    .replace(/\bRevenue\b/g, "Rev")
+    .replace(/\bearnings\b/g, "EPS")
+    .replace(/\bOperating\b/g, "Op.")
+    .replace(/\boperating\b/g, "op.")
+    .replace(/\bSegment\b/g, "Seg.")
+    .replace(/\bsegment\b/g, "seg.")
+    .replace(/\bProjected\b/g, "Proj.")
+    .replace(/\bProduction\b/g, "Prod.")
+    .replace(/\bManufacturing\b/g, "Mfg.")
+    .replace(/\bGovernment\b/g, "Gov.")
+    .replace(/\bGross profit\b/g, "GP");
+}
+
 function el(doc, tag, className, text) {
   const node = doc.createElement(tag);
   if (className) node.className = className;
@@ -132,10 +214,6 @@ export function renderDeepDive(payload, doc = document, options = {}) {
     root.append(el(doc, "p", "data-state", "No deep dive is configured for this company."));
     return root;
   }
-  const banner = el(doc, "p", "deep-dive-banner");
-  banner.textContent = dive.disclaimer
-    || "Figures appear when a source has been collected. Pending review values stay labeled. Empty series are not zero.";
-  root.append(banner);
 
   const ticker = options.ticker || payload?.ticker || "";
   const nav = renderSectionNav(orderedDeepDiveSections(dive.sections), ticker, root, doc, options);
@@ -180,7 +258,14 @@ function renderSectionNav(sections, ticker, root, doc, options) {
   strip.setAttribute("aria-label", "Sections");
   const track = el(doc, "div", "section-strip-track");
   for (const section of sections || []) {
-    const chip = el(doc, "a", "section-strip-chip", section.title || section.id || "");
+    const full = String(section.title || section.id || "").replace(/\s+/g, " ").trim();
+    const chip = el(doc, "a", "section-strip-chip");
+    chip.append(el(doc, "span", "section-strip-label", shortSectionLabel(full)));
+    if (full) {
+      chip.title = full;
+      chip.setAttribute("title", full);
+      chip.setAttribute("aria-label", full);
+    }
     bindSectionLink(chip, section, ticker, root, doc, options);
     track.append(chip);
   }

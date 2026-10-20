@@ -54,7 +54,7 @@ test("the same snapshot reuses the sparkline path", () => {
   assert.notEqual(sparklineModel(history, "2026-10-10|TSLA"), first);
 });
 
-test("the strip and My tickers share one helper, and the chip colors are theme tokens", () => {
+test("the strip and Watchlist share one helper, and the chip colors are theme tokens", () => {
   assert.match(app, /from "\.\/sparkline\.js"/);
   assert.match(account, /from "\.\/sparkline\.js"/);
   assert.doesNotMatch(account, /function sparkline/);

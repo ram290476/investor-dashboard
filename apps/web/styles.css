@@ -525,6 +525,19 @@ a {
   border-bottom: 1px solid var(--line);
 }
 
+.price-panel > .overview:last-child {
+  border-bottom: 0;
+}
+
+.trend-scoreboard-notice {
+  display: grid;
+  gap: 8px;
+}
+
+.trend-scoreboard-notice .stock-section-title {
+  margin: 0;
+}
+
 .overview-quote {
   min-width: 0;
   flex: 1 1 auto;
@@ -3646,6 +3659,13 @@ a.catalyst-edgar-link:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.stock-page > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .stock-section {
@@ -3709,7 +3729,11 @@ a.catalyst-edgar-link:hover {
 
 .stock-page-tabs .stock-tab {
   width: auto;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
   height: auto;
   min-height: 36px;
   padding: 0 14px;
@@ -4111,18 +4135,16 @@ a.catalyst-edgar-link:hover {
   top: 0;
   z-index: 6;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
   min-height: 44px;
   margin: 0;
   padding: 3px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: thin;
+  overflow-x: clip;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
@@ -5079,6 +5101,32 @@ a.catalyst-edgar-link:hover {
 .deep-dive {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Charts and tables fit the panel. The Deep dive section strip wraps instead of
+   scrolling sideways. The ticker bar can scroll at any width. */
+.deep-dive > *,
+.deep-dive-section,
+.deep-dive-grid > *,
+.section-strip,
+.section-strip-track,
+.deep-dive-panel,
+.deep-dive-chart-wrap,
+.deep-dive-map-wrap,
+.deep-dive-forecast {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.deep-dive-panel,
+.deep-dive-chart-wrap,
+.deep-dive-map-wrap,
+.deep-dive-forecast,
+.section-strip,
+.section-strip-track {
+  overflow-x: clip;
 }
 
 .deep-dive-banner {
@@ -5162,6 +5210,8 @@ a.catalyst-edgar-link:hover {
   z-index: 5;
   height: 0;
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .section-strip-track {
@@ -5171,7 +5221,10 @@ a.catalyst-edgar-link:hover {
   right: 0;
   display: flex;
   gap: 4px;
-  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  overflow-x: clip;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -5198,9 +5251,10 @@ a.catalyst-edgar-link:hover {
 }
 
 .section-strip-chip {
-  flex: none;
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   min-height: 28px;
   padding: 4px 10px;
   border-radius: 999px;
@@ -5209,6 +5263,24 @@ a.catalyst-edgar-link:hover {
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* Same pattern as the company tabs: chips wrap onto extra rows and the bar
+   never scrolls sideways. A chip wider than the bar ellipsizes; the title
+   attribute is the full catalog label. */
+.deep-dive .section-strip-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.deep-dive .section-strip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -5261,7 +5333,7 @@ a.catalyst-edgar-link:hover {
 .deep-dive-section {
   display: grid;
   gap: 8px;
-  scroll-margin-top: 104px;
+  scroll-margin-top: 132px;
 }
 
 .deep-dive-grid {
@@ -5305,6 +5377,8 @@ a.catalyst-edgar-link:hover {
 }
 
 .deep-dive-tile-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--text);
   font-size: 17px;
   font-weight: 600;
@@ -5334,6 +5408,7 @@ a.catalyst-edgar-link:hover {
 .deep-dive-spark {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
 }
 
@@ -5452,16 +5527,28 @@ a.catalyst-edgar-link:hover {
 
 .deep-dive-table {
   width: 100%;
+  min-width: 0;
   margin-top: 8px;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 12px;
+}
+
+.deep-dive-panel h2,
+.deep-dive-milestone-label,
+.deep-dive-milestone-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .deep-dive-table th,
 .deep-dive-table td {
+  min-width: 0;
   padding: 4px 6px;
   border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
   text-align: left;
+  white-space: normal;
 }
 
 .deep-dive-table th {
@@ -5621,5 +5708,20 @@ a.catalyst-edgar-link:hover {
   .deep-dive-section-tile,
   .section-strip-chip {
     min-height: 44px;
+  }
+
+  .deep-dive .section-strip-chip {
+    padding-inline: 8px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .stock-page[data-stock-tab="deep-dive"] .section-strip {
+    top: 98px;
+  }
+
+  .deep-dive-section {
+    scroll-margin-top: 360px;
   }
 }

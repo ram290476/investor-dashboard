@@ -33,7 +33,7 @@ import {
 
 const prefs = (tickers, pinned = []) => ({ tickers, pinned, display: { time_zone: "America/New_York" }, version: 3 });
 
-test("deep links open the matching tab and unknown tabs fall back to My tickers", () => {
+test("deep links open the matching tab and unknown tabs fall back to Watchlist", () => {
   assert.equal(parseSettingsHash("#settings/theme"), "theme");
   assert.equal(parseSettingsHash("#settings/profile"), "profile");
   assert.equal(parseSettingsHash("#settings/refresh"), "refresh");
@@ -62,7 +62,8 @@ test("new tickers are validated for format, duplicates and the cap", () => {
   assert.deepEqual(validateNewTicker(" nvda ", prefs(["TSLA"])), { ticker: "NVDA" });
   assert.match(validateNewTicker("", prefs(["TSLA"])).error, /Enter a ticker/);
   assert.match(validateNewTicker("1ABC", prefs(["TSLA"])).error, /not a valid/);
-  assert.equal(validateNewTicker("tsla", prefs(["TSLA"])).error, "TSLA is already in My tickers.");
+  assert.equal(validateNewTicker("tsla", prefs(["TSLA"])).error, "TSLA is already on the watchlist.");
+  assert.equal(settingsTabs(false).find((tab) => tab.id === "tickers").label, "Watchlist");
   const full = prefs(Array.from({ length: MAX_TICKERS }, (_, i) => `T${i}`));
   assert.equal(validateNewTicker("NVDA", full).error, `At most ${MAX_TICKERS} tickers. Remove one to add another.`);
   const legacy = prefs(Array.from({ length: 30 }, (_, i) => `T${i}`));

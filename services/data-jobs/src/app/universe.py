@@ -1,6 +1,6 @@
 """Which tickers the collectors cover.
 
-The universe is the union of every user's "My tickers" (DynamoDB user_prefs),
+The universe is the union of every user's watchlist (DynamoDB user_prefs),
 the base tickers, and the index ETF proxies, capped so free-tier limits hold.
 
 Free-tier budget per extra ticker (one run each):

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import {
   axisLabel,
@@ -10,7 +10,9 @@ import {
   hasDeepDive,
   orderedDeepDiveSections,
   renderDeepDive,
+  renderTrendDisclaimer,
   revealDeepDiveSection,
+  shortSectionLabel,
   trendTone,
 } from "./deep-dive.js";
 import { nextStockTab, stockTabs, STOCK_TABS } from "./stock-page.js";
@@ -350,12 +352,16 @@ test("section chips jump by name and leave the metric on the section", () => {
   });
   const sites = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "fleet");
   assert.equal(textOf(sites), "Fleet");
+  assert.equal(sites.getAttribute("title"), "Fleet");
+  assert.equal(sites.getAttribute("aria-label"), "Fleet");
   assert.equal(byClass(view, "deep-dive-section-tile").length, 0);
   const sitesMetric = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Sites"));
   assert.match(textOf(sitesMetric), /Estimate/);
   assert.match(textOf(sitesMetric), /Pending review/);
   const notes = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "notes");
   assert.equal(textOf(notes), "Notes");
+  assert.equal(notes.getAttribute("title"), "Notes");
+  assert.equal(notes.getAttribute("aria-label"), "Notes");
   const event = {
     button: 0,
     metaKey: false,
@@ -452,22 +458,43 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(trendTone(0, true), "flat");
   assert.equal(STOCK_TABS.length, 4);
   assert.equal(stockTabs(null).length, 4);
-  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["overview", "trends", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["overview", "trends", "deep-dive", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["trends", "overview", "deep-dive", "fundamentals", "kpis"]);
   assert.equal(stockTabs(sample).find((tab) => tab.id === "deep-dive").label, "Deep dive");
   assert.equal(stockTabs(sample).some((tab) => tab.id === "admin"), false);
-  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(sample)), "overview");
+  assert.equal(nextStockTab("overview", "ArrowRight", stockTabs(sample)), "deep-dive");
   assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "fundamentals");
   assert.equal(nextStockTab("fundamentals", "ArrowLeft", stockTabs(sample)), "deep-dive");
-  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "overview");
+  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "trends");
   assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "kpis");
-  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "overview");
+  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "trends");
+});
+
+test("the forecast notice sits under the scoreboard title on Trends, not in Deep dive", () => {
+  const notice = renderTrendDisclaimer(sample, fakeDocument(false));
+  assert.equal(byClass(notice, "stock-section-title")[0].textContent, "Scoreboard");
+  assert.equal(byClass(notice, "deep-dive-banner")[0].textContent, sample.deep_dive.disclaimer);
+  assert.equal(notice.children[0].className, "stock-section-title");
+  assert.equal(notice.children[1].className, "deep-dive-banner");
+  const plain = {
+    deep_dive: {
+      disclaimer: "Placeholder only — not a real forecast model.",
+      sections: [{ id: "mix", title: "Mix", panels: [{ kind: "table", title: "Mix" }] }],
+    },
+  };
+  const moved = renderTrendDisclaimer(plain, fakeDocument(false));
+  assert.equal(byClass(moved, "stock-section-title").length, 0);
+  assert.match(moved.children[0].textContent, /not a real forecast model/);
+  assert.equal(renderTrendDisclaimer({}, fakeDocument(false)), null);
+  assert.doesNotMatch(source, /TSLA|Tesla|SPCX/);
 });
 
 test("rendered deep dive shows pending review, empty copy, and a placeholder forecast", () => {
   const view = renderDeepDive(sample, fakeDocument(false));
   const text = textOf(view);
-  assert.match(text, /Figures appear when a source has been collected/);
+  assert.equal(byClass(view, "deep-dive-banner").length, 0);
+  assert.doesNotMatch(text, /Figures appear when a source has been collected/);
   assert.match(text, /Not yet disclosed/);
   assert.match(text, /Pending review/);
   assert.match(text, /Low confidence/);
@@ -524,9 +551,95 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.match(app, /hasDeepDive\(payload\)/);
   assert.match(app, /stock-tab-mark", "\+"/);
   assert.match(deepStyles, /grid-template-columns:\s*repeat\(6/);
+  assert.match(deepStyles, /\.deep-dive-panel,\s*\n\.deep-dive-chart-wrap,\s*\n\.deep-dive-map-wrap,\s*\n\.deep-dive-forecast,\s*\n\.section-strip,\s*\n\.section-strip-track\s*\{[^}]*overflow-x:\s*clip/);
+  assert.match(deepStyles, /\.deep-dive-chart,\s*\n\.deep-dive-map,\s*\n\.deep-dive-spark\s*\{[^}]*max-width:\s*100%/);
+  assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*width:\s*100%/);
+  assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*table-layout:\s*fixed/);
+  assert.match(deepStyles, /\.section-strip-track\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(deepStyles, /\.deep-dive \.section-strip-chip\s*\{[^}]*max-width:\s*100%/);
+  assert.match(deepStyles, /\.deep-dive \.section-strip-label\s*\{[^}]*text-overflow:\s*ellipsis/);
+  assert.match(deepStyles, /\.deep-dive \.section-strip-label\s*\{[^}]*white-space:\s*nowrap/);
+  assert.match(source, /section-strip-label/);
+  assert.match(deepStyles, /max-width:\s*480px\)[\s\S]*?top:\s*98px/);
+  assert.equal(deepStyles.match(/overflow-x:\s*auto/g), null);
   assert.match(styles, /\.stock-page-tabs\s*\{[^}]*display:\s*flex/);
   assert.match(ci, /node --check apps\/web\/deep-dive\.js/);
   assert.match(ci, /node --check apps\/web\/geo\.js/);
+});
+
+test("deep dive section chips abbreviate catalog titles and keep the full label as the tooltip", async () => {
+  const expected = {
+    "AI deals": "AI deals",
+    "Chargers": "Chargers",
+    "Commercial energy": "Comm. energy",
+    "Energy projects & news": "Energy news",
+    "FSD by region": "FSD regions",
+    "Government obligations": "Gov. obligations",
+    "Gross profit and operating income": "GP & op. income",
+    "Launches": "Launches",
+    "Manufacturing footprint": "Mfg. footprint",
+    "Net sales by product": "Sales by product",
+    "New factories": "Factories",
+    "Operating income": "Op. income",
+    "Operating income by segment": "Op. income by seg.",
+    "Optimus": "Optimus",
+    "Production & deliveries": "Prod. & deliveries",
+    "Projected launches": "Proj. launches",
+    "Public vehicle records": "Vehicle records",
+    "Reportable segments": "Segments",
+    "Revenue & earnings forecast": "Rev & EPS",
+    "Revenue and earnings forecast": "Rev & EPS",
+    "Revenue by channel": "Rev by channel",
+    "Revenue by customer": "Rev by customer",
+    "Revenue by end market": "Rev by market",
+    "Revenue by market": "Rev by market",
+    "Revenue by segment": "Rev by segment",
+    "Revenue mix": "Rev mix",
+    "Robotaxi & autonomy": "Robotaxi",
+    "Sales by product": "Sales by product",
+    "Sales by segment": "Sales by seg.",
+    "Segment gross margin": "Seg. margin",
+    "Segment operating income": "Seg. op. income",
+    "Starlink": "Starlink",
+    "Starmind": "Starmind",
+    "Starship": "Starship",
+    "Terraform": "Terraform",
+    "Tesla Semi": "Semi",
+    "Trend scoreboard": "Scoreboard",
+  };
+  const dir = new URL("../../services/data-jobs/src/functions/company_ir/catalog/", import.meta.url);
+  const titles = new Set();
+  for (const name of await readdir(dir)) {
+    const catalog = JSON.parse(await readFile(new URL(name, dir), "utf8"));
+    for (const section of catalog.deep_dive?.sections || []) {
+      if (section?.title) titles.add(section.title);
+    }
+  }
+  assert.deepEqual([...titles].sort(), Object.keys(expected).sort());
+  for (const [title, label] of Object.entries(expected)) {
+    assert.equal(shortSectionLabel(title), label);
+    assert.ok(label.length <= title.length, `${title} grew`);
+  }
+  assert.equal(shortSectionLabel("Revenue outlook"), "Rev outlook");
+  const view = renderDeepDive({
+    deep_dive: {
+      sections: [...titles].map((title, index) => ({
+        id: `section-${index}`,
+        title,
+        panels: [{ id: `panel-${index}`, kind: "note", title }],
+      })),
+    },
+  }, fakeDocument(false), { ticker: "exmpl" });
+  const chips = byClass(view, "section-strip-chip");
+  assert.equal(chips.length, titles.size);
+  for (const chip of chips) {
+    const full = chip.getAttribute("title");
+    assert.equal(chip.getAttribute("aria-label"), full);
+    assert.equal(textOf(chip), expected[full]);
+  }
+  const headings = byClass(view, "stock-section-title").map((node) => node.textContent);
+  assert.deepEqual(headings.sort(), [...titles].sort());
+  assert.doesNotMatch(source, /TSLA|Tesla|NVDA|SPCX|SpaceX/);
 });
 
 test("a second company page uses the same panels for launches, forecast, and voice labels", () => {

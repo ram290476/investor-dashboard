@@ -107,8 +107,8 @@ test("overview tiles stay name-only jump targets", () => {
     fundamentals: [],
     guidance: [{ latestPeriod: "2026Q3", text: "Raised the outlook." }],
   });
-  assert.deepEqual(bookmarks.map((item) => item.id), ["price", "technical", "quarterly-notes"]);
-  assert.deepEqual(bookmarks.map((item) => item.title), ["Price", "Technical Summary", "Quarterly notes"]);
+  assert.deepEqual(bookmarks.map((item) => item.id), ["technical", "quarterly-notes"]);
+  assert.deepEqual(bookmarks.map((item) => item.title), ["Technical Summary", "Quarterly notes"]);
   assert.equal(bookmarks.some((item) => item.id === "metrics"), false);
   assert.equal(bookmarks.every((item) => item.headline == null), true);
 });
@@ -250,8 +250,8 @@ test("the section strip is visible on load and tracks the section in view", () =
   const notes = page.children.find((child) => child.dataset.companySection === "quarterly-notes");
   observers[0].callback([{ target: notes, isIntersecting: true, intersectionRatio: 0.8 }]);
   assert.equal(notesChip.getAttribute("aria-current"), "location");
-  const priceChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "price");
-  assert.equal(priceChip.getAttribute("aria-current"), undefined);
+  const technicalChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "technical");
+  assert.equal(technicalChip.getAttribute("aria-current"), undefined);
   assert.equal(String(strip.className).includes("is-visible"), true);
   assert.equal(strip.getAttribute("aria-hidden"), undefined);
   assert.equal(notesChip.getAttribute("tabindex"), undefined);

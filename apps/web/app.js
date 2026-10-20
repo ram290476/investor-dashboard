@@ -49,7 +49,7 @@ import {
   stockTabs,
   visibleStockTab,
 } from "./stock-page.js";
-import { hasDeepDive, renderDeepDive, revealDeepDiveSection } from "./deep-dive.js";
+import { hasDeepDive, renderDeepDive, renderTrendDisclaimer, revealDeepDiveSection } from "./deep-dive.js";
 import { companyBookmarks, renderCompanyBookmarks, revealCompanySection, sectionSlug } from "./company-sections.js";
 import { curveView, fomcView, policyPathView, sparklinePath } from "./rates-panel.js";
 import {
@@ -83,7 +83,6 @@ import {
   fundamentalSummary,
   fundamentalObservation,
   isMarketOverlay,
-  mergeCompanyFundamentals,
   normalizePanelMode,
   overlayDefinition,
   overlayGroups,
@@ -165,7 +164,7 @@ const session = {
   fundRetry: {},
   fundUi: {},
   stockPageError: {},
-  stockTab: "overview",
+  stockTab: "trends",
   scrolledStockSection: "",
   metricReview: readStoredMetricReview(),
   metricReviewError: "",
@@ -1524,7 +1523,7 @@ function disabledPeriodTip(period, quote) {
 function renderPeriodChips(history, activeId, onSelect, intraday, historyState = "ready") {
   const group = node("div", "period-chips");
   group.setAttribute("role", "group");
-  group.setAttribute("aria-label", "Period: return over each period; select one to chart it");
+  group.setAttribute("aria-label", "Period: return over each period; select one");
   const loading = historyState === "loading";
   PERIODS.forEach((period) => {
     const quote = periodQuote(history, period.id);
@@ -1550,7 +1549,7 @@ function renderPeriodChips(history, activeId, onSelect, intraday, historyState =
       button.setAttribute("aria-label", `${period.id}, ${reason}`);
       button.addEventListener("click", (event) => event.preventDefault());
     } else {
-      const shown = selected ? "shown on the chart" : "click to show this period on the chart";
+      const shown = selected ? "selected period" : "click to select this period";
       button.title = `${period.id} return ${valueText} · ${shown}`;
       button.setAttribute("aria-label", `${period.id} return ${valueText}, ${periodDirection(shownReturn)}, ${shown}`);
       button.addEventListener("click", () => onSelect(period.id));
@@ -2142,8 +2141,9 @@ function legendKey(item, color) {
 }
 
 // The one chart panel every page renders (#203). Page differences come from chartPanelOptions.
-function renderChartPanel(page, ticker = session.selected) {
-  const options = chartPanelOptions(page, ticker);
+// extras.stockPanel places the quote header on Fundamentals or KPIs.
+function renderChartPanel(page, ticker = session.selected, extras = {}) {
+  const options = { ...chartPanelOptions(page, ticker), ...extras };
   const symbol = options.ticker || session.selected;
   const chartData = session.chartData[symbol] || null;
   const chartDataState = session.chartDataState[symbol] || "loading";
@@ -2164,22 +2164,12 @@ function renderChartPanel(page, ticker = session.selected) {
 }
 
 function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, onSettingsChange, options = chartPanelOptions("dashboard")) {
-  chartData = mergeCompanyFundamentals(
-    chartData,
-    metricsForReview(session.stockPage[session.selected], session.metricReview || "all"),
-  );
   const history = servedPriceHistory(tickerData, chartDataState === "ready" ? chartData : null);
   const bars = validBars(history);
-  const chartSettings = chartSettingsView(session.prefs, session.selected);
   const requested = normalizePeriod(session.prefs.display?.chart_period);
   const waiting = chartDataState === "loading" && !periodQuote(history, requested).available;
   const activeId = waiting ? requested : resolveChartPeriod(requested, history);
   const quote = periodQuote(history, activeId);
-  const intradayBars = tickerData?.intraday?.bars || [];
-  const chartHistory = waiting ? [] : selectedChartBars({ ...tickerData, price_history: history });
-  const controls = chartControlsFor(tickerData, chartData, chartDataState, chartHistory);
-  const visibleOverlayIds = controls.groups.flatMap(group => group.overlays).filter(overlay => overlay.available).map(overlay => overlay.id);
-  const visibleOverlays = chartSettings.overlays.filter(id => visibleOverlayIds.includes(id));
   const panel = node("section", "panel price-panel");
   const overview = node("div", "overview");
   const quoteBlock = node("div", "overview-quote");
@@ -2196,7 +2186,6 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   } else if (quote.available) {
     meta.append(document.createTextNode(`As of ${asOf} · `));
     meta.append(node("span", polarity(quote.returnValue), `${formatPercent(quote.returnValue, 1)} ${activeId}`));
-    meta.append(document.createTextNode(" on the chart"));
   } else {
     meta.textContent = `As of ${asOf}`;
   }
@@ -2223,153 +2212,6 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   ));
   overview.append(quoteBlock, side);
   panel.append(overview);
-  panel.append(renderOverlayControls(controls.groups, chartDataState, onSettingsChange));
-  const filters = node("div", "catalyst-filters");
-  filters.setAttribute("role", "group");
-  filters.setAttribute("aria-label", "Chart catalyst categories");
-  filters.append(node("span", "signal-note", "Catalysts"));
-  const categories = catalystCategoriesInWindow(session.dashboard, session.selected, chartHistory);
-  categories.forEach(category => {
-    const enabled = activeCatalysts().includes(category.id);
-    const color = overlayColor(category.slot, session.prefs.display.theme);
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "overlay-chip catalyst-chip";
-    toggle.style.setProperty("--catalyst-color", color);
-    toggle.dataset.catalystCategory = category.id;
-    toggle.dataset.catalystColor = color;
-    toggle.setAttribute("aria-pressed", String(enabled));
-    const swatch = node("span", "catalyst-swatch");
-    swatch.setAttribute("aria-hidden", "true");
-    toggle.append(swatch, document.createTextNode(category.label));
-    toggle.addEventListener("click", () => {
-      setActiveCatalysts(enabled ? activeCatalysts().filter(id => id !== category.id)
-        : [...activeCatalysts(), category.id]);
-      renderDashboard();
-      root.querySelector(`[data-catalyst-category="${category.id}"]`)?.focus({ preventScroll: true });
-    });
-    filters.append(toggle);
-  });
-  const clearCatalysts = action("Clear all", "overlay-chip bulk-control", () => {
-    setActiveCatalysts([]);
-    renderDashboard();
-    (root.querySelector("[data-catalyst-category]") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus({ preventScroll: true });
-  });
-  clearCatalysts.dataset.clear = "catalysts";
-  clearCatalysts.setAttribute("aria-label", "Clear all catalyst markers");
-  clearCatalysts.disabled = !activeCatalysts().length;
-  filters.append(clearCatalysts);
-  if (chartDataState === "error") {
-    const error = node("p", "data-state error chart-data-error", "Historical overlay data could not be loaded. Use Refresh data to retry.");
-    error.setAttribute("role", "alert");
-    panel.append(error);
-  }
-
-  let placedLanes = false;
-  if (chartHistory.length >= 2) {
-    const chart = drawChart(chartHistory, session.selected, activeId, visibleOverlays, {
-      tickerData: { ...tickerData, price_history: history },
-      chartData,
-      dashboard: session.dashboard,
-      charts: session.chartData,
-    });
-    if (chart) {
-      const stack = node("div", "chart-stack");
-      stack.tabIndex = 0;
-      stack.setAttribute("role", "group");
-      stack.setAttribute("aria-label", `${session.selected} price chart and under-chart lanes. Left and right arrow keys move the date crosshair.`);
-      const readout = node("p", "chart-readout", "Hover, tap, or use arrow keys to read a date across the charts.");
-      readout.setAttribute("role", "status");
-      readout.setAttribute("aria-live", "polite");
-      const lanes = renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes, activeId);
-      const laneSeries = controls.lanes.filter((lane) => chartSettings.lanes.includes(lane.id)).map((lane) => ({
-        ...lane,
-        values: lane.id === "VOL" || chartDataState === "ready" ? laneValues(lane.id, chartHistory, chartData) : [],
-        percent: lane.id === "SI" && alignedLaneValues(chartData?.short_interest, chartHistory, "short_pct_denominator").some(isNumericValue),
-      }));
-      const theme = session.prefs.display.theme;
-      const overlaySeries = visibleOverlays.map((id) => ({
-        id,
-        definition: overlayDefinition(id),
-        unit: overlayUnit(id),
-        color: overlayColor(overlayDefinition(id)?.color, theme),
-        values: valuesForOverlay(id, {
-          bars: chartHistory,
-          tickerData: { ...tickerData, price_history: history },
-          chartData,
-          dashboard: session.dashboard,
-          charts: session.chartData,
-        }),
-      })).filter((overlay) => overlay.definition);
-      stack.append(readout, chart, lanes, renderTimeAxis(chartHistory, activeId));
-      attachSharedCrosshair(stack, chartHistory, activeId, laneSeries, overlaySeries);
-      panel.append(stack);
-      pinReadoutBelowControls(panel);
-      placedLanes = true;
-      const legend = node("div", "chart-legend");
-      const values = chartHistory.map(chartValue);
-      const numericValues = values.filter(isNumericValue).map(Number);
-      legend.append(
-        node(
-          "span",
-          "chart-legend-summary",
-          `${activeId} · ${formatPercent(activeId === "1D" && isNumericValue(live?.change_pct) ? live.change_pct : quote.returnValue, 1)} · ${chartHistory.length.toLocaleString()} ${activeId === "1D" && intradayBars.length >= 2 ? "hourly bars" : "sessions · daily closes"}`,
-        ),
-      );
-      if (chart.dataset.scaleMode === "percent") {
-        legend.append(node("span", "chart-legend-summary", "Price and market overlays · percent change from period start"));
-      }
-      legendItems({
-        ticker: session.selected,
-        prices: values,
-        adjustedMin: numericValues.length ? Math.min(...numericValues) : null,
-        adjustedMax: numericValues.length ? Math.max(...numericValues) : null,
-        overlays: overlaySeries.map(({ id, definition, values: series }) => {
-          const lastObservationIndex = series.findLastIndex(isNumericValue);
-          return {
-            definition,
-            values: series,
-            correlation: overlayCorrelation(id, tickerData, chartData),
-            summary: definition?.kind === "fundamental"
-              ? fundamentalSummary(id, chartData, chartHistory.at(-1)?.ts || chartHistory.at(-1)?.date)
-              : "",
-            observedOn: lastObservationIndex >= 0
-              ? formatPanelStamp(chartHistory[lastObservationIndex]?.ts || chartHistory[lastObservationIndex]?.date || "")
-              : "",
-          };
-        }),
-      }, { money: formatPrice }).forEach((item) => {
-        const label = node("span", "chart-legend-item");
-        if (item.id !== "price") label.dataset.overlay = item.id;
-        if (item.title) label.title = item.title;
-        const color = item.kind === "price"
-          ? "var(--price)"
-          : overlayColor(overlayDefinition(item.id).color, theme);
-        label.append(legendKey(item, color), node("span", "legend-copy", item.text));
-        legend.append(label);
-      });
-      panel.append(legend);
-    } else {
-      panel.append(node("p", "data-state", "Price history is incomplete; waiting for more valid observations."));
-    }
-  } else {
-    panel.append(
-      node(
-        "p",
-        "data-state",
-        session.dashboardState === "loading" || waiting
-          ? "Loading daily closes…"
-          : session.dashboardState === "error" && !tickerData
-            ? "Daily closes could not be loaded. Use Try again above."
-            : bars.length === 1
-              ? "Only one daily close is available; a line chart needs at least two points."
-              : "No historical closes are published yet. Start the initial backfill and this chart will fill as batches complete.",
-      ),
-    );
-  }
-  if (!placedLanes) panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes, activeId));
-  panel.append(renderLaneControls(chartSettings, controls.lanes, chartDataState, onSettingsChange));
-  if (categories.length) panel.append(filters);
   return panel;
 }
 
@@ -3971,22 +3813,18 @@ function renderStockPage(restoreDrawer = null) {
   if (hasDeepDive(payload)) page.dataset.hasDeepDive = "true";
   page.setAttribute("aria-label", `${session.selected} company page`);
 
-  const chart = renderChartPanel("company", session.selected);
-  chart.id = "stock-panel-price";
-  chart.dataset.companySection = "price";
-
   const section = (id, label, cards, empty) => {
     const block = node("section", "panel stock-section company-section-target");
     block.dataset.stockPanel = id;
     block.dataset.companySection = id;
     block.id = `stock-panel-${id}`;
-    if (id === "kpis") block.append(renderMetricReview());
+    if (id === "kpis" || id === "fundamentals") block.append(renderMetricReview());
     block.append(node("h3", "stock-section-title", label));
     appendMetricGroups(block, cards, empty);
     return block;
   };
 
-  const trends = renderTrendsLayout(tickerData, chartData, chartDataState);
+  const trends = renderTrendsLayout(tickerData, chartData, chartDataState, payload);
   const present = String(trends.dataset.presentSections || "").split(",").filter(Boolean);
   // Funds (#223): Fund holdings follows the Technical Summary on Overview. The same tabs stay
   // available. Operating companies never get the fund panel or its fetch.
@@ -3998,11 +3836,13 @@ function renderStockPage(restoreDrawer = null) {
     // The write-once is_fund stamp and the live SEC classification can disagree; say so, don't override.
     fundExtras.push(renderFundPanel(session.selected, classificationNote(tickerData)), ...renderFundSummary(session.selected));
   }
+  const quoteFor = (stockPanel) => renderChartPanel("company", session.selected, { stockPanel });
   page.append(
-    chart,
     renderTechnicalSummary(session.selected, history),
     ...fundExtras,
+    quoteFor("kpis"),
     section("kpis", "Operating KPIs", charts.operating, emptyKpiCopy()),
+    quoteFor("fundamentals"),
     section(
       "fundamentals",
       charts.fundamentalsSource === "edgar" ? "SEC filings" : "Fundamentals",
@@ -4035,7 +3875,7 @@ function renderStockPage(restoreDrawer = null) {
     tab.id = `stock-tab-${item.id}`;
     tab.dataset.stockTab = item.id;
     tab.setAttribute("role", "tab");
-    const controls = item.id === "overview" ? "stock-title"
+    const controls = item.id === "overview" ? "stock-panel-technical"
       : item.id === "admin" ? "stock-panel-metrics"
       : `stock-panel-${item.id}`;
     tab.setAttribute("aria-controls", controls);
@@ -4163,7 +4003,7 @@ function tagTrendSection(element, id) {
   return element;
 }
 
-function renderTrendsLayout(tickerData, chartData, chartDataState) {
+function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
   const present = [];
   const mark = (element, id) => {
     if (!tagTrendSection(element, id)) return;
@@ -4175,6 +4015,8 @@ function renderTrendsLayout(tickerData, chartData, chartDataState) {
   layout.id = "stock-panel-trends";
   layout.setAttribute("aria-label", `${session.selected} trends`);
   const primary = node("div", "primary-column");
+  const notice = renderTrendDisclaimer(payload, document);
+  if (notice) primary.append(notice);
   const chart = renderChartPanel("dashboard", session.selected);
   chart.querySelector("[data-company-page]")?.remove();
   mark(chart, "price");
@@ -4297,7 +4139,7 @@ function applyLegacyRedirect() {
   return true;
 }
 
-// First load of this tab: Overview, then remember the session so a refresh keeps the URL tab.
+// First load of this tab: Trends, then remember the session so a refresh keeps the URL tab.
 // Research pages do not consume the flag. An empty watchlist does not either.
 function applySessionStockLanding() {
   const landing = sessionStockLanding({
@@ -4305,16 +4147,16 @@ function applySessionStockLanding() {
     hashTab: parseStockTab(location.hash),
     routePage: session.route?.page || "",
   });
-  if (!landing.rewriteOverview) return;
+  if (!landing.rewriteLanding) return;
   const ticker = fallbackSelection(session.prefs, session.selected || session.dashboardSelection);
-  if (!ticker || !stockTabHash(ticker, "overview")) return;
+  if (!ticker || !stockTabHash(ticker, landing.tab)) return;
   stockSession.setItem(STOCK_SESSION_KEY, "1");
   session.stockTab = landing.tab;
   session.selected = ticker;
   session.dashboardSelection = ticker;
   session.route = { page: "stock", ticker };
   session.focusCatalyst = null;
-  const hash = stockTabHash(ticker, "overview");
+  const hash = stockTabHash(ticker, landing.tab);
   if (hash && !parseSettingsHash(location.hash) && location.hash !== hash) {
     history.replaceState(history.state, "", `/${hash}`);
   }

@@ -33,27 +33,28 @@ test("readout items carry the overlay label and colour in the selected order (#2
   ]);
 });
 
-test("the shared chart panel feeds active overlays to the crosshair readout (#218)", () => {
-  assert.match(app, /attachSharedCrosshair\(stack, chartHistory, activeId, laneSeries, overlaySeries\);/);
+test("the chart engine still builds a crosshair readout (#218)", () => {
+  assert.match(app, /function attachSharedCrosshair\(/);
   assert.match(app, /renderReadout\(readout, crosshairText\(bars\[index\], index, periodId, lanes\), overlayReadoutItems\(overlays, index, formatPrice\)\)/);
-  assert.match(app, /const overlaySeries = visibleOverlays\.map\(\(id\) => \(\{[\s\S]*?color: overlayColor\(overlayDefinition\(id\)\?\.color, theme\)/);
-  assert.match(app, /overlays: overlaySeries\.map\(/, "legend and readout use the same series");
   assert.match(app, /label\.style\.color = item\.color;/);
+  const panel = app.slice(app.indexOf("function renderPricePanel"), app.indexOf("function renderContracts"));
+  assert.doesNotMatch(panel, /visibleOverlays|attachSharedCrosshair|chart-legend/);
 });
 
-test("the overlay groups panel stays pinned during scroll, drag and redraws (#218)", () => {
+test("overlay controls still restore focus without scrolling (#218)", () => {
   assert.match(styles, /\.chart-controls \{[^}]*position: sticky;[^}]*top: 0;/);
   assert.match(app, /function renderDashboard\(\) \{\n  if \(session\.ended\) return;\n  const before = chartControlsTop\(\);\n  renderDashboardNow\(\);\n  keepChartControlsPinned\(before\);\n\}/);
   assert.match(app, /window\.scrollBy\(0, after - before\)/);
-  for (const selector of ["data-overlay-tab=", "data-overlay=\"\\$\\{overlay.id", "\\.overlay-all", "lane-toggle\\[data-lane=", "data-catalyst-category=\"\\$"]) {
+  for (const selector of ["data-overlay-tab=", "data-overlay=\"\\$\\{overlay.id", "\\.overlay-all", "lane-toggle\\[data-lane="]) {
     assert.match(app, new RegExp(`${selector}[^\\n]*\\?\\.focus\\(\\{ preventScroll: true \\}\\)`), selector);
   }
-  assert.match(styles, /\.chart-stack \{[^}]*touch-action: pan-y;/, "a horizontal drag on the chart scrubs instead of panning");
+  const panel = app.slice(app.indexOf("function renderPricePanel"), app.indexOf("function renderContracts"));
+  assert.doesNotMatch(panel, /catalyst-filters|chart-controls|chart-stack/);
 });
 
-test("the crosshair readout is pinned right below the overlay groups panel (#218)", () => {
+test("the price panel does not render the chart stack under the period selection", () => {
+  const panel = app.slice(app.indexOf("function renderPricePanel"), app.indexOf("function renderContracts"));
+  assert.doesNotMatch(panel, /chart-stack|pinReadoutBelowControls|renderOverlayControls/);
+  assert.match(app, /function pinReadoutBelowControls/);
   assert.match(styles, /\.chart-readout \{[^}]*position: sticky;[^}]*top: var\(--chart-controls-height, 0px\);[^}]*background: var\(--surface\);/);
-  assert.match(app, /panel\.style\.setProperty\("--chart-controls-height"/);
-  assert.match(app, /new ResizeObserver\(update\)\.observe\(controls\)/);
-  assert.match(app, /panel\.append\(stack\);\n\s*pinReadoutBelowControls\(panel\);/);
 });

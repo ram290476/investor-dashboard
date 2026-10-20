@@ -21,7 +21,7 @@ expired, so CloudWatch logs and live lake contents could not be inspected.
 | Status lists D2/D3/W1 despite no corresponding deployed job definitions | Planned catalog tiers appear permanently broken | Remove unimplemented placeholders, not real collector errors |
 | Successful `PutEvents` HTTP responses can contain failed entries | The collector finishes but dependent builds never start | Check `FailedEntryCount`, log and retry rejected publishes |
 | D4 collects ETF proxies but dashboard snapshots serve only equities | Market comparison overlays have no ETF price history despite successful collection | Serve proxy histories alongside equities without changing user watchlists |
-| TREND iterates collection equities, which deliberately exclude ETF proxies | An ETF added to My tickers has no own price trend or driver links | Use the capped watchlist universe, as M1 already does; exclude each ticker's own ETF driver |
+| TREND iterates collection equities, which deliberately exclude ETF proxies | An ETF added to the watchlist has no own price trend or driver links | Use the capped watchlist universe, as M1 already does; exclude each ticker's own ETF driver |
 
 ## Implementation sequence
 

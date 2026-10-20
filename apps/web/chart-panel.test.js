@@ -38,19 +38,20 @@ test("every page renders the one shared chart panel (#203)", () => {
   assert.ok(dashboardAt > 0);
   assert.match(research, /renderChartPanel\("research", session\.selected\)/);
   const stock = slice("function renderStockPage", "function renderResearchPage");
-  assert.match(stock, /renderChartPanel\("company", session\.selected\)/);
+  assert.match(stock, /renderChartPanel\("company", session\.selected, \{ stockPanel \}\)/);
+  assert.doesNotMatch(stock, /renderChartPanel\("company", session\.selected\)/);
   assert.doesNotMatch(stock, /classList\.add\(/);
   assert.doesNotMatch(styles, /price-panel-compact/);
-  // Technical Summary stays directly below the chart on the company page.
-  assert.match(stock, /page\.append\(\s*chart,\s*renderTechnicalSummary\(/);
+  assert.match(stock, /renderTechnicalSummary\(session\.selected, history\)/);
+  assert.doesNotMatch(stock, /page\.append\(\s*chart,/);
 });
 
-test("the shared panel keeps every control and gates only the company link", () => {
+test("the shared panel keeps the price and period and nothing below them", () => {
   const panel = slice("function renderPricePanel", "function renderContracts");
-  for (const piece of [/renderPeriodChips\(/, /renderTrend\(/, /renderOverlayControls\(/, /renderChartLanes\(/,
-    /renderLaneControls\(/, /catalyst-filters/, /attachSharedCrosshair\(/, /chart-legend/]) {
-    assert.match(panel, piece);
-  }
+  assert.match(panel, /renderPeriodChips\(/);
+  assert.match(panel, /renderTrend\(/);
   assert.match(panel, /options\.companyLink && stockHash/);
+  assert.doesNotMatch(panel, /renderOverlayControls\(|renderChartLanes\(|renderLaneControls\(|catalyst-filters|attachSharedCrosshair\(|chart-legend|drawChart\(/);
   assert.doesNotMatch(panel, /session\.route\.page/);
+  assert.match(panel, /panel\.append\(overview\);\n {2}return panel;/);
 });

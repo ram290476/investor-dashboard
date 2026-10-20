@@ -81,7 +81,7 @@ test("the legend keys and the plot share one dash helper, and the legend CSS use
   assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}/);
   assert.match(app, /seriesLineStyle\(definition\.kind\)/);
   assert.match(app, /seriesLineStyle\("price"\)/);
-  assert.match(app, /legendItems\(/);
   assert.match(app, /aria-hidden", "true"/);
-  assert.doesNotMatch(app.slice(app.indexOf("const legend = node"), app.indexOf("panel.append(legend)")), /overlay-swatch/);
+  const panel = app.slice(app.indexOf("function renderPricePanel"), app.indexOf("function renderContracts"));
+  assert.doesNotMatch(panel, /legendItems\(|chart-legend|overlay-swatch/);
 });

@@ -329,13 +329,14 @@ test("review mode shows or hides operating, guidance, and CapEx panels together"
 });
 
 test("stock tabs move by keyboard and calls stay unlicensed", () => {
-  assert.equal(nextStockTab("overview", "ArrowRight"), "trends");
-  assert.equal(nextStockTab("trends", "ArrowRight"), "fundamentals");
+  assert.equal(nextStockTab("trends", "ArrowRight"), "overview");
+  assert.equal(nextStockTab("overview", "ArrowRight"), "fundamentals");
   assert.equal(nextStockTab("fundamentals", "ArrowRight"), "kpis");
-  assert.equal(nextStockTab("overview", "End"), "kpis");
-  assert.equal(nextStockTab("kpis", "ArrowRight"), "overview");
-  assert.equal(nextStockTab("kpis", "Home"), "overview");
-  assert.deepEqual(STOCK_TABS.map((tab) => tab.id), ["overview", "trends", "fundamentals", "kpis"]);
+  assert.equal(nextStockTab("trends", "End"), "kpis");
+  assert.equal(nextStockTab("kpis", "ArrowRight"), "trends");
+  assert.equal(nextStockTab("kpis", "Home"), "trends");
+  assert.deepEqual(STOCK_TABS.map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
+  assert.deepEqual(STOCK_TABS.map((tab) => tab.label), ["Trends", "Technical", "Fundamentals", "KPIs"]);
   assert.equal(STOCK_TABS.length, 4);
   assert.match(callsCopy().transcripts, /not collected/);
   const gap = fillQuarterGaps([
@@ -503,10 +504,12 @@ test("company description comes from the stock payload, then dashboard data, and
   assert.equal(companyDescription(null, { company_description: null }), "");
 });
 
-test("company page order: header, shared chart, Technical Summary, then the metric sections (#210)", () => {
+test("company page order: Technical Summary, then quote headers on KPIs and Fundamentals (#279)", () => {
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
-  assert.match(page, /const chart = renderChartPanel\("company", session\.selected\)/);
-  const order = ["chart,", "renderTechnicalSummary(session.selected, history)", 'section("kpis"', 'section(\n      "fundamentals"', "renderCompanyMetrics(charts, pageState)", "renderQuarterlyNotes(charts.guidance)"]
+  assert.match(page, /quoteFor\("kpis"\)/);
+  assert.match(page, /quoteFor\("fundamentals"\)/);
+  assert.doesNotMatch(page, /renderChartPanel\("company", session\.selected\)/);
+  const order = ["renderTechnicalSummary(session.selected, history)", 'quoteFor("kpis")', 'section("kpis"', 'quoteFor("fundamentals")', 'section(\n      "fundamentals"', "renderCompanyMetrics(charts, pageState)", "renderQuarterlyNotes(charts.guidance)"]
     .map((piece) => page.indexOf(piece, page.indexOf("page.append(")));
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), order.join(","));
   assert.ok(page.indexOf("root.append(heading)") < page.indexOf("root.append(page)"));
@@ -518,7 +521,9 @@ test("company page order: header, shared chart, Technical Summary, then the metr
   const barAt = styles.indexOf(".stock-page-tabs {");
   const bar = styles.slice(barAt, styles.indexOf("}", barAt) + 1);
   assert.match(bar, /display:\s*flex/);
-  assert.match(bar, /overflow-x:\s*auto/);
+  assert.match(bar, /flex-wrap:\s*wrap/);
+  assert.match(bar, /overflow-x:\s*clip/);
+  assert.doesNotMatch(bar, /overflow-x:\s*auto/);
   assert.doesNotMatch(bar, /display:\s*none/);
   assert.doesNotMatch(styles, /\.stock-page-tabs\s*\{[^}]*grid-template-columns:\s*repeat\(4/);
   assert.match(styles, /\.stock-tab-deep\[aria-selected="true"\]/);
