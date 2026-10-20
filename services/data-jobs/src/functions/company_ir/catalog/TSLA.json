@@ -878,17 +878,19 @@
       "display_name": "Automotive gross profit",
       "unit": "USD",
       "scale": 1000000,
-      "definition": "Automotive gross profit from the financial summary.",
+      "definition": "Automotive reportable-segment gross profit. Proposed from the filing. Nothing here is approved.",
       "category": "fundamentals",
       "status": "proposed",
       "approved_by": null,
       "approved_at": null,
       "panel_order": 265,
       "aliases": [
-        "Automotive gross profit"
+        "Automotive gross profit",
+        "Automotive segment gross profit"
       ],
       "disclosure_status": "numeric",
       "source_priority": [
+        "xbrl",
         "deck"
       ],
       "first_seen": {
@@ -1216,6 +1218,141 @@
         "source": "Q2 2026 Update or the quarterly deliveries release"
       },
       "last_seen": "2026Q2"
+    },
+    {
+      "metric_id": "automotive_sales",
+      "display_name": "Automotive sales",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Automotive sales, excluding regulatory credits and leasing. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 500,
+      "aliases": ["Automotive sales"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "automotive_regulatory_credits",
+      "display_name": "Automotive regulatory credits",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Automotive regulatory credits. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 510,
+      "aliases": ["Automotive regulatory credits"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "energy_sales",
+      "display_name": "Energy generation and storage sales",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Energy generation and storage sales, excluding leasing. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 520,
+      "aliases": ["Energy generation and storage sales"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "automotive_leasing",
+      "display_name": "Automotive leasing",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Automotive leasing revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 530,
+      "aliases": ["Automotive leasing"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "energy_leasing",
+      "display_name": "Energy generation and storage leasing",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Energy generation and storage leasing revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 540,
+      "aliases": ["Energy generation and storage leasing"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "energy_gross_profit",
+      "display_name": "Energy gross profit",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Energy generation and storage reportable-segment gross profit. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 560,
+      "aliases": ["Energy segment gross profit"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "automotive_gross_margin",
+      "display_name": "Automotive gross margin",
+      "unit": "ratio",
+      "scale": 1,
+      "definition": "Automotive gross profit divided by automotive segment revenue. Derived at serve time. Proposed. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 570,
+      "aliases": ["Automotive gross margin"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "energy_gross_margin",
+      "display_name": "Energy gross margin",
+      "unit": "ratio",
+      "scale": 1,
+      "definition": "Energy gross profit divided by energy segment revenue. Derived at serve time. Proposed. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 580,
+      "aliases": ["Energy gross margin"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "gov_obligations",
+      "display_name": "Government obligations",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Federal obligations from the existing USAspending rollup. Proposed. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 590,
+      "aliases": ["Government obligations"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
     }
   ],
   "ir_sources": [
@@ -1241,7 +1378,16 @@
       "AutomotiveSegmentMember": "automotive_revenue",
       "EnergyGenerationAndStorageSegmentMember": "energy_revenue",
       "ServicesAndOtherMember": "services_revenue"
-    }
+    },
+    "bindings": [
+      {"member": "AutomotiveSalesMember", "fact": "RevenueFromContractWithCustomerExcludingAssessedTax", "metric_id": "automotive_sales"},
+      {"member": "AutomotiveRegulatoryCreditsMember", "fact": "RevenueFromContractWithCustomerExcludingAssessedTax", "metric_id": "automotive_regulatory_credits"},
+      {"member": "EnergyGenerationAndStorageSalesMember", "fact": "RevenueFromContractWithCustomerExcludingAssessedTax", "metric_id": "energy_sales"},
+      {"member": "AutomotiveLeasingMember", "fact": "RevenueFromContractWithCustomerExcludingAssessedTax", "metric_id": "automotive_leasing"},
+      {"member": "EnergyGenerationAndStorageLeasingMember", "fact": "RevenueFromContractWithCustomerExcludingAssessedTax", "metric_id": "energy_leasing"},
+      {"member": "AutomotiveSegmentMember", "fact": "GrossProfit", "metric_id": "automotive_gross_profit"},
+      {"member": "EnergyGenerationAndStorageSegmentMember", "fact": "GrossProfit", "metric_id": "energy_gross_profit"}
+    ]
   },
   "gov_contracts": {
     "name_aliases": ["tesla"],
@@ -1440,6 +1586,12 @@
         "unit": "vehicles",
         "max_files": 4,
         "package_url": "https://data.ca.gov/api/3/action/package_show?id=vehicle-fuel-type-count-by-zip-code"
+      },
+      {
+        "id": "usaspending",
+        "metric_id": "gov_obligations",
+        "unit": "USD",
+        "label": "Government obligations"
       }
     ],
     "derived": [
@@ -1448,6 +1600,22 @@
         "from": "semi_production",
         "op": "running_sum",
         "unit": "vehicles"
+      },
+      {
+        "metric_id": "automotive_gross_margin",
+        "op": "ratio",
+        "numerator": "automotive_gross_profit",
+        "denominator": "automotive_revenue",
+        "unit": "ratio",
+        "label": "Automotive gross margin"
+      },
+      {
+        "metric_id": "energy_gross_margin",
+        "op": "ratio",
+        "numerator": "energy_gross_profit",
+        "denominator": "energy_revenue",
+        "unit": "ratio",
+        "label": "Energy gross margin"
       }
     ],
     "forecast": {
@@ -2379,6 +2547,39 @@
             ]
           }
         ]
+      },
+      {
+        "id": "revenue-mix",
+        "title": "Revenue mix",
+        "archetype": "segment_revenue_mix",
+        "headline": "revenue_gaap",
+        "placement": "primary",
+        "metrics": [
+          "automotive_sales",
+          "automotive_regulatory_credits",
+          "energy_sales",
+          "services_revenue",
+          "automotive_leasing",
+          "energy_leasing"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "notes": ["Sales and services total is a parent and is not stacked with these lines."]
+      },
+      {
+        "id": "growth-margin",
+        "title": "Segment gross margin",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": ["automotive_gross_margin", "energy_gross_margin"],
+        "source_note": "Gross profit over reportable-segment revenue. Derived at serve time. Pending review."
+      },
+      {
+        "id": "government-awards",
+        "title": "Government obligations",
+        "archetype": "public_records",
+        "placement": "primary",
+        "metrics": ["gov_obligations"],
+        "source_note": "USAspending obligations already collected for this ticker. Pending review."
       }
     ]
   }

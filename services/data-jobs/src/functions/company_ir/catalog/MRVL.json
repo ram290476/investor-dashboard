@@ -1,0 +1,102 @@
+{
+  "ticker": "MRVL",
+  "catalog_version": 1,
+  "fiscal_year_end_month": 1,
+  "approval_note": "Company-specific rows only. Shared GAAP rows are added when the catalog is loaded. Every entry is proposed. Nothing is auto-approved.",
+  "metrics": [
+    {
+      "metric_id": "revenue_data_center",
+      "display_name": "Data center revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Data center revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "Data center end market"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_communications",
+      "display_name": "Communications and other revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Communications and other revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "Communications and other end market"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    }
+  ],
+  "xbrl_segments": {
+    "axes": [
+      "ProductOrServiceAxis"
+    ],
+    "reports": [
+      "Revenue - Net Revenue by End Market (Details)"
+    ],
+    "facts": [
+      "RevenueFromContractWithCustomerExcludingAssessedTax"
+    ],
+    "bindings": [
+      {
+        "member": "DataCenterMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_data_center",
+        "label": "Data center"
+      },
+      {
+        "member": "CommunicationsAndOtherMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_communications",
+        "label": "Communications and other"
+      }
+    ]
+  },
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "sections": [
+      {
+        "id": "end-market-mix",
+        "title": "Revenue by end market",
+        "archetype": "segment_revenue_mix",
+        "placement": "primary",
+        "metrics": [
+          "revenue_data_center",
+          "revenue_communications"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "headline": "revenue_gaap"
+      },
+      {
+        "id": "growth-margin",
+        "title": "Operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": [
+          "operating_income"
+        ],
+        "source_note": "SEC companyfacts. Pending review.",
+        "notes": [
+          "One reportable segment. Operating income is the consolidated figure."
+        ]
+      }
+    ]
+  }
+}

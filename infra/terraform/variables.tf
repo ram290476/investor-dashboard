@@ -592,7 +592,7 @@ variable "jobs" {
       triggers       = ["job:Q2X?partial", "job:DEEP?partial"]
       memory         = 512
       timeout        = 120
-      read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/", "curated/deep_dive/", "manual/deep_dive/", "curated/news_topics/"]
+      read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/", "curated/deep_dive/", "manual/deep_dive/", "curated/news_topics/", "curated/contracts_rollup/"]
       write_prefixes = ["serving/stock/"]
       api_keys       = []
       reads_prefs    = false

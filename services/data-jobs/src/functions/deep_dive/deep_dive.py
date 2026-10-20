@@ -16,6 +16,7 @@ import re
 from datetime import UTC, datetime
 
 import httpx
+import pattern_recognition as patterns
 from botocore.exceptions import BotoCoreError, ClientError
 
 import deep_dive_sources as sources
@@ -31,6 +32,15 @@ PANEL_KINDS = frozenset({
     "map-sites",
     "forecast-band",
     "table",
+    "stacked-area",
+    "headline-card",
+})
+ARCHETYPES = frozenset({
+    "segment_revenue_mix",
+    "unit_volumes",
+    "operating_kpis",
+    "growth_margin",
+    "public_records",
 })
 PLACEMENTS = frozenset({"primary", "secondary"})
 WIDTHS = frozenset({"wide", "half"})
@@ -92,6 +102,7 @@ NHTSA_NOTES = (
 )
 
 _QUARTER = re.compile(r"^(\d{4})Q([1-4])$")
+_FY_QUARTER = re.compile(r"^FY(\d{4})Q([1-4])$")
 _MONTH = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
 _METRIC_ID = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _VRU = ("pedestrian", "bicycle", "cyclist", "vulnerable")
@@ -136,10 +147,28 @@ def validate_deep_dive(block) -> list[str]:
         if headline not in (None, ""):
             if not isinstance(headline, str) or not _METRIC_ID.match(headline):
                 errors.append(f"{sid or 'section'} headline must be a metric id")
+        archetype = section.get("archetype")
+        if archetype is not None and archetype not in ARCHETYPES:
+            errors.append(f"{sid or 'section'} has unsupported archetype {archetype!r}")
         panels = section.get("panels")
-        if not isinstance(panels, list) or not panels:
+        metrics = section.get("metrics")
+        if archetype:
+            if metrics is None:
+                metrics = []
+            if not isinstance(metrics, list):
+                errors.append(f"{sid or 'section'} metrics must be a list")
+            else:
+                for spec in metrics:
+                    if isinstance(spec, str):
+                        spec = {"metric_id": spec}
+                    if not isinstance(spec, dict) or not _METRIC_ID.match(str(spec.get("metric_id") or "")):
+                        errors.append(f"{sid or 'section'} metric needs a metric id")
+            if panels is not None and not isinstance(panels, list):
+                errors.append(f"{sid or 'section'} panels must be a list")
+            panels = panels or []
+        elif not isinstance(panels, list) or not panels:
             errors.append(f"{sid or 'section'} needs panels")
-            continue
+            panels = []
         for panel in panels:
             errors.extend(_validate_panel(sid, panel))
     for source in block.get("sources") or []:
@@ -161,10 +190,20 @@ def validate_deep_dive(block) -> list[str]:
             for spec in derived:
                 if not isinstance(spec, dict) or not _METRIC_ID.match(str(spec.get("metric_id") or "")):
                     errors.append("derived series needs a metric id")
-                elif not _METRIC_ID.match(str(spec.get("from") or "")):
-                    errors.append(f"{spec.get('metric_id')} derived series needs a from metric")
-                elif spec.get("op") not in {None, "running_sum"}:
+                    continue
+                op = spec.get("op")
+                if op == "ratio":
+                    if (
+                        not _METRIC_ID.match(str(spec.get("numerator") or ""))
+                        or not _METRIC_ID.match(str(spec.get("denominator") or ""))
+                    ):
+                        errors.append(f"{spec.get('metric_id')} ratio needs numerator and denominator")
+                    continue
+                if op not in {None, "running_sum"}:
                     errors.append(f"{spec.get('metric_id')} has unsupported derived op")
+                    continue
+                if not _METRIC_ID.match(str(spec.get("from") or "")):
+                    errors.append(f"{spec.get('metric_id')} derived series needs a from metric")
     return errors
 
 
@@ -189,11 +228,13 @@ def _validate_panel(section_id: str, panel) -> list[str]:
 
 def shift_period(period: str, steps: int) -> str | None:
     """Move a fiscal quarter or calendar month by `steps`. Negative steps go backward."""
-    quarter = _QUARTER.match(str(period or ""))
+    text = str(period or "")
+    quarter = _QUARTER.match(text) or _FY_QUARTER.match(text)
     if quarter:
         index = int(quarter.group(1)) * 4 + (int(quarter.group(2)) - 1) + steps
         year, slot = divmod(index, 4)
-        return f"{year}Q{slot + 1}"
+        prefix = "FY" if text.startswith("FY") else ""
+        return f"{prefix}{year}Q{slot + 1}"
     month = _MONTH.match(str(period or ""))
     if month:
         index = int(month.group(1)) * 12 + (int(month.group(2)) - 1) + steps
@@ -203,13 +244,14 @@ def shift_period(period: str, steps: int) -> str | None:
 
 
 def _period_sort_key(period: str) -> tuple:
-    quarter = _QUARTER.match(str(period or ""))
+    text = str(period or "")
+    quarter = _QUARTER.match(text) or _FY_QUARTER.match(text)
     if quarter:
-        return (0, int(quarter.group(1)), int(quarter.group(2)))
-    month = _MONTH.match(str(period or ""))
+        return (0, int(quarter.group(1)), int(quarter.group(2)), 1 if text.startswith("FY") else 0)
+    month = _MONTH.match(text)
     if month:
-        return (1, int(month.group(1)), int(month.group(2)))
-    return (2, 0, 0)
+        return (1, int(month.group(1)), int(month.group(2)), 0)
+    return (2, 0, 0, 0)
 
 
 def _change(latest: float | None, prior: float | None) -> float | None:
@@ -522,6 +564,7 @@ def _tile(metric_id: str, series: dict | None, spec: dict) -> dict:
         "empty_label": "" if latest is not None else EMPTY_LABELS.get(disclosure, EMPTY_LABELS["not_disclosed"]),
         "source_kind": (series or {}).get("source_kind"),
         "source_url": (series or {}).get("source_url"),
+        "patterns": patterns.detect_patterns(reported),
     }
 
 
@@ -558,6 +601,7 @@ def _chart_series(spec: dict, found: dict | None, color_index: int) -> dict:
             EMPTY_LABELS["not_disclosed"],
         ),
         "source_kind": (found or {}).get("source_kind"),
+        "patterns": patterns.detect_patterns(reported),
     }
 
 
@@ -922,6 +966,7 @@ def assemble_deep_dive(
     projections: list | None = None,
     news: dict | None = None,
     lock_projections: bool = False,
+    contracts=None,
 ) -> dict | None:
     """Layout from the catalog, filled with real series. Missing series stay empty, never zero."""
     block = catalog.get("deep_dive") if isinstance(catalog, dict) else None
@@ -959,6 +1004,8 @@ def assemble_deep_dive(
     for series in estimate_rows:
         estimates[series["metric_id"]] = series
     _apply_derived(block, metrics, estimates)
+    for metric_id, series in _contract_series(catalog, contracts).items():
+        metrics.setdefault(metric_id, series)
     forecast = apply_projections(
         placeholder_forecast(block.get("forecast"), metrics),
         projections if projections is not None else (observations or {}).get("stored_headlines"),
@@ -970,12 +1017,16 @@ def assemble_deep_dive(
         panels = []
         for panel in section.get("panels") or []:
             panels.append(_fill_panel(panel, metrics, estimates, catalog, forecast))
+        if section.get("archetype"):
+            panels.extend(_archetype_panels(section, metrics, catalog))
         built = {
             "id": section.get("id"),
             "title": section.get("title"),
             "placement": section.get("placement") or "primary",
             "panels": panels,
         }
+        if section.get("archetype"):
+            built["archetype"] = section.get("archetype")
         headline = str(section.get("headline") or "").strip()
         if headline:
             built["headline"] = headline
@@ -1272,14 +1323,68 @@ def _running_sum_series(source: dict, metric_id: str, unit: str, *, estimate: bo
     }
 
 
+def _ratio_series(numerator: dict, denominator: dict, metric_id: str, unit: str, label: str) -> dict | None:
+    """Period-matched ratio. A zero denominator is skipped. The result stays proposed."""
+    nums = {
+        point.get("period"): point.get("value")
+        for point in numerator.get("points") or []
+        if point.get("reported") and point.get("period") and point.get("value") is not None
+    }
+    dens = {
+        point.get("period"): point.get("value")
+        for point in denominator.get("points") or []
+        if point.get("reported") and point.get("period") and point.get("value") not in (None, 0)
+    }
+    points = []
+    for period in sorted(set(nums) & set(dens), key=_period_sort_key):
+        den = dens[period]
+        if not den:
+            continue
+        points.append({"period": period, "value": float(nums[period]) / float(den), "reported": True})
+    if not points:
+        return None
+    return {
+        "metric_id": metric_id,
+        "label": label or metric_id,
+        "unit": unit or "ratio",
+        "cadence": "quarterly",
+        "approval_state": "proposed",
+        "approved": False,
+        "estimate": False,
+        "source_kind": "derived",
+        "disclosure_status": "numeric",
+        "points": points,
+        "notes": ["Ratio of two reported series. Pending review. Not a forecast."],
+    }
+
+
 def _apply_derived(block: dict, metrics: dict[str, dict], estimates: dict[str, dict]) -> None:
-    """Catalog-declared running sums. A series that already has points is left alone."""
+    """Catalog-declared running sums and ratios. A series that already has points is left alone."""
     for spec in (block or {}).get("derived") or []:
-        if not isinstance(spec, dict) or spec.get("op") not in {None, "running_sum"}:
+        if not isinstance(spec, dict):
             continue
         metric_id = str(spec.get("metric_id") or "")
+        if not metric_id or metric_id in metrics or metric_id in estimates:
+            continue
+        if spec.get("op") == "ratio":
+            numerator = metrics.get(str(spec.get("numerator") or ""))
+            denominator = metrics.get(str(spec.get("denominator") or ""))
+            if not numerator or not denominator:
+                continue
+            built = _ratio_series(
+                numerator,
+                denominator,
+                metric_id,
+                str(spec.get("unit") or "ratio"),
+                str(spec.get("label") or metric_id),
+            )
+            if built:
+                metrics[metric_id] = built
+            continue
+        if spec.get("op") not in {None, "running_sum"}:
+            continue
         origin = str(spec.get("from") or "")
-        if not metric_id or not origin or metric_id in metrics or metric_id in estimates:
+        if not origin:
             continue
         reported = metrics.get(origin)
         reported_points = (reported or {}).get("points") or []
@@ -1294,6 +1399,222 @@ def _apply_derived(block: dict, metrics: dict[str, dict], estimates: dict[str, d
             built = _running_sum_series(estimate, metric_id, str(spec.get("unit") or ""), estimate=True)
             if built:
                 estimates[metric_id] = _force_news_estimate(built)
+
+
+def _contract_series(catalog: dict, rollup) -> dict[str, dict]:
+    """Quarterly obligations from the existing USAspending rollup. Missing rows stay empty."""
+    if not isinstance(rollup, list):
+        return {}
+    source = next(
+        (
+            item for item in (catalog.get("deep_dive") or {}).get("sources") or []
+            if isinstance(item, dict) and item.get("id") == "usaspending"
+        ),
+        None,
+    )
+    if source is None:
+        return {}
+    ticker = str(catalog.get("ticker") or "").upper()
+    row = next((item for item in rollup if str(item.get("ticker") or "").upper() == ticker), None)
+    if not isinstance(row, dict):
+        return {}
+    totals: dict[str, float] = {}
+    for agency in row.get("by_agency") or []:
+        if not isinstance(agency, dict):
+            continue
+        quarter = str(agency.get("quarter") or "")
+        amount = agency.get("obligated")
+        if not quarter or amount is None:
+            continue
+        totals[quarter] = totals.get(quarter, 0.0) + float(amount)
+    if not totals:
+        return {}
+    metric_id = str(source.get("metric_id") or "gov_obligations")
+    points = [
+        {"period": period, "value": totals[period], "reported": True}
+        for period in sorted(totals, key=_period_sort_key)
+    ]
+    return {
+        metric_id: {
+            "metric_id": metric_id,
+            "label": source.get("label") or "Government obligations",
+            "unit": source.get("unit") or "USD",
+            "cadence": "quarterly",
+            "approval_state": "proposed",
+            "approved": False,
+            "estimate": False,
+            "source_kind": "usaspending",
+            "source_url": "https://www.usaspending.gov/",
+            "disclosure_status": "numeric",
+            "points": points,
+            "notes": ["Sum of matched USAspending obligations by quarter. Pending review."],
+        }
+    }
+
+
+def _section_metrics(section: dict, key: str = "metrics") -> list[dict]:
+    specs = []
+    for item in section.get(key) or []:
+        if isinstance(item, str):
+            specs.append({"metric_id": item})
+        elif isinstance(item, dict) and item.get("metric_id"):
+            specs.append(item)
+    return specs
+
+
+def _shares(values: list) -> list:
+    numbers = [value for value in values if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    if not numbers or any(value < 0 for value in numbers) or len(numbers) != len(values):
+        return [None] * len(values)
+    total = sum(numbers)
+    if total <= 0:
+        return [None] * len(values)
+    return [float(value) / total for value in numbers]
+
+
+def _period_table(specs: list[dict], metrics: dict[str, dict], catalog: dict) -> dict:
+    columns = [{"id": "period", "label": "Period"}]
+    series = []
+    for spec in specs:
+        found = _lookup_metric(spec.get("metric_id"), metrics, catalog)
+        columns.append({
+            "id": spec.get("metric_id"),
+            "label": spec.get("label") or (found or {}).get("label") or spec.get("metric_id"),
+            "unit": spec.get("unit") or (found or {}).get("unit") or "",
+        })
+        series.append(found)
+    periods: list[str] = []
+    for found in series:
+        for point in (found or {}).get("points") or []:
+            period = point.get("period")
+            if point.get("reported") and period and period not in periods:
+                periods.append(period)
+    periods.sort(key=_period_sort_key)
+    rows = []
+    for period in periods:
+        cells = [period]
+        for found in series:
+            value = None
+            for point in (found or {}).get("points") or []:
+                if point.get("period") == period and point.get("reported"):
+                    value = point.get("value")
+            cells.append(value)
+        rows.append({"cells": cells})
+    return {"columns": columns, "rows": rows}
+
+
+def _panel_shell(section: dict, panel_id: str, kind: str, title: str, **extra) -> dict:
+    panel = {
+        "id": panel_id,
+        "kind": kind,
+        "title": title,
+        "subtitle": section.get("subtitle") or "",
+        "width": extra.pop("width", "wide"),
+        "cadence": extra.pop("cadence", "quarterly"),
+        "source_note": section.get("source_note") or "",
+        "kpis": extra.pop("kpis", []),
+        "series": extra.pop("series", []),
+        "modes": [],
+        "map": None,
+        "markers": [],
+        "multiples": extra.pop("multiples", []),
+        "milestones": [],
+        "table": extra.pop("table", None),
+        "forecast": None,
+        "notes": list(section.get("notes") or []),
+        "empty_label": extra.pop("empty_label", ""),
+        "archetype": section.get("archetype"),
+    }
+    return panel
+
+
+def _headline_panel(section: dict, spec: dict, metrics: dict[str, dict], catalog: dict) -> dict:
+    metric_id = str(spec.get("metric_id") or "")
+    found = _lookup_metric(metric_id, metrics, catalog)
+    tile = _tile(metric_id, found, spec)
+    if tile.get("value") is None and section.get("empty_label"):
+        tile["empty_label"] = section["empty_label"]
+    chart = []
+    points = (found or {}).get("points") or []
+    reported = found and any(point.get("reported") and point.get("value") is not None for point in points)
+    if reported:
+        chart.append(_chart_series({**spec, "role": "line"}, found, 1))
+    return _panel_shell(
+        section,
+        f"{section.get('id')}-{metric_id}",
+        "headline-card",
+        spec.get("label") or (found or {}).get("label") or section.get("title") or metric_id,
+        width="half",
+        cadence=(found or {}).get("cadence") or "quarterly",
+        kpis=[tile],
+        series=chart,
+        multiples=[],
+        table=_period_table([spec], metrics, catalog) if reported else None,
+        empty_label="" if tile.get("value") is not None else (section.get("empty_label") or "Not yet disclosed"),
+    )
+
+
+def _mix_panel(section: dict, metrics: dict[str, dict], catalog: dict) -> dict:
+    specs = _section_metrics(section)
+    detail = _section_metrics(section, "detail_metrics")
+    headline_id = str(section.get("headline") or "").strip()
+    kpis = []
+    if headline_id:
+        found = _lookup_metric(headline_id, metrics, catalog)
+        headline_label = section.get("headline_label") or (found or {}).get("label") or "Total"
+        tile = _tile(headline_id, found, {"metric_id": headline_id, "label": headline_label})
+        if not specs and section.get("empty_label"):
+            tile["empty_label"] = section["empty_label"]
+        kpis.append(tile)
+    multiples = []
+    series = []
+    color = 1
+    for spec in specs:
+        found = _lookup_metric(spec.get("metric_id"), metrics, catalog)
+        multiples.append(_tile(spec.get("metric_id"), found, spec))
+        series.append(_chart_series({**spec, "role": "area", "stack": "mix"}, found, color))
+        color = color % 6 + 1
+    shares = _shares([tile.get("value") for tile in multiples])
+    for tile, share in zip(multiples, shares, strict=True):
+        if share is not None:
+            tile["share"] = share
+    any_value = any(tile.get("value") is not None for tile in [*kpis, *multiples])
+    notes = list(section.get("notes") or [])
+    for item in section.get("series_breaks") or []:
+        if isinstance(item, dict) and item.get("note"):
+            notes.append(str(item["note"]))
+    panel = _panel_shell(
+        section,
+        f"{section.get('id')}-mix",
+        "stacked-area",
+        section.get("title") or "Mix",
+        kpis=kpis,
+        series=series,
+        multiples=multiples,
+        table=_period_table([*specs, *detail], metrics, catalog) if (specs or detail) else None,
+        empty_label="" if any_value else (section.get("empty_label") or "No segment mix is reported."),
+    )
+    panel["notes"] = notes
+    return panel
+
+
+def _archetype_panels(section: dict, metrics: dict[str, dict], catalog: dict) -> list[dict]:
+    archetype = section.get("archetype")
+    if archetype == "segment_revenue_mix":
+        return [_mix_panel(section, metrics, catalog)]
+    specs = _section_metrics(section)
+    if not specs:
+        empty = _panel_shell(
+            section,
+            f"{section.get('id')}-empty",
+            "headline-card",
+            section.get("title") or "Series",
+            width="wide",
+            kpis=[],
+            empty_label=section.get("empty_label") or "Not yet disclosed",
+        )
+        return [empty]
+    return [_headline_panel(section, spec, metrics, catalog) for spec in specs]
 
 
 def _collect_catalog_sources(

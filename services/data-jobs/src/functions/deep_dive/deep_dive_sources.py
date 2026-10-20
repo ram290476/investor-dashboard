@@ -213,6 +213,9 @@ def validate_extra_source(source: dict) -> list[str]:
                     errors.append("news estimate rule needs metric_id")
     elif sid == "av_regulator":
         errors.extend(_validate_av_regulator(source))
+    elif sid == "usaspending":
+        if not str(source.get("metric_id") or "").strip():
+            errors.append("usaspending source needs metric_id")
     return errors
 
 

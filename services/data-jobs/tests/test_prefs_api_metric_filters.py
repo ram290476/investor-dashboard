@@ -84,7 +84,7 @@ def test_metric_review_route_cors_integration_and_iam_prefixes():
     serve = jobs[jobs.index("q2-company-ir-serve = {"):jobs.index("short-interest = {")]
     expected_reads = (
         'read_prefixes  = ["curated/company_metrics/", "serving/stock/", "catalog/", '
-        '"curated/deep_dive/", "manual/deep_dive/", "curated/news_topics/"]'
+        '"curated/deep_dive/", "manual/deep_dive/", "curated/news_topics/", "curated/contracts_rollup/"]'
     )
     assert expected_reads in serve
     assert 'write_prefixes = ["serving/stock/"]' in serve

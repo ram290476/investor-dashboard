@@ -227,6 +227,94 @@
         "press_release",
         "deck"
       ]
+    },
+    {
+      "metric_id": "operating_income_compute",
+      "display_name": "Compute & Networking operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Compute & Networking operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 120,
+      "aliases": ["Compute & Networking operating income"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "operating_income_graphics",
+      "display_name": "Graphics operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Graphics operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 130,
+      "aliases": ["Graphics operating income"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
     }
-  ]
+  ],
+  "xbrl_segments": {
+    "axes": ["ConsolidationItemsAxis", "ProductOrServiceAxis"],
+    "reports": [
+      "Segment Information - Schedule of Reportable Segments (Details)",
+      "Segment Information - Schedule of Revenue by Market Platform (Details)"
+    ],
+    "facts": ["Revenues"],
+    "bindings": [
+      {"member": "OperatingSegmentsMember", "label": "Compute & Networking", "fact": "Revenues", "metric_id": "revenue_compute_networking"},
+      {"member": "OperatingSegmentsMember", "label": "Graphics", "fact": "Revenues", "metric_id": "revenue_graphics"},
+      {"member": "OperatingSegmentsMember", "label": "Compute & Networking", "fact": "OperatingIncomeLoss", "metric_id": "operating_income_compute"},
+      {"member": "OperatingSegmentsMember", "label": "Graphics", "fact": "OperatingIncomeLoss", "metric_id": "operating_income_graphics"},
+      {"member": "HyperscaleMember", "fact": "Revenues", "metric_id": "revenue_hyperscale"},
+      {"member": "AICloudsIndustrialEnterpriseMember", "fact": "Revenues", "metric_id": "revenue_acie"},
+      {"member": "EdgeComputingMember", "fact": "Revenues", "metric_id": "revenue_edge_computing"},
+      {"member": "DataCenterMember", "fact": "Revenues", "metric_id": "revenue_data_center"}
+    ]
+  },
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "sections": [
+      {
+        "id": "reportable-mix",
+        "title": "Reportable segments",
+        "archetype": "segment_revenue_mix",
+        "headline": "revenue_gaap",
+        "placement": "primary",
+        "metrics": ["revenue_compute_networking", "revenue_graphics"],
+        "source_note": "SEC FilingSummary segment report. Pending review."
+      },
+      {
+        "id": "market-mix",
+        "title": "Revenue by market",
+        "archetype": "segment_revenue_mix",
+        "headline": "revenue_gaap",
+        "placement": "primary",
+        "metrics": ["revenue_hyperscale", "revenue_acie", "revenue_edge_computing"],
+        "detail_metrics": ["revenue_data_center"],
+        "series_breaks": [
+          {
+            "period": "2026Q3",
+            "note": "Market names changed. Data Center, Gaming, Pro Visualization, Automotive, and OEM are not stitched onto Edge, Hyperscale, or AI Clouds."
+          }
+        ],
+        "notes": ["Data Center is the prior vocabulary and is not stacked with the current market lines."],
+        "source_note": "SEC FilingSummary segment report. Pending review."
+      },
+      {
+        "id": "growth-margin",
+        "title": "Segment operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": ["operating_income_compute", "operating_income_graphics"],
+        "source_note": "SEC FilingSummary segment report. Pending review."
+      }
+    ]
+  }
 }

@@ -2107,7 +2107,7 @@ def test_segment_report_keeps_three_month_members_and_ignores_the_company_total(
     assert _value(tesla, "automotive_revenue", "2026Q2") == 20_000_000_000
     assert _value(tesla, "energy_revenue", "2026Q2") == 3_000_000_000
     assert _value(tesla, "services_revenue", "2026Q2") == 2_500_000_000
-    assert not any(row["value"] == 999_000_000 for row in tesla)
+    assert _value(tesla, "automotive_gross_profit", "2026Q2") == 999_000_000
     written = {}
     result = ir.run_extract(
         {"manifests": [{
@@ -2180,3 +2180,179 @@ def test_spacex_companyfacts_uses_the_quarterly_fact_and_the_backlog_tag():
     assert _value(rows, "backlog", "2026Q2") == 47_461_000_000
     assert not any(row["value"] in {20_000_000_000, -5.0} for row in rows)
     assert all(row["approved"] is False for row in rows)
+
+
+def test_amendments_are_skipped_and_the_newer_revenue_tag_wins():
+    filings = ir.periodic_filings(
+        {
+            "cik": "320193",
+            "filings": {"recent": {
+                "form": ["10-K/A", "10-Q/A", "10-Q", "10-K"],
+                "accessionNumber": ["0001-26-000001", "0001-26-000002", "0001-26-000003", "0001-26-000004"],
+                "primaryDocument": ["a.htm", "b.htm", "q.htm", "k.htm"],
+                "filingDate": ["2026-08-01", "2026-08-02", "2026-07-31", "2025-11-01"],
+                "reportDate": ["2025-09-27", "2026-06-27", "2026-06-27", "2025-09-27"],
+            }},
+        },
+        limits={"10-Q": 6, "10-K": 2},
+    )
+    assert [item["form"] for item in filings] == ["10-Q", "10-K"]
+    assert ir._segment_number("$ (4,619)") == -4619
+    assert ir._segment_number("$(542)") == -542
+    assert ir._segment_number("\u2014") is None
+
+    def fact(start, end, value):
+        return {
+            "start": start, "end": end, "val": value, "form": "10-Q",
+            "filed": end, "accn": "0001-26-000003", "fp": "Q2", "fy": 2026,
+        }
+
+    rows, _flags = ir.companyfacts_observations(
+        {"facts": {"us-gaap": {
+            "Revenues": {"units": {"USD": [fact("2023-04-01", "2023-06-30", 1)]}},
+            "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                "units": {"USD": [fact("2026-04-01", "2026-06-30", 109_417_000_000)]},
+            },
+        }}},
+        ir.load_catalog("EX"),
+        ticker="EX",
+        source_url="https://data.sec.gov/api/xbrl/companyfacts/CIK0000000001.json",
+        source_doc_hash="d" * 64,
+        extracted_at=EXTRACTED,
+    )
+    assert _value(rows, "revenue_gaap", "2026Q2") == 109_417_000_000
+    assert not any(row["fiscal_period"] == "2023Q2" and row["metric_id"] == "revenue_gaap" for row in rows)
+
+
+def test_header_label_splits_a_shared_member_and_an_unnamed_row_stays_unmapped():
+    shared = _segment_table(
+        [
+            _member_rows(
+                "us-gaap_ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember",
+                "Operating Segments | Compute & Networking",
+                "us-gaap_Revenues",
+                ["88", "70"],
+            ),
+            _member_rows(
+                "us-gaap_ConsolidationItemsAxis=us-gaap_OperatingSegmentsMember",
+                "Operating Segments | Graphics",
+                "us-gaap_Revenues",
+                ["8", "6"],
+            ),
+            "<tr>" + _xbrl_cell("us-gaap_Revenues", "Retail") + "<td>29</td><td>20</td></tr>",
+        ],
+        six_months_first=False,
+    )
+    catalog = {
+        "ticker": "EX",
+        "fiscal_year_end_month": 12,
+        "metrics": [
+            {"metric_id": "revenue_compute", "display_name": "Compute", "unit": "USD", "status": "proposed"},
+            {"metric_id": "revenue_graphics", "display_name": "Graphics", "unit": "USD", "status": "proposed"},
+            {"metric_id": "revenue_retail", "display_name": "Retail", "unit": "USD", "status": "proposed"},
+        ],
+        "xbrl_segments": {
+            "axes": ["ConsolidationItemsAxis"],
+            "facts": ["Revenues"],
+            "bindings": [
+                {
+                    "member": "OperatingSegmentsMember",
+                    "label": "Compute & Networking",
+                    "fact": "Revenues",
+                    "metric_id": "revenue_compute",
+                },
+                {
+                    "member": "OperatingSegmentsMember",
+                    "label": "Graphics",
+                    "fact": "Revenues",
+                    "metric_id": "revenue_graphics",
+                },
+            ],
+        },
+    }
+    rows = ir.segment_observations(
+        shared, catalog, ticker="EX", source_url="https://www.sec.gov/Archives/edgar/data/example/R1.htm",
+        source_doc_hash="e" * 64, extracted_at=EXTRACTED,
+    )
+    assert _value(rows, "revenue_compute", "2026Q2") == 88_000_000
+    assert _value(rows, "revenue_graphics", "2026Q2") == 8_000_000
+    assert not any(row["metric_id"] == "revenue_retail" for row in rows)
+    named = {
+        **catalog,
+        "xbrl_segments": {**catalog["xbrl_segments"], "labels": {"Retail": "revenue_retail"}},
+    }
+    # The Retail line follows a member, so it stays with that member until the catalog
+    # names the row on its own. A row with no member context uses the labels map.
+    alone = _segment_table(
+        ["<tr>" + _xbrl_cell("us-gaap_Revenues", "Retail") + "<td>29</td><td>20</td></tr>"],
+        six_months_first=False,
+    )
+    labeled = ir.segment_observations(
+        alone, named, ticker="EX", source_url="https://www.sec.gov/Archives/edgar/data/example/R2.htm",
+        source_doc_hash="e" * 64, extracted_at=EXTRACTED,
+    )
+    assert _value(labeled, "revenue_retail", "2026Q2") == 29_000_000
+    unlabeled = ir.segment_observations(
+        alone, catalog, ticker="EX", source_url="https://www.sec.gov/Archives/edgar/data/example/R2.htm",
+        source_doc_hash="e" * 64, extracted_at=EXTRACTED,
+    )
+    assert unlabeled == []
+    geo = _segment_table(
+        [
+            _member_rows(
+                "us-gaap_StatementGeographicalAxis=country_US",
+                "U.S. net revenues | Retail(1)",
+                "us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax",
+                ["30", "20"],
+            ),
+            _member_rows(
+                "us-gaap_StatementGeographicalAxis=us-gaap_NonUsMember",
+                "International net revenues | Retail(1)",
+                "us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax",
+                ["18", "10"],
+            ),
+        ],
+        six_months_first=False,
+    )
+    places = {
+        "ticker": "EX",
+        "fiscal_year_end_month": 12,
+        "metrics": [
+            {
+                "metric_id": "revenue_us_retail",
+                "display_name": "U.S. retail",
+                "unit": "USD",
+                "status": "proposed",
+            },
+            {
+                "metric_id": "revenue_international_retail",
+                "display_name": "International retail",
+                "unit": "USD",
+                "status": "proposed",
+            },
+        ],
+        "xbrl_segments": {
+            "axes": ["StatementGeographicalAxis"],
+            "facts": ["RevenueFromContractWithCustomerExcludingAssessedTax"],
+            "bindings": [
+                {
+                    "member": "country_US",
+                    "label": "Retail",
+                    "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+                    "metric_id": "revenue_us_retail",
+                },
+                {
+                    "member": "NonUsMember",
+                    "label": "Retail",
+                    "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+                    "metric_id": "revenue_international_retail",
+                },
+            ],
+        },
+    }
+    placed = ir.segment_observations(
+        geo, places, ticker="EX", source_url="https://www.sec.gov/Archives/edgar/data/example/R3.htm",
+        source_doc_hash="e" * 64, extracted_at=EXTRACTED,
+    )
+    assert _value(placed, "revenue_us_retail", "2026Q2") == 30_000_000
+    assert _value(placed, "revenue_international_retail", "2026Q2") == 18_000_000
