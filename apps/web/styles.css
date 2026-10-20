@@ -5187,6 +5187,16 @@ a.catalyst-edgar-link:hover {
   pointer-events: auto;
 }
 
+.section-strip.section-strip-docked {
+  height: auto;
+}
+
+.section-strip.section-strip-docked .section-strip-track {
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .section-strip-chip {
   flex: none;
   display: inline-flex;

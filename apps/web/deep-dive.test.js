@@ -228,22 +228,23 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
       booked = `${id}|${href}`;
     },
   });
-  const chips = byClass(view, "deep-dive-section-tile");
-  assert.equal(chips.length, sample.deep_dive.sections.length);
+  assert.equal(byClass(view, "deep-dive-section-tile").length, 0);
+  assert.equal(byClass(view, "deep-dive-sections").length, 0);
   assert.equal(byClass(view, "deep-dive-jump-label").length, 0);
   assert.doesNotMatch(textOf(view), /On this page/);
-  assert.equal(byClass(view, "deep-dive-sections")[0].getAttribute("aria-label"), "Deep dive sections");
   const strip = byClass(view, "section-strip")[0];
   assert.equal(strip.getAttribute("aria-label"), "Sections");
-  assert.equal(strip.getAttribute("aria-hidden"), "true");
-  assert.equal(String(strip.className).includes("is-visible"), false);
-  assert.equal(byClass(view, "section-strip-chip").length, sample.deep_dive.sections.length);
+  assert.equal(strip.getAttribute("aria-hidden"), undefined);
+  assert.equal(String(strip.className).includes("is-visible"), true);
+  assert.equal(String(strip.className).includes("section-strip-docked"), true);
+  const chips = byClass(view, "section-strip-chip");
+  assert.equal(chips.length, sample.deep_dive.sections.length);
   assert.deepEqual(chips.map((chip) => chip.dataset.sectionId), ["scoreboard", "forecast", "places", "later"]);
   for (const chip of chips) {
     assert.equal(chip.tagName, "A");
     assert.equal(String(chip.className).includes("overlay-chip"), false);
     assert.equal(chip.getAttribute("role"), undefined);
-    assert.equal(byClass(chip, "deep-dive-section-icon").length, 1);
+    assert.equal(chip.getAttribute("tabindex"), undefined);
     assert.doesNotMatch(chip.href, /^#deep-dive-/);
     assert.match(chip.href, /^#stock\/ABCD\/deep-dive\//);
   }
@@ -287,7 +288,7 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
 
   const phone = renderDeepDive(sample, fakeDocument(true), { ticker: "zzzz" });
   assert.equal(byClass(phone, "deep-dive-secondary-body")[0].hidden, true);
-  const phoneLater = byClass(phone, "deep-dive-section-tile").find((chip) => chip.dataset.sectionId === "later");
+  const phoneLater = byClass(phone, "section-strip-chip").find((chip) => chip.dataset.sectionId === "later");
   phoneLater.listeners.click[0]({
     button: 0,
     metaKey: false,
@@ -301,11 +302,11 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
 
   const laterChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "later");
   assert.equal(laterChip.getAttribute("aria-current"), "location");
-  assert.equal(laterChip.getAttribute("tabindex"), "-1");
+  assert.equal(laterChip.getAttribute("tabindex"), undefined);
   assert.equal(laterChip.href, "#stock/ABCD/deep-dive/later");
 });
 
-test("section tiles jump by name and leave the metric on the section", () => {
+test("section chips jump by name and leave the metric on the section", () => {
   const fleet = {
     id: "fleet",
     title: "Fleet",
@@ -347,17 +348,13 @@ test("section tiles jump by name and leave the metric on the section", () => {
       booked = `${id}|${href}`;
     },
   });
-  const sites = byClass(view, "deep-dive-section-tile").find((tile) => tile.dataset.sectionId === "fleet");
+  const sites = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "fleet");
   assert.equal(textOf(sites), "Fleet");
-  assert.equal(byClass(sites, "deep-dive-spark").length, 0);
-  assert.equal(byClass(sites, "deep-dive-section-tile-value").length, 0);
-  assert.equal(byClass(sites, "deep-dive-section-icon").length, 1);
+  assert.equal(byClass(view, "deep-dive-section-tile").length, 0);
   const sitesMetric = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Sites"));
   assert.match(textOf(sitesMetric), /Estimate/);
   assert.match(textOf(sitesMetric), /Pending review/);
-  const notes = byClass(view, "deep-dive-section-tile").find((tile) => tile.dataset.sectionId === "notes");
-  assert.equal(byClass(notes, "deep-dive-section-tile-value").length, 0);
-  assert.equal(byClass(notes, "deep-dive-spark").length, 0);
+  const notes = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "notes");
   assert.equal(textOf(notes), "Notes");
   const event = {
     button: 0,
@@ -376,7 +373,7 @@ test("section tiles jump by name and leave the metric on the section", () => {
   assert.equal(section.scrolled.block, "start");
 });
 
-test("section tiles follow primary then secondary, and regulator records sit beside the estimate", () => {
+test("section chips follow primary then secondary, and regulator records sit beside the estimate", () => {
   const payload = {
     deep_dive: {
       title: "Deep dive",
@@ -418,9 +415,10 @@ test("section tiles follow primary then secondary, and regulator records sit bes
   };
   assert.deepEqual(orderedDeepDiveSections(payload.deep_dive.sections).map((section) => section.id), ["fleet", "later"]);
   const view = renderDeepDive(payload, fakeDocument(false), { ticker: "abcd" });
-  const chips = byClass(view, "deep-dive-section-tile");
+  const chips = byClass(view, "section-strip-chip");
   assert.deepEqual(chips.map((chip) => chip.dataset.sectionId), ["fleet", "later"]);
   assert.equal(chips[0].getAttribute("role"), undefined);
+  assert.equal(byClass(view, "deep-dive-section-tile").length, 0);
   const fleet = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Fleet"));
   assert.match(textOf(fleet), /Estimate/);
   assert.match(textOf(fleet), /Regulator records/);
@@ -515,7 +513,8 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.doesNotMatch(source, /overlay-chip deep-dive-jump-chip/);
   assert.doesNotMatch(source, /On this page/);
   assert.doesNotMatch(source, /sectionHeadline/);
-  assert.match(source, /deep-dive-section-tile/);
+  assert.doesNotMatch(source, /deep-dive-section-tile/);
+  assert.match(source, /section-strip-docked/);
   assert.match(styles, /\.deep-dive-sections\s*\{[^}]*grid-template-columns:\s*repeat\(6/);
   assert.match(styles, /\.deep-dive-section-tile:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--amber\)/);
   assert.match(styles, /\.stock-page-tabs\s*\{[^}]*border-radius:\s*12px/);

@@ -7,25 +7,11 @@ import { formatChange, formatMetricValue } from "./stock-page.js";
 
 const SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
 
-const ICON_PATHS = {
-  scoreboard: ["M2.5 2.5h4.5v4.5H2.5z", "M9 2.5h4.5v4.5H9z", "M2.5 9h4.5v4.5H2.5z", "M9 9h4.5v4.5H9z"],
-  "forecast-band": ["M2 12.5 5.5 9l2.5 2.2L13.5 5", "M11 5h2.5V7.5"],
-  "trend-bars": ["M3 13.5V8.5", "M3 13.5h10", "M6.5 13.5V5.5", "M10 13.5V7", "M13 13.5V4"],
-  "diverging-bars": ["M2 8h12", "M5 8V4.5", "M5 8v3.5", "M8.5 8V3.5", "M8.5 8v5", "M12 8V6", "M12 8v2"],
-  "small-multiples": ["M2.5 2.5h4.5v4.5H2.5z", "M9 2.5h4.5v4.5H9z", "M2.5 9h4.5v4.5H2.5z", "M9 9h4.5v4.5H9z"],
-  "milestone-timeline": ["M4 2.5v11", "M4 4h7.5L9.7 6.4 11.5 8.8H4"],
-  "map-sites": ["M8 2.2a3.6 3.6 0 0 0-3.6 3.6c0 2.7 3.6 7.8 3.6 7.8s3.6-5.1 3.6-7.8A3.6 3.6 0 0 0 8 2.2z", "M8 7.2a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8z"],
-  "map-us-bubbles": ["M2.5 4.5h11v8h-11z", "M6.2 8.8a1.1 1.1 0 1 1 0.01 0", "M10.2 7.6a0.9 0.9 0 1 1 0.01 0"],
-  "map-world-bubbles": ["M8 2.5a5.5 5.5 0 1 0 0.01 0", "M2.5 8h11", "M8 2.6c1.5 1.7 2.3 3.5 2.3 5.4s-.8 3.7-2.3 5.4c-1.5-1.7-2.3-3.5-2.3-5.4s.8-3.7 2.3-5.4z"],
-  table: ["M2.5 3.5h11v9h-11z", "M2.5 6.5h11", "M2.5 9.5h11", "M6.5 6.5v6"],
-  default: ["M8 2.5 12.5 5.5v5L8 13.5 3.5 10.5v-5z"],
-};
-
 export function hasDeepDive(payload) {
   return Array.isArray(payload?.deep_dive?.sections) && payload.deep_dive.sections.length > 0;
 }
 
-/** Primary sections first, then secondary, so the tile row matches the page. */
+/** Primary sections first, then secondary, so the section strip matches the page. */
 export function orderedDeepDiveSections(sections) {
   const list = Array.isArray(sections) ? sections : [];
   const primary = [];
@@ -134,38 +120,6 @@ function valueAt(series, period) {
   return point && point.reported ? point.value : null;
 }
 
-function sectionIconKind(section) {
-  const kind = (section?.panels || []).find((panel) => panel?.kind)?.kind || "";
-  return ICON_PATHS[kind] ? kind : "default";
-}
-
-function sectionIcon(doc, kind) {
-  const svg = svgEl(doc, "svg", {
-    class: "deep-dive-section-icon",
-    viewBox: "0 0 16 16",
-    "aria-hidden": "true",
-    focusable: "false",
-  });
-  for (const d of ICON_PATHS[kind] || ICON_PATHS.default) {
-    svg.append(svgEl(doc, "path", {
-      d,
-      fill: "none",
-      stroke: "currentColor",
-      "stroke-width": "1.4",
-      "stroke-linecap": "round",
-      "stroke-linejoin": "round",
-    }));
-  }
-  return svg;
-}
-
-function setClass(node, name, on) {
-  const parts = String(node?.className || "").split(/\s+/).filter(Boolean);
-  const has = parts.includes(name);
-  if (on && !has) node.className = [...parts, name].join(" ");
-  else if (!on && has) node.className = parts.filter((part) => part !== name).join(" ");
-}
-
 export function renderDeepDive(payload, doc = document, options = {}) {
   const dive = payload?.deep_dive;
   const root = el(doc, "div", "deep-dive");
@@ -181,17 +135,14 @@ export function renderDeepDive(payload, doc = document, options = {}) {
   root.append(banner);
 
   const ticker = options.ticker || payload?.ticker || "";
-  const jump = el(doc, "nav", "deep-dive-sections");
-  jump.setAttribute("aria-label", "Deep dive sections");
   const nav = renderSectionNav(orderedDeepDiveSections(dive.sections), ticker, root, doc, options);
-  root.append(nav, jump);
+  root.append(nav);
 
   const secondary = [];
   for (const section of orderedDeepDiveSections(dive.sections)) {
     const block = renderSection(section, doc);
     if (section.placement === "secondary") secondary.push(block);
     else root.append(block);
-    jump.append(renderSectionTile(section, ticker, root, doc, options));
   }
   if (secondary.length) {
     const wrap = el(doc, "section", "deep-dive-secondary");
@@ -222,31 +173,16 @@ export function renderDeepDive(payload, doc = document, options = {}) {
 }
 
 function renderSectionNav(sections, ticker, root, doc, options) {
-  const strip = el(doc, "nav", "section-strip");
+  const strip = el(doc, "nav", "section-strip section-strip-docked is-visible");
   strip.setAttribute("aria-label", "Sections");
-  strip.setAttribute("aria-hidden", "true");
   const track = el(doc, "div", "section-strip-track");
   for (const section of sections || []) {
     const chip = el(doc, "a", "section-strip-chip", section.title || section.id || "");
-    chip.setAttribute("tabindex", "-1");
     bindSectionLink(chip, section, ticker, root, doc, options);
     track.append(chip);
   }
   strip.append(track);
   return strip;
-}
-
-function renderSectionTile(section, ticker, root, doc, options) {
-  const sectionId = String(section?.id || "");
-  const tile = el(doc, "a", "deep-dive-section-tile");
-  const head = el(doc, "span", "deep-dive-section-tile-head");
-  head.append(
-    sectionIcon(doc, sectionIconKind(section)),
-    el(doc, "span", "deep-dive-section-tile-name", section.title || sectionId),
-  );
-  tile.append(head);
-  bindSectionLink(tile, section, ticker, root, doc, options);
-  return tile;
 }
 
 function bindSectionLink(node, section, ticker, root, doc, options) {
@@ -272,7 +208,7 @@ function bindSectionLink(node, section, ticker, root, doc, options) {
 }
 
 function markCurrentSection(root, sectionId) {
-  const wanted = new Set(["deep-dive-section-tile", "section-strip-chip"]);
+  const wanted = new Set(["section-strip-chip"]);
   const stack = [root];
   while (stack.length) {
     const node = stack.pop();
@@ -306,25 +242,8 @@ function findByClass(node, className) {
 function watchSectionNav(root, doc) {
   const Observer = doc.defaultView?.IntersectionObserver;
   if (typeof Observer !== "function") return;
-  const grid = findByClass(root, "deep-dive-sections");
   const strip = findByClass(root, "section-strip");
-  if (!grid || !strip) return;
-  const gridObserver = new Observer((entries) => {
-    const visible = entries.some((entry) => entry.isIntersecting);
-    setClass(strip, "is-visible", !visible);
-    const stack = [strip];
-    while (stack.length) {
-      const node = stack.pop();
-      if (String(node?.className || "").split(/\s+/).includes("section-strip-chip")) {
-        if (visible) node.setAttribute?.("tabindex", "-1");
-        else node.removeAttribute?.("tabindex");
-      }
-      if (node?.children) stack.push(...node.children);
-    }
-    if (visible) strip.setAttribute("aria-hidden", "true");
-    else strip.removeAttribute("aria-hidden");
-  });
-  gridObserver.observe(grid);
+  if (!strip) return;
   const sections = [];
   const stack = [root];
   while (stack.length) {

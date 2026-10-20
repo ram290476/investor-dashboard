@@ -1,5 +1,5 @@
-// Section jump tiles and the sticky section strip for every company tab.
-// No ticker names. The strip replaces the Sections dropdown.
+// Sticky Sections strip for company tabs. Admin keeps its section tiles.
+// No ticker names. The strip is the section jump list.
 import { stockPanelHash } from "./routes.js";
 
 export const TREND_SECTIONS = [
@@ -207,15 +207,16 @@ function setChipTabbable(strip, on) {
   }
 }
 
-function renderStrip(bookmarks, root, doc, options) {
-  const strip = el(doc, "nav", "section-strip");
+function renderStrip(bookmarks, root, doc, options, docked) {
+  const strip = el(doc, "nav", docked ? "section-strip section-strip-docked is-visible" : "section-strip");
   strip.setAttribute("aria-label", "Sections");
-  strip.setAttribute("aria-hidden", "true");
+  if (!docked) strip.setAttribute("aria-hidden", "true");
+  const markRoot = root || strip;
   const track = el(doc, "div", "section-strip-track");
   for (const bookmark of bookmarks) {
     const chip = el(doc, "a", "section-strip-chip", bookmark.title || bookmark.id);
-    chip.setAttribute("tabindex", "-1");
-    bindBookmark(chip, bookmark, root, options);
+    if (!docked) chip.setAttribute("tabindex", "-1");
+    bindBookmark(chip, bookmark, markRoot, options);
     track.append(chip);
   }
   strip.append(track);
@@ -237,15 +238,18 @@ function watchSectionNav(root, doc, options = {}) {
   if (typeof Observer !== "function") return;
   const grid = findByClass(root, "deep-dive-sections");
   const strip = findByClass(root, "section-strip");
-  if (!grid || !strip) return;
-  const gridObserver = new Observer((entries) => {
-    const visible = entries.some((entry) => entry.isIntersecting);
-    setClass(strip, "is-visible", !visible);
-    setChipTabbable(strip, !visible);
-    if (visible) strip.setAttribute("aria-hidden", "true");
-    else strip.removeAttribute("aria-hidden");
-  });
-  gridObserver.observe(grid);
+  const docked = String(strip?.className || "").split(/\s+/).includes("section-strip-docked");
+  if (grid && strip && !docked) {
+    const gridObserver = new Observer((entries) => {
+      const visible = entries.some((entry) => entry.isIntersecting);
+      setClass(strip, "is-visible", !visible);
+      setChipTabbable(strip, !visible);
+      if (visible) strip.setAttribute("aria-hidden", "true");
+      else strip.removeAttribute("aria-hidden");
+    });
+    gridObserver.observe(grid);
+  }
+  if (!strip) return;
   const host = options.scrollRoot || root;
   const wanted = options.tab || "";
   const sections = [];
@@ -271,10 +275,15 @@ function watchSectionNav(root, doc, options = {}) {
 export function renderCompanyBookmarks(bookmarks, doc = document, options = {}) {
   const items = Array.isArray(bookmarks) ? bookmarks : [];
   if (!items.length) return null;
+  if (options.tab !== "admin") {
+    const strip = renderStrip(items, null, doc, options, true);
+    watchSectionNav(strip, doc, options);
+    return strip;
+  }
   const root = el(doc, "div", "company-bookmarks");
   const grid = el(doc, "nav", "deep-dive-sections");
   grid.setAttribute("aria-label", "Company sections");
-  root.append(renderStrip(items, root, doc, options), grid);
+  root.append(renderStrip(items, root, doc, options, false), grid);
   for (const bookmark of items) grid.append(renderTile(bookmark, root, doc, options));
   watchSectionNav(root, doc, options);
   return root;
