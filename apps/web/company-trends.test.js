@@ -4,7 +4,7 @@ import test from "node:test";
 import { companyBookmarks, TREND_SECTIONS } from "./company-sections.js";
 import { redirectStockHash } from "./routes.js";
 import { canApproveMetrics } from "./settings-model.js";
-import { nextStockTab, quarterlyNoteEntries, stockTabs, visibleStockTab } from "./stock-page.js";
+import { nextStockTab, stockTabs, visibleStockTab } from "./stock-page.js";
 
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 
@@ -74,39 +74,12 @@ test("Admin is last, only for a signed-in admin, and a non-admin hash cannot ope
   assert.match(app, /if \(tab === "admin" && !canApproveMetrics\(session\.accessToken, session\.email\)\) tab = "overview"/);
 });
 
-test("quarterly notes keep the latest quarter first and stay empty without guidance", () => {
-  assert.deepEqual(quarterlyNoteEntries([]), []);
-  assert.deepEqual(quarterlyNoteEntries(null), []);
-  const notes = quarterlyNoteEntries([
-    {
-      id: "older",
-      latestPeriod: "2025Q4",
-      periodEnd: "2025-12-31",
-      text: "Prior outlook.",
-      sourceUrl: "https://example.com/older",
-      sourceTitle: "Older letter",
-    },
-    {
-      id: "latest",
-      latestPeriod: "2026Q2",
-      periodEnd: "2026-06-30",
-      text: "Raised the outlook.",
-      sourceUrl: "https://example.com/latest",
-      sourceTitle: "Shareholder letter",
-      pending: true,
-      latest: "Raised",
-      name: "Outlook",
-    },
-  ]);
-  assert.deepEqual(notes.map((note) => note.quarter), ["Q2 2026", "Q4 2025"]);
-  assert.equal(notes[0].date, "2026-06-30");
-  assert.deepEqual(notes[0].points, ["Raised the outlook.", "Outlook: Raised"]);
-  assert.equal(notes[0].sourceUrl, "https://example.com/latest");
-  assert.equal(notes[0].pending, true);
-  const tile = companyBookmarks("overview", { guidance: notes.map((note) => ({ latestPeriod: note.quarter === "Q2 2026" ? "2026Q2" : "2025Q4", text: note.points[0], sourceUrl: note.sourceUrl })) });
-  const notesTile = tile.find((item) => item.id === "quarterly-notes");
-  assert.equal(notesTile.title, "Quarterly notes");
-  assert.equal(notesTile.headline, undefined);
+test("overview bookmarks are the Technical Summary only", () => {
+  const tile = companyBookmarks("overview", {
+    guidance: [{ latestPeriod: "2026Q2", text: "Raised the outlook.", sourceUrl: "https://example.com/latest" }],
+  });
+  assert.deepEqual(tile.map((item) => item.id), ["technical"]);
+  assert.equal(tile.some((item) => item.id === "quarterly-notes"), false);
 });
 
 test("Trends tiles follow the sections that are actually on the page", () => {
@@ -121,14 +94,15 @@ test("Trends tiles follow the sections that are actually on the page", () => {
   assert.equal(companyBookmarks("trends", {}).length, TREND_SECTIONS.length);
 });
 
-test("old main-page hashes and Calls land on Trends or quarterly notes", () => {
+test("old main-page hashes and Calls land on Trends or Overview", () => {
   assert.equal(redirectStockHash("#chart", "spy"), "#stock/SPY/trends/price");
   assert.equal(redirectStockHash("#calendar", "qqq"), "#stock/QQQ/trends/catalyst-calendar");
-  assert.equal(redirectStockHash("#stock/dia/calls/notes"), "#stock/DIA/overview/quarterly-notes");
+  assert.equal(redirectStockHash("#stock/dia/calls/notes"), "#stock/DIA");
+  assert.equal(redirectStockHash("#stock/DIA/overview/quarterly-notes"), "#stock/DIA");
 });
 
 test("the company page renders former main-page panels on Trends and keeps the tab on ticker switch", () => {
-  const trends = app.slice(app.indexOf("function renderTrendsLayout"), app.indexOf("function renderQuarterlyNotes"));
+  const trends = app.slice(app.indexOf("function renderTrendsLayout"), app.indexOf("function appendStatusAlerts"));
   for (const piece of [
     'renderChartPanel("dashboard", session.selected)',
     "renderMacroPanels(tickerData, chartData, chartDataState)",
@@ -147,8 +121,7 @@ test("the company page renders former main-page panels on Trends and keeps the t
   assert.match(page, /renderTrendsLayout\(tickerData, chartData, chartDataState, payload\)/);
   assert.match(app, /renderTrendDisclaimer\(payload, document\)/);
   assert.match(page, /page\.prepend\(trends\)/);
-  assert.match(page, /renderQuarterlyNotes\(charts\.guidance\)/);
-  assert.match(app.slice(app.indexOf("function renderQuarterlyNotes"), app.indexOf("function appendStatusAlerts")), /No quarterly notes yet/);
+  assert.doesNotMatch(app, /renderQuarterlyNotes|quarterly-notes|No quarterly notes yet|Quarterly notes/);
   assert.match(app, /navigateToStock\(ticker, \{ keepTab: true \}\)/);
   const navigate = app.slice(app.indexOf("function navigateToStock"), app.indexOf("function navigateToDashboard"));
   assert.match(navigate, /keepTab/);

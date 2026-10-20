@@ -79,13 +79,15 @@ export function legacyMainSection(hash) {
 }
 
 /**
- * Replacement hash for a legacy Calls or main-page bookmark.
- * "" when the hash should be left alone. Calls always lands on Overview quarterly notes.
+ * Replacement hash for a legacy Calls, quarterly-notes, or main-page bookmark.
+ * "" when the hash should be left alone. Calls and quarterly notes land on Overview.
  * A bare main-page hash needs the selected ticker.
  */
 export function redirectStockHash(hash, ticker = "") {
   const match = stockMatch(hash);
-  if (match?.[2] === "calls") return stockPanelHash(match[1], "overview", "quarterly-notes");
+  if (match?.[2] === "calls" || (match?.[2] === "overview" && match?.[3] === "quarterly-notes")) {
+    return stockTabHash(match[1], "overview");
+  }
   const section = legacyMainSection(hash);
   if (!section) return "";
   return stockPanelHash(ticker, "trends", section) || "";
@@ -104,7 +106,7 @@ export function stockTabHash(ticker, tab = "") {
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;
   const id = String(tab || "").trim();
-  if (id === "calls") return stockPanelHash(symbol, "overview", "quarterly-notes");
+  if (id === "calls") return `#stock/${symbol}`;
   if (!id || id === "overview" || !LIVE_TABS.includes(id)) return `#stock/${symbol}`;
   return `#stock/${symbol}/${id}`;
 }
@@ -115,7 +117,7 @@ export function stockPanelHash(ticker, tab, sectionId = "") {
   if (id === "deep-dive") return stockHash(ticker, sectionId);
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;
-  if (id === "calls") return stockPanelHash(symbol, "overview", "quarterly-notes");
+  if (id === "calls") return `#stock/${symbol}`;
   const section = String(sectionId || "").trim();
   if (!section || !SECTION_ID.test(section)) return stockTabHash(symbol, id);
   const prefix = id === "overview" ? "overview" : id;
