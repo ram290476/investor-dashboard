@@ -16,7 +16,7 @@ import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAm
 import { applyTheme, overlayColor } from "./theme.js";
 import { clearRefreshToken, createAuthClient, performAuthorizedRequest } from "./auth-session.js";
 import { createSafeStorage } from "./safe-storage.js";
-import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
   catalystDateLabel, catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
@@ -35,7 +35,6 @@ import {
 } from "./market-correlation.js";
 import { canApproveMetrics, drawerControls, emailFromIdToken, fallbackSelection, isPanelOpen, panelState, parseSettingsHash, stripOrder, withPanelState } from "./settings-model.js";
 import {
-  callsCopy,
   companyDescription,
   companyName,
   emptyKpiCopy,
@@ -44,6 +43,7 @@ import {
   metricsForReview,
   LONG_PRESS_MS,
   nextStockTab,
+  quarterlyNoteEntries,
   stockPanels,
   stockTabs,
 } from "./stock-page.js";
@@ -726,6 +726,8 @@ function renderFundSummary(ticker) {
 // pages keep their saved per-ticker settings and catalyst choices untouched.
 function companyChartState(ticker = session.selected) {
   if (session.route?.page !== "stock") return null;
+  // Trends keeps the saved dashboard chart. Overview starts with every toggle off.
+  if (session.stockTab && session.stockTab !== "overview") return null;
   if (!session.companyChart || session.companyChart.ticker !== ticker) {
     session.companyChart = { ticker, overlays: [], lanes: [], catalysts: [] };
   }
@@ -1431,7 +1433,7 @@ function renderWatchlist() {
         return;
       }
       if (session.route.page === "stock") {
-        navigateToStock(ticker);
+        navigateToStock(ticker, { keepTab: true });
         return;
       } else if (session.route.page !== "dashboard") {
         navigateToDashboard(ticker);
@@ -3917,7 +3919,7 @@ function renderTechnicalSummary(ticker, history) {
   return panel;
 }
 
-function renderStockPage() {
+function renderStockPage(restoreDrawer = null) {
   const chartData = session.chartData[session.selected] || null;
   const chartDataState = session.chartDataState[session.selected] || "loading";
   const tickerData = withChartHistory(selectedData(), chartData, chartDataState);
@@ -3937,6 +3939,7 @@ function renderStockPage() {
   root.replaceChildren();
   applyTheme(session.prefs.display);
   root.append(renderAppHeader(), renderWatchlist());
+  appendStatusAlerts(dashboardBanner(session));
 
   const heading = node("section", "panel stock-heading");
   heading.dataset.stockPanel = "overview";
@@ -3993,40 +3996,22 @@ function renderStockPage() {
     return block;
   };
 
-  const calls = callsCopy();
-  const callsBlock = node("section", "panel stock-section company-section-target");
-  callsBlock.dataset.stockPanel = "calls";
-  callsBlock.dataset.companySection = "calls";
-  callsBlock.id = "stock-panel-calls";
-  callsBlock.append(node("h3", "stock-section-title", "Quarterly call notes"));
-  if (charts.guidance.length) {
-    appendMetricGroups(callsBlock, charts.guidance, "");
-    callsBlock.append(node("p", "signal-note", calls.guidance), node("p", "signal-note", calls.transcripts));
-  } else {
-    callsBlock.append(node("p", "data-state", calls.transcripts));
-    callsBlock.append(node("p", "signal-note", calls.guidance));
-  }
-
-  // Funds (#223): Fund holdings follows the Technical Summary; the company-only panels and tabs
-  // are hidden. Operating companies never get the fund panel or its fetch.
+  const trends = renderTrendsLayout(tickerData, chartData, chartDataState);
+  const present = String(trends.dataset.presentSections || "").split(",").filter(Boolean);
+  // Funds (#223): Fund holdings follows the Technical Summary on Overview. The same tabs stay
+  // available. Operating companies never get the fund panel or its fetch.
+  const fundExtras = [];
   const fund = isFund(tickerData);
   if (fund) {
     loadFundHoldings(session.selected);
     page.dataset.instrumentKind = "fund";
-    // Funds have no KPI/Fundamentals/Calls tabs; a tab left over from a company page would hide
-    // every overview panel on a phone.
-    page.dataset.stockTab = "overview";
     // The write-once is_fund stamp and the live SEC classification can disagree; say so, don't override.
-    const fundPanel = renderFundPanel(session.selected, classificationNote(tickerData));
-    page.append(chart, renderTechnicalSummary(session.selected, history), fundPanel,
-      ...renderFundSummary(session.selected));
-    root.append(page);
-    settings.refresh();
-    return;
+    fundExtras.push(renderFundPanel(session.selected, classificationNote(tickerData)), ...renderFundSummary(session.selected));
   }
   page.append(
     chart,
     renderTechnicalSummary(session.selected, history),
+    ...fundExtras,
     section("kpis", "Operating KPIs", charts.operating, emptyKpiCopy()),
     section(
       "fundamentals",
@@ -4035,8 +4020,9 @@ function renderStockPage() {
       "No company fundamentals are in this snapshot.",
     ),
     renderCompanyMetrics(charts, pageState),
-    callsBlock,
+    renderQuarterlyNotes(charts.guidance),
   );
+  page.prepend(trends);
 
   const tabs = node("div", "stock-page-tabs");
   tabs.setAttribute("role", "tablist");
@@ -4085,6 +4071,7 @@ function renderStockPage() {
       operating: charts.operating,
       fundamentals: charts.fundamentals,
       guidance: charts.guidance,
+      present,
     }), document, {
       ticker: session.selected,
       tab: session.stockTab,
@@ -4092,7 +4079,11 @@ function renderStockPage() {
       scrollRoot: root,
       onBookmark: openCompanyBookmark,
     });
-    if (bookmarks) tabs.after(bookmarks);
+    if (bookmarks) {
+      const strip = bookmarks.querySelector(".section-strip");
+      tabs.after(bookmarks);
+      if (strip) page.insertBefore(strip, bookmarks);
+    }
   }
   if (hasDeepDive(payload)) {
     page.append(renderDeepDive(payload, document, {
@@ -4101,10 +4092,10 @@ function renderStockPage() {
       onBookmark: openDeepDiveBookmark,
     }));
   }
-  // Filings & events lives on the dashboard and research pages only (#194).
   root.append(page);
   scheduleStockSectionScroll();
   settings.refresh();
+  finishPanelFocus(restoreDrawer);
 }
 
 function renderResearchPage() {
@@ -4170,6 +4161,166 @@ function renderResearchPage() {
   settings.refresh();
 }
 
+function tagTrendSection(element, id) {
+  if (!element) return null;
+  element.dataset.stockPanel = "trends";
+  element.dataset.companySection = id;
+  element.id = `trends-panel-${id}`;
+  element.classList.add("company-section-target");
+  return element;
+}
+
+function renderTrendsLayout(tickerData, chartData, chartDataState) {
+  const present = [];
+  const mark = (element, id) => {
+    if (!tagTrendSection(element, id)) return;
+    present.push(id);
+  };
+  const layout = node("div", "trends-layout dashboard-grid");
+  layout.dataset.stockPanel = "trends";
+  layout.dataset.mobileView = "all";
+  layout.id = "stock-panel-trends";
+  layout.setAttribute("aria-label", `${session.selected} trends`);
+  const primary = node("div", "primary-column");
+  const chart = renderChartPanel("dashboard", session.selected);
+  chart.querySelector("[data-company-page]")?.remove();
+  mark(chart, "price");
+  primary.append(chart);
+  const technical = renderTechnicalSummary(session.selected, tickerData?.price_history || []);
+  mark(technical, "technical");
+  primary.append(technical);
+  primary.append(renderPanelToolbar("chart"));
+  const macros = renderMacroPanels(tickerData, chartData, chartDataState);
+  const drawerSection = {
+    rates: "rates",
+    inflation: "inflation",
+    "market-comparison": "market-comparison",
+    "moving-averages": "moving-averages",
+    volatility: "volatility",
+    "dollar-oil": "dollar-oil",
+    tariffs: "tariffs",
+    correlation: "correlation",
+    "catalyst-calendar": "catalyst-calendar",
+  };
+  macros.querySelectorAll("[data-drawer]").forEach((panel) => {
+    const section = drawerSection[panel.dataset.drawer];
+    if (section) mark(panel, section);
+  });
+  primary.append(macros);
+  const contracts = renderContracts(tickerData);
+  if (contracts) {
+    contracts.dataset.mobilePanel = "more";
+    mark(contracts, "contracts");
+    primary.append(contracts);
+  }
+  const side = node("aside", "side-column");
+  side.setAttribute("aria-label", "Macro drivers, news and filings");
+  const news = renderNews(tickerData), filings = renderFilings(tickerData);
+  if (news) news.dataset.mobilePanel = "more";
+  if (filings) filings.dataset.mobilePanel = "more";
+  side.append(...[renderDrivers(tickerData), news, filings].filter(Boolean));
+  const driversPanel = side.querySelector(".signals-panel");
+  mark(driversPanel, "drivers");
+  mark(news, "news");
+  mark(filings, "filings");
+  const about = renderAboutData();
+  if (about) {
+    mark(about, "about-data");
+    primary.append(about);
+  }
+  if (!tabHasVisibleDetail("more")) primary.append(renderPanelEmpty("more"));
+  primary.append(renderPanelToolbar("more"));
+  layout.append(primary, side);
+  const footer = node("footer", "dashboard-footer");
+  footer.dataset.stockPanel = "trends";
+  footer.append(node("span", "", "Information for research; not investment advice."));
+  footer.append(node("span", "", snapshotLabel(session.dashboard?.generated_at)));
+  layout.append(footer);
+  layout.dataset.presentSections = [...new Set(present)].join(",");
+  return layout;
+}
+
+function renderQuarterlyNotes(guidance) {
+  const notes = quarterlyNoteEntries(guidance);
+  const block = node("section", "panel stock-section company-section-target");
+  block.dataset.stockPanel = "overview";
+  block.dataset.companySection = "quarterly-notes";
+  block.id = "stock-panel-quarterly-notes";
+  block.append(node("h3", "stock-section-title", "Quarterly notes"));
+  if (!notes.length) {
+    block.append(node("p", "data-state", "No quarterly notes yet"));
+    return block;
+  }
+  notes.forEach((note) => {
+    const article = node("article", "quarterly-note");
+    if (note.quarter) article.append(node("h4", "quarterly-note-quarter", note.quarter));
+    const dated = formatConsumerDate(note.date) || readablePanelText(note.date);
+    if (dated) article.append(node("p", "quarterly-note-date", dated));
+    if (note.points.length) {
+      const list = node("ul", "quarterly-note-points");
+      note.points.forEach((point) => list.append(node("li", "", point)));
+      article.append(list);
+    }
+    if (note.sourceUrl) {
+      const link = node("a", "quarterly-note-source", note.sourceTitle || "Source");
+      link.href = note.sourceUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      article.append(link);
+    }
+    if (note.pending) article.append(node("span", "review-badge", "Pending review"));
+    block.append(article);
+  });
+  return block;
+}
+
+function appendStatusAlerts(errorMessage) {
+  if (session.settingsError) {
+    const { message, reopen } = session.settingsError;
+    const alert = node("p", "data-state error", `${message} `);
+    alert.setAttribute("role", "alert");
+    alert.append(action("Open settings", "button-link", reopen));
+    root.append(alert);
+  }
+  const panelSaveError = renderPanelSaveError();
+  if (panelSaveError) root.append(panelSaveError);
+  if (errorMessage) {
+    const alert = node("p", "data-state error");
+    alert.setAttribute("role", "alert");
+    alert.textContent = `${errorMessage} `;
+    alert.append(action("Try again", "button-link", () => refreshData(true)));
+    root.append(alert);
+  }
+}
+
+function applyLegacyRedirect() {
+  const next = redirectStockHash(location.hash, session.selected || session.dashboardSelection || "");
+  if (!next || next === location.hash) return false;
+  history.replaceState(history.state, "", `/${next}`);
+  const ticker = parseStockHash(next);
+  if (ticker) {
+    session.route = { page: "stock", ticker };
+    session.selected = ticker;
+    const tab = parseStockTab(next);
+    if (tab && tab !== "calls") session.stockTab = tab;
+  }
+  return true;
+}
+
+function openTrendsLanding() {
+  if (session.route.page !== "dashboard") return false;
+  const ticker = fallbackSelection(session.prefs, session.selected);
+  if (!ticker || !stockTabHash(ticker, "trends")) return false;
+  session.dashboardSelection = ticker;
+  session.selected = ticker;
+  session.stockTab = "trends";
+  session.route = { page: "stock", ticker };
+  if (!parseSettingsHash(location.hash)) {
+    history.replaceState(history.state, "", `/${stockTabHash(ticker, "trends")}`);
+  }
+  return true;
+}
+
 function renderNotFoundPage() {
   root.replaceChildren();
   applyTheme(session.prefs.display);
@@ -4186,9 +4337,10 @@ function selectStockTab(id) {
   session.stockTab = id;
   session.scrolledStockSection = "";
   const hash = stockTabHash(session.selected, id);
-  if (hash && parseStockHash(location.hash) === session.selected && location.hash !== hash) {
+  if (hash && location.hash !== hash) {
     history.pushState(history.state, "", `${location.pathname}${location.search}${hash}`);
   }
+  if (hash) session.route = routeFromLocation(location.pathname, hash);
   renderDashboard();
   root.querySelector(`#stock-tab-${id}`)?.focus();
 }
@@ -4225,19 +4377,26 @@ function scheduleStockSectionScroll() {
   if (session.scrolledStockSection === key) return;
   session.scrolledStockSection = key;
   requestAnimationFrame(() => {
-    revealCompanySection(root, panel);
+    revealCompanySection(root, panel, session.stockTab);
   });
 }
 
-function navigateToStock(ticker) {
-  const hash = stockHash(ticker);
+function navigateToStock(ticker, options = {}) {
+  const keepTab = options.keepTab === true && session.route.page === "stock";
+  const tab = keepTab && session.stockTab ? session.stockTab : "overview";
+  const section = keepTab
+    ? (tab === "deep-dive" ? parseStockSection(location.hash) : parseStockPanel(location.hash))
+    : "";
+  const hash = section
+    ? (tab === "deep-dive" ? stockHash(ticker, section) : stockPanelHash(ticker, tab, section))
+    : stockTabHash(ticker, tab);
   if (!hash) return;
   if (session.route.page === "dashboard") session.dashboardSelection = session.selected;
-  const symbol = hash.slice("#stock/".length);
+  const symbol = parseStockHash(hash);
   history.pushState(history.state, "", `/${hash}`);
   session.route = routeFromLocation(location.pathname, hash);
   session.selected = symbol;
-  session.stockTab = "overview";
+  session.stockTab = parseStockTab(hash) || "overview";
   session.scrolledStockSection = "";
   session.companyChart = null;
   renderDashboard();
@@ -4261,20 +4420,27 @@ function navigateToResearch(ticker) {
 function navigateToDashboard(ticker = session.dashboardSelection || session.selected) {
   session.dashboardSelection = fallbackSelection(session.prefs, ticker);
   session.selected = session.dashboardSelection;
-  session.route = { page: "dashboard" };
-  history.pushState(history.state, "", "/");
+  session.stockTab = "trends";
+  session.scrolledStockSection = "";
+  const hash = stockTabHash(session.selected, "trends");
+  session.route = hash ? { page: "stock", ticker: session.selected } : { page: "dashboard" };
+  history.pushState(history.state, "", hash ? `/${hash}` : "/");
   renderDashboard();
   loadChartData(session.selected);
+  if (hash) loadStockPage(session.selected);
 }
 
 function handleRoutePopstate() {
   session.scrolledStockSection = "";
+  applyLegacyRedirect();
+  const wasStock = session.route.page === "stock";
   const state = routeStateForLocation(location.pathname, location.hash, session.dashboardSelection, session.selected);
-  if (state.route.page !== "stock" || state.selected !== session.selected) session.companyChart = null;
-  session.route = state.route;
+  const stayingForSettings = wasStock && state.route.page === "dashboard" && Boolean(parseSettingsHash(location.hash));
+  if (!stayingForSettings && (state.route.page !== "stock" || state.selected !== session.selected)) session.companyChart = null;
   session.dashboardSelection = state.dashboardSelection
     || fallbackSelection(session.prefs, session.selected);
   session.selected = state.selected || fallbackSelection(session.prefs, session.dashboardSelection);
+  session.route = stayingForSettings ? { page: "stock", ticker: session.selected } : state.route;
   renderDashboard();
   loadChartData(session.selected);
   if (session.route.page === "stock") loadStockPage(session.selected);
@@ -4341,10 +4507,7 @@ function renderDashboardNow() {
     : document.activeElement?.dataset?.drawerToggle || null;
   const errorMessage = dashboardBanner(session);
   if (!session.prefs) return;
-  if (session.route.page === "stock") {
-    renderStockPage();
-    return;
-  }
+  applyLegacyRedirect();
   if (session.route.page === "research") {
     renderResearchPage();
     finishPanelFocus(restoreDrawer);
@@ -4354,106 +4517,17 @@ function renderDashboardNow() {
     renderNotFoundPage();
     return;
   }
-  session.selected = fallbackSelection(session.prefs, session.selected);
-  const focusedTicker = document.activeElement?.closest(".watchlist .ticker-button")?.dataset.ticker;
-  root.replaceChildren();
-  applyTheme(session.prefs.display);
-  root.append(renderAppHeader(), renderWatchlist());
-  if (focusedTicker) root.querySelector(`[data-ticker="${focusedTicker}"]`)?.focus();
-
-  if (session.settingsError) {
-    const { message, reopen } = session.settingsError;
-    const alert = node("p", "data-state error", `${message} `);
-    alert.setAttribute("role", "alert");
-    // Opening the dialog clears settingsError and redraws the page without this alert.
-    alert.append(action("Open settings", "button-link", reopen));
-    root.append(alert);
+  if (session.route.page === "dashboard" && !openTrendsLanding()) {
+    session.selected = fallbackSelection(session.prefs, session.selected);
+    root.replaceChildren();
+    applyTheme(session.prefs.display);
+    root.append(renderAppHeader(), renderWatchlist());
+    appendStatusAlerts(errorMessage);
+    root.append(node("p", "data-state", "Add a ticker to your watchlist to see trends."));
+    settings.refresh();
+    return;
   }
-  const panelSaveError = renderPanelSaveError();
-  if (panelSaveError) root.append(panelSaveError);
-
-  if (errorMessage) {
-    const alert = node("p", "data-state error");
-    alert.setAttribute("role", "alert");
-    alert.textContent = `${errorMessage} `;
-    alert.append(action("Try again", "button-link", () => refreshData(true)));
-    root.append(alert);
-  }
-
-  const chartData = session.chartData[session.selected] || null;
-  const chartDataState = session.chartDataState[session.selected] || "loading";
-  const tickerData = withChartHistory(selectedData(), chartData, chartDataState);
-  const mainGrid = node("main", "dashboard-grid");
-  mainGrid.setAttribute("aria-label", `${session.selected} investor dashboard`);
-  const primary = node("div", "primary-column");
-  primary.append(renderChartPanel("dashboard", session.selected));
-  primary.append(renderPanelToolbar("chart"));
-  primary.append(renderMacroPanels(tickerData, chartData, chartDataState));
-  const contracts = renderContracts(tickerData);
-  if (contracts) {
-    contracts.dataset.mobilePanel = "more";
-    primary.append(contracts);
-  }
-  const side = node("aside", "side-column");
-  side.setAttribute("aria-label", "Macro drivers, news and filings");
-  const news = renderNews(tickerData), filings = renderFilings(tickerData);
-  if (news) {
-    news.dataset.mobilePanel = "more";
-    news.id = "mobile-panel-more";
-  }
-  if (filings) filings.dataset.mobilePanel = "more";
-  side.append(...[renderDrivers(tickerData), news, filings].filter(Boolean));
-  const about = renderAboutData();
-  if (about) primary.append(about);
-  if (!tabHasVisibleDetail("more")) primary.append(renderPanelEmpty("more"));
-  primary.append(renderPanelToolbar("more"));
-  mainGrid.append(primary, side);
-  ["chart", "signals", "calendar", "more"].forEach((view) => claimMobileId(mainGrid, view));
-  const mobileTabs = node("div", "mobile-view-tabs");
-  mobileTabs.setAttribute("role", "tablist");
-  mobileTabs.setAttribute("aria-label", "Dashboard sections");
-  mainGrid.dataset.mobileView = session.mobileView;
-  ["chart", "signals", "calendar", "more"].forEach(view => {
-    const tab = action(view[0].toUpperCase() + view.slice(1), "", () => {
-      session.mobileView = view;
-      renderDashboard();
-      root.querySelector(`#mobile-tab-${view}`)?.focus();
-    });
-    tab.id = `mobile-tab-${view}`;
-    tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-controls", `mobile-panel-${view}`);
-    tab.setAttribute("aria-selected", String(view === session.mobileView));
-    tab.tabIndex = view === session.mobileView ? 0 : -1;
-    tab.addEventListener("keydown", event => {
-      const views = ["chart", "signals", "calendar", "more"];
-      const index = views.indexOf(view);
-      const next = event.key === "ArrowRight" ? (index + 1) % 4
-        : event.key === "ArrowLeft" ? (index + 3) % 4 : event.key === "Home" ? 0 : event.key === "End" ? 3 : null;
-      if (next == null) return;
-      event.preventDefault();
-      root.querySelector(`#mobile-tab-${views[next]}`)?.click();
-    });
-    mobileTabs.append(tab);
-    if (window.matchMedia("(max-width: 640px)").matches) {
-      const panel = mainGrid.querySelector(`#mobile-panel-${view}`);
-      if (panel) {
-        panel.setAttribute("role", "tabpanel");
-        panel.setAttribute("aria-labelledby", tab.id);
-      }
-    }
-  });
-  root.append(mobileTabs);
-  root.append(mainGrid);
-  const footer = node("footer", "dashboard-footer");
-  footer.append(node("span", "", "Information for research; not investment advice."));
-  footer.append(node("span", "", snapshotLabel(session.dashboard?.generated_at)));
-  root.append(footer);
-
-  if (!session.dashboard && !errorMessage) {
-    root.querySelector(".price-panel-state")?.remove();
-  }
-  settings.refresh();
-  finishPanelFocus(restoreDrawer);
+  renderStockPage(restoreDrawer);
 }
 
 async function refreshData(showLoading) {
@@ -4559,8 +4633,9 @@ async function start() {
     renderDashboard();
     window.addEventListener("popstate", handleRoutePopstate);
     window.addEventListener("hashchange", () => {
+      applyLegacyRedirect();
       const stock = parseStockHash(location.hash);
-      if (stock || session.route.page === "stock") handleRoutePopstate();
+      if (stock || session.route.page === "stock" || session.route.page === "dashboard") handleRoutePopstate();
       settings.openFromHash();
     });
     settings.openFromHash();

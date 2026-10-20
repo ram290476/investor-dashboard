@@ -129,7 +129,7 @@ test("overview tiles fall back to a name and icon when a section has no metric",
     fundamentals: [],
     guidance: [],
   });
-  assert.deepEqual(bookmarks.map((item) => item.id), ["price", "technical", "metrics"]);
+  assert.deepEqual(bookmarks.map((item) => item.id), ["price", "technical", "metrics", "quarterly-notes"]);
   assert.equal(bookmarks.every((item) => item.headline == null), true);
   const withPrice = companyBookmarks("overview", {
     history: [{ close: 10 }, { close: 12 }],
@@ -180,8 +180,14 @@ test("company section tiles scroll to the section and write the tab hash", () =>
   assert.equal(tiles.length, 2);
   assert.equal(view.getAttribute("class") || view.className, "company-bookmarks");
   assert.equal(byClass(view, "deep-dive-sections")[0].getAttribute("aria-label"), "Company sections");
-  assert.equal(byClass(view, "deep-dive-sections-toggle")[0].getAttribute("aria-label"), "Sections");
-  assert.equal(String(byClass(view, "deep-dive-section-nav")[0].className).includes("is-visible"), false);
+  const strip = byClass(view, "section-strip")[0];
+  assert.equal(strip.getAttribute("aria-label"), "Sections");
+  assert.equal(strip.getAttribute("aria-hidden"), "true");
+  assert.equal(String(strip.className).includes("is-visible"), false);
+  const chips = byClass(view, "section-strip-chip");
+  assert.equal(chips.length, tiles.length);
+  assert.equal(chips[0].getAttribute("tabindex"), "-1");
+  assert.equal(chips[0].href, "#stock/EXMPL/kpis/deliveries");
   const deliveries = tiles[0];
   assert.equal(byClass(deliveries, "deep-dive-section-icon").length, 1);
   assert.equal(deliveries.href, "#stock/EXMPL/kpis/deliveries");
@@ -201,15 +207,50 @@ test("company section tiles scroll to the section and write the tab hash", () =>
   assert.equal(target.focused.preventScroll, true);
   notesTile.listeners.click[0]({ button: 0, preventDefault() {} });
   assert.equal(notes.getAttribute("aria-current") == null && notesTile.getAttribute("aria-current"), "location");
-  const back = byClass(view, "deep-dive-sections-back")[0];
+  assert.equal(chips[1].getAttribute("aria-current"), "location");
+  assert.equal(chips[0].getAttribute("aria-current"), undefined);
+});
+
+test("the section strip appears when the grid leaves view and tracks the section in view", () => {
+  const bookmarks = companyBookmarks("overview", {
+    history: [{ close: 10 }, { close: 12 }],
+    guidance: [{ id: "outlook", latestPeriod: "2026Q3", text: "Raised the outlook.", sourceUrl: "https://example.com/letter" }],
+  });
+  const page = element("div");
+  for (const id of ["price", "technical", "metrics", "quarterly-notes"]) {
+    const section = element("section");
+    section.dataset.companySection = id;
+    section.dataset.stockPanel = "overview";
+    page.append(section);
+  }
+  const observers = [];
+  const doc = fakeDocument();
+  doc.defaultView.IntersectionObserver = function Observer(callback) {
+    const record = { callback, targets: [] };
+    observers.push(record);
+    this.observe = (target) => record.targets.push(target);
+    this.disconnect = () => {};
+  };
+  const view = renderCompanyBookmarks(bookmarks, doc, { ticker: "exmpl", tab: "overview", scrollRoot: page });
+  const strip = byClass(view, "section-strip")[0];
   const grid = byClass(view, "deep-dive-sections")[0];
-  back.listeners.click[0]();
-  assert.equal(grid.scrolled.behavior, "smooth");
-  const toggle = byClass(view, "deep-dive-sections-toggle")[0];
-  toggle.listeners.click[0]();
-  assert.equal(byClass(view, "deep-dive-sections-menu")[0].hidden, false);
-  view.listeners.keydown[0]({ key: "Escape" });
-  assert.equal(byClass(view, "deep-dive-sections-menu")[0].hidden, true);
+  assert.equal(observers.length, 2);
+  observers[0].callback([{ target: grid, isIntersecting: false, intersectionRatio: 0 }]);
+  assert.equal(String(strip.className).includes("is-visible"), true);
+  assert.equal(strip.getAttribute("aria-hidden"), undefined);
+  const notesChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "quarterly-notes");
+  assert.equal(notesChip.getAttribute("tabindex"), undefined);
+  assert.equal(notesChip.href, "#stock/EXMPL/overview/quarterly-notes");
+  const notes = page.children.find((child) => child.dataset.companySection === "quarterly-notes");
+  observers[1].callback([{ target: notes, isIntersecting: true, intersectionRatio: 0.8 }]);
+  assert.equal(notesChip.getAttribute("aria-current"), "location");
+  const priceChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "price");
+  assert.equal(priceChip.getAttribute("aria-current"), undefined);
+  observers[0].callback([{ target: grid, isIntersecting: true, intersectionRatio: 1 }]);
+  assert.equal(String(strip.className).includes("is-visible"), false);
+  assert.equal(strip.getAttribute("aria-hidden"), "true");
+  assert.equal(notesChip.getAttribute("tabindex"), "-1");
+  assert.equal(bookmarks.find((item) => item.id === "quarterly-notes").headline.display, "Q3 2026");
 });
 
 test("the company page renders section tiles for every tab except deep dive", () => {
@@ -218,9 +259,9 @@ test("the company page renders section tiles for every tab except deep dive", ()
   assert.match(page, /session\.stockTab !== "deep-dive"/);
   assert.match(page, /parseStockTab\(location\.hash\)/);
   assert.match(page, /parseStockPanel\(location\.hash\)/);
-  assert.match(app, /revealCompanySection\(root, panel\)/);
+  assert.match(app, /revealCompanySection\(root, panel, session\.stockTab\)/);
   assert.match(app, /stockTabHash\(session\.selected, id\)/);
-  assert.match(styles, /\.company-section-target,\s*#stock-panel-price\s*\{[^}]*scroll-margin-top:\s*56px/);
+  assert.match(styles, /\.company-section-target,\s*#stock-panel-price,\s*\.trends-layout \[data-company-section\]\s*\{[^}]*scroll-margin-top:\s*104px/);
   assert.match(styles, /\.deep-dive-section-tile\s*\{[^}]*cursor:\s*pointer/);
   assert.match(styles, /\.stock-page-tabs \.stock-tab\s*\{[^}]*cursor:\s*pointer/);
 });

@@ -93,7 +93,7 @@ export function companyMetricLine(card) {
 
 /** Every user-visible string a company metric card, list row, or call-note card would show. */
 export function renderedMetricPanelText(panels) {
-  const lines = ["Company metrics", "Operating KPIs", "Fundamentals", "Quarterly call notes"];
+  const lines = ["Company metrics", "Operating KPIs", "Fundamentals", "Quarterly notes"];
   const cards = [...(panels?.operating || []), ...(panels?.fundamentals || []), ...(panels?.guidance || [])];
   cards.forEach((card) => {
     lines.push(card.name || "", card.detailName || "");

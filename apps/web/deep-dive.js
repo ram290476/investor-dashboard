@@ -342,52 +342,18 @@ export function renderDeepDive(payload, doc = document, options = {}) {
 }
 
 function renderSectionNav(sections, ticker, root, doc, options) {
-  const nav = el(doc, "div", "deep-dive-section-nav");
-  nav.setAttribute("aria-hidden", "true");
-  const toggle = el(doc, "button", "deep-dive-sections-toggle");
-  toggle.type = "button";
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.setAttribute("aria-haspopup", "true");
-  toggle.setAttribute("aria-controls", "deep-dive-sections-menu");
-  toggle.setAttribute("aria-label", "Sections");
-  const chevron = el(doc, "span", "deep-dive-sections-chevron", "▾");
-  chevron.setAttribute("aria-hidden", "true");
-  toggle.append(el(doc, "span", "deep-dive-sections-toggle-label", "Sections"), chevron);
-  const menu = el(doc, "div", "deep-dive-sections-menu");
-  menu.id = "deep-dive-sections-menu";
-  menu.hidden = true;
-  menu.setAttribute("role", "group");
-  menu.setAttribute("aria-label", "Deep dive sections");
-  const back = el(doc, "button", "deep-dive-sections-back", "Back to tiles");
-  back.type = "button";
-  back.addEventListener("click", () => {
-    closeSectionMenu(root);
-    const grid = findByClass(root, "deep-dive-sections");
-    if (!grid) return;
-    if (typeof grid.hasAttribute !== "function" || !grid.hasAttribute("tabindex")) {
-      grid.tabIndex = -1;
-      grid.setAttribute?.("tabindex", "-1");
-    }
-    grid.scrollIntoView?.({ behavior: "smooth", block: "start" });
-    grid.focus?.({ preventScroll: true });
-  });
-  menu.append(back);
+  const strip = el(doc, "nav", "section-strip");
+  strip.setAttribute("aria-label", "Sections");
+  strip.setAttribute("aria-hidden", "true");
+  const track = el(doc, "div", "section-strip-track");
   for (const section of sections || []) {
-    const link = el(doc, "a", "deep-dive-section-link", section.title || section.id || "");
-    bindSectionLink(link, section, ticker, root, doc, options);
-    menu.append(link);
+    const chip = el(doc, "a", "section-strip-chip", section.title || section.id || "");
+    chip.setAttribute("tabindex", "-1");
+    bindSectionLink(chip, section, ticker, root, doc, options);
+    track.append(chip);
   }
-  toggle.addEventListener("click", () => {
-    const open = Boolean(menu.hidden);
-    menu.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
-  });
-  toggle.addEventListener("keydown", (event) => {
-    if (event?.key !== "Escape") return;
-    closeSectionMenu(root);
-  });
-  nav.append(toggle, menu);
-  return nav;
+  strip.append(track);
+  return strip;
 }
 
 function renderSectionTile(section, ticker, root, doc, options) {
@@ -465,14 +431,16 @@ function bindSectionLink(node, section, ticker, root, doc, options) {
 }
 
 function markCurrentSection(root, sectionId) {
-  const wanted = new Set(["deep-dive-section-tile", "deep-dive-section-link"]);
+  const wanted = new Set(["deep-dive-section-tile", "section-strip-chip"]);
   const stack = [root];
   while (stack.length) {
     const node = stack.pop();
     const names = String(node?.className || "").split(/\s+/);
     if (names.some((name) => wanted.has(name))) {
-      if (node.dataset?.sectionId === sectionId) node.setAttribute("aria-current", "location");
-      else node.removeAttribute?.("aria-current");
+      if (node.dataset?.sectionId === sectionId) {
+        node.setAttribute("aria-current", "location");
+        if (names.includes("section-strip-chip")) node.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+      } else node.removeAttribute?.("aria-current");
     }
     if (node?.children) stack.push(...node.children);
   }
@@ -498,17 +466,22 @@ function watchSectionNav(root, doc) {
   const Observer = doc.defaultView?.IntersectionObserver;
   if (typeof Observer !== "function") return;
   const grid = findByClass(root, "deep-dive-sections");
-  const nav = findByClass(root, "deep-dive-section-nav");
-  if (!grid || !nav) return;
+  const strip = findByClass(root, "section-strip");
+  if (!grid || !strip) return;
   const gridObserver = new Observer((entries) => {
     const visible = entries.some((entry) => entry.isIntersecting);
-    setClass(nav, "is-visible", !visible);
-    if (visible) {
-      nav.setAttribute("aria-hidden", "true");
-      closeSectionMenu(root);
-    } else {
-      nav.removeAttribute("aria-hidden");
+    setClass(strip, "is-visible", !visible);
+    const stack = [strip];
+    while (stack.length) {
+      const node = stack.pop();
+      if (String(node?.className || "").split(/\s+/).includes("section-strip-chip")) {
+        if (visible) node.setAttribute?.("tabindex", "-1");
+        else node.removeAttribute?.("tabindex");
+      }
+      if (node?.children) stack.push(...node.children);
     }
+    if (visible) strip.setAttribute("aria-hidden", "true");
+    else strip.removeAttribute("aria-hidden");
   });
   gridObserver.observe(grid);
   const sections = [];

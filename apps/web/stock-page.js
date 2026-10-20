@@ -7,10 +7,10 @@ import { catalystDateLabel } from "./roadmap.js";
 export const LONG_PRESS_MS = 550;
 
 export const STOCK_TABS = [
+  { id: "trends", label: "Trends" },
   { id: "overview", label: "Overview" },
-  { id: "kpis", label: "KPIs" },
   { id: "fundamentals", label: "Fundamentals" },
-  { id: "calls", label: "Calls" },
+  { id: "kpis", label: "KPIs" },
 ];
 
 // Last resort only: companyName() uses the API company_name / SEC entity name first.
@@ -176,12 +176,16 @@ export function companyDescription(payload, tickerData) {
   return "";
 }
 
-/** Base tabs, plus Deep dive when this payload's catalog published a deep_dive block. */
+/** Company tabs, in order. Deep dive sits between Fundamentals and KPIs, and only when sections exist. */
 export function stockTabs(payload) {
   const sections = payload?.deep_dive?.sections;
-  if (!Array.isArray(sections) || !sections.length) return STOCK_TABS;
-  const label = String(payload.deep_dive.title || "Deep dive").trim() || "Deep dive";
-  return [...STOCK_TABS, { id: "deep-dive", label }];
+  const deep = Array.isArray(sections) && sections.length
+    ? { id: "deep-dive", label: String(payload.deep_dive.title || "Deep dive").trim() || "Deep dive" }
+    : null;
+  const byId = new Map(STOCK_TABS.map((tab) => [tab.id, tab]));
+  return ["trends", "overview", "fundamentals", "deep-dive", "kpis"]
+    .map((id) => (id === "deep-dive" ? deep : byId.get(id)))
+    .filter(Boolean);
 }
 
 export function nextStockTab(current, key, tabs = STOCK_TABS) {
@@ -579,6 +583,46 @@ export function callsCopy() {
     guidance: "Show pending review includes proposed series on this page. Approved only hides those panels and list rows.",
     transcripts: "Quarterly call transcripts are not collected. They are added only where the company hosts them or the license explicitly allows it.",
   };
+}
+
+function notePoints(card) {
+  const points = [];
+  const text = String(card?.text || "").trim();
+  if (text) points.push(text);
+  if (card?.latest && card.latest !== "not reported") {
+    const line = `${card.name || "Note"}: ${card.latest}`;
+    if (!points.includes(line)) points.push(line);
+  }
+  for (const row of card?.rows || []) {
+    if (typeof row === "string" && row.trim()) points.push(row.trim());
+    else if (row && typeof row === "object") {
+      const point = String(row.point || row.text || row.note || row.title || "").trim();
+      if (point) points.push(point);
+    }
+  }
+  return points;
+}
+
+function quarterLabel(value) {
+  const match = QUARTER.exec(String(value || "").trim());
+  return match ? `Q${match[2]} ${match[1]}` : String(value || "").trim();
+}
+
+/** Guidance cards as quarterly notes, latest quarter first. The underlying metric fields stay on the cards. */
+export function quarterlyNoteEntries(guidance) {
+  const cards = [...(guidance || [])].filter(Boolean).sort((a, b) => (
+    String(b.latestPeriod || "").localeCompare(String(a.latestPeriod || ""))
+    || String(b.periodEnd || b.published || "").localeCompare(String(a.periodEnd || a.published || ""))
+  ));
+  return cards.map((card) => ({
+    id: card.id || "",
+    quarter: quarterLabel(card.latestPeriod),
+    date: String(card.periodEnd || card.published || "").trim(),
+    points: notePoints(card),
+    sourceUrl: card.sourceUrl || "",
+    sourceTitle: card.sourceTitle || "Source",
+    pending: Boolean(card.pending),
+  })).filter((note) => note.quarter || note.points.length || note.sourceUrl);
 }
 
 export function emptyKpiCopy() {
