@@ -487,14 +487,16 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(trendTone(0, true), "flat");
   assert.equal(STOCK_TABS.length, 4);
   assert.equal(stockTabs(null).length, 4);
-  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["trends", "overview", "fundamentals", "deep-dive", "kpis"]);
+  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["overview", "trends", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["overview", "trends", "deep-dive", "fundamentals", "kpis"]);
   assert.equal(stockTabs(sample).find((tab) => tab.id === "deep-dive").label, "Deep dive");
-  assert.equal(nextStockTab("fundamentals", "ArrowRight", stockTabs(sample)), "deep-dive");
-  assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "kpis");
-  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "trends");
+  assert.equal(stockTabs(sample).some((tab) => tab.id === "admin"), false);
+  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "fundamentals");
+  assert.equal(nextStockTab("fundamentals", "ArrowLeft", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "overview");
   assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "kpis");
-  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "trends");
+  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "overview");
 });
 
 test("rendered deep dive shows pending review, empty copy, and a placeholder forecast", () => {
@@ -535,7 +537,7 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.doesNotMatch(deepStyles, /#[0-9a-fA-F]{3,8}/);
   assert.match(deepStyles, /var\(--surface\)/);
   assert.match(deepStyles, /data-has-deep-dive/);
-  assert.match(app, /stockTabs\(payload\)/);
+  assert.match(app, /stockTabs\(payload, \{ admin: metricAdmin \}\)/);
   assert.match(app, /renderDeepDive\(payload/);
   assert.match(app, /openDeepDiveBookmark/);
   assert.match(app, /revealDeepDiveSection\(/);

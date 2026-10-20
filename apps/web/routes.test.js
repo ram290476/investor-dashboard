@@ -78,6 +78,11 @@ test("company tab hashes stay on that company's route and restore the section", 
   assert.equal(stockTabHash("abcd", "kpis"), "#stock/ABCD/kpis");
   assert.equal(stockTabHash("abcd", "deep-dive"), "#stock/ABCD/deep-dive");
   assert.equal(stockTabHash("abcd", "calls"), "#stock/ABCD/overview/quarterly-notes");
+  assert.equal(stockTabHash("abcd", "admin"), "#stock/ABCD/admin");
+  assert.equal(parseStockTab("#stock/NVDA/admin"), "admin");
+  assert.equal(parseStockPanel("#stock/NVDA/admin/metrics"), "metrics");
+  assert.equal(parseStockHash("#stock/tsla/admin"), "TSLA");
+  assert.equal(stockPanelHash("abcd", "admin", "metrics"), "#stock/ABCD/admin/metrics");
   assert.equal(stockPanelHash("abcd", "overview", "price"), "#stock/ABCD/overview/price");
   assert.equal(stockPanelHash("abcd", "trends", "news"), "#stock/ABCD/trends/news");
   assert.equal(stockPanelHash("abcd", "calls", "notes"), "#stock/ABCD/overview/quarterly-notes");

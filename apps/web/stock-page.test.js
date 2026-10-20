@@ -329,11 +329,13 @@ test("review mode shows or hides operating, guidance, and CapEx panels together"
 });
 
 test("stock tabs move by keyboard and calls stay unlicensed", () => {
-  assert.equal(nextStockTab("trends", "ArrowRight"), "overview");
-  assert.equal(nextStockTab("overview", "ArrowRight"), "fundamentals");
+  assert.equal(nextStockTab("overview", "ArrowRight"), "trends");
+  assert.equal(nextStockTab("trends", "ArrowRight"), "fundamentals");
+  assert.equal(nextStockTab("fundamentals", "ArrowRight"), "kpis");
   assert.equal(nextStockTab("overview", "End"), "kpis");
-  assert.equal(nextStockTab("kpis", "ArrowRight"), "trends");
-  assert.equal(nextStockTab("kpis", "Home"), "trends");
+  assert.equal(nextStockTab("kpis", "ArrowRight"), "overview");
+  assert.equal(nextStockTab("kpis", "Home"), "overview");
+  assert.deepEqual(STOCK_TABS.map((tab) => tab.id), ["overview", "trends", "fundamentals", "kpis"]);
   assert.equal(STOCK_TABS.length, 4);
   assert.match(callsCopy().transcripts, /not collected/);
   const gap = fillQuarterGaps([
@@ -360,19 +362,17 @@ test("stock page panels are two-up on desktop and one-up below 1024px", () => {
   assert.doesNotMatch(card, /stock-provenance|stock-xbrl|DS-11/);
 });
 
-test("company header shows only the company name and a centered Back to dashboard link", () => {
+test("company header shows only the company name and no Back to dashboard button", () => {
   const header = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   const heading = header.slice(header.indexOf('node("section", "panel stock-heading")'), header.indexOf('const page = node("main", "stock-page")'));
-  const copyAt = heading.indexOf('node("div", "stock-heading-copy")');
-  const linkAt = heading.indexOf('node("a", "stock-dashboard-link", "Back to dashboard")');
-  assert.ok(copyAt > 0 && linkAt > copyAt);
+  assert.equal(heading.indexOf("Back to dashboard"), -1);
+  assert.doesNotMatch(heading, /stock-dashboard-link/);
   assert.match(heading, /node\("h2", "", companyName\(session\.selected, payload, tickerData\)\)/);
   assert.doesNotMatch(heading, /\$\{session\.selected\}/);
   assert.match(heading, /copy\.append\(title\)/);
+  assert.match(heading, /heading\.append\(copy\)/);
+  assert.doesNotMatch(heading, /heading\.append\(copy, back\)/);
   assert.doesNotMatch(heading, /stock-price|stock-freshness|overview-meta|formatPrice|monthDay|session\.selected\} ·/);
-  assert.match(header, /back\.href = "\/"/);
-  assert.match(header, /heading\.append\(copy, back\)/);
-  assert.match(header, /navigateToDashboard\(\)/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*display:\s*grid/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
   assert.match(styles, /\.stock-heading\s*\{[^}]*align-items:\s*center/);
@@ -389,20 +389,7 @@ test("company header shows only the company name and a centered Back to dashboar
   assert.doesNotMatch(mobileHeading, /padding-inline:\s*0/);
   assert.doesNotMatch(mobileHeading, /padding-block:\s*0/);
   assert.doesNotMatch(mobileHeading, /margin-block:\s*0/);
-  assert.doesNotMatch(mobileHeading, /\.stock-dashboard-link\s*\{[^}]*align-self:/);
-  assert.doesNotMatch(mobileHeading, /\.stock-dashboard-link\s*\{[^}]*height:\s*100%/);
-  const linkCss = styles.slice(styles.indexOf(".stock-dashboard-link {"), styles.indexOf(".stock-dashboard-link:hover"));
-  assert.match(linkCss, /justify-self:\s*end/);
-  assert.match(linkCss, /margin-left:\s*auto/);
-  assert.match(linkCss, /height:\s*auto/);
-  assert.match(linkCss, /padding:\s*6px 14px/);
-  assert.match(linkCss, /var\(--/);
-  assert.doesNotMatch(linkCss, /align-self:/);
-  assert.doesNotMatch(linkCss, /height:\s*100%/);
-  assert.doesNotMatch(linkCss, /min-height:\s*44px/);
-  assert.doesNotMatch(linkCss, /#[0-9a-fA-F]{3,8}/);
-  assert.doesNotMatch(styles, /\.stock-dashboard-link\s*\{[^}]*align-self:/);
-  assert.doesNotMatch(styles, /\.stock-dashboard-link\s*\{[^}]*height:\s*100%/);
+  assert.doesNotMatch(styles, /\.stock-dashboard-link/);
   assert.doesNotMatch(styles, /\.stock-heading\s*\{[^}]*align-items:\s*start/);
   assert.doesNotMatch(styles, /\.stock-heading-copy\s*\{[^}]*flex-basis:\s*100%/);
 });

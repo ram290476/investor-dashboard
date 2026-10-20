@@ -1,8 +1,9 @@
 const TICKER = /^[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
 const SECTION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$/;
 // Calls stays in the matcher so old bookmarks can be redirected. It is not a tab.
-const STOCK_TABS = "trends|overview|fundamentals|kpis|deep-dive|calls";
-const LIVE_TABS = ["trends", "overview", "fundamentals", "kpis", "deep-dive"];
+// Admin is a real tab for signed-in admins. The page refuses it for everyone else.
+const STOCK_TABS = "trends|overview|fundamentals|kpis|deep-dive|calls|admin";
+const LIVE_TABS = ["trends", "overview", "fundamentals", "kpis", "deep-dive", "admin"];
 
 // Bare hashes the main page used for its panels. Each one lands on the Trends section.
 export const MAIN_PAGE_SECTIONS = Object.freeze({
@@ -61,7 +62,7 @@ export function parseStockSection(hash) {
   return match?.[2] === "deep-dive" ? (match[3] || "") : "";
 }
 
-/** Bookmark id in `#stock/<T>/<tab>/<section>` for Trends, Overview, Fundamentals, and KPIs. */
+/** Bookmark id in `#stock/<T>/<tab>/<section>` for Trends, Overview, Fundamentals, KPIs, and Admin. */
 export function parseStockPanel(hash) {
   const match = stockMatch(hash);
   if (!match?.[2] || match[2] === "deep-dive" || match[2] === "calls") return "";

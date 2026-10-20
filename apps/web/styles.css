@@ -3662,8 +3662,7 @@ a.catalyst-edgar-link:hover {
   .lane-toggle::after,
   .theme-choice::after,
   .segment::after,
-  .panel-action::after,
-  .stock-dashboard-link::after {
+  .panel-action::after {
     content: "";
     position: absolute;
     left: 0;
@@ -3720,31 +3719,6 @@ a.catalyst-edgar-link:hover {
 
 .stock-company-description:empty {
   display: none;
-}
-
-.stock-dashboard-link {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  justify-self: end;
-  margin-left: auto;
-  box-sizing: border-box;
-  height: auto;
-  padding: 6px 14px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-  color: var(--blue);
-  font-size: 14px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.stock-dashboard-link:hover,
-.stock-dashboard-link:focus-visible {
-  border-color: var(--blue);
-  background: var(--hover);
 }
 
 .stock-page {
@@ -4241,7 +4215,8 @@ a.catalyst-edgar-link:hover {
 .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
 .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
 .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
-.stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"] {
+.stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"],
+.stock-page[data-stock-tab="admin"] [data-stock-panel="admin"] {
   display: block;
 }
 
@@ -4249,7 +4224,7 @@ a.catalyst-edgar-link:hover {
   display: grid;
 }
 
-.stock-page[data-stock-tab="overview"] .company-metrics {
+.stock-page[data-stock-tab="admin"] .company-metrics {
   display: grid;
 }
 
@@ -4286,12 +4261,6 @@ a.catalyst-edgar-link:hover {
     min-width: 0;
   }
 
-  .stock-dashboard-link {
-    justify-self: end;
-    height: auto;
-    margin-left: auto;
-  }
-
   .stock-page-tabs {
     gap: 2px;
   }
@@ -4314,7 +4283,8 @@ a.catalyst-edgar-link:hover {
   .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
   .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
   .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
-  .stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"] {
+  .stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"],
+  .stock-page[data-stock-tab="admin"] [data-stock-panel="admin"] {
     display: block;
   }
 
@@ -4330,7 +4300,7 @@ a.catalyst-edgar-link:hover {
     display: grid;
   }
 
-  .stock-page[data-stock-tab] .company-metrics {
+  .stock-page[data-stock-tab="admin"] .company-metrics {
     display: grid;
   }
 
