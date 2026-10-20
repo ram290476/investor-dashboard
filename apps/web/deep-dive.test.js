@@ -556,10 +556,12 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*width:\s*100%/);
   assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*table-layout:\s*fixed/);
   assert.match(deepStyles, /\.section-strip-track\s*\{[^}]*flex-wrap:\s*wrap/);
-  assert.match(deepStyles, /\.deep-dive \.section-strip-chip\s*\{[^}]*white-space:\s*nowrap/);
-  assert.match(deepStyles, /@media \(max-width:\s*640px\)\s*\{\s*\.deep-dive \.section-strip-track\s*\{[^}]*flex-wrap:\s*nowrap/);
-  assert.match(deepStyles, /@media \(max-width:\s*640px\)\s*\{\s*\.deep-dive \.section-strip-track\s*\{[^}]*overflow-x:\s*auto/);
-  assert.deepEqual(deepStyles.match(/overflow-x:\s*auto/g), ["overflow-x: auto"]);
+  assert.match(deepStyles, /\.deep-dive \.section-strip-chip\s*\{[^}]*max-width:\s*100%/);
+  assert.match(deepStyles, /\.deep-dive \.section-strip-label\s*\{[^}]*text-overflow:\s*ellipsis/);
+  assert.match(deepStyles, /\.deep-dive \.section-strip-label\s*\{[^}]*white-space:\s*nowrap/);
+  assert.match(source, /section-strip-label/);
+  assert.match(deepStyles, /max-width:\s*480px\)[\s\S]*?top:\s*98px/);
+  assert.equal(deepStyles.match(/overflow-x:\s*auto/g), null);
   assert.match(styles, /\.stock-page-tabs\s*\{[^}]*display:\s*flex/);
   assert.match(ci, /node --check apps\/web\/deep-dive\.js/);
   assert.match(ci, /node --check apps\/web\/geo\.js/);

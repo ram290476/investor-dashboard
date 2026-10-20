@@ -5105,8 +5105,8 @@ a.catalyst-edgar-link:hover {
   max-width: 100%;
 }
 
-/* Charts and tables fit the panel. The Deep dive section strip scrolls sideways
-   only on a very narrow screen. The ticker bar can scroll at any width. */
+/* Charts and tables fit the panel. The Deep dive section strip wraps instead of
+   scrolling sideways. The ticker bar can scroll at any width. */
 .deep-dive > *,
 .deep-dive-section,
 .deep-dive-grid > *,
@@ -5267,21 +5267,21 @@ a.catalyst-edgar-link:hover {
   white-space: normal;
 }
 
-/* Deep dive chips stay one line so the shortened label does not break mid-word.
-   The row wraps at common widths. Below 640px the track scrolls inside itself. */
+/* Same pattern as the company tabs: chips wrap onto extra rows and the bar
+   never scrolls sideways. A chip wider than the bar ellipsizes; the title
+   attribute is the full catalog label. */
 .deep-dive .section-strip-chip {
-  flex: 0 0 auto;
-  max-width: none;
-  overflow-wrap: normal;
-  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
-@media (max-width: 640px) {
-  .deep-dive .section-strip-track {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-  }
+.deep-dive .section-strip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-strip-chip[aria-current="location"] {
@@ -5333,7 +5333,7 @@ a.catalyst-edgar-link:hover {
 .deep-dive-section {
   display: grid;
   gap: 8px;
-  scroll-margin-top: 104px;
+  scroll-margin-top: 132px;
 }
 
 .deep-dive-grid {
@@ -5708,5 +5708,20 @@ a.catalyst-edgar-link:hover {
   .deep-dive-section-tile,
   .section-strip-chip {
     min-height: 44px;
+  }
+
+  .deep-dive .section-strip-chip {
+    padding-inline: 8px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .stock-page[data-stock-tab="deep-dive"] .section-strip {
+    top: 98px;
+  }
+
+  .deep-dive-section {
+    scroll-margin-top: 360px;
   }
 }

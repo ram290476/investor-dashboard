@@ -259,7 +259,8 @@ function renderSectionNav(sections, ticker, root, doc, options) {
   const track = el(doc, "div", "section-strip-track");
   for (const section of sections || []) {
     const full = String(section.title || section.id || "").replace(/\s+/g, " ").trim();
-    const chip = el(doc, "a", "section-strip-chip", shortSectionLabel(full));
+    const chip = el(doc, "a", "section-strip-chip");
+    chip.append(el(doc, "span", "section-strip-label", shortSectionLabel(full)));
     if (full) {
       chip.title = full;
       chip.setAttribute("title", full);
