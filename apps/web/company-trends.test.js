@@ -103,16 +103,20 @@ test("quarterly notes keep the latest quarter first and stay empty without guida
   assert.equal(notes[0].sourceUrl, "https://example.com/latest");
   assert.equal(notes[0].pending, true);
   const tile = companyBookmarks("overview", { guidance: notes.map((note) => ({ latestPeriod: note.quarter === "Q2 2026" ? "2026Q2" : "2025Q4", text: note.points[0], sourceUrl: note.sourceUrl })) });
-  assert.equal(tile.find((item) => item.id === "quarterly-notes").headline.display, "Q2 2026");
-  assert.equal(tile.find((item) => item.id === "quarterly-notes").headline.label, "Latest quarter");
+  const notesTile = tile.find((item) => item.id === "quarterly-notes");
+  assert.equal(notesTile.title, "Quarterly notes");
+  assert.equal(notesTile.headline, undefined);
 });
 
 test("Trends tiles follow the sections that are actually on the page", () => {
-  const present = ["price", "technical", "news", "filings"];
+  const present = ["price", "news", "filings"];
   const tiles = companyBookmarks("trends", { present, history: [{ close: 4 }, { close: 5 }] });
   assert.deepEqual(tiles.map((item) => item.id), present);
   assert.equal(tiles[0].anchorId, "trends-panel-price");
-  assert.equal(tiles[0].headline.value, 5);
+  assert.equal(tiles[0].title, "Price");
+  assert.equal(tiles[0].headline, undefined);
+  assert.equal(TREND_SECTIONS.some((item) => item.id === "technical"), false);
+  assert.equal(companyBookmarks("trends", { present: ["price", "technical"] }).some((item) => item.id === "technical"), false);
   assert.equal(companyBookmarks("trends", {}).length, TREND_SECTIONS.length);
 });
 
@@ -126,7 +130,6 @@ test("the company page renders former main-page panels on Trends and keeps the t
   const trends = app.slice(app.indexOf("function renderTrendsLayout"), app.indexOf("function renderQuarterlyNotes"));
   for (const piece of [
     'renderChartPanel("dashboard", session.selected)',
-    "renderTechnicalSummary(session.selected",
     "renderMacroPanels(tickerData, chartData, chartDataState)",
     "renderContracts(tickerData)",
     "renderNews(tickerData)",
@@ -136,6 +139,7 @@ test("the company page renders former main-page panels on Trends and keeps the t
   ]) {
     assert.match(trends, new RegExp(piece.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+  assert.doesNotMatch(trends, /renderTechnicalSummary\(/);
   assert.match(trends, /trends-layout dashboard-grid/);
   assert.match(trends, /dataset\.mobileView = "all"/);
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
