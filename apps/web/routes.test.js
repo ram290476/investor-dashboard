@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { legacyMainSection, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 
 test("dashboard and Cognito callback paths resolve to the dashboard", () => {
   assert.deepEqual(routeFromPath("/"), { page: "dashboard" });
@@ -74,13 +74,34 @@ test("company tab hashes stay on that company's route and restore the section", 
   assert.equal(parseStockSection("#stock/MSFT/deep-dive"), "");
   assert.equal(parseStockHash("#stock/NVDA/nope"), null);
   assert.equal(stockTabHash("abcd", "overview"), "#stock/ABCD");
+  assert.equal(stockTabHash("abcd", "trends"), "#stock/ABCD/trends");
   assert.equal(stockTabHash("abcd", "kpis"), "#stock/ABCD/kpis");
   assert.equal(stockTabHash("abcd", "deep-dive"), "#stock/ABCD/deep-dive");
+  assert.equal(stockTabHash("abcd", "calls"), "#stock/ABCD/overview/quarterly-notes");
   assert.equal(stockPanelHash("abcd", "overview", "price"), "#stock/ABCD/overview/price");
-  assert.equal(stockPanelHash("abcd", "calls", "notes"), "#stock/ABCD/calls/notes");
+  assert.equal(stockPanelHash("abcd", "trends", "news"), "#stock/ABCD/trends/news");
+  assert.equal(stockPanelHash("abcd", "calls", "notes"), "#stock/ABCD/overview/quarterly-notes");
   assert.equal(stockPanelHash("abcd", "deep-dive", "forecast"), "#stock/ABCD/deep-dive/forecast");
   assert.equal(stockPanelHash("abcd", "kpis", "../x"), "#stock/ABCD/kpis");
+  assert.equal(parseStockTab("#stock/NVDA/trends/price"), "trends");
+  assert.equal(parseStockPanel("#stock/NVDA/trends/price"), "price");
+  assert.equal(parseStockPanel("#stock/NVDA/calls/notes"), "");
   assert.deepEqual(routeFromLocation("/", "#stock/BRK.B/fundamentals/revenue"), { page: "stock", ticker: "BRK.B" });
+});
+
+test("legacy main-page and calls hashes redirect to the company tab that replaced them", () => {
+  assert.equal(legacyMainSection("#news"), "news");
+  assert.equal(legacyMainSection("#rates"), "rates");
+  assert.equal(legacyMainSection("#mobile-panel-chart"), "price");
+  assert.equal(legacyMainSection("#settings"), "");
+  assert.equal(legacyMainSection("#stock/NVDA"), "");
+  assert.equal(redirectStockHash("#news", "nvda"), "#stock/NVDA/trends/news");
+  assert.equal(redirectStockHash("#filings", "brk.b"), "#stock/BRK.B/trends/filings");
+  assert.equal(redirectStockHash("#stock/nvda/calls"), "#stock/NVDA/overview/quarterly-notes");
+  assert.equal(redirectStockHash("#stock/NVDA/calls/transcripts"), "#stock/NVDA/overview/quarterly-notes");
+  assert.equal(redirectStockHash("#stock/NVDA/trends/price", "NVDA"), "");
+  assert.equal(redirectStockHash("#settings/theme", "NVDA"), "");
+  assert.equal(redirectStockHash("#news", ""), "");
 });
 
 test("research navigation preserves and restores the dashboard ticker", () => {

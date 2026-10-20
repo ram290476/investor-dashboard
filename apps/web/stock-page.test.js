@@ -329,9 +329,11 @@ test("review mode shows or hides operating, guidance, and CapEx panels together"
 });
 
 test("stock tabs move by keyboard and calls stay unlicensed", () => {
-  assert.equal(nextStockTab("overview", "ArrowRight"), "kpis");
-  assert.equal(nextStockTab("overview", "End"), "calls");
-  assert.equal(nextStockTab("calls", "ArrowRight"), "overview");
+  assert.equal(nextStockTab("trends", "ArrowRight"), "overview");
+  assert.equal(nextStockTab("overview", "ArrowRight"), "fundamentals");
+  assert.equal(nextStockTab("overview", "End"), "kpis");
+  assert.equal(nextStockTab("kpis", "ArrowRight"), "trends");
+  assert.equal(nextStockTab("kpis", "Home"), "trends");
   assert.equal(STOCK_TABS.length, 4);
   assert.match(callsCopy().transcripts, /not collected/);
   const gap = fillQuarterGaps([
@@ -517,7 +519,7 @@ test("company description comes from the stock payload, then dashboard data, and
 test("company page order: header, shared chart, Technical Summary, then the metric sections (#210)", () => {
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   assert.match(page, /const chart = renderChartPanel\("company", session\.selected\)/);
-  const order = ["chart,", "renderTechnicalSummary(session.selected, history)", 'section("kpis"', 'section(\n      "fundamentals"', "renderCompanyMetrics(charts, pageState)", "callsBlock,"]
+  const order = ["chart,", "renderTechnicalSummary(session.selected, history)", 'section("kpis"', 'section(\n      "fundamentals"', "renderCompanyMetrics(charts, pageState)", "renderQuarterlyNotes(charts.guidance)"]
     .map((piece) => page.indexOf(piece, page.indexOf("page.append(")));
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), order.join(","));
   assert.ok(page.indexOf("root.append(heading)") < page.indexOf("root.append(page)"));

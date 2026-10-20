@@ -120,11 +120,15 @@ test("the company page shows the panel only for funds and fetches GET /fund/<T> 
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   const gate = page.indexOf("const fund = isFund(tickerData)");
   assert.ok(gate > 0 && page.indexOf("loadFundHoldings(session.selected)") > gate);
-  // Fund holdings follows the Technical Summary; company-only panels are not appended for funds.
-  const fundBranch = page.slice(gate, page.indexOf("return;", gate));
-  assert.match(fundBranch, /renderTechnicalSummary\(session\.selected, history\), fundPanel,\s+\.\.\.renderFundSummary/);
-  assert.doesNotMatch(fundBranch, /section\("kpis"/);
-  assert.match(fundBranch, /page\.dataset\.stockTab = "overview"/);
+  // Fund holdings follows the Technical Summary. The other company tabs stay on the page.
+  const fundBranch = page.slice(gate, page.indexOf("page.append(", gate));
+  assert.match(fundBranch, /page\.dataset\.instrumentKind = "fund"/);
+  assert.match(fundBranch, /renderFundPanel\(session\.selected, classificationNote\(tickerData\)\)/);
+  assert.doesNotMatch(fundBranch, /page\.dataset\.stockTab = "overview"/);
+  assert.doesNotMatch(fundBranch, /return;/);
+  const appended = page.slice(page.indexOf("page.append(", gate));
+  assert.match(appended, /renderTechnicalSummary\(session\.selected, history\),\s+\.\.\.fundExtras/);
+  assert.match(appended, /section\("kpis"/);
   const panelCss = css.slice(css.indexOf("Fund holdings panel (issue 223)"));
   assert.doesNotMatch(panelCss, /#[0-9a-fA-F]{3,8}\b/);
   assert.match(panelCss, /@media \(max-width: 640px\)/);

@@ -3760,8 +3760,9 @@ a.catalyst-edgar-link:hover {
 }
 
 .company-section-target,
-#stock-panel-price {
-  scroll-margin-top: 56px;
+#stock-panel-price,
+.trends-layout [data-company-section] {
+  scroll-margin-top: 104px;
 }
 
 .stock-section-title {
@@ -4211,6 +4212,9 @@ a.catalyst-edgar-link:hover {
 /* Company-page tabs stay visible at every width. Hiding this bar above 640px
    unless data-has-deep-dive was set left every other ticker as one long page (#248). */
 .stock-page-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 6;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -4233,12 +4237,16 @@ a.catalyst-edgar-link:hover {
   display: none;
 }
 
+.stock-page[data-stock-tab="trends"] [data-stock-panel="trends"],
 .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
 .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
 .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
-.stock-page[data-stock-tab="calls"] [data-stock-panel="calls"],
 .stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"] {
   display: block;
+}
+
+.stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="trends"] {
+  display: grid;
 }
 
 .stock-page[data-stock-tab="overview"] .company-metrics {
@@ -4302,20 +4310,32 @@ a.catalyst-edgar-link:hover {
     display: none;
   }
 
+  .stock-page[data-stock-tab="trends"] [data-stock-panel="trends"],
   .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
   .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
   .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
-  .stock-page[data-stock-tab="calls"] [data-stock-panel="calls"],
   .stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"] {
     display: block;
+  }
+
+  .stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="trends"] {
+    display: grid;
+  }
+
+  .stock-page .trends-layout[data-mobile-view="all"] [data-mobile-panel] {
+    display: block;
+  }
+
+  .stock-page .trends-layout[data-mobile-view="all"] .macro-panel-grid {
+    display: grid;
   }
 
   .stock-page[data-stock-tab] .company-metrics {
     display: grid;
   }
 
-  .stock-page[data-stock-tab] [data-stock-panel="calls"] {
-    display: block;
+  .section-strip-chip {
+    min-height: 44px;
   }
 }
 
@@ -5162,11 +5182,8 @@ a.catalyst-edgar-link:hover {
   }
 }
 
-/* Deep dive is a fifth company-page tab. The tab row itself is always visible.
+/* Deep dive is a company-page tab. The tab row itself is always visible.
    data-has-deep-dive marks a page whose payload included deep_dive sections. */
-.stock-page[data-has-deep-dive="true"] .deep-dive-section-nav.is-visible .deep-dive-sections-toggle {
-  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
-}
 
 .deep-dive {
   display: grid;
@@ -5305,100 +5322,90 @@ a.catalyst-edgar-link:hover {
   margin-top: auto;
 }
 
-.deep-dive-section-nav {
+.section-strip {
   position: sticky;
-  top: 8px;
-  z-index: 4;
+  top: 52px;
+  z-index: 5;
   height: 0;
   margin: 0;
 }
 
-.deep-dive-sections-toggle {
+.section-strip-track {
   position: absolute;
   top: 0;
   left: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 4px 10px;
+  right: 0;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 4px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--surface-raised);
-  color: var(--text);
-  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  font-size: 12px;
-  font-weight: 600;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
   box-shadow: 0 8px 24px color-mix(in srgb, var(--page) 55%, transparent);
   opacity: 0;
   pointer-events: none;
+  scrollbar-width: thin;
 }
 
-.deep-dive-section-nav.is-visible .deep-dive-sections-toggle {
+.section-strip.is-visible .section-strip-track {
   opacity: 1;
   pointer-events: auto;
 }
 
-.deep-dive-sections-toggle:focus-visible {
+.section-strip-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--secondary);
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.section-strip-chip[aria-current="location"] {
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 55%, var(--line));
+}
+
+.section-strip-chip:focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: 2px;
 }
 
-.deep-dive-sections-chevron {
-  color: var(--amber);
-  font-size: 11px;
-  line-height: 1;
-}
-
-.deep-dive-sections-menu {
-  position: absolute;
-  top: 40px;
-  left: 0;
+.quarterly-note {
   display: grid;
-  gap: 2px;
-  width: min(240px, 70vw);
-  max-height: 50vh;
-  padding: 6px;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-raised);
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--page) 65%, transparent);
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
 }
 
-.deep-dive-sections-menu[hidden] {
-  display: none;
-}
-
-.deep-dive-sections-back,
-.deep-dive-section-link {
-  display: flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
+.quarterly-note-quarter {
+  margin: 0;
   color: var(--text);
-  font: inherit;
+  font-size: 14px;
+}
+
+.quarterly-note-date,
+.quarterly-note-points {
+  margin: 0;
+  color: var(--secondary);
   font-size: 13px;
-  text-align: left;
-  text-decoration: none;
-  cursor: pointer;
 }
 
-.deep-dive-sections-back:hover,
-.deep-dive-section-link:hover,
-.deep-dive-sections-back:focus-visible,
-.deep-dive-section-link:focus-visible {
-  background: var(--hover);
-  outline: 2px solid var(--amber);
-  outline-offset: -2px;
-}
-
-.deep-dive-section-link[aria-current="location"] {
+.quarterly-note-source {
   color: var(--amber);
-  font-weight: 600;
+  font-size: 13px;
+}
+
+.trends-layout > .dashboard-footer {
+  grid-column: 1 / -1;
 }
 
 @media (max-width: 1100px) {
@@ -5410,7 +5417,7 @@ a.catalyst-edgar-link:hover {
 .deep-dive-section {
   display: grid;
   gap: 8px;
-  scroll-margin-top: 56px;
+  scroll-margin-top: 104px;
 }
 
 .deep-dive-grid {
@@ -5718,9 +5725,7 @@ a.catalyst-edgar-link:hover {
   }
 
   .deep-dive-section-tile,
-  .deep-dive-sections-toggle,
-  .deep-dive-sections-back,
-  .deep-dive-section-link {
+  .section-strip-chip {
     min-height: 44px;
   }
 }

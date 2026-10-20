@@ -1,8 +1,27 @@
-// Section tiles for the company page (Overview, KPIs, Fundamentals, Calls).
-// The same card, hash, and sticky-nav behavior as the deep dive. No ticker names.
+// Section tiles and the sticky section strip for every company tab.
+// No ticker names. The strip replaces the Sections dropdown.
 import { trendTone } from "./deep-dive.js";
 import { stockPanelHash } from "./routes.js";
-import { formatChange, formatMetricValue } from "./stock-page.js";
+import { formatChange, formatMetricValue, quarterlyNoteEntries } from "./stock-page.js";
+
+export const TREND_SECTIONS = [
+  { id: "price", title: "Price", icon: "price" },
+  { id: "technical", title: "Technical Summary", icon: "technical" },
+  { id: "rates", title: "Rates & yields", icon: "default" },
+  { id: "inflation", title: "Inflation surprise", icon: "default" },
+  { id: "market-comparison", title: "Market comparison", icon: "default" },
+  { id: "moving-averages", title: "Moving averages", icon: "default" },
+  { id: "volatility", title: "Volatility", icon: "default" },
+  { id: "dollar-oil", title: "Dollar & oil", icon: "default" },
+  { id: "tariffs", title: "Tariffs & geopolitics", icon: "default" },
+  { id: "correlation", title: "Correlation drift", icon: "default" },
+  { id: "catalyst-calendar", title: "Catalyst calendar", icon: "default" },
+  { id: "drivers", title: "Macro signals", icon: "technical" },
+  { id: "news", title: "News & sentiment", icon: "default" },
+  { id: "filings", title: "Filings & events", icon: "fundamentals" },
+  { id: "contracts", title: "Government contracts", icon: "default" },
+  { id: "about-data", title: "About this data", icon: "default" },
+];
 
 const ICON_PATHS = {
   price: ["M2 12l3.2-3.2 2.4 2.4L12.2 4", "M9.5 4H13v3.5"],
@@ -107,12 +126,32 @@ function metricBookmarks(metrics, icon, fallbackId, fallbackTitle) {
   });
 }
 
+function textHeadline(display, label) {
+  const value = String(display || "").trim();
+  if (!value) return null;
+  return { display: value, label: label || "" };
+}
+
 /** Tiles for the active company tab. Deep dive keeps its own section list. */
 export function companyBookmarks(tab, context = {}) {
+  if (tab === "trends") {
+    const present = new Set(context.present?.length ? context.present : TREND_SECTIONS.map((item) => item.id));
+    const supplied = context.headlines || {};
+    return TREND_SECTIONS.filter((item) => present.has(item.id)).map((item) => ({
+      id: item.id,
+      title: item.title,
+      anchorId: `trends-panel-${item.id}`,
+      icon: item.icon,
+      headline: supplied[item.id]
+        || (item.id === "price" ? priceHeadline(context.history) : null)
+        || (item.id === "technical" ? technicalHeadline(context.technical) : null),
+    }));
+  }
   if (tab === "kpis") return metricBookmarks(context.operating, "kpi", "kpis", "Operating KPIs");
   if (tab === "fundamentals") return metricBookmarks(context.fundamentals, "fundamentals", "fundamentals", "Fundamentals");
-  if (tab === "calls") return metricBookmarks(context.guidance, "calls", "calls", "Quarterly call notes");
   if (tab !== "overview") return [];
+  const notes = quarterlyNoteEntries(context.guidance);
+  const latestQuarter = notes[0]?.quarter || "";
   return [
     {
       id: "price",
@@ -134,6 +173,13 @@ export function companyBookmarks(tab, context = {}) {
       anchorId: "stock-panel-metrics",
       icon: "metrics",
       headline: firstHeadline([context.operating, context.fundamentals, context.guidance]),
+    },
+    {
+      id: "quarterly-notes",
+      title: "Quarterly notes",
+      anchorId: "stock-panel-quarterly-notes",
+      icon: "calls",
+      headline: textHeadline(latestQuarter, "Latest quarter"),
     },
   ];
 }
@@ -244,22 +290,19 @@ function findByClass(node, className) {
   return null;
 }
 
-function closeSectionMenu(root) {
-  const menu = findByClass(root, "deep-dive-sections-menu");
-  const toggle = findByClass(root, "deep-dive-sections-toggle");
-  if (menu) menu.hidden = true;
-  if (toggle) toggle.setAttribute("aria-expanded", "false");
-}
-
 function markCurrent(root, sectionId) {
-  const wanted = new Set(["deep-dive-section-tile", "deep-dive-section-link"]);
+  const wanted = new Set(["deep-dive-section-tile", "section-strip-chip"]);
   const stack = [root];
   while (stack.length) {
     const node = stack.pop();
     const names = String(node?.className || "").split(/\s+/);
     if (names.some((name) => wanted.has(name))) {
-      if (node.dataset?.sectionId === sectionId) node.setAttribute("aria-current", "location");
-      else node.removeAttribute?.("aria-current");
+      if (node.dataset?.sectionId === sectionId) {
+        node.setAttribute("aria-current", "location");
+        if (names.includes("section-strip-chip")) {
+          node.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+        }
+      } else node.removeAttribute?.("aria-current");
     }
     if (node?.children) stack.push(...node.children);
   }
@@ -276,8 +319,7 @@ function bindBookmark(node, bookmark, root, options) {
     if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) return;
     event?.preventDefault();
     markCurrent(root, sectionId);
-    closeSectionMenu(root);
-    revealCompanySection(options.scrollRoot || root, sectionId);
+    revealCompanySection(options.scrollRoot || root, sectionId, options.tab);
     if (typeof options.onBookmark === "function") options.onBookmark(sectionId, href);
   });
 }
@@ -307,70 +349,78 @@ function renderTile(bookmark, root, doc, options) {
   return tile;
 }
 
-function renderNav(bookmarks, root, doc, options) {
-  const nav = el(doc, "div", "deep-dive-section-nav");
-  nav.setAttribute("aria-hidden", "true");
-  const toggle = el(doc, "button", "deep-dive-sections-toggle");
-  toggle.type = "button";
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.setAttribute("aria-haspopup", "true");
-  toggle.setAttribute("aria-controls", "company-sections-menu");
-  toggle.setAttribute("aria-label", "Sections");
-  const chevron = el(doc, "span", "deep-dive-sections-chevron", "▾");
-  chevron.setAttribute("aria-hidden", "true");
-  toggle.append(el(doc, "span", "deep-dive-sections-toggle-label", "Sections"), chevron);
-  const menu = el(doc, "div", "deep-dive-sections-menu");
-  menu.id = "company-sections-menu";
-  menu.hidden = true;
-  menu.setAttribute("role", "group");
-  menu.setAttribute("aria-label", "Company sections");
-  const back = el(doc, "button", "deep-dive-sections-back", "Back to tiles");
-  back.type = "button";
-  back.addEventListener("click", () => {
-    closeSectionMenu(root);
-    const grid = findByClass(root, "deep-dive-sections");
-    if (!grid) return;
-    if (typeof grid.hasAttribute !== "function" || !grid.hasAttribute("tabindex")) {
-      grid.tabIndex = -1;
-      grid.setAttribute?.("tabindex", "-1");
+function setChipTabbable(strip, on) {
+  const stack = [strip];
+  while (stack.length) {
+    const node = stack.pop();
+    const names = String(node?.className || "").split(/\s+/);
+    if (names.includes("section-strip-chip")) {
+      if (on) node.removeAttribute?.("tabindex");
+      else node.setAttribute?.("tabindex", "-1");
     }
-    grid.scrollIntoView?.({ behavior: "smooth", block: "start" });
-    grid.focus?.({ preventScroll: true });
-  });
-  menu.append(back);
-  for (const bookmark of bookmarks) {
-    const link = el(doc, "a", "deep-dive-section-link", bookmark.title || bookmark.id);
-    bindBookmark(link, bookmark, root, options);
-    menu.append(link);
+    if (node?.children) stack.push(...node.children);
   }
-  toggle.addEventListener("click", () => {
-    const open = Boolean(menu.hidden);
-    menu.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
-  });
-  root.addEventListener?.("keydown", (event) => {
-    if (event?.key !== "Escape") return;
-    closeSectionMenu(root);
-  });
-  nav.append(toggle, menu);
-  return nav;
 }
 
-function watchSectionNav(root, doc) {
+function renderStrip(bookmarks, root, doc, options) {
+  const strip = el(doc, "nav", "section-strip");
+  strip.setAttribute("aria-label", "Sections");
+  strip.setAttribute("aria-hidden", "true");
+  const track = el(doc, "div", "section-strip-track");
+  for (const bookmark of bookmarks) {
+    const chip = el(doc, "a", "section-strip-chip", bookmark.title || bookmark.id);
+    chip.setAttribute("tabindex", "-1");
+    bindBookmark(chip, bookmark, root, options);
+    track.append(chip);
+  }
+  strip.append(track);
+  return strip;
+}
+
+function owningTab(node) {
+  let current = node;
+  while (current) {
+    const tab = current.dataset?.stockPanel || current.getAttribute?.("data-stock-panel") || "";
+    if (tab) return tab;
+    current = current.parentElement;
+  }
+  return "";
+}
+
+function watchSectionNav(root, doc, options = {}) {
   const Observer = doc.defaultView?.IntersectionObserver;
   if (typeof Observer !== "function") return;
   const grid = findByClass(root, "deep-dive-sections");
-  const nav = findByClass(root, "deep-dive-section-nav");
-  if (!grid || !nav) return;
+  const strip = findByClass(root, "section-strip");
+  if (!grid || !strip) return;
   const gridObserver = new Observer((entries) => {
     const visible = entries.some((entry) => entry.isIntersecting);
-    setClass(nav, "is-visible", !visible);
-    if (visible) {
-      nav.setAttribute("aria-hidden", "true");
-      closeSectionMenu(root);
-    } else nav.removeAttribute("aria-hidden");
+    setClass(strip, "is-visible", !visible);
+    setChipTabbable(strip, !visible);
+    if (visible) strip.setAttribute("aria-hidden", "true");
+    else strip.removeAttribute("aria-hidden");
   });
   gridObserver.observe(grid);
+  const host = options.scrollRoot || root;
+  const wanted = options.tab || "";
+  const sections = [];
+  const stack = [host];
+  while (stack.length) {
+    const node = stack.pop();
+    const mark = node?.dataset?.companySection || node?.getAttribute?.("data-company-section") || "";
+    if (mark && tabMatches(node, wanted)) sections.push(node);
+    if (node?.children) stack.push(...node.children);
+  }
+  if (!sections.length) return;
+  const sectionObserver = new Observer((entries) => {
+    const best = entries
+      .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!best) return;
+    const id = best.target?.dataset?.companySection || best.target?.getAttribute?.("data-company-section") || "";
+    if (id) markCurrent(root, id);
+  }, { rootMargin: "-20% 0px -55% 0px", threshold: [0.15, 0.4, 0.7] });
+  for (const section of sections) sectionObserver.observe(section);
 }
 
 export function renderCompanyBookmarks(bookmarks, doc = document, options = {}) {
@@ -379,26 +429,32 @@ export function renderCompanyBookmarks(bookmarks, doc = document, options = {}) 
   const root = el(doc, "div", "company-bookmarks");
   const grid = el(doc, "nav", "deep-dive-sections");
   grid.setAttribute("aria-label", "Company sections");
-  root.append(renderNav(items, root, doc, options), grid);
+  root.append(renderStrip(items, root, doc, options), grid);
   for (const bookmark of items) grid.append(renderTile(bookmark, root, doc, options));
-  watchSectionNav(root, doc);
+  watchSectionNav(root, doc, options);
   return root;
 }
 
-function findCompanySection(node, sectionId) {
+function tabMatches(node, tab) {
+  if (!tab) return true;
+  const owner = owningTab(node);
+  return !owner || owner === tab;
+}
+
+function findCompanySection(node, sectionId, tab = "") {
   if (!node || typeof node !== "object") return null;
   const mark = node.dataset?.companySection || node.getAttribute?.("data-company-section") || "";
-  if (mark && mark === sectionId) return node;
+  if (mark && mark === sectionId && tabMatches(node, tab)) return node;
   for (const child of node.children || []) {
-    const found = findCompanySection(child, sectionId);
+    const found = findCompanySection(child, sectionId, tab);
     if (found) return found;
   }
   return null;
 }
 
 /** Scroll a company-page section into view. The hash update stays with the caller. */
-export function revealCompanySection(root, sectionId) {
-  const target = findCompanySection(root, sectionId);
+export function revealCompanySection(root, sectionId, tab = "") {
+  const target = findCompanySection(root, sectionId, tab);
   if (!target) return null;
   if (typeof target.hasAttribute !== "function" || !target.hasAttribute("tabindex")) {
     target.tabIndex = -1;

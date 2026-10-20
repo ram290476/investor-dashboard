@@ -21,7 +21,7 @@ const geo = await readFile(new URL("./geo.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 const ci = await readFile(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
-const deepStyles = styles.slice(styles.indexOf("Deep dive is a fifth company-page tab"));
+const deepStyles = styles.slice(styles.indexOf("Deep dive is a company-page tab"));
 
 function element(tag) {
   const node = {
@@ -234,10 +234,11 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
   assert.equal(byClass(view, "deep-dive-jump-label").length, 0);
   assert.doesNotMatch(textOf(view), /On this page/);
   assert.equal(byClass(view, "deep-dive-sections")[0].getAttribute("aria-label"), "Deep dive sections");
-  const toggle = byClass(view, "deep-dive-sections-toggle")[0];
-  assert.equal(toggle.getAttribute("aria-label"), "Sections");
-  assert.equal(toggle.getAttribute("aria-expanded"), "false");
-  assert.equal(String(byClass(view, "deep-dive-section-nav")[0].className).includes("is-visible"), false);
+  const strip = byClass(view, "section-strip")[0];
+  assert.equal(strip.getAttribute("aria-label"), "Sections");
+  assert.equal(strip.getAttribute("aria-hidden"), "true");
+  assert.equal(String(strip.className).includes("is-visible"), false);
+  assert.equal(byClass(view, "section-strip-chip").length, sample.deep_dive.sections.length);
   assert.deepEqual(chips.map((chip) => chip.dataset.sectionId), ["scoreboard", "forecast", "places", "later"]);
   for (const chip of chips) {
     assert.equal(chip.tagName, "A");
@@ -299,18 +300,10 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
   assert.equal(byClass(phone, "deep-dive-secondary-body")[0].hidden, false);
   assert.equal(phoneLater.href, "#stock/ZZZZ/deep-dive/later");
 
-  const back = byClass(view, "deep-dive-sections-back")[0];
-  back.listeners.click[0]();
-  const grid = byClass(view, "deep-dive-sections")[0];
-  assert.equal(grid.scrolled.behavior, "smooth");
-  assert.equal(grid.scrolled.block, "start");
-  assert.equal(grid.tabIndex, -1);
-  toggle.listeners.click[0]();
-  assert.equal(byClass(view, "deep-dive-sections-menu")[0].hidden, false);
-  assert.equal(toggle.getAttribute("aria-expanded"), "true");
-  toggle.listeners.keydown[0]({ key: "Escape" });
-  assert.equal(byClass(view, "deep-dive-sections-menu")[0].hidden, true);
-  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  const laterChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "later");
+  assert.equal(laterChip.getAttribute("aria-current"), "location");
+  assert.equal(laterChip.getAttribute("tabindex"), "-1");
+  assert.equal(laterChip.href, "#stock/ABCD/deep-dive/later");
 });
 
 test("section tiles use a catalog headline, then the first series, and omit a metric when none exists", () => {
@@ -494,12 +487,14 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(trendTone(0, true), "flat");
   assert.equal(STOCK_TABS.length, 4);
   assert.equal(stockTabs(null).length, 4);
-  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["overview", "kpis", "fundamentals", "calls", "deep-dive"]);
-  assert.equal(stockTabs(sample).at(-1).id, "deep-dive");
-  assert.equal(stockTabs(sample).at(-1).label, "Deep dive");
-  assert.equal(nextStockTab("calls", "ArrowRight", stockTabs(sample)), "deep-dive");
-  assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "deep-dive");
-  assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "overview");
+  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["trends", "overview", "fundamentals", "deep-dive", "kpis"]);
+  assert.equal(stockTabs(sample).find((tab) => tab.id === "deep-dive").label, "Deep dive");
+  assert.equal(nextStockTab("fundamentals", "ArrowRight", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "kpis");
+  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "trends");
+  assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "kpis");
+  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "trends");
 });
 
 test("rendered deep dive shows pending review, empty copy, and a placeholder forecast", () => {
