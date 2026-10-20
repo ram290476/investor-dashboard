@@ -133,7 +133,8 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   assert.match(app, /No quarterly notes yet/);
   assert.doesNotMatch(page, /callsBlock/);
   const phone = styles.slice(styles.indexOf(".stock-page [data-stock-panel]"), styles.indexOf("/* Data refresh"));
-  assert.match(phone, /\.stock-page\[data-stock-tab\] \.company-metrics\s*\{[^}]*display:\s*grid/);
+  assert.match(phone, /\.stock-page\[data-stock-tab="admin"\] \.company-metrics\s*\{[^}]*display:\s*grid/);
+  assert.doesNotMatch(phone, /\.stock-page\[data-stock-tab="overview"\] \.company-metrics/);
   assert.match(phone, /\.stock-page\[data-stock-tab="trends"\] \[data-stock-panel="trends"\][\s\S]*?display:\s*block/);
   assert.doesNotMatch(phone, /data-stock-panel="calls"/);
   const metrics = slice("function renderCompanyMetrics", "function appendMetricGroups");

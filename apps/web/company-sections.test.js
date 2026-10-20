@@ -129,7 +129,8 @@ test("overview tiles fall back to a name and icon when a section has no metric",
     fundamentals: [],
     guidance: [],
   });
-  assert.deepEqual(bookmarks.map((item) => item.id), ["price", "technical", "metrics", "quarterly-notes"]);
+  assert.deepEqual(bookmarks.map((item) => item.id), ["price", "technical", "quarterly-notes"]);
+  assert.equal(bookmarks.some((item) => item.id === "metrics"), false);
   assert.equal(bookmarks.every((item) => item.headline == null), true);
   const withPrice = companyBookmarks("overview", {
     history: [{ close: 10 }, { close: 12 }],
@@ -139,8 +140,48 @@ test("overview tiles fall back to a name and icon when a section has no metric",
   assert.equal(withPrice[0].headline.value, 12);
   assert.equal(withPrice[0].headline.unit, "USD");
   assert.equal(withPrice[1].headline.display, "Buy");
-  assert.equal(withPrice[2].headline.display, "12");
-  assert.equal(withPrice[2].headline.label, "Deliveries");
+  assert.equal(withPrice.some((item) => item.id === "metrics"), false);
+});
+
+test("company metrics move to the Admin tab and stay pending review", () => {
+  const admin = companyBookmarks("admin", {
+    operating: [{
+      id: "deliveries",
+      name: "Deliveries",
+      latest: "12",
+      latestPeriod: "2026Q2",
+      qoqValue: 0.1,
+      pending: true,
+      series: [{ reported: true, value: 12 }],
+    }],
+    fundamentals: [],
+    guidance: [],
+  });
+  assert.deepEqual(admin.map((item) => item.id), ["metrics"]);
+  assert.equal(admin[0].title, "Company metrics");
+  assert.equal(admin[0].anchorId, "stock-panel-metrics");
+  assert.equal(admin[0].headline.display, "12");
+  assert.equal(admin[0].headline.label, "Deliveries");
+  assert.equal(admin[0].headline.pending, true);
+  const view = renderCompanyBookmarks(admin, fakeDocument(), { ticker: "exmpl", tab: "admin" });
+  const tile = byClass(view, "deep-dive-section-tile")[0];
+  const chip = byClass(view, "section-strip-chip")[0];
+  assert.equal(tile.href, "#stock/EXMPL/admin/metrics");
+  assert.equal(chip.href, "#stock/EXMPL/admin/metrics");
+  assert.equal(byClass(view, "section-strip")[0].getAttribute("aria-label"), "Sections");
+  assert.match(tile.getAttribute("aria-label"), /Pending review/);
+  const metrics = app.slice(app.indexOf("function renderCompanyMetrics"), app.indexOf("function appendMetricGroups"));
+  assert.match(metrics, /dataset\.stockPanel = "admin"/);
+  assert.doesNotMatch(metrics, /dataset\.stockPanel = "overview"/);
+  assert.match(metrics, /Pending review/);
+  assert.match(metrics, /"Approve"/);
+  assert.doesNotMatch(metrics, /approval_state\s*=\s*"approved"/);
+  assert.doesNotMatch(metrics, /status:\s*"approved"/);
+  const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
+  assert.match(page, /renderCompanyMetrics\(charts, pageState\)/);
+  assert.match(page, /item\.id === "admin" \? "stock-panel-metrics"/);
+  assert.match(styles, /\.stock-page\[data-stock-tab="admin"\] \[data-stock-panel="admin"\]/);
+  assert.match(styles, /\.stock-page\[data-stock-tab="admin"\] \.company-metrics\s*\{[^}]*display:\s*grid/);
 });
 
 test("company section tiles scroll to the section and write the tab hash", () => {

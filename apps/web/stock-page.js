@@ -7,11 +7,16 @@ import { catalystDateLabel } from "./roadmap.js";
 export const LONG_PRESS_MS = 550;
 
 export const STOCK_TABS = [
-  { id: "trends", label: "Trends" },
   { id: "overview", label: "Overview" },
+  { id: "trends", label: "Trends" },
   { id: "fundamentals", label: "Fundamentals" },
   { id: "kpis", label: "KPIs" },
 ];
+
+// Last tab, and only for a signed-in admin. The demo account is never an admin.
+export const ADMIN_STOCK_TAB = { id: "admin", label: "Admin" };
+
+const STOCK_TAB_ORDER = ["overview", "trends", "deep-dive", "fundamentals", "kpis"];
 
 // Last resort only: companyName() uses the API company_name / SEC entity name first.
 // SPCX has no SEC entity name, so it keeps a display name here.
@@ -176,16 +181,38 @@ export function companyDescription(payload, tickerData) {
   return "";
 }
 
-/** Company tabs, in order. Deep dive sits between Fundamentals and KPIs, and only when sections exist. */
-export function stockTabs(payload) {
+/**
+ * Company tabs, in order. Deep dive sits between Trends and Fundamentals, and only when sections exist.
+ * Admin is last, and only when options.admin is true (a signed-in admin, never the demo account).
+ */
+export function stockTabs(payload, options = {}) {
   const sections = payload?.deep_dive?.sections;
   const deep = Array.isArray(sections) && sections.length
     ? { id: "deep-dive", label: String(payload.deep_dive.title || "Deep dive").trim() || "Deep dive" }
     : null;
   const byId = new Map(STOCK_TABS.map((tab) => [tab.id, tab]));
-  return ["trends", "overview", "fundamentals", "deep-dive", "kpis"]
+  const tabs = STOCK_TAB_ORDER
     .map((id) => (id === "deep-dive" ? deep : byId.get(id)))
     .filter(Boolean);
+  if (options.admin === true) tabs.push({ ...ADMIN_STOCK_TAB });
+  return tabs;
+}
+
+/**
+ * Tab a company hash may open.
+ * Admin is refused unless that tab is in the visible list, so a non-admin URL cannot open it.
+ * A bare company hash is Overview. An unknown tab keeps the current one when it is still visible.
+ */
+export function visibleStockTab(hashTab, tabs, current = "overview") {
+  const ids = (Array.isArray(tabs) ? tabs : [])
+    .map((tab) => (typeof tab === "string" ? tab : tab?.id))
+    .filter(Boolean);
+  const requested = String(hashTab || "");
+  if (requested === "admin" && !ids.includes("admin")) return "overview";
+  if (requested && ids.includes(requested)) return requested;
+  if (!requested) return "overview";
+  if (current && ids.includes(current)) return current;
+  return "overview";
 }
 
 export function nextStockTab(current, key, tabs = STOCK_TABS) {

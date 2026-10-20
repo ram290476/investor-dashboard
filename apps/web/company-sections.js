@@ -149,6 +149,15 @@ export function companyBookmarks(tab, context = {}) {
   }
   if (tab === "kpis") return metricBookmarks(context.operating, "kpi", "kpis", "Operating KPIs");
   if (tab === "fundamentals") return metricBookmarks(context.fundamentals, "fundamentals", "fundamentals", "Fundamentals");
+  if (tab === "admin") {
+    return [{
+      id: "metrics",
+      title: "Company metrics",
+      anchorId: "stock-panel-metrics",
+      icon: "metrics",
+      headline: firstHeadline([context.operating, context.fundamentals, context.guidance]),
+    }];
+  }
   if (tab !== "overview") return [];
   const notes = quarterlyNoteEntries(context.guidance);
   const latestQuarter = notes[0]?.quarter || "";
@@ -166,13 +175,6 @@ export function companyBookmarks(tab, context = {}) {
       anchorId: "stock-panel-technical",
       icon: "technical",
       headline: technicalHeadline(context.technical),
-    },
-    {
-      id: "metrics",
-      title: "Company metrics",
-      anchorId: "stock-panel-metrics",
-      icon: "metrics",
-      headline: firstHeadline([context.operating, context.fundamentals, context.guidance]),
     },
     {
       id: "quarterly-notes",

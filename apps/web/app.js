@@ -46,6 +46,7 @@ import {
   quarterlyNoteEntries,
   stockPanels,
   stockTabs,
+  visibleStockTab,
 } from "./stock-page.js";
 import { hasDeepDive, renderDeepDive, revealDeepDiveSection } from "./deep-dive.js";
 import { companyBookmarks, renderCompanyBookmarks, revealCompanySection, sectionSlug } from "./company-sections.js";
@@ -3707,7 +3708,7 @@ async function submitMetricReview(metricId, status) {
 
 function renderCompanyMetrics(panels, pageState) {
   const block = node("section", "panel stock-section company-metrics company-section-target");
-  block.dataset.stockPanel = "overview";
+  block.dataset.stockPanel = "admin";
   block.dataset.companySection = "metrics";
   block.id = "stock-panel-metrics";
   block.append(node("h3", "stock-section-title", "Company metrics"));
@@ -3954,26 +3955,25 @@ function renderStockPage(restoreDrawer = null) {
     about.title = description;
     copy.append(about);
   }
-  const back = node("a", "stock-dashboard-link", "Back to dashboard");
-  back.href = "/";
-  back.dataset.stockBack = "dashboard";
-  back.addEventListener("click", (event) => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    navigateToDashboard();
-  });
-  heading.append(copy, back);
+  heading.append(copy);
   root.append(heading);
 
-  const pageTabs = stockTabs(payload);
+  const metricAdmin = canApproveMetrics(session.accessToken, session.email);
+  const pageTabs = stockTabs(payload, { admin: metricAdmin });
   const hashSection = parseStockSection(location.hash);
-  // A stock hash names the tab. `#stock/<T>` is Overview, including after Back.
+  // A stock hash names the tab. `#stock/<T>` is Overview.
+  // Admin is refused unless this caller is an admin, including when the hash asks for it.
   // A deep-dive hash waits until that tab exists in the payload.
   if (parseStockHash(location.hash) === session.selected) {
     const hashTab = parseStockTab(location.hash);
-    if (hashTab && pageTabs.some((item) => item.id === hashTab)) session.stockTab = hashTab;
-    else if (!hashTab) session.stockTab = "overview";
-    else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
+    if (hashTab === "admin" && !metricAdmin) {
+      const fallback = stockTabHash(session.selected, "overview");
+      if (fallback && location.hash !== fallback) {
+        // `history` in this function is the price series. The session history is on window.
+        window.history.replaceState(window.history.state, "", `${location.pathname}${location.search}${fallback}`);
+      }
+    }
+    session.stockTab = visibleStockTab(hashTab, pageTabs, session.stockTab);
   } else if (hashSection && pageTabs.some((item) => item.id === "deep-dive")) session.stockTab = "deep-dive";
   else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
   const page = node("main", "stock-page");
@@ -4045,7 +4045,10 @@ function renderStockPage(restoreDrawer = null) {
     tab.id = `stock-tab-${item.id}`;
     tab.dataset.stockTab = item.id;
     tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-controls", item.id === "overview" ? "stock-title" : `stock-panel-${item.id}`);
+    const controls = item.id === "overview" ? "stock-title"
+      : item.id === "admin" ? "stock-panel-metrics"
+      : `stock-panel-${item.id}`;
+    tab.setAttribute("aria-controls", controls);
     tab.setAttribute("aria-selected", String(item.id === session.stockTab));
     tab.tabIndex = item.id === session.stockTab ? 0 : -1;
     tab.addEventListener("keydown", (event) => {
@@ -4334,6 +4337,7 @@ function renderNotFoundPage() {
 }
 
 function selectStockTab(id) {
+  if (id === "admin" && !canApproveMetrics(session.accessToken, session.email)) id = "overview";
   session.stockTab = id;
   session.scrolledStockSection = "";
   const hash = stockTabHash(session.selected, id);
@@ -4383,7 +4387,8 @@ function scheduleStockSectionScroll() {
 
 function navigateToStock(ticker, options = {}) {
   const keepTab = options.keepTab === true && session.route.page === "stock";
-  const tab = keepTab && session.stockTab ? session.stockTab : "overview";
+  let tab = keepTab && session.stockTab ? session.stockTab : "overview";
+  if (tab === "admin" && !canApproveMetrics(session.accessToken, session.email)) tab = "overview";
   const section = keepTab
     ? (tab === "deep-dive" ? parseStockSection(location.hash) : parseStockPanel(location.hash))
     : "";
