@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Deep dive coverage</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+  <div class="wrap">
+    <p class="kicker">Planning mockup · Industrial Dark · not wired to the app</p>
+    <h1>Deep dive coverage</h1>
+    <p class="sub">All watchlist tickers</p>
+    <div class="tabs" hidden>
+      <span class="tab">Overview</span><span class="tab">Trends</span><span class="tab active">Deep dive</span>
+      <span class="tab">Fundamentals</span><span class="tab">KPIs</span>
+    </div>
+    <p class="banner">Pending review. Every figure on this page is a sample from an SEC filing. Nothing here is approved, and nothing is estimated.</p>
+    
+    <p class="banner">Twelve names. The config default is TSLA and SPCX. The other ten are the named watchlist fixtures in the repo, capped well under 25. Each sparkline is that company's own revenue, except QuantumScape, which has no revenue fact.</p>
+    <section>
+      <h2>Watchlist</h2>
+      <div class="grid">
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">TSLA</span> Tesla</div>
+          <div class="value">$28.2B</div>
+          <div class="share">Revenue · 2026-06-30</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+25.5%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,9.2 27.9,6.9 52.8,11.8 77.7,6.5 102.6,6.9 127.5,6.2 152.5,14.3 177.4,10.3 202.3,3.2 227.2,7.3 252.1,10.5 277.0,3.0"/><circle cx="277.0" cy="3.0" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">Segment mix</span></div>
+          <p>Six revenue lines parse and add up. Unit KPIs stay on the IR deck.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">SPCX</span> SpaceX</div>
+          <div class="value">$7.8B</div>
+          <div class="share">Revenue · 2026-06-30</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+91.9%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,20.2 277.0,3.0"/><circle cx="277.0" cy="3.0" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill partial">partial</span><span class="pill">Segment mix</span></div>
+          <p>Space, Connectivity, and AI parse. Two quarters on file.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">NVDA</span> NVIDIA</div>
+          <div class="value">$96.2B</div>
+          <div class="share">Revenue · 2026-07-26</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+105.9%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,32.2 27.9,30.7 52.8,29.3 77.7,27.8 102.6,25.9 127.5,24.3 152.5,22.5 177.4,21.5 202.3,17.7 227.2,13.5 252.1,8.5 277.0,3.0"/><circle cx="277.0" cy="3.0" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">Segment mix</span></div>
+          <p>Compute & Networking and Graphics parse. Market names changed.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">AMZN</span> Amazon</div>
+          <div class="value">$200.6B</div>
+          <div class="share">Revenue · 2026-06-30</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+19.6%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,14.9 27.9,10.3 52.8,14.8 77.7,14.0 102.6,12.2 127.5,7.3 152.5,12.7 177.4,10.7 202.3,8.6 227.2,3.0 252.1,8.4 277.0,5.2"/><circle cx="277.0" cy="5.2" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">Segment mix</span></div>
+          <p>North America, International, and AWS sales and operating income parse.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">GOOG</span> Alphabet</div>
+          <div class="value">$119.8B</div>
+          <div class="share">Revenue · 2026-06-30</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+24.2%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,13.5 42.1,12.5 81.3,11.9 120.4,10.0 159.6,8.2 198.7,4.8 237.9,6.0 277.0,3.0"/><circle cx="277.0" cy="3.0" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">Segment mix</span></div>
+          <p>Services, Cloud, and Other Bets revenue and operating income parse.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">AAPL</span> Apple</div>
+          <div class="value">$109.4B</div>
+          <div class="share">Net sales · 2026-06-27</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+16.4%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,7.9 57.8,15.1 112.6,15.5 167.4,3.0 222.2,11.2 277.0,11.6"/><circle cx="277.0" cy="11.6" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">Product lines</span></div>
+          <p>iPhone, Mac, iPad, Wearables, and Services parse on the 10-Q.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">META</span> Meta</div>
+          <div class="value">$60.8B</div>
+          <div class="share">Revenue · 2026-06-30</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+28.0%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,15.0 57.8,13.9 112.6,10.9 167.4,8.7 222.2,5.7 277.0,3.0"/><circle cx="277.0" cy="3.0" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">Segment mix</span></div>
+          <p>Family of Apps and Reality Labs revenue and operating income parse.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">PLTR</span> Palantir</div>
+          <div class="value">$1.9B</div>
+          <div class="share">Revenue · 2026-06-30</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+92.8%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,28.6 27.9,27.7 52.8,27.2 77.7,26.4 102.6,25.5 127.5,23.6 152.5,22.6 177.4,20.3 202.3,17.0 227.2,12.8 252.1,8.6 277.0,3.0"/><circle cx="277.0" cy="3.0" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">Customer mix</span></div>
+          <p>Government and Commercial parse as reportable segments.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">MRVL</span> Marvell</div>
+          <div class="value">$2.7B</div>
+          <div class="share">Revenue · 2026-08-01</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+36.5%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,21.6 27.9,21.4 52.8,20.4 77.7,20.3 102.6,23.7 127.5,22.3 152.5,19.1 177.4,14.1 202.3,12.6 227.2,11.7 252.1,7.2 277.0,3.0"/><circle cx="277.0" cy="3.0" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">End market</span></div>
+          <p>Data center versus communications. One reportable segment.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">BYND</span> Beyond Meat</div>
+          <div class="value">$68.8M</div>
+          <div class="share">Revenue · 2026-06-27</div>
+          <div class="deltas"><span class="down"><b>YoY</b>-8.2%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,6.5 27.9,3.0 52.8,12.4 77.7,6.2 102.6,10.5 127.5,12.0 152.5,14.8 177.4,12.6 202.3,14.3 227.2,17.3 252.1,18.5 277.0,14.7"/><circle cx="277.0" cy="14.7" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill partial">partial</span><span class="pill">Channel</span></div>
+          <p>Margins parse. Channel labels on the R page are incomplete.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">QS</span> QuantumScape</div>
+          <div class="value">-$106.1M</div>
+          <div class="share">Operating loss · 2026-06-30</div>
+          <div class="deltas"><span class="up"><b>YoY</b>+14.1%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#f07a7a" stroke-width="1.8" points="3.0,71.4 27.9,72.4 52.8,74.3 77.7,75.0 102.6,73.8 127.5,73.5 152.5,72.1 177.4,72.1 202.3,69.8 227.2,68.6 252.1,68.2 277.0,67.4"/><circle cx="277.0" cy="67.4" r="2.4" fill="#f07a7a"/></svg>
+          <div class="pillrow"><span class="pill gap">gap</span><span class="pill">Pre-revenue</span></div>
+          <p>No revenue segment. The series is operating loss.</p>
+        </article>
+        <article class="card overview-card">
+          <div class="name"><span class="ticker">EVGO</span> EVgo</div>
+          <div class="value">$82.6M</div>
+          <div class="share">Revenue · 2026-06-30</div>
+          <div class="deltas"><span class="down"><b>YoY</b>-15.7%</span></div>
+          <svg class="spark" viewBox="0 0 280 42" role="img"><line x1="3" y1="39" x2="277" y2="39" stroke="#27303c"/><polyline fill="none" stroke="#7db4ff" stroke-width="1.8" points="3.0,14.3 94.3,6.8 185.7,3.0 277.0,11.8"/><circle cx="277.0" cy="11.8" r="2.4" fill="#7db4ff"/></svg>
+          <div class="pillrow"><span class="pill ready">ready</span><span class="pill">Charging mix</span></div>
+          <p>Retail, commercial, OEM, credits, eXtend, and ancillary parse.</p>
+        </article></div>
+    </section>
+    
+  </div>
+</body>
+</html>
