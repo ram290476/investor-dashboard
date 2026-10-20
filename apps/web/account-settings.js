@@ -13,6 +13,7 @@ import {
   PIN_LIMIT_MESSAGE,
   ADMIN_TAB,
   SETTINGS_TABS,
+  accountMenuModel,
   settingsTabs,
   TIME_ZONE_PICKS,
   addTicker,
@@ -943,21 +944,27 @@ export function createAccountSettings(ctx) {
       open("refresh", "account");
     });
 
-    const items = [refresh, ...[
-      ["My tickers", "add · pin · reorder", () => open("tickers", "account")],
-      ["Theme & display", "colors · chart period", () => open("theme", "account")],
-      ["Profile & time zone", `email · ${timeZoneLabel(session.prefs.display.time_zone)}`, () => open("profile", "account")],
-      ["Sign out", "", ctx.signOut],
-    ].map(([label, hint, run]) => {
+    const menuAction = {
+      tickers: () => open("tickers", "account"),
+      theme: () => open("theme", "account"),
+      profile: () => open("profile", "account"),
+      admin: () => open(ADMIN_TAB.id, "account"),
+      "sign-out": ctx.signOut,
+    };
+    const items = [refresh, ...accountMenuModel(isAdmin()).map((entry) => {
+      const hint = entry.id === "profile"
+        ? `email · ${timeZoneLabel(session.prefs.display.time_zone)}`
+        : entry.hint;
       const item = el("button", "menu-item");
       item.type = "button";
       item.setAttribute("role", "menuitem");
       item.tabIndex = -1;
-      item.append(el("span", "", label));
+      item.dataset.menu = entry.id;
+      item.append(el("span", "", entry.label));
       if (hint) item.append(el("span", "menu-hint", hint));
       item.addEventListener("click", () => {
         hideMenu(false);
-        run();
+        menuAction[entry.id]?.();
       });
       return item;
     })];

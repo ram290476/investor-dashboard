@@ -34,6 +34,7 @@ import {
   returnTone, signedPercent, signedPoints,
 } from "./market-correlation.js";
 import { canApproveMetrics, drawerControls, emailFromIdToken, fallbackSelection, isPanelOpen, panelState, parseSettingsHash, stripOrder, withPanelState } from "./settings-model.js";
+import { STOCK_SESSION_KEY, freshCatalystSelection, sessionStockLanding } from "./session-landing.js";
 import {
   companyDescription,
   companyName,
@@ -100,6 +101,9 @@ const svgNS = "http://www.w3.org/2000/svg";
 // Private / incognito browsing can make Web Storage throw. These wrappers never throw,
 // so sign-in, prefs (and with them the saved theme) still load (#214).
 const authStorage = createSafeStorage("sessionStorage", { cookieFallback: true });
+// First stock-page load in this tab. No cookie fallback: a cookie would survive into a
+// new tab and look like a continuing session. localStorage would survive the tab too.
+const stockSession = createSafeStorage("sessionStorage");
 const localPrefs = createSafeStorage("localStorage");
 // Refresh token only. localStorage survives a reload and a new tab for the
 // 12-hour Cognito refresh-token lifetime, and it is scoped to this origin, so
@@ -114,6 +118,7 @@ const authKeys = {
   path: "oauth_return_path",
   dashboardTicker: "oauth_return_dashboard_ticker",
 };
+const openedCatalysts = freshCatalystSelection();
 const session = {
   config: null,
   accessToken: null,
@@ -137,9 +142,11 @@ const session = {
   periodSave: false,
   chartSaveError: "",
   watchlistScroll: 0,
-  catalystCategories: CATALYST_CATEGORIES.map(category => category.id),
+  // Markers stay off, and none are selected, until the user turns a category on.
+  // A document load builds this again, so a refresh clears them. Not stored.
+  catalystCategories: openedCatalysts.categories,
   companyChart: null,
-  focusCatalyst: null,
+  focusCatalyst: openedCatalysts.focusId,
   showOtherEvents: false,
   newsExpanded: {},
   driverSort: "effect",
@@ -4290,6 +4297,30 @@ function applyLegacyRedirect() {
   return true;
 }
 
+// First load of this tab: Overview, then remember the session so a refresh keeps the URL tab.
+// Research pages do not consume the flag. An empty watchlist does not either.
+function applySessionStockLanding() {
+  const landing = sessionStockLanding({
+    sessionStarted: stockSession.getItem(STOCK_SESSION_KEY) === "1",
+    hashTab: parseStockTab(location.hash),
+    routePage: session.route?.page || "",
+  });
+  if (!landing.rewriteOverview) return;
+  const ticker = fallbackSelection(session.prefs, session.selected || session.dashboardSelection);
+  if (!ticker || !stockTabHash(ticker, "overview")) return;
+  stockSession.setItem(STOCK_SESSION_KEY, "1");
+  session.stockTab = landing.tab;
+  session.selected = ticker;
+  session.dashboardSelection = ticker;
+  session.route = { page: "stock", ticker };
+  session.focusCatalyst = null;
+  const hash = stockTabHash(ticker, "overview");
+  if (hash && !parseSettingsHash(location.hash) && location.hash !== hash) {
+    history.replaceState(history.state, "", `/${hash}`);
+  }
+}
+
+// A bare dashboard route after the tab session has started still opens Trends.
 function openTrendsLanding() {
   if (session.route.page !== "dashboard") return false;
   const ticker = fallbackSelection(session.prefs, session.selected);
@@ -4490,6 +4521,7 @@ function renderDashboardNow() {
     renderNotFoundPage();
     return;
   }
+  applySessionStockLanding();
   if (session.route.page === "dashboard" && !openTrendsLanding()) {
     session.selected = fallbackSelection(session.prefs, session.selected);
     root.replaceChildren();
