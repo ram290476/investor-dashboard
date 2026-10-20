@@ -28,13 +28,25 @@ def test_packaged_catalog_deep_dive_is_valid_and_metrics_stay_proposed():
     assert all(item["status"] == "proposed" for item in catalog["metrics"])
     assert all(item.get("approved_by") in (None, "") for item in catalog["metrics"])
     nvda = ir.load_catalog("NVDA")
-    assert "deep_dive" not in nvda
-    assert dd.assemble_deep_dive(nvda) is None
+    assert ir.validate_catalog(nvda) == []
+    assert nvda["deep_dive"]["sections"]
+    assert dd.assemble_deep_dive(nvda, [])["sections"]
+    for ticker in (
+        "TSLA", "SPCX", "NVDA", "AMZN", "GOOG", "AAPL", "PLTR", "QS", "BYND", "META", "MRVL", "EVGO",
+    ):
+        loaded = ir.load_catalog(ticker)
+        assert ir.validate_catalog(loaded) == [], ticker
+        assert loaded["deep_dive"]["sections"]
+        assert all(item["status"] == "proposed" and item.get("approved_by") in (None, "") for item in loaded["metrics"])
     source = Path(dd.__file__).read_text()
     assert "TSLA" not in source
     assert '== "TSLA"' not in source
     assert "SPCX" not in source
     assert "SpaceX" not in source
+    patterns = Path(dd.__file__).resolve().parent.joinpath("pattern_recognition.py").read_text()
+    assert "TSLA" not in patterns and "SPCX" not in patterns
+    assert "top-track" not in source.lower() and "top tracked" not in source.lower()
+    assert "top-track" not in patterns.lower() and "top tracked" not in patterns.lower()
 
 
 def test_spcx_deep_dive_is_catalog_data_and_stays_proposed():
@@ -253,17 +265,19 @@ def test_serve_attaches_the_catalog_deep_dive_and_leaves_other_tickers_alone():
         store[key] = obj
 
     served = ir.run_serve(
-        {"tickers": ["TSLA", "NVDA"], "run_status": "ok"},
+        {"tickers": ["TSLA", "NVDA", "QQQ"], "run_status": "ok"},
         read_json=read_json,
         write_json=write_json,
         now="2026-10-19T12:00:00Z",
     )
-    assert served["tickers"] == ["TSLA", "NVDA"]
+    assert served["tickers"] == ["TSLA", "NVDA", "QQQ"]
     tesla = store[ir.serving_stock_key("TSLA")]
     nvidia = store[ir.serving_stock_key("NVDA")]
+    index = store[ir.serving_stock_key("QQQ")]
     assert tesla["deep_dive"]["title"] == "Deep dive"
     assert tesla["deep_dive"]["model_status"] == "placeholder"
-    assert "deep_dive" not in nvidia
+    assert nvidia["deep_dive"]["sections"]
+    assert "deep_dive" not in index
     public = ir.public_stock_document(tesla, "TSLA")
     assert public["deep_dive"]["sections"]
 
@@ -918,6 +932,7 @@ def test_regulator_record_sits_beside_the_estimate_and_catalog_order_holds():
     assert ids == [
         "scoreboard", "forecast", "robotaxi", "energy", "semi", "chargers", "fsd",
         "vehicles", "optimus", "factories", "energy-secondary", "public-records",
+        "revenue-mix", "growth-margin", "government-awards",
     ]
     source_ids = [item["id"] for item in catalog["deep_dive"]["sources"]]
     assert "av_regulator" in source_ids
@@ -1200,3 +1215,158 @@ def test_running_sum_skips_a_missing_quarter_and_stays_pending():
     celestrak = next(item for item in spcx["deep_dive"]["sources"] if item["id"] == "celestrak")
     assert celestrak["deployed_metric"] == "starlink_satellites_deployed"
     assert celestrak["name_prefix"] == "STARLINK"
+
+
+def test_pattern_detection_is_deterministic_and_not_a_forecast():
+    import pattern_recognition as patterns
+
+    assert patterns.detect_patterns([{"period": "2026Q1", "value": 1, "reported": True}]) == []
+    growth = patterns.detect_patterns([
+        {"period": "2025Q1", "value": 10, "reported": True},
+        {"period": "2025Q2", "value": 12, "reported": True},
+        {"period": "2025Q3", "value": 15, "reported": True},
+        {"period": "2025Q4", "value": 20, "reported": True},
+    ])
+    assert [item["kind"] for item in growth] == ["growth_streak"]
+    rising = [100, 101, 103, 107, 115]
+    flags = patterns.detect_patterns([
+        {"period": f"2025Q{index}", "value": value, "reported": True} for index, value in enumerate(rising, start=1)
+    ])
+    kinds = [item["kind"] for item in flags]
+    assert kinds[0] in {"unusual_move", "acceleration"}
+    assert "acceleration" in kinds
+    assert "growth_streak" in kinds
+    turned = patterns.detect_patterns([
+        {"period": "2025Q1", "value": 100, "reported": True},
+        {"period": "2025Q2", "value": 90, "reported": True},
+        {"period": "2025Q3", "value": 80, "reported": True},
+        {"period": "2025Q4", "value": 70, "reported": True},
+        {"period": "2026Q1", "value": 80, "reported": True},
+    ])
+    assert turned[0]["kind"] == "inflection"
+    assert turned[0]["forecast"] is False
+    assert turned[0]["detection"] == "pattern"
+    assert "not a forecast" in turned[0]["note"].lower()
+    jump = patterns.detect_patterns([
+        {"period": f"2025Q{index}", "value": value, "reported": True}
+        for index, value in enumerate([100, 101, 102, 103, 104, 200], start=1)
+    ])
+    assert jump[0]["kind"] == "unusual_move"
+    assert all(item["forecast"] is False for item in jump)
+
+
+def test_archetype_panels_keep_patterns_inside_the_panel():
+    def entry(metric_id, unit):
+        return {
+            "metric_id": metric_id,
+            "display_name": metric_id,
+            "unit": unit,
+            "status": "proposed",
+            "disclosure_status": "numeric",
+        }
+
+    catalog = {
+        "ticker": "EX",
+        "metrics": [
+            entry("sales", "USD"),
+            entry("part", "USD"),
+            entry("gross", "USD"),
+            entry("margin", "ratio"),
+            entry("units", "vehicles"),
+            entry("stations", "count"),
+            entry("filings", "count"),
+        ],
+        "deep_dive": {
+            "title": "Deep dive",
+            "sections": [
+                {
+                    "id": "mix",
+                    "title": "Mix",
+                    "archetype": "segment_revenue_mix",
+                    "headline": "sales",
+                    "metrics": ["part"],
+                },
+                {"id": "units", "title": "Units", "archetype": "unit_volumes", "metrics": ["units"]},
+                {"id": "ops", "title": "Operations", "archetype": "operating_kpis", "metrics": ["stations"]},
+                {"id": "margin", "title": "Margin", "archetype": "growth_margin", "metrics": ["margin"]},
+                {"id": "records", "title": "Records", "archetype": "public_records", "metrics": ["filings"]},
+            ],
+            "derived": [{
+                "metric_id": "margin",
+                "op": "ratio",
+                "numerator": "gross",
+                "denominator": "sales",
+                "unit": "ratio",
+                "label": "Margin",
+            }],
+        },
+    }
+    points = [
+        {"period": "2025Q1", "value": 100, "reported": True},
+        {"period": "2025Q2", "value": 110, "reported": True},
+        {"period": "2025Q3", "value": 130, "reported": True},
+        {"period": "2025Q4", "value": 160, "reported": True},
+    ]
+    observations = {"series": [
+        {"metric_id": "sales", "unit": "USD", "approval_state": "proposed", "approved": False, "points": points},
+        {"metric_id": "part", "unit": "USD", "approval_state": "proposed", "approved": False, "points": [
+            {"period": "2025Q4", "value": 40, "reported": True},
+        ]},
+        {"metric_id": "gross", "unit": "USD", "approval_state": "proposed", "approved": False, "points": [
+            {"period": point["period"], "value": point["value"] / 2, "reported": True} for point in points
+        ]},
+        {"metric_id": "units", "unit": "vehicles", "approval_state": "proposed", "approved": False, "points": points},
+        {"metric_id": "stations", "unit": "count", "approval_state": "proposed", "approved": False, "points": points},
+    ]}
+    document = dd.assemble_deep_dive(catalog, [], observations, generated_at="2026-10-20T00:00:00Z")
+    assert [section["id"] for section in document["sections"]] == ["mix", "units", "ops", "margin", "records"]
+    assert all(section["archetype"] for section in document["sections"])
+    mix = document["sections"][0]["panels"][0]
+    assert mix["kind"] == "stacked-area"
+    assert mix["multiples"][0]["share"] == 1
+    units = document["sections"][1]["panels"][0]
+    assert units["kind"] == "headline-card"
+    assert units["kpis"][0]["patterns"]
+    assert units["kpis"][0]["patterns"][0]["forecast"] is False
+    assert "top" not in " ".join(section["id"] for section in document["sections"])
+    margin = document["sections"][3]["panels"][0]["kpis"][0]
+    assert margin["value"] == 0.5
+    assert margin["approved"] is False
+    assert margin["approval_state"] == "proposed"
+    empty = document["sections"][4]["panels"][0]
+    assert empty["kpis"][0]["value"] is None
+    qs = dd.assemble_deep_dive(ir.load_catalog("QS"), [], generated_at="2026-10-20T00:00:00Z")
+    qs_mix = qs["sections"][0]["panels"][0]
+    assert qs_mix["kind"] == "stacked-area"
+    assert qs_mix["empty_label"] == "No revenue segments are reported."
+    assert qs["sections"][1]["panels"][0]["kpis"][0]["metric_id"] == "operating_income"
+
+
+def test_contract_rollup_becomes_a_proposed_series():
+    catalog = {
+        "ticker": "EX",
+        "metrics": [],
+        "deep_dive": {
+            "sections": [{
+                "id": "awards",
+                "title": "Awards",
+                "archetype": "public_records",
+                "metrics": ["gov_obligations"],
+            }],
+            "sources": [{"id": "usaspending", "metric_id": "gov_obligations", "unit": "USD", "label": "Obligations"}],
+        },
+    }
+    rollup = [{
+        "ticker": "EX",
+        "by_agency": [
+            {"quarter": "FY2026Q1", "obligated": 10},
+            {"quarter": "FY2026Q1", "obligated": 5},
+            {"quarter": "FY2025Q4", "obligated": 3},
+        ],
+    }]
+    document = dd.assemble_deep_dive(catalog, [], contracts=rollup)
+    tile = document["sections"][0]["panels"][0]["kpis"][0]
+    assert tile["value"] == 15
+    assert tile["period"] == "FY2026Q1"
+    assert tile["approved"] is False
+    assert dd.shift_period("FY2026Q4", 1) == "FY2027Q1"

@@ -1,0 +1,172 @@
+{
+  "ticker": "AAPL",
+  "catalog_version": 1,
+  "fiscal_year_end_month": 9,
+  "approval_note": "Company-specific rows only. Shared GAAP rows are added when the catalog is loaded. Every entry is proposed. Nothing is auto-approved.",
+  "metrics": [
+    {
+      "metric_id": "revenue_iphone",
+      "display_name": "iPhone revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "iPhone revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "iPhone net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_mac",
+      "display_name": "Mac revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Mac revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "Mac net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_ipad",
+      "display_name": "iPad revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "iPad revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 30,
+      "aliases": [
+        "iPad net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_wearables",
+      "display_name": "Wearables, Home and Accessories revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Wearables, Home and Accessories revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 40,
+      "aliases": [
+        "Wearables, Home and Accessories net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_services",
+      "display_name": "Services revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Services revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 50,
+      "aliases": [
+        "Services net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    }
+  ],
+  "xbrl_segments": {
+    "axes": [
+      "ProductOrServiceAxis"
+    ],
+    "reports": [
+      "Revenue - Disaggregated Net Sales and Portion of Net Sales That Was Previously Deferred (Details)"
+    ],
+    "facts": [
+      "RevenueFromContractWithCustomerExcludingAssessedTax"
+    ],
+    "bindings": [
+      {
+        "member": "IPhoneMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_iphone"
+      },
+      {
+        "member": "MacMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_mac"
+      },
+      {
+        "member": "IPadMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_ipad"
+      },
+      {
+        "member": "WearablesHomeandAccessoriesMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_wearables"
+      },
+      {
+        "member": "ServiceMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_services"
+      }
+    ]
+  },
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "sections": [
+      {
+        "id": "product-mix",
+        "title": "Net sales by product",
+        "archetype": "segment_revenue_mix",
+        "placement": "primary",
+        "metrics": [
+          "revenue_iphone",
+          "revenue_mac",
+          "revenue_ipad",
+          "revenue_wearables",
+          "revenue_services"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "headline": "revenue_gaap"
+      },
+      {
+        "id": "growth-margin",
+        "title": "Operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": [
+          "operating_income"
+        ],
+        "source_note": "SEC companyfacts. Pending review."
+      }
+    ]
+  }
+}

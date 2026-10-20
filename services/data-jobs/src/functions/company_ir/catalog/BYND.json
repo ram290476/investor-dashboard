@@ -1,0 +1,155 @@
+{
+  "ticker": "BYND",
+  "catalog_version": 1,
+  "fiscal_year_end_month": 12,
+  "approval_note": "Company-specific rows only. Shared GAAP rows are added when the catalog is loaded. Every entry is proposed. Nothing is auto-approved.",
+  "metrics": [
+    {
+      "metric_id": "revenue_us_retail",
+      "display_name": "U.S. retail revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "U.S. retail revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "U.S. retail channel"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_us_foodservice",
+      "display_name": "U.S. foodservice revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "U.S. foodservice revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "U.S. foodservice channel"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_international_retail",
+      "display_name": "International retail revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "International retail revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 30,
+      "aliases": [
+        "International retail channel"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_international_foodservice",
+      "display_name": "International foodservice revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "International foodservice revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 40,
+      "aliases": [
+        "International foodservice channel"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    }
+  ],
+  "xbrl_segments": {
+    "axes": [
+      "StatementGeographicalAxis"
+    ],
+    "reports": [
+      "Revenue Recognition - Schedule of Disaggregation of Revenue (Details)"
+    ],
+    "facts": [
+      "RevenueFromContractWithCustomerExcludingAssessedTax"
+    ],
+    "bindings": [
+      {
+        "member": "country_US",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_us_retail",
+        "label": "Retail"
+      },
+      {
+        "member": "country_US",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_us_foodservice",
+        "label": "Foodservice"
+      },
+      {
+        "member": "NonUsMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_international_retail",
+        "label": "Retail"
+      },
+      {
+        "member": "NonUsMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_international_foodservice",
+        "label": "Foodservice"
+      }
+    ]
+  },
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "sections": [
+      {
+        "id": "channel-mix",
+        "title": "Revenue by channel",
+        "archetype": "segment_revenue_mix",
+        "placement": "primary",
+        "metrics": [
+          "revenue_us_retail",
+          "revenue_us_foodservice",
+          "revenue_international_retail",
+          "revenue_international_foodservice"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "headline": "revenue_gaap",
+        "notes": [
+          "U.S. and international totals are parents. The chart stacks the channel rows only."
+        ]
+      },
+      {
+        "id": "growth-margin",
+        "title": "Gross profit and operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": [
+          "gross_profit",
+          "operating_income"
+        ],
+        "source_note": "SEC companyfacts. Pending review."
+      }
+    ]
+  }
+}

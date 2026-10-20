@@ -1,0 +1,146 @@
+{
+  "ticker": "META",
+  "catalog_version": 1,
+  "fiscal_year_end_month": 12,
+  "approval_note": "Company-specific rows only. Shared GAAP rows are added when the catalog is loaded. Every entry is proposed. Nothing is auto-approved.",
+  "metrics": [
+    {
+      "metric_id": "revenue_family_of_apps",
+      "display_name": "Family of Apps revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Family of Apps revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "Family of Apps revenue"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_reality_labs",
+      "display_name": "Reality Labs revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Reality Labs revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "Reality Labs revenue"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "operating_income_family_of_apps",
+      "display_name": "Family of Apps operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Family of Apps operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 30,
+      "aliases": [
+        "Family of Apps operating income"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "operating_income_reality_labs",
+      "display_name": "Reality Labs operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Reality Labs operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 40,
+      "aliases": [
+        "Reality Labs operating income"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    }
+  ],
+  "xbrl_segments": {
+    "axes": [
+      "StatementBusinessSegmentsAxis"
+    ],
+    "reports": [
+      "Segment Information - Segment Information of Revenue and Income (Details)"
+    ],
+    "facts": [
+      "RevenueFromContractWithCustomerExcludingAssessedTax"
+    ],
+    "bindings": [
+      {
+        "member": "FamilyOfAppsMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_family_of_apps"
+      },
+      {
+        "member": "RealityLabsMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_reality_labs"
+      },
+      {
+        "member": "FamilyOfAppsMember",
+        "fact": "OperatingIncomeLoss",
+        "metric_id": "operating_income_family_of_apps"
+      },
+      {
+        "member": "RealityLabsMember",
+        "fact": "OperatingIncomeLoss",
+        "metric_id": "operating_income_reality_labs"
+      }
+    ]
+  },
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "sections": [
+      {
+        "id": "revenue-mix",
+        "title": "Revenue by segment",
+        "archetype": "segment_revenue_mix",
+        "placement": "primary",
+        "metrics": [
+          "revenue_family_of_apps",
+          "revenue_reality_labs"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "headline": "revenue_gaap"
+      },
+      {
+        "id": "growth-margin",
+        "title": "Operating income by segment",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": [
+          "operating_income_family_of_apps",
+          "operating_income_reality_labs"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review."
+      }
+    ]
+  }
+}

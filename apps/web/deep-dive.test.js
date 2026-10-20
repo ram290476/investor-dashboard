@@ -800,3 +800,85 @@ test("an estimate stays beside the reported figure and a stored headline waits f
   assert.match(prior, /2026Q3/);
   assert.match(prior, /2026Q2/);
 });
+
+test("pattern detection stays inside the panel and the quarterly detail starts closed", () => {
+  assert.doesNotMatch(source, /top-track|Top tracked|top tracked/i);
+  const view = renderDeepDive({
+    ticker: "abcd",
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "mix",
+        title: "Revenue mix",
+        archetype: "segment_revenue_mix",
+        panels: [{
+          id: "mix-panel",
+          kind: "stacked-area",
+          title: "Revenue mix",
+          archetype: "segment_revenue_mix",
+          kpis: [{
+            metric_id: "revenue",
+            label: "Revenue",
+            unit: "USD",
+            value: 100,
+            period: "2026Q2",
+            qoq: 0.1,
+            yoy: 0.2,
+            sparkline: [80, 90, 100],
+            approval_state: "proposed",
+            patterns: [{
+              kind: "growth_streak",
+              label: "Growth streak, 3 periods",
+              detail: "The last 3 reported period changes were increases.",
+              detection: "pattern",
+              forecast: false,
+            }],
+          }],
+          multiples: [{
+            metric_id: "part",
+            label: "Part",
+            unit: "USD",
+            value: 40,
+            period: "2026Q2",
+            share: 0.4,
+            sparkline: [20, 30, 40],
+            approval_state: "proposed",
+            patterns: [{
+              kind: "inflection",
+              label: "Inflection to growth",
+              detail: "The change turned to growth.",
+              detection: "pattern",
+              forecast: false,
+            }],
+          }],
+          series: [{
+            metric_id: "part",
+            label: "Part",
+            role: "area",
+            points: [
+              { period: "2026Q1", value: 30, reported: true },
+              { period: "2026Q2", value: 40, reported: true },
+            ],
+          }],
+          table: {
+            columns: [{ id: "period", label: "Period" }, { id: "part", label: "Part" }],
+            rows: [{ cells: ["2026Q2", 40] }],
+          },
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  const page = textOf(view);
+  assert.match(page, /Pattern detection/);
+  assert.match(page, /Not a forecast/);
+  assert.match(page, /Growth streak, 3 periods/);
+  assert.match(page, /40\.0% of mix/);
+  assert.doesNotMatch(page, /Top tracked|top-track|Most notable/);
+  const details = byClass(view, "deep-dive-details")[0];
+  assert.equal(details.tagName, "DETAILS");
+  assert.equal(details.getAttribute("open"), undefined);
+  assert.match(textOf(details), /Quarterly detail/);
+  const patterns = byClass(view, "deep-dive-patterns");
+  assert.equal(patterns.length, 2);
+  assert.ok(patterns.every((node) => node.parentElement.className.includes("deep-dive-tile")));
+});

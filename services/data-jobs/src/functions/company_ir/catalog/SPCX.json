@@ -768,17 +768,82 @@
         "press_release",
         "deck"
       ]
+    },
+    {
+      "metric_id": "operating_income_space",
+      "display_name": "Space operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Space segment operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 500,
+      "aliases": ["Space operating income"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "operating_income_connectivity",
+      "display_name": "Connectivity operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Connectivity segment operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 510,
+      "aliases": ["Connectivity operating income"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "operating_income_ai",
+      "display_name": "AI operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "AI segment operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 520,
+      "aliases": ["AI operating income"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
+    },
+    {
+      "metric_id": "gov_obligations",
+      "display_name": "Government obligations",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Federal obligations from the existing USAspending rollup. Proposed. Nothing here is approved.",
+      "category": "operating",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 530,
+      "aliases": ["Government obligations"],
+      "disclosure_status": "numeric",
+      "source_priority": ["xbrl"]
     }
   ],
   "xbrl_segments": {
-    "axes": ["StatementBusinessSegmentsAxis"],
+    "axes": ["StatementBusinessSegmentsAxis", "ConsolidationItemsAxis"],
     "reports": ["Segments (Details)"],
     "facts": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues"],
     "members": {
       "SpaceMember": "revenue_space",
       "ConnectivityMember": "revenue_connectivity",
       "AIMember": "revenue_ai"
-    }
+    },
+    "bindings": [
+      {"member": "OperatingSegmentsMember", "label": "Space", "fact": "OperatingIncomeLoss", "metric_id": "operating_income_space"},
+      {"member": "OperatingSegmentsMember", "label": "Connectivity", "fact": "OperatingIncomeLoss", "metric_id": "operating_income_connectivity"},
+      {"member": "OperatingSegmentsMember", "label": "AI", "fact": "OperatingIncomeLoss", "metric_id": "operating_income_ai"}
+    ]
   },
   "gov_contracts": {
     "name_aliases": ["space exploration technologies", "spacex"],
@@ -861,6 +926,12 @@
             ]
           }
         ]
+      },
+      {
+        "id": "usaspending",
+        "metric_id": "gov_obligations",
+        "unit": "USD",
+        "label": "Government obligations"
       }
     ],
     "forecast": {
@@ -1463,6 +1534,32 @@
             ]
           }
         ]
+      },
+      {
+        "id": "revenue-mix",
+        "title": "Revenue mix",
+        "archetype": "segment_revenue_mix",
+        "headline": "revenue_gaap",
+        "placement": "primary",
+        "metrics": ["revenue_space", "revenue_connectivity", "revenue_ai"],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "notes": ["Starmind and Starship are not separate filing segments."]
+      },
+      {
+        "id": "growth-margin",
+        "title": "Segment operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": ["operating_income_space", "operating_income_connectivity", "operating_income_ai"],
+        "source_note": "SEC FilingSummary segment report. Pending review."
+      },
+      {
+        "id": "government-awards",
+        "title": "Government obligations",
+        "archetype": "public_records",
+        "placement": "primary",
+        "metrics": ["gov_obligations"],
+        "source_note": "USAspending obligations already collected for this ticker. Pending review."
       }
     ]
   }

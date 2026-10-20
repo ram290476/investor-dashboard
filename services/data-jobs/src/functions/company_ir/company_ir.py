@@ -2785,29 +2785,43 @@ def item_202_filings(submissions: dict, *, limit: int = 4) -> list[dict]:
     return rows[:limit]
 
 
-def latest_periodic_filings(submissions: dict) -> list[dict]:
-    """The newest 10-Q and 10-K primary documents, for the raw layer."""
+def periodic_filings(submissions: dict, *, limits: dict[str, int] | None = None) -> list[dict]:
+    """Recent original 10-Q and 10-K filings, newest first.
+
+    Amendments are skipped. A 10-K/A can be the newest annual filing and can have
+    no FilingSummary match; the original 10-K is what the segment walk reads.
+    """
+    caps = limits or {"10-Q": 1, "10-K": 1}
     recent = (submissions.get("filings") or {}).get("recent") or {}
     forms = recent.get("form") or []
     cik = str(submissions.get("cik") or "0").zfill(10)
-    chosen: dict[str, dict] = {}
+    counts = {kind: 0 for kind in caps}
+    rows = []
     for index, form in enumerate(forms):
         kind = str(form).upper()
-        if kind not in {"10-Q", "10-K"} or kind in chosen:
+        if kind not in caps or counts[kind] >= int(caps[kind]):
             continue
         accession = (recent.get("accessionNumber") or [""] * len(forms))[index]
         document = (recent.get("primaryDocument") or [""] * len(forms))[index]
         if not accession or not document:
             continue
-        chosen[kind] = {
-            "accession": accession,
-            "cik": cik,
-            "form": kind,
-            "filed": (recent.get("filingDate") or [""] * len(forms))[index],
-            "report_date": (recent.get("reportDate") or [""] * len(forms))[index] or None,
-            "primary_document": document,
-        }
-    return list(chosen.values())
+        counts[kind] += 1
+        rows.append(
+            {
+                "accession": accession,
+                "cik": cik,
+                "form": kind,
+                "filed": (recent.get("filingDate") or [""] * len(forms))[index],
+                "report_date": (recent.get("reportDate") or [""] * len(forms))[index] or None,
+                "primary_document": document,
+            }
+        )
+    return rows
+
+
+def latest_periodic_filings(submissions: dict) -> list[dict]:
+    """The newest 10-Q and 10-K primary documents, for the raw layer."""
+    return periodic_filings(submissions, limits={"10-Q": 1, "10-K": 1})
 
 
 _THREE_MONTHS = re.compile(r"^(?:3|three)\s+months\s+ended\b", re.IGNORECASE)
@@ -2839,9 +2853,24 @@ def segment_report_files(xml_text: str, reports: list) -> list[str]:
     for report in root.iter("Report"):
         short = (report.findtext("ShortName") or "").strip()
         html_name = (report.findtext("HtmlFileName") or "").strip()
-        if short in wanted and html_name:
+        if short and html_name:
             by_short.setdefault(short, html_name)
-    return [by_short[name] for name in wanted if name in by_short]
+    found: list[str] = []
+    seen: set[str] = set()
+    for name in wanted:
+        exact = by_short.get(name)
+        if exact:
+            if exact not in seen:
+                found.append(exact)
+                seen.add(exact)
+            continue
+        if len(name) < 12:
+            continue
+        for short, html_name in by_short.items():
+            if name in short and html_name not in seen:
+                found.append(html_name)
+                seen.add(html_name)
+    return found
 
 
 class _SegmentCells(HTMLParser):
@@ -2977,11 +3006,12 @@ def _segment_scale(rows: list[list[dict]]) -> float:
 
 
 def _segment_number(text: str) -> float | None:
-    raw = (text or "").replace("\xa0", " ").strip()
+    """A segment cell. `$ (4,619)` is a loss. A blank or dash is missing, not zero."""
+    raw = (text or "").replace("\xa0", " ").replace("$", "").strip()
     if not raw or raw in {"-", "\u2014", "\u2013"}:
         return None
     negative = raw.startswith("(") and raw.endswith(")")
-    cleaned = raw.strip("()").replace("$", "").replace(",", "").strip()
+    cleaned = raw.strip("()").replace(",", "").strip()
     if not re.fullmatch(r"-?\d+(?:\.\d+)?", cleaned):
         return None
     value = float(cleaned)
@@ -2996,10 +3026,92 @@ def _xbrl_local_name(token: str) -> str:
 
 
 def _segment_member(defref: str, axes: list[str]) -> str | None:
+    raw = _segment_member_raw(defref, axes)
+    if raw is None:
+        return None
+    return _xbrl_local_name(raw)
+
+
+def _segment_member_raw(defref: str, axes: list[str]) -> str | None:
     for axis in axes:
         marker = f"{axis}="
         if marker in defref:
-            return _xbrl_local_name(defref.split(marker, 1)[1])
+            token = defref.split(marker, 1)[1]
+            # A dimensional defref can chain another axis after this member.
+            return token.split("=", 1)[0].rsplit(" ", 1)[-1]
+    return None
+
+
+def _member_keys(raw: str) -> list[str]:
+    """`spcx_SpaceMember` matches SpaceMember. `country_US` also matches itself."""
+    token = (raw or "").strip()
+    if not token:
+        return []
+    keys = [token]
+    local = _xbrl_local_name(token)
+    if local not in keys:
+        keys.append(local)
+    return keys
+
+
+def _label_matches(header: str, wanted: str) -> bool:
+    left = normalize_label(header)
+    right = normalize_label(wanted)
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    return left.split("|")[-1].strip() == right
+
+
+def _binding_matches(binding: dict, keys: list[str], header: str, fact: str) -> bool:
+    member = str(binding.get("member") or "").strip()
+    label = str(binding.get("label") or "").strip()
+    wanted_fact = str(binding.get("fact") or "").strip()
+    if wanted_fact and _xbrl_local_name(wanted_fact) != fact and wanted_fact != fact:
+        return False
+    if member and member not in keys and _xbrl_local_name(member) not in keys:
+        return False
+    if label and not _label_matches(header, label):
+        return False
+    if not member and not label:
+        return False
+    return True
+
+
+def _segment_metric(spec: dict, keys: list[str], header: str, fact: str) -> str | None:
+    """Map a member, and the header when the member token repeats, to a catalog metric."""
+    for binding in spec.get("bindings") or []:
+        if isinstance(binding, dict) and binding.get("metric_id") and _binding_matches(binding, keys, header, fact):
+            return str(binding["metric_id"])
+    members = spec.get("members") if isinstance(spec.get("members"), dict) else {}
+    facts = {str(item) for item in (spec.get("facts") or []) if str(item).strip()}
+    if facts and fact not in facts and _xbrl_local_name(fact) not in facts:
+        mapped = None
+    else:
+        mapped = None
+        for key in keys:
+            if key in members:
+                mapped = members[key]
+                break
+        if mapped is None:
+            for key in keys:
+                local = _xbrl_local_name(key)
+                if local in members:
+                    mapped = members[local]
+                    break
+    if isinstance(mapped, str):
+        return mapped
+    if isinstance(mapped, dict):
+        if fact in mapped:
+            return str(mapped[fact])
+        for key, metric in mapped.items():
+            if _label_matches(header, str(key)):
+                return str(metric)
+    labels = spec.get("labels") if isinstance(spec.get("labels"), dict) else {}
+    for key, metric in labels.items():
+        if _label_matches(header, str(key)) and isinstance(metric, str):
+            return metric
     return None
 
 
@@ -3012,14 +3124,18 @@ def _segment_fact(defref: str) -> str | None:
 def segment_amounts(html: str, spec: dict) -> list[tuple[str, date, float]]:
     """Quarterly segment amounts from one SEC R page. The catalog maps member names to metric ids.
 
-    A revenue row is kept only after a member header on a configured axis, and only in a
-    three-month column. The consolidated total that sits above the first member is ignored.
-    A blank cell is skipped. It is not stored as zero.
+    A row is kept in a three-month column. When several rows share one member token, the
+    header label chooses the metric. A row with a label and a number but no member token
+    is kept only when the catalog names that label. A blank cell is skipped. It is not
+    stored as zero.
     """
     members = spec.get("members") if isinstance(spec.get("members"), dict) else {}
+    bindings = spec.get("bindings") if isinstance(spec.get("bindings"), list) else []
     facts = {str(item) for item in (spec.get("facts") or []) if str(item).strip()}
     axes = [str(item) for item in (spec.get("axes") or []) if str(item).strip()]
-    if not members or not facts or not axes:
+    if not axes or not (members or bindings or spec.get("labels")):
+        return []
+    if not facts and not bindings:
         return []
     rows = _segment_rows(html)
     grid = _segment_grid(rows)
@@ -3029,19 +3145,24 @@ def segment_amounts(html: str, spec: dict) -> list[tuple[str, date, float]]:
     scale = _segment_scale(rows)
     found: list[tuple[str, date, float]] = []
     seen: set[tuple[str, date]] = set()
-    current: str | None = None
+    current_keys: list[str] = []
+    current_label = ""
     for line in grid:
         if not line:
             continue
         label = line[min(line)]
         defref = str(label.get("defref") or "")
-        member = _segment_member(defref, axes)
-        if member:
-            current = member
+        raw_member = _segment_member_raw(defref, axes)
+        if raw_member:
+            current_keys = _member_keys(raw_member)
+            current_label = label.get("text") or ""
             continue
         fact = _segment_fact(defref)
-        metric_id = members.get(current or "")
-        if not fact or fact not in facts or not metric_id:
+        if not fact:
+            continue
+        header = current_label if current_keys else (label.get("text") or "")
+        metric_id = _segment_metric(spec, current_keys, header, fact)
+        if not metric_id:
             continue
         for col, end in columns:
             cell = line.get(col)
@@ -4015,27 +4136,48 @@ def run_collect(
                     filing.get("filed"),
                     fy_month,
                 )
-        for filing in latest_periodic_filings(body):
-            url = archive_url(cik, filing["accession"], filing["primary_document"])
-            document = pull(url, f"edgar:{ticker}:{filing['form']}")
-            if document is None:
-                continue
+        segment_spec = catalog.get("xbrl_segments") if isinstance(catalog.get("xbrl_segments"), dict) else {}
+        has_segments = bool(
+            segment_spec.get("reports") and (segment_spec.get("members") or segment_spec.get("bindings"))
+        )
+        filing_limits = {"10-Q": 6, "10-K": 2} if has_segments else {"10-Q": 1, "10-K": 1}
+        saved_primary: set[str] = set()
+        for filing in periodic_filings(body, limits=filing_limits):
+            if expired():
+                break
             period = "undated"
             if filing.get("report_date"):
                 period = fiscal_period_for_end(date.fromisoformat(filing["report_date"]), fy_month)
-            content = document.content if isinstance(document.content, bytes) else document.text.encode()
-            save(ticker, period, url, content, "text/html", "note", filing["accession"], filing.get("filed"), fy_month)
-            segment_spec = catalog.get("xbrl_segments") if isinstance(catalog.get("xbrl_segments"), dict) else {}
-            if segment_spec.get("reports") and segment_spec.get("members"):
-                summary = pull(
-                    archive_url(cik, filing["accession"], "FilingSummary.xml"),
-                    f"edgar:{ticker}:{filing['accession']}:summary",
-                    optional=True,
-                )
-                names: list[str] = []
-                if summary is not None:
-                    names = segment_report_files(summary.text, segment_spec.get("reports") or [])
-                for name in names:
+            if filing["form"] not in saved_primary:
+                url = archive_url(cik, filing["accession"], filing["primary_document"])
+                document = pull(url, f"edgar:{ticker}:{filing['form']}")
+                if document is not None:
+                    content = document.content if isinstance(document.content, bytes) else document.text.encode()
+                    save(
+                        ticker,
+                        period,
+                        url,
+                        content,
+                        "text/html",
+                        "note",
+                        filing["accession"],
+                        filing.get("filed"),
+                        fy_month,
+                    )
+                saved_primary.add(filing["form"])
+            if not has_segments:
+                continue
+            summary = pull(
+                archive_url(cik, filing["accession"], "FilingSummary.xml"),
+                f"edgar:{ticker}:{filing['accession']}:summary",
+                optional=True,
+            )
+            names: list[str] = []
+            if summary is not None:
+                names = segment_report_files(summary.text, segment_spec.get("reports") or [])
+            if not names:
+                continue
+            for name in names:
                     page = pull(
                         archive_url(cik, filing["accession"], name),
                         f"edgar:{ticker}:{filing['accession']}:segments",
@@ -4303,6 +4445,16 @@ def run_serve(event: dict | None, *, read_json, write_json, now: str | None = No
         symbol = ticker.upper()
         observations = read_optional(read_json, f"curated/deep_dive/ticker={symbol}/observations.json")
         stored = observations.get("stored_headlines")
+        try:
+            rollup = read_json("curated/contracts_rollup/latest.json")
+        except (OSError, ValueError, KeyError):
+            rollup = []
+        except Exception as exc:
+            from lake import lake_read_denied_or_missing
+
+            if not lake_read_denied_or_missing(exc):
+                raise
+            rollup = []
         deep_dive = assemble_deep_dive(
             catalog,
             rows,
@@ -4311,6 +4463,7 @@ def run_serve(event: dict | None, *, read_json, write_json, now: str | None = No
             projections=stored if isinstance(stored, list) else None,
             news=read_optional(read_json, f"curated/news_topics/ticker={symbol}/topics.json"),
             generated_at=generated_at,
+            contracts=rollup if isinstance(rollup, list) else [],
         )
         if deep_dive:
             document["deep_dive"] = deep_dive

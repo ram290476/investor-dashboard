@@ -1,0 +1,99 @@
+{
+  "ticker": "PLTR",
+  "catalog_version": 1,
+  "fiscal_year_end_month": 12,
+  "approval_note": "Company-specific rows only. Shared GAAP rows are added when the catalog is loaded. Every entry is proposed. Nothing is auto-approved.",
+  "metrics": [
+    {
+      "metric_id": "revenue_government",
+      "display_name": "Government revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Government revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "Government segment revenue"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_commercial",
+      "display_name": "Commercial revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Commercial revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "Commercial segment revenue"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    }
+  ],
+  "xbrl_segments": {
+    "axes": [
+      "ConsolidationItemsAxis"
+    ],
+    "reports": [
+      "Segment and Geographic Information - Summary of Financial Information for Each Reportable Segment (Detail)"
+    ],
+    "facts": [
+      "RevenueFromContractWithCustomerExcludingAssessedTax"
+    ],
+    "bindings": [
+      {
+        "member": "OperatingSegmentsMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_government",
+        "label": "Government"
+      },
+      {
+        "member": "OperatingSegmentsMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_commercial",
+        "label": "Commercial"
+      }
+    ]
+  },
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "sections": [
+      {
+        "id": "revenue-mix",
+        "title": "Revenue by customer",
+        "archetype": "segment_revenue_mix",
+        "placement": "primary",
+        "metrics": [
+          "revenue_government",
+          "revenue_commercial"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "headline": "revenue_gaap"
+      },
+      {
+        "id": "growth-margin",
+        "title": "Operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": [
+          "operating_income"
+        ],
+        "source_note": "SEC companyfacts. Pending review."
+      }
+    ]
+  }
+}

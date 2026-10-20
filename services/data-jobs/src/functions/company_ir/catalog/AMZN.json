@@ -1,0 +1,364 @@
+{
+  "ticker": "AMZN",
+  "catalog_version": 1,
+  "fiscal_year_end_month": 12,
+  "approval_note": "Company-specific rows only. Shared GAAP rows are added when the catalog is loaded. Every entry is proposed. Nothing is auto-approved.",
+  "metrics": [
+    {
+      "metric_id": "revenue_north_america",
+      "display_name": "North America revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "North America revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 10,
+      "aliases": [
+        "North America segment net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_international",
+      "display_name": "International revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "International revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 20,
+      "aliases": [
+        "International segment net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_aws",
+      "display_name": "AWS revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "AWS revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 30,
+      "aliases": [
+        "Amazon Web Services segment net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "operating_income_north_america",
+      "display_name": "North America operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "North America operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 40,
+      "aliases": [
+        "North America segment operating income"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "operating_income_international",
+      "display_name": "International operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "International operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 50,
+      "aliases": [
+        "International segment operating income"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "operating_income_aws",
+      "display_name": "AWS operating income",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "AWS operating income. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 60,
+      "aliases": [
+        "Amazon Web Services segment operating income"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_online_stores",
+      "display_name": "Online stores revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Online stores revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 70,
+      "aliases": [
+        "Online stores net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_physical_stores",
+      "display_name": "Physical stores revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Physical stores revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 80,
+      "aliases": [
+        "Physical stores net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_third_party_seller",
+      "display_name": "Third-party seller services revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Third-party seller services revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 90,
+      "aliases": [
+        "Third-party seller services net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_advertising",
+      "display_name": "Advertising services revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Advertising services revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 100,
+      "aliases": [
+        "Advertising services net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_subscriptions",
+      "display_name": "Subscription services revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Subscription services revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 110,
+      "aliases": [
+        "Subscription services net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    },
+    {
+      "metric_id": "revenue_other_services",
+      "display_name": "Other services revenue",
+      "unit": "USD",
+      "scale": 1,
+      "definition": "Other services revenue. Proposed from the filing. Nothing here is approved.",
+      "category": "fundamentals",
+      "status": "proposed",
+      "approved_by": null,
+      "approved_at": null,
+      "panel_order": 120,
+      "aliases": [
+        "Other services net sales"
+      ],
+      "disclosure_status": "numeric",
+      "source_priority": [
+        "xbrl"
+      ]
+    }
+  ],
+  "xbrl_segments": {
+    "axes": [
+      "StatementBusinessSegmentsAxis",
+      "ProductOrServiceAxis"
+    ],
+    "reports": [
+      "Segment Information - Reportable Segments and Reconciliation to Consolidated Net Income (Details)",
+      "Segment Information - Disaggregation of Revenue (Details)"
+    ],
+    "facts": [
+      "RevenueFromContractWithCustomerExcludingAssessedTax"
+    ],
+    "bindings": [
+      {
+        "member": "NorthAmericaSegmentMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_north_america"
+      },
+      {
+        "member": "InternationalSegmentMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_international"
+      },
+      {
+        "member": "AmazonWebServicesSegmentMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_aws"
+      },
+      {
+        "member": "NorthAmericaSegmentMember",
+        "fact": "OperatingIncomeLoss",
+        "metric_id": "operating_income_north_america"
+      },
+      {
+        "member": "InternationalSegmentMember",
+        "fact": "OperatingIncomeLoss",
+        "metric_id": "operating_income_international"
+      },
+      {
+        "member": "AmazonWebServicesSegmentMember",
+        "fact": "OperatingIncomeLoss",
+        "metric_id": "operating_income_aws"
+      },
+      {
+        "member": "OnlineStoresMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_online_stores"
+      },
+      {
+        "member": "PhysicalStoresMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_physical_stores"
+      },
+      {
+        "member": "ThirdPartySellerServicesMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_third_party_seller"
+      },
+      {
+        "member": "AdvertisingServicesMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_advertising"
+      },
+      {
+        "member": "SubscriptionServicesMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_subscriptions"
+      },
+      {
+        "member": "AmazonWebServicesMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_aws"
+      },
+      {
+        "member": "OtherServicesMember",
+        "fact": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "metric_id": "revenue_other_services"
+      }
+    ]
+  },
+  "deep_dive": {
+    "version": 1,
+    "title": "Deep dive",
+    "sections": [
+      {
+        "id": "reportable-mix",
+        "title": "Sales by segment",
+        "archetype": "segment_revenue_mix",
+        "placement": "primary",
+        "metrics": [
+          "revenue_north_america",
+          "revenue_international",
+          "revenue_aws"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "headline": "revenue_gaap"
+      },
+      {
+        "id": "product-mix",
+        "title": "Sales by product",
+        "archetype": "segment_revenue_mix",
+        "placement": "primary",
+        "metrics": [
+          "revenue_online_stores",
+          "revenue_physical_stores",
+          "revenue_third_party_seller",
+          "revenue_advertising",
+          "revenue_subscriptions",
+          "revenue_aws",
+          "revenue_other_services"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review.",
+        "headline": "revenue_gaap"
+      },
+      {
+        "id": "growth-margin",
+        "title": "Segment operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "metrics": [
+          "operating_income_north_america",
+          "operating_income_international",
+          "operating_income_aws"
+        ],
+        "source_note": "SEC FilingSummary segment report. Pending review."
+      }
+    ]
+  }
+}

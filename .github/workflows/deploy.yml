@@ -247,3 +247,55 @@ jobs:
             "${site_url}/"
           curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors \
             "${site_url}/config.json" | jq -e '.apiBaseUrl and .clientId and .callbackUrl'
+
+      # Company IR skips a weekday schedule unless it is Monday. source=weekly
+      # collects the watchlist immediately so new segment catalogs are not empty
+      # until the next Monday. Extract and serve run on the returned payload.
+      # Deep-dive collect then refreshes the keyless series and serve publishes again.
+      - name: Backfill company metrics and deep dive
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          mapfile -t functions < <(terraform output -json job_functions | jq -r '.[]')
+          collect=""
+          extract=""
+          serve=""
+          deep=""
+          for name in "${functions[@]}"; do
+            case "$name" in
+              *-q2-company-ir-collect) collect="$name" ;;
+              *-q2-company-ir-extract) extract="$name" ;;
+              *-q2-company-ir-serve) serve="$name" ;;
+              *-deep-dive-collect) deep="$name" ;;
+            esac
+          done
+          if [ -z "$collect" ] || [ -z "$extract" ] || [ -z "$serve" ] || [ -z "$deep" ]; then
+            echo "::error::Could not resolve company IR or deep-dive Lambda names."
+            exit 1
+          fi
+          work="$(mktemp -d)"
+          invoke() {
+            local name="$1" payload="$2" out="$3"
+            if aws lambda invoke \
+              --function-name "$name" \
+              --cli-read-timeout 400 \
+              --payload "$payload" \
+              --cli-binary-format raw-in-base64-out \
+              "$out"; then
+              echo "$name $(jq -c '{status, run_status, reason, tickers}' "$out" 2>/dev/null || echo '{}')"
+              return 0
+            fi
+            echo "::warning::${name} invoke failed"
+            return 1
+          }
+          if invoke "$collect" '{"source":"weekly"}' "$work/collect.json" \
+            && jq -e '.manifests or .status == "ok" or .status == "partial"' "$work/collect.json" >/dev/null; then
+            invoke "$extract" "file://$work/collect.json" "$work/extract.json" || true
+          fi
+          invoke "$deep" '{"source":"weekly"}' "$work/deep.json" || true
+          if [ -f "$work/extract.json" ]; then
+            jq -n --slurpfile extract "$work/extract.json" '{tickers: ($extract[0].tickers // []), status: "ok", run_status: "ok"}' > "$work/serve.json"
+          else
+            echo '{"tickers":[],"status":"ok","run_status":"ok"}' > "$work/serve.json"
+          fi
+          invoke "$serve" "file://$work/serve.json" "$work/served.json" || true
