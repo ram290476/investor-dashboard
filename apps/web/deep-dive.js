@@ -22,7 +22,7 @@ function scoreboardSection(sections) {
 }
 
 /**
- * Placeholder notice for the Trends tab. It sits under the scoreboard title when
+ * Placeholder notice for the Overview tab. It sits under the scoreboard title when
  * the payload has one, and it is not drawn inside the Research tab.
  */
 export function renderTrendDisclaimer(payload, doc = document) {

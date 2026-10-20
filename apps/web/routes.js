@@ -19,7 +19,7 @@ function isResearchTab(tab) {
   return id === RESEARCH_TAB_ID || id === LEGACY_RESEARCH_TAB;
 }
 
-// Bare hashes the main page used for its panels. Each one lands on the Trends section.
+// Bare hashes the main page used for its panels. Each one lands on the Overview tab (id `trends`).
 export const MAIN_PAGE_SECTIONS = Object.freeze({
   chart: "price",
   price: "price",
@@ -76,7 +76,7 @@ export function parseStockSection(hash) {
   return isResearchTab(match?.[2]) ? (match[3] || "") : "";
 }
 
-/** Bookmark id in `#stock/<T>/<tab>/<section>` for Trends, Technical, Fundamentals, KPIs, and Admin. */
+/** Bookmark id in `#stock/<T>/<tab>/<section>` for Overview, Technical, Fundamentals, KPIs, and Admin. */
 export function parseStockPanel(hash) {
   const match = stockMatch(hash);
   if (!match?.[2] || isResearchTab(match[2]) || match[2] === "calls") return "";
@@ -94,7 +94,7 @@ export function legacyMainSection(hash) {
 
 /**
  * Replacement hash for a legacy Calls or main-page bookmark.
- * "" when the hash should be left alone. Calls always lands on Overview quarterly notes.
+ * "" when the hash should be left alone. Calls always lands on Technical quarterly notes.
  * A bare main-page hash needs the selected ticker.
  */
 export function redirectStockHash(hash, ticker = "") {
@@ -113,7 +113,7 @@ export function stockHash(ticker, sectionId = "") {
   return `#stock/${symbol}/${RESEARCH_TAB_ID}/${section}`;
 }
 
-/** `#stock/<T>` for Overview, `#stock/<T>/<tab>` for Trends and the other company tabs. */
+/** `#stock/<T>` for Technical (id `overview`). `#stock/<T>/trends` is the Overview tab. */
 export function stockTabHash(ticker, tab = "") {
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;

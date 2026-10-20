@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { legacyMainSection, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { canonicalStockTab, legacyMainSection, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 
 test("dashboard and Cognito callback paths resolve to the dashboard", () => {
   assert.deepEqual(routeFromPath("/"), { page: "dashboard" });
@@ -41,6 +41,17 @@ test("stock pages open from a hash or a /stock path for any watchlist ticker", (
       selected: "AAPL",
     },
   );
+});
+
+test("Overview keeps the trends id and Technical keeps the overview id", () => {
+  assert.equal(canonicalStockTab("trends"), "trends");
+  assert.equal(canonicalStockTab("overview"), "overview");
+  assert.equal(parseStockTab("#stock/TSLA/trends"), "trends");
+  assert.equal(parseStockTab("#stock/TSLA/overview"), "overview");
+  assert.equal(parseStockPanel("#stock/TSLA/trends/price"), "price");
+  assert.equal(parseStockPanel("#stock/TSLA/overview/technical"), "technical");
+  assert.equal(stockTabHash("TSLA", "trends"), "#stock/TSLA/trends");
+  assert.equal(stockTabHash("TSLA", "overview"), "#stock/TSLA");
 });
 
 test("a deep-dive bookmark hash stays on that company's route", () => {

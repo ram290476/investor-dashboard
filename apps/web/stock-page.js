@@ -8,7 +8,7 @@ import { canonicalStockTab } from "./routes.js";
 export const LONG_PRESS_MS = 550;
 
 export const STOCK_TABS = [
-  { id: "trends", label: "Trends" },
+  { id: "trends", label: "Overview" },
   { id: "overview", label: "Technical" },
   { id: "fundamentals", label: "Fundamentals" },
   { id: "kpis", label: "KPIs" },
@@ -183,7 +183,8 @@ export function companyDescription(payload, tickerData) {
 }
 
 /**
- * Company tabs, in order. Technical follows Trends. Research sits between Technical and Fundamentals, and only when sections exist.
+ * Company tabs, in order. Technical follows Overview. Research sits between Technical and Fundamentals, and only when sections exist.
+ * Overview keeps the id `trends`. Technical keeps the id `overview`, which #281 already used for that tab.
  * The label is always Research. `deep_dive.title` stays in the company document and is not shown.
  * Admin is last, and only when options.admin is true (a signed-in admin, never the demo account).
  */

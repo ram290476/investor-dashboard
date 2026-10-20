@@ -3,7 +3,7 @@ import { canonicalStockTab } from "./routes.js";
 // First stock-page load in a browser tab.
 // sessionStorage (not localStorage) marks that this tab has already loaded, so a
 // refresh can keep the tab named in the URL. A new tab has empty sessionStorage
-// and lands on Trends again. Catalyst markers are not part of that flag:
+// and lands on Overview again. Catalyst markers are not part of that flag:
 // they start cleared and are rebuilt empty on every document load.
 
 export const STOCK_SESSION_KEY = "investor-dashboard.stock-session";
@@ -15,9 +15,9 @@ export function freshCatalystSelection() {
 
 /**
  * Tab decision for a stock or dashboard route.
- * The first load of a tab session is Trends, even when the URL names another tab.
+ * The first load of a tab session is Overview (tab id `trends`), even when the URL names another tab.
  * After the session flag is set, a stock URL keeps its tab and a bare dashboard
- * route still opens Trends. A bare stock hash stays on Technical.
+ * route still opens Overview. A bare stock hash stays on Technical (tab id `overview`).
  * The /ticker research route and other routes do not consume the first-load flag.
  * A saved `deep-dive` tab id is the Research tab.
  */

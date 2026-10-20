@@ -12,7 +12,7 @@ function accessToken(claims) {
   return `header.${payload}.sig`;
 }
 
-test("the first load of a session lands on Trends and rewrites a deep link", () => {
+test("the first load of a session lands on Overview and rewrites a deep link", () => {
   for (const hashTab of ["overview", "fundamentals", "kpis", "deep-dive", "admin", ""]) {
     const landing = sessionStockLanding({ sessionStarted: false, hashTab, routePage: "stock" });
     assert.equal(landing.tab, "trends");
@@ -69,7 +69,7 @@ test("first load is detected with sessionStorage and not localStorage", () => {
   const render = app.slice(app.indexOf("function renderDashboardNow"), app.indexOf("async function refreshData"));
   const landingAt = render.indexOf("applySessionStockLanding()");
   const trendsAt = render.indexOf("openTrendsLanding()");
-  assert.ok(landingAt >= 0 && trendsAt > landingAt, "session landing runs before the dashboard Trends fallback");
+  assert.ok(landingAt >= 0 && trendsAt > landingAt, "session landing runs before the dashboard Overview fallback");
   const landing = app.slice(app.indexOf("function applySessionStockLanding"), app.indexOf("function openTrendsLanding"));
   assert.match(landing, /rewriteLanding/);
   assert.match(landing, /stockTabHash\(ticker, landing\.tab\)/);

@@ -1,4 +1,4 @@
-// One price chart panel for every page (#203). Trends (the dashboard chart) and research
+// One price chart panel for every page (#203). Overview (the dashboard chart) and research
 // render the full panel — period chips, trend pill, overlays, under-chart lanes, lane
 // controls, catalyst filters, crosshair and legend. Fundamentals and KPIs pass stockPanel
 // and keep only the quote header. The Technical tab does not render this panel.
@@ -10,7 +10,7 @@ const TICKER = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 /**
  * Options for the shared panel on one page.
  * companyLink: show "Open company page" (the dashboard only; the company page is the target).
- * stockPanel: Fundamentals and KPIs get only this quote header. Trends keeps the full chart.
+ * stockPanel: Fundamentals and KPIs get only this quote header. Overview keeps the full chart.
  * mobilePanel / id: dashboard phone tab wiring.
  */
 export function chartPanelOptions(page, ticker) {

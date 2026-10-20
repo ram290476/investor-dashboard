@@ -336,7 +336,9 @@ test("stock tabs move by keyboard and calls stay unlicensed", () => {
   assert.equal(nextStockTab("kpis", "ArrowRight"), "trends");
   assert.equal(nextStockTab("kpis", "Home"), "trends");
   assert.deepEqual(STOCK_TABS.map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
-  assert.deepEqual(STOCK_TABS.map((tab) => tab.label), ["Trends", "Technical", "Fundamentals", "KPIs"]);
+  assert.deepEqual(STOCK_TABS.map((tab) => tab.label), ["Overview", "Technical", "Fundamentals", "KPIs"]);
+  assert.equal(STOCK_TABS.find((tab) => tab.id === "trends").label, "Overview");
+  assert.equal(STOCK_TABS.find((tab) => tab.id === "overview").label, "Technical");
   assert.equal(STOCK_TABS.length, 4);
   assert.match(callsCopy().transcripts, /not collected/);
   const gap = fillQuarterGaps([

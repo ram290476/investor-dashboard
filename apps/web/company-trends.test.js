@@ -15,10 +15,13 @@ function accessToken(claims) {
   return `e.${payload}.s`;
 }
 
-test("company tabs are Trends, Technical, Research, Fundamentals, and KPIs", () => {
+test("company tabs are Overview, Technical, Research, Fundamentals, and KPIs", () => {
   assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(deepDive).map((tab) => tab.label), ["Trends", "Technical", "Research", "Fundamentals", "KPIs"]);
-  assert.equal(stockTabs(deepDive).some((tab) => tab.label === "Overview"), false);
+  assert.deepEqual(stockTabs(deepDive).map((tab) => tab.label), ["Overview", "Technical", "Research", "Fundamentals", "KPIs"]);
+  assert.equal(stockTabs(deepDive).find((tab) => tab.id === "trends").label, "Overview");
+  assert.equal(stockTabs(deepDive).find((tab) => tab.id === "overview").label, "Technical");
+  assert.equal(visibleStockTab("trends", stockTabs(deepDive), "overview"), "trends");
+  assert.equal(visibleStockTab("overview", stockTabs(deepDive), "trends"), "overview");
   assert.equal(stockTabs(deepDive).some((tab) => tab.label === "Deep dive"), false);
   assert.equal(stockTabs({ deep_dive: { sections: [] } }).some((tab) => tab.id === "research"), false);
   assert.equal(stockTabs(null).some((tab) => tab.id === "calls"), false);
@@ -112,7 +115,7 @@ test("quarterly notes keep the latest quarter first and stay empty without guida
   assert.equal(notesTile.headline, undefined);
 });
 
-test("Trends tiles follow the sections that are actually on the page", () => {
+test("Overview tiles follow the sections that are actually on the page", () => {
   const present = ["price", "news", "filings"];
   const tiles = companyBookmarks("trends", { present, history: [{ close: 4 }, { close: 5 }] });
   assert.deepEqual(tiles.map((item) => item.id), present);
@@ -124,13 +127,13 @@ test("Trends tiles follow the sections that are actually on the page", () => {
   assert.equal(companyBookmarks("trends", {}).length, TREND_SECTIONS.length);
 });
 
-test("old main-page hashes and Calls land on Trends or quarterly notes", () => {
+test("old main-page hashes and Calls land on Overview or quarterly notes", () => {
   assert.equal(redirectStockHash("#chart", "spy"), "#stock/SPY/trends/price");
   assert.equal(redirectStockHash("#calendar", "qqq"), "#stock/QQQ/trends/catalyst-calendar");
   assert.equal(redirectStockHash("#stock/dia/calls/notes"), "#stock/DIA/overview/quarterly-notes");
 });
 
-test("the company page renders former main-page panels on Trends and keeps the tab on ticker switch", () => {
+test("the company page renders former main-page panels on Overview and keeps the tab on ticker switch", () => {
   const trends = app.slice(app.indexOf("function renderTrendsLayout"), app.indexOf("function renderQuarterlyNotes"));
   for (const piece of [
     'renderChartPanel("dashboard", session.selected)',

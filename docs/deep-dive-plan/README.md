@@ -153,7 +153,7 @@ Rules:
 
 ## Panel design
 
-The mockups follow the current theme (`--page #0b0e13`, `--surface #12161d`, IBM Plex, green `#48c79b`, red `#f07a7a`, blue `#7db4ff`, amber `#f2b24e`). The tab row matches the company page: Overview, Trends, Research, Fundamentals, KPIs.
+The mockups follow the current theme (`--page #0b0e13`, `--surface #12161d`, IBM Plex, green `#48c79b`, red `#f07a7a`, blue `#7db4ff`, amber `#f2b24e`). The tab row matches the company page: Overview, Technical, Research, Fundamentals, KPIs.
 
 Each segment section:
 

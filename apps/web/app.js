@@ -721,7 +721,7 @@ function renderFundSummary(ticker) {
 // pages keep their saved per-ticker settings and catalyst choices untouched.
 function companyChartState(ticker = session.selected) {
   if (session.route?.page !== "stock") return null;
-  // Trends keeps the saved dashboard chart. Overview starts with every toggle off.
+  // Overview (id trends) keeps the saved dashboard chart. Technical (id overview) starts with every toggle off.
   if (session.stockTab && session.stockTab !== "overview") return null;
   if (!session.companyChart || session.companyChart.ticker !== ticker) {
     session.companyChart = { ticker, overlays: [], lanes: [], catalysts: [] };
@@ -2165,7 +2165,7 @@ function renderChartPanel(page, ticker = session.selected, extras = {}) {
 }
 
 function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, onSettingsChange, options = chartPanelOptions("dashboard")) {
-  // Fundamentals and KPIs keep the quote header only. Trends and research keep the chart.
+  // Fundamentals and KPIs keep the quote header only. Overview and research keep the chart.
   const quoteOnly = options.stockPanel === "fundamentals" || options.stockPanel === "kpis";
   if (!quoteOnly) {
     chartData = mergeCompanyFundamentals(
@@ -3958,7 +3958,7 @@ function renderStockPage(restoreDrawer = null) {
   const pageTabs = stockTabs(payload, { admin: metricAdmin });
   const hashSection = parseStockSection(location.hash);
   session.stockTab = canonicalStockTab(session.stockTab);
-  // A stock hash names the tab. `#stock/<T>` is Overview.
+  // A stock hash names the tab. `#stock/<T>` and `#stock/<T>/overview` are Technical.
   // Admin is refused unless this caller is an admin, including when the hash asks for it.
   // A Research hash waits until that tab exists in the payload. `deep-dive` is the old id.
   if (parseStockHash(location.hash) === session.selected) {
@@ -3977,10 +3977,9 @@ function renderStockPage(restoreDrawer = null) {
   page.dataset.stockTab = session.stockTab;
   if (hasDeepDive(payload)) page.dataset.hasDeepDive = "true";
   const companyLabel = companyName(session.selected, payload, tickerData);
-  page.setAttribute("aria-label", session.stockTab === "research" ? `${session.selected} Research` : `${session.selected} company page`);
-  document.title = session.stockTab === "research"
-    ? `${companyLabel} · Research · Investor Dashboard`
-    : "Investor Dashboard";
+  const tabTitle = session.stockTab === "research" ? "Research" : session.stockTab === "trends" ? "Overview" : "";
+  page.setAttribute("aria-label", tabTitle ? `${session.selected} ${tabTitle}` : `${session.selected} company page`);
+  document.title = tabTitle ? `${companyLabel} · ${tabTitle} · Investor Dashboard` : "Investor Dashboard";
 
   const section = (id, label, cards, empty) => {
     const block = node("section", "panel stock-section company-section-target");
@@ -3995,7 +3994,7 @@ function renderStockPage(restoreDrawer = null) {
 
   const trends = renderTrendsLayout(tickerData, chartData, chartDataState, payload);
   const present = String(trends.dataset.presentSections || "").split(",").filter(Boolean);
-  // Funds (#223): Fund holdings follows the Technical Summary on Overview. The same tabs stay
+  // Funds (#223): Fund holdings follows the Technical Summary on Technical. The same tabs stay
   // available. Operating companies never get the fund panel or its fetch.
   const fundExtras = [];
   const fund = isFund(tickerData);
@@ -4183,7 +4182,7 @@ function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
   layout.dataset.stockPanel = "trends";
   layout.dataset.mobileView = "all";
   layout.id = "stock-panel-trends";
-  layout.setAttribute("aria-label", `${session.selected} trends`);
+  layout.setAttribute("aria-label", `${session.selected} Overview`);
   const primary = node("div", "primary-column");
   const notice = renderTrendDisclaimer(payload, document);
   if (notice) primary.append(notice);
@@ -4309,7 +4308,7 @@ function applyLegacyRedirect() {
   return true;
 }
 
-// First load of this tab: Trends, then remember the session so a refresh keeps the URL tab.
+// First load of this tab: Overview, then remember the session so a refresh keeps the URL tab.
 // Research pages do not consume the flag. An empty watchlist does not either.
 function applySessionStockLanding() {
   const landing = sessionStockLanding({
@@ -4332,7 +4331,7 @@ function applySessionStockLanding() {
   }
 }
 
-// A bare dashboard route after the tab session has started still opens Trends.
+// A bare dashboard route after the tab session has started still opens Overview.
 function openTrendsLanding() {
   if (session.route.page !== "dashboard") return false;
   const ticker = fallbackSelection(session.prefs, session.selected);

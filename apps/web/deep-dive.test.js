@@ -473,7 +473,7 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "trends");
 });
 
-test("the forecast notice sits under the scoreboard title on Trends, not in Deep dive", () => {
+test("the forecast notice sits under the scoreboard title on Overview, not in Research", () => {
   const notice = renderTrendDisclaimer(sample, fakeDocument(false));
   assert.equal(byClass(notice, "stock-section-title")[0].textContent, "Scoreboard");
   assert.equal(byClass(notice, "deep-dive-banner")[0].textContent, sample.deep_dive.disclaimer);

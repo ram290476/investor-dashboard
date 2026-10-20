@@ -46,7 +46,7 @@ test("every page renders the one shared chart panel (#203)", () => {
   assert.doesNotMatch(stock, /page\.append\(\s*chart,/);
 });
 
-test("Trends keeps the full chart and Fundamentals and KPIs return after the quote", () => {
+test("Overview keeps the full chart and Fundamentals and KPIs return after the quote", () => {
   const panel = slice("function renderPricePanel", "function renderContracts");
   assert.match(panel, /renderPeriodChips\(/);
   assert.match(panel, /renderTrend\(/);
