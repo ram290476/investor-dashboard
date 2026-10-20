@@ -144,7 +144,7 @@ test("the company page renders former main-page panels on Trends and keeps the t
   assert.match(page, /renderQuarterlyNotes\(charts\.guidance\)/);
   assert.match(app.slice(app.indexOf("function renderQuarterlyNotes"), app.indexOf("function appendStatusAlerts")), /No quarterly notes yet/);
   assert.match(app, /navigateToStock\(ticker, \{ keepTab: true \}\)/);
-  const navigate = app.slice(app.indexOf("function navigateToStock"), app.indexOf("function navigateToResearch"));
+  const navigate = app.slice(app.indexOf("function navigateToStock"), app.indexOf("function navigateToDashboard"));
   assert.match(navigate, /keepTab/);
   assert.match(navigate, /session\.companyChart = null/);
   assert.match(app, /stockTabHash\(ticker, "trends"\)/);

@@ -5,7 +5,7 @@ import {
   ageLabel, calendarPanelModel, calendarSummary, catalystCategory, catalystCategoriesInWindow, catalystDateLabel,
   catalystMove, catalystMoveLabel, catalystRowView, catalystRows, countdownLabel, edgarCompanyUrl, edgarIndexUrl,
   filingDisplayTitle, filingPanelModel, filingsEmptyMessage, formatSentimentScore, markerIndex, movingAverageRows,
-  catalystSensitivityRows, newsClockTitle, newsEmptyMessage, newsGroupName, newsGroups, newsHeader, newsRowView, newsSummary, sensitivityRows,
+  catalystSensitivityRows, newsClockTitle, newsRowView, sensitivityRows,
   sentimentTone, sortedDrivers, stripPublisher,
 } from "./roadmap.js";
 

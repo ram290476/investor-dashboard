@@ -136,8 +136,7 @@ a {
   line-height: 1.6;
 }
 
-.eyebrow,
-.section-kicker {
+.eyebrow {
   color: var(--subtle);
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
@@ -192,8 +191,6 @@ a {
 
 .brand-line,
 .header-actions,
-.section-head,
-.ticker-actions,
 .chart-legend {
   display: flex;
   align-items: center;
@@ -213,8 +210,7 @@ a {
 }
 
 .market-badge,
-.chip,
-.data-badge {
+.chip {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -507,12 +503,6 @@ a {
   border-bottom: 1px solid var(--line);
 }
 
-.section-head {
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.section-head h2,
 .panel-header h2 {
   margin: 0;
   font-size: 14px;
@@ -1279,40 +1269,6 @@ a {
   padding: 8px 0;
 }
 
-.legend-mark {
-  display: inline-block;
-  width: 14px;
-  height: 2px;
-  margin-right: 6px;
-  vertical-align: middle;
-  background: var(--blue);
-}
-
-.driver-list,
-.status-list {
-  display: grid;
-  gap: 0;
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.driver-row,
-.status-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-height: 43px;
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-}
-
-.driver-row:last-child,
-.status-row:last-child {
-  border-bottom: 0;
-}
-
 .driver-name {
   overflow: hidden;
   color: var(--secondary);
@@ -1365,24 +1321,6 @@ a {
   font-size: 11px;
 }
 
-.news-label {
-  text-transform: lowercase;
-}
-
-.release-notes {
-  display: grid;
-  gap: 4px;
-  padding: 4px 16px 14px;
-}
-
-.release-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.driver-value,
 .mono {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
@@ -2566,8 +2504,7 @@ input::placeholder {
 /* end detail panel dismiss and follow mode (#94) */
 
 
-.rate-entry,
-.release-block {
+.rate-entry {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
   font-size: 12px;
@@ -3027,10 +2964,6 @@ input::placeholder {
   line-height: 1.5;
 }
 
-.mobile-view-tabs {
-  display: none;
-}
-
 .catalyst-filters {
   display: flex;
   flex-wrap: wrap;
@@ -3378,18 +3311,6 @@ a.catalyst-edgar-link:hover {
 }
 
 @media (max-width: 640px) {
-  .mobile-view-tabs {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
-    margin: 12px 0;
-  }
-
-  .mobile-view-tabs [aria-selected="true"] {
-    border-color: var(--blue);
-    background: var(--selected);
-  }
-
   .dashboard-grid .primary-column,
   .dashboard-grid .side-column {
     display: contents;
@@ -5669,12 +5590,6 @@ a.catalyst-edgar-link:hover {
 .deep-dive-tools {
   display: flex;
   gap: 6px;
-}
-
-@media (max-width: 1023px) {
-  .deep-dive-jump {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 640px) {

@@ -611,11 +611,6 @@ def _as_positive_spend(metric_id: str, value: float) -> float:
     return value
 
 
-def _parse_number(text: str) -> float | None:
-    value, _lower = _parse_cell(text)
-    return value
-
-
 def _parse_cell(text: str) -> tuple[float | None, bool]:
     """Parse one cell. `>550,000` keeps the number and a lower-bound flag. `—` is null."""
     cleaned = " ".join(str(text).replace("\u00a0", " ").replace("\u2013", "-").replace("\u2014", "-").split()).strip()
@@ -1322,12 +1317,6 @@ def fiscal_end_month_from_submissions(submissions: dict) -> int:
     return 12
 
 
-def _quarter_months(fiscal_end_month: int, quarter: int) -> set[int]:
-    """Months that belong to a fiscal quarter. A January year end makes Q2 May-July."""
-    first = ((fiscal_end_month % 12) + (quarter - 1) * 3) % 12 + 1
-    return {first, first % 12 + 1, (first + 1) % 12 + 1}
-
-
 def _filing_key(fact: dict) -> tuple:
     """Facts that share an accession are one filing. Comparatives reuse that filing's fy/fp."""
     accn = str(fact.get("accn") or fact.get("accession") or "").strip()
@@ -1386,13 +1375,6 @@ def _periods_for_facts(facts: list[dict], fiscal_end_month: int) -> dict[int, st
             )
             labeled[id(fact)] = anchor_label if use_filing_label else from_dates
     return labeled
-
-
-def _period_from_fact(fact: dict, fiscal_end_month: int, periods: dict[int, str] | None = None) -> str:
-    """Period of one fact. Pass `periods` from `_periods_for_facts` when the filing is known."""
-    if periods is not None and id(fact) in periods:
-        return periods[id(fact)]
-    return _fiscal_period(date.fromisoformat(str(fact["end"])), fiscal_end_month)
 
 
 _MONTHS = {
@@ -3533,15 +3515,6 @@ def _jsonable(row: dict) -> dict:
         else:
             copied[key] = value
     return copied
-
-
-def _source_kind_for_title(title: str) -> str:
-    kind = classify_exhibit_title(title)
-    if kind == "press_release":
-        return "press_release"
-    if kind == "deck":
-        return "deck"
-    return "other"
 
 
 # Leave headroom under the 300s collect Lambda so a slow ticker stops as partial, not a timeout.

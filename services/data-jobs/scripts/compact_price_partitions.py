@@ -39,7 +39,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "app"))
 import lake
 
 LEGACY_KEY = re.compile(r"^curated/prices_daily/ticker=(?P<ticker>[^/]+)/(date=|batch_start=)[^/].*\.parquet$")
-YEARLY_KEY = re.compile(r"^curated/prices_daily/ticker=[^/]+/year=\d{4}/prices\.parquet$")
 
 
 def legacy_objects(bucket: str, tickers: list[str] | None = None) -> dict[str, list[str]]:

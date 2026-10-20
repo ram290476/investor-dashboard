@@ -16,7 +16,7 @@ import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAm
 import { applyTheme, overlayColor } from "./theme.js";
 import { clearRefreshToken, createAuthClient, performAuthorizedRequest } from "./auth-session.js";
 import { createSafeStorage } from "./safe-storage.js";
-import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
   catalystDateLabel, catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
@@ -27,7 +27,7 @@ import { legendItems, overlayCorrelation, overlayReadoutItems, seriesLineStyle }
 import { sparkline, sparklineModel, sparklineSummary } from "./sparkline.js";
 import {
   driverChange, driverLabel, driverRows, driverTrend, driverValue,
-  number as signalNumber, pressureSummary, RELEASE_WINDOWS, signed,
+  number as signalNumber, pressureSummary, signed,
 } from "./signals.js";
 import {
   correlationPanelModel, deltaText, formatLink, marketComparisonModel, nowText,
@@ -411,19 +411,6 @@ function finishPanelFocus(restoreDrawer) {
     panel.scrollIntoView({ block: "nearest", behavior });
     panel.querySelector("[data-drawer-toggle]")?.focus();
   });
-}
-
-function claimMobileId(mainGrid, view) {
-  const elementId = `mobile-panel-${view}`;
-  if (mainGrid.querySelector(`#${elementId}`)) return;
-  const host = mainGrid.querySelector(`[data-mobile-panel="${view}"]`);
-  if (host) host.id = elementId;
-  else {
-    const anchor = node("div", "mobile-panel-anchor");
-    anchor.dataset.mobilePanel = view;
-    anchor.id = elementId;
-    mainGrid.append(anchor);
-  }
 }
 
 function selectCatalyst(event) {
@@ -1208,10 +1195,6 @@ function renderDrawer({ id, title, subtitle, summary, mobilePanel, panelId, keys
   });
   panel.append(header, body);
   return panel;
-}
-
-function shortReleaseDate(value) {
-  return formatConsumerDate(value) || readablePanelText(value);
 }
 
 function snapshotLabel(value) {
@@ -4408,18 +4391,6 @@ function navigateToStock(ticker, options = {}) {
   loadChartData(symbol);
   loadStockPage(symbol);
   requestAnimationFrame(() => root.querySelector("#stock-title")?.focus());
-}
-
-function navigateToResearch(ticker) {
-  const path = tickerResearchPath(ticker);
-  if (!path) return;
-  if (session.route.page !== "research") session.dashboardSelection = session.selected;
-  history.pushState(history.state, "", path);
-  session.route = routeFromPath(path);
-  session.selected = session.route.ticker;
-  renderDashboard();
-  loadChartData(session.selected);
-  requestAnimationFrame(() => root.querySelector("#research-title")?.focus());
 }
 
 function navigateToDashboard(ticker = session.dashboardSelection || session.selected) {

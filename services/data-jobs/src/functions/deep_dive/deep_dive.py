@@ -351,12 +351,6 @@ def _series_from_counts(metric_id: str, parsed: dict, source: dict) -> dict:
     }
 
 
-def _entry_identity(entry: dict) -> tuple:
-    dimensions = entry.get("dimensions") if isinstance(entry.get("dimensions"), dict) else {}
-    keys = tuple(sorted((str(key), str(dimensions[key])) for key in dimensions))
-    return (str(entry.get("metric_id") or ""), str(entry.get("period") or ""), keys)
-
-
 def normalize_manual_entry(entry: dict) -> dict | None:
     """Keep a sourced manual value and force it to pending review."""
     if not isinstance(entry, dict):

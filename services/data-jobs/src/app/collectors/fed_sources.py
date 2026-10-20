@@ -21,7 +21,6 @@ import io
 from datetime import date, datetime
 from html.parser import HTMLParser
 
-ATLANTA_PAGE = "https://www.atlantafed.org/cenfis/market-probability-tracker"
 CLEVELAND_PAGE = "https://www.clevelandfed.org/indicators-and-data/inflation-nowcasting"
 MEASURES = ("Core CPI", "CPI", "Core PCE", "PCE")  # longest match first
 

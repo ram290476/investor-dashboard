@@ -4,25 +4,9 @@ No login needed for market data. Documented base is external-api.kalshi.com (the
 api.elections.kalshi.com still works and is allowlisted too). Prices are fixed-point
 dollar strings (e.g. "0.5600"), read as probabilities. Thin markets can be noisy, so
 each row keeps bid, ask and volume next to the mid used as the probability.
-
-Series tickers: KXFEDDECISION is confirmed on kalshi.com. The CPI series ticker is set
-in KALSHI_SERIES (default KXCPI) and should be checked against /trade-api/v2/series on
-the first run.
 """
 
 from __future__ import annotations
-
-import os
-
-BASE = "https://external-api.kalshi.com/trade-api/v2"
-SERIES = [s.strip() for s in os.getenv("KALSHI_SERIES", "KXFEDDECISION,KXCPI").split(",") if s.strip()]
-
-
-def markets_params(series_ticker: str, cursor: str | None = None) -> dict:
-    p = {"series_ticker": series_ticker, "status": "open", "limit": 1000}
-    if cursor:
-        p["cursor"] = cursor
-    return p
 
 
 def _f(x) -> float | None:
