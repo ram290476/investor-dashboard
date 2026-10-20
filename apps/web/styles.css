@@ -3659,6 +3659,13 @@ a.catalyst-edgar-link:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.stock-page > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .stock-section {
@@ -5092,6 +5099,31 @@ a.catalyst-edgar-link:hover {
 .deep-dive {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Charts scale to the panel. Tables and the section strip scroll inside
+   themselves so the page never grows sideways. */
+.deep-dive > *,
+.deep-dive-section,
+.deep-dive-grid > *,
+.section-strip,
+.section-strip-track,
+.deep-dive-panel,
+.deep-dive-chart-wrap,
+.deep-dive-map-wrap,
+.deep-dive-forecast {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.deep-dive-panel,
+.deep-dive-chart-wrap,
+.deep-dive-map-wrap,
+.deep-dive-forecast {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .deep-dive-banner {
@@ -5175,6 +5207,8 @@ a.catalyst-edgar-link:hover {
   z-index: 5;
   height: 0;
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .section-strip-track {
@@ -5184,7 +5218,10 @@ a.catalyst-edgar-link:hover {
   right: 0;
   display: flex;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -5318,6 +5355,8 @@ a.catalyst-edgar-link:hover {
 }
 
 .deep-dive-tile-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--text);
   font-size: 17px;
   font-weight: 600;
@@ -5347,6 +5386,7 @@ a.catalyst-edgar-link:hover {
 .deep-dive-spark {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
 }
 
@@ -5464,10 +5504,18 @@ a.catalyst-edgar-link:hover {
 }
 
 .deep-dive-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   margin-top: 8px;
   border-collapse: collapse;
   font-size: 12px;
+}
+
+.deep-dive-panel h2,
+.deep-dive-milestone-label,
+.deep-dive-milestone-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .deep-dive-table th,
