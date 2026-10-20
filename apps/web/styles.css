@@ -3729,7 +3729,11 @@ a.catalyst-edgar-link:hover {
 
 .stock-page-tabs .stock-tab {
   width: auto;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
   height: auto;
   min-height: 36px;
   padding: 0 14px;
@@ -4131,18 +4135,16 @@ a.catalyst-edgar-link:hover {
   top: 0;
   z-index: 6;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
   min-height: 44px;
   margin: 0;
   padding: 3px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: thin;
+  overflow-x: clip;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
@@ -5103,8 +5105,7 @@ a.catalyst-edgar-link:hover {
   max-width: 100%;
 }
 
-/* Charts scale to the panel. Tables and the section strip scroll inside
-   themselves so the page never grows sideways. */
+/* Charts and tables fit the panel. The ticker bar is the only horizontal scroller. */
 .deep-dive > *,
 .deep-dive-section,
 .deep-dive-grid > *,
@@ -5121,9 +5122,10 @@ a.catalyst-edgar-link:hover {
 .deep-dive-panel,
 .deep-dive-chart-wrap,
 .deep-dive-map-wrap,
-.deep-dive-forecast {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+.deep-dive-forecast,
+.section-strip,
+.section-strip-track {
+  overflow-x: clip;
 }
 
 .deep-dive-banner {
@@ -5220,8 +5222,8 @@ a.catalyst-edgar-link:hover {
   gap: 4px;
   min-width: 0;
   max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+  flex-wrap: wrap;
+  overflow-x: clip;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -5248,9 +5250,10 @@ a.catalyst-edgar-link:hover {
 }
 
 .section-strip-chip {
-  flex: none;
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   min-height: 28px;
   padding: 4px 10px;
   border-radius: 999px;
@@ -5259,7 +5262,8 @@ a.catalyst-edgar-link:hover {
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .section-strip-chip[aria-current="location"] {
@@ -5504,10 +5508,11 @@ a.catalyst-edgar-link:hover {
 }
 
 .deep-dive-table {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  min-width: 0;
   margin-top: 8px;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 12px;
 }
 
@@ -5520,9 +5525,12 @@ a.catalyst-edgar-link:hover {
 
 .deep-dive-table th,
 .deep-dive-table td {
+  min-width: 0;
   padding: 4px 6px;
   border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
   text-align: left;
+  white-space: normal;
 }
 
 .deep-dive-table th {

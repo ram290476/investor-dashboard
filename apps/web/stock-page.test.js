@@ -521,7 +521,9 @@ test("company page order: Technical Summary, then quote headers on KPIs and Fund
   const barAt = styles.indexOf(".stock-page-tabs {");
   const bar = styles.slice(barAt, styles.indexOf("}", barAt) + 1);
   assert.match(bar, /display:\s*flex/);
-  assert.match(bar, /overflow-x:\s*auto/);
+  assert.match(bar, /flex-wrap:\s*wrap/);
+  assert.match(bar, /overflow-x:\s*clip/);
+  assert.doesNotMatch(bar, /overflow-x:\s*auto/);
   assert.doesNotMatch(bar, /display:\s*none/);
   assert.doesNotMatch(styles, /\.stock-page-tabs\s*\{[^}]*grid-template-columns:\s*repeat\(4/);
   assert.match(styles, /\.stock-tab-deep\[aria-selected="true"\]/);

@@ -546,9 +546,12 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.match(app, /hasDeepDive\(payload\)/);
   assert.match(app, /stock-tab-mark", "\+"/);
   assert.match(deepStyles, /grid-template-columns:\s*repeat\(6/);
-  assert.match(deepStyles, /\.deep-dive-panel,\s*\n\.deep-dive-chart-wrap,\s*\n\.deep-dive-map-wrap,\s*\n\.deep-dive-forecast\s*\{[^}]*overflow-x:\s*auto/);
+  assert.match(deepStyles, /\.deep-dive-panel,\s*\n\.deep-dive-chart-wrap,\s*\n\.deep-dive-map-wrap,\s*\n\.deep-dive-forecast,\s*\n\.section-strip,\s*\n\.section-strip-track\s*\{[^}]*overflow-x:\s*clip/);
   assert.match(deepStyles, /\.deep-dive-chart,\s*\n\.deep-dive-map,\s*\n\.deep-dive-spark\s*\{[^}]*max-width:\s*100%/);
-  assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*width:\s*max-content/);
+  assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*width:\s*100%/);
+  assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*table-layout:\s*fixed/);
+  assert.match(deepStyles, /\.section-strip-track\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.doesNotMatch(deepStyles, /\.deep-dive-panel[\s\S]*overflow-x:\s*auto/);
   assert.match(styles, /\.stock-page-tabs\s*\{[^}]*display:\s*flex/);
   assert.match(ci, /node --check apps\/web\/deep-dive\.js/);
   assert.match(ci, /node --check apps\/web\/geo\.js/);
