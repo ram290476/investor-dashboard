@@ -10,6 +10,7 @@ import {
   hasDeepDive,
   orderedDeepDiveSections,
   renderDeepDive,
+  renderTrendDisclaimer,
   revealDeepDiveSection,
   trendTone,
 } from "./deep-dive.js";
@@ -452,22 +453,43 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(trendTone(0, true), "flat");
   assert.equal(STOCK_TABS.length, 4);
   assert.equal(stockTabs(null).length, 4);
-  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["overview", "trends", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["overview", "trends", "deep-dive", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["trends", "overview", "deep-dive", "fundamentals", "kpis"]);
   assert.equal(stockTabs(sample).find((tab) => tab.id === "deep-dive").label, "Deep dive");
   assert.equal(stockTabs(sample).some((tab) => tab.id === "admin"), false);
-  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(sample)), "overview");
+  assert.equal(nextStockTab("overview", "ArrowRight", stockTabs(sample)), "deep-dive");
   assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "fundamentals");
   assert.equal(nextStockTab("fundamentals", "ArrowLeft", stockTabs(sample)), "deep-dive");
-  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "overview");
+  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "trends");
   assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "kpis");
-  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "overview");
+  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "trends");
+});
+
+test("the forecast notice sits under the scoreboard title on Trends, not in Deep dive", () => {
+  const notice = renderTrendDisclaimer(sample, fakeDocument(false));
+  assert.equal(byClass(notice, "stock-section-title")[0].textContent, "Scoreboard");
+  assert.equal(byClass(notice, "deep-dive-banner")[0].textContent, sample.deep_dive.disclaimer);
+  assert.equal(notice.children[0].className, "stock-section-title");
+  assert.equal(notice.children[1].className, "deep-dive-banner");
+  const plain = {
+    deep_dive: {
+      disclaimer: "Placeholder only — not a real forecast model.",
+      sections: [{ id: "mix", title: "Mix", panels: [{ kind: "table", title: "Mix" }] }],
+    },
+  };
+  const moved = renderTrendDisclaimer(plain, fakeDocument(false));
+  assert.equal(byClass(moved, "stock-section-title").length, 0);
+  assert.match(moved.children[0].textContent, /not a real forecast model/);
+  assert.equal(renderTrendDisclaimer({}, fakeDocument(false)), null);
+  assert.doesNotMatch(source, /TSLA|Tesla|SPCX/);
 });
 
 test("rendered deep dive shows pending review, empty copy, and a placeholder forecast", () => {
   const view = renderDeepDive(sample, fakeDocument(false));
   const text = textOf(view);
-  assert.match(text, /Figures appear when a source has been collected/);
+  assert.equal(byClass(view, "deep-dive-banner").length, 0);
+  assert.doesNotMatch(text, /Figures appear when a source has been collected/);
   assert.match(text, /Not yet disclosed/);
   assert.match(text, /Pending review/);
   assert.match(text, /Low confidence/);

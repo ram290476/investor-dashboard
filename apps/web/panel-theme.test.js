@@ -107,7 +107,7 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   const page = slice("function renderStockPage", "function renderResearchPage");
   const heading = page.slice(0, page.indexOf("const page = node"));
   assert.doesNotMatch(heading, /renderMetricReview/);
-  assert.match(page, /id === "kpis"\) block\.append\(renderMetricReview\(\)\)/);
+  assert.match(page, /id === "kpis" \|\| id === "fundamentals"\) block\.append\(renderMetricReview\(\)\)/);
   const review = styles.slice(styles.indexOf(".metric-review {"), styles.indexOf(".metric-review-option {"));
   assert.match(review, /margin-bottom:\s*var\(--space-3\)/);
   assert.doesNotMatch(review, /margin(?:-top|-bottom)?:\s*-/);
@@ -120,7 +120,8 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   assert.match(toggle, /localPrefs\.getItem\("investor-dashboard\.metric-review"\)/);
   assert.match(toggle, /localPrefs\.setItem\("investor-dashboard\.metric-review"/);
   const price = slice("function renderPricePanel", "function renderContracts");
-  assert.match(price, /mergeCompanyFundamentals\(/);
+  assert.doesNotMatch(price, /mergeCompanyFundamentals\(/);
+  assert.match(price, /renderPeriodChips\(/);
   const appended = page.slice(page.indexOf("page.append("));
   const metricsAt = appended.indexOf("renderCompanyMetrics(charts, pageState)");
   const kpisAt = appended.indexOf('section("kpis", "Operating KPIs", charts.operating');

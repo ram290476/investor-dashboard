@@ -80,12 +80,6 @@ export function companyBookmarks(tab, context = {}) {
   if (tab !== "overview") return [];
   return [
     {
-      id: "price",
-      title: "Price",
-      anchorId: "stock-panel-price",
-      icon: "price",
-    },
-    {
       id: "technical",
       title: "Technical Summary",
       anchorId: "stock-panel-technical",

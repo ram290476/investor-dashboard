@@ -73,8 +73,10 @@ test("missing provider data never throws", () => {
   assert.equal(technicalSummaryView({ example: false, horizons: [] }).example, false);
 });
 
-test("the panel sits directly below the chart, uses theme tokens and has no hard-coded tickers", () => {
-  assert.match(app, /page\.append\(\s*chart,\s*renderTechnicalSummary\(session\.selected, history\),/);
+test("the Technical tab shows the summary without the price chart, and uses theme tokens", () => {
+  const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
+  assert.match(page, /renderTechnicalSummary\(session\.selected, history\)/);
+  assert.doesNotMatch(page, /page\.append\(\s*chart,/);
   const render = app.slice(app.indexOf("function technicalSummaryFor"), app.indexOf("function renderStockPage"));
   assert.match(render, /Example data/);
   assert.match(render, /view\.disclaimer/);

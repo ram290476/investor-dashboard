@@ -9,7 +9,7 @@ const TICKER = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 /**
  * Options for the shared panel on one page.
  * companyLink: show "Open company page" (the dashboard only; the company page is the target).
- * stockPanel: company-page tab the panel belongs to (the chart sits on Overview).
+ * stockPanel: company-page tab the quote header belongs to. Callers set Fundamentals and KPIs.
  * mobilePanel / id: dashboard phone tab wiring.
  */
 export function chartPanelOptions(page, ticker) {

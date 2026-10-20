@@ -7,8 +7,8 @@ import { catalystDateLabel } from "./roadmap.js";
 export const LONG_PRESS_MS = 550;
 
 export const STOCK_TABS = [
-  { id: "overview", label: "Overview" },
   { id: "trends", label: "Trends" },
+  { id: "overview", label: "Technical" },
   { id: "fundamentals", label: "Fundamentals" },
   { id: "kpis", label: "KPIs" },
 ];
@@ -16,7 +16,7 @@ export const STOCK_TABS = [
 // Last tab, and only for a signed-in admin. The demo account is never an admin.
 export const ADMIN_STOCK_TAB = { id: "admin", label: "Admin" };
 
-const STOCK_TAB_ORDER = ["overview", "trends", "deep-dive", "fundamentals", "kpis"];
+const STOCK_TAB_ORDER = ["trends", "overview", "deep-dive", "fundamentals", "kpis"];
 
 // Last resort only: companyName() uses the API company_name / SEC entity name first.
 // SPCX has no SEC entity name, so it keeps a display name here.
@@ -182,7 +182,7 @@ export function companyDescription(payload, tickerData) {
 }
 
 /**
- * Company tabs, in order. Deep dive sits between Trends and Fundamentals, and only when sections exist.
+ * Company tabs, in order. Technical follows Trends. Deep dive sits between Technical and Fundamentals, and only when sections exist.
  * Admin is last, and only when options.admin is true (a signed-in admin, never the demo account).
  */
 export function stockTabs(payload, options = {}) {
@@ -201,7 +201,7 @@ export function stockTabs(payload, options = {}) {
 /**
  * Tab a company hash may open.
  * Admin is refused unless that tab is in the visible list, so a non-admin URL cannot open it.
- * A bare company hash is Overview. An unknown tab keeps the current one when it is still visible.
+ * A bare company hash is Technical. An unknown tab keeps the current one when it is still visible.
  */
 export function visibleStockTab(hashTab, tabs, current = "overview") {
   const ids = (Array.isArray(tabs) ? tabs : [])

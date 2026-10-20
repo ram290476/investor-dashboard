@@ -525,6 +525,19 @@ a {
   border-bottom: 1px solid var(--line);
 }
 
+.price-panel > .overview:last-child {
+  border-bottom: 0;
+}
+
+.trend-scoreboard-notice {
+  display: grid;
+  gap: 8px;
+}
+
+.trend-scoreboard-notice .stock-section-title {
+  margin: 0;
+}
+
 .overview-quote {
   min-width: 0;
   flex: 1 1 auto;

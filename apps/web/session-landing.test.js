@@ -12,31 +12,31 @@ function accessToken(claims) {
   return `header.${payload}.sig`;
 }
 
-test("the first load of a session lands on Overview and rewrites a deep link", () => {
-  for (const hashTab of ["trends", "fundamentals", "kpis", "deep-dive", "admin", ""]) {
+test("the first load of a session lands on Trends and rewrites a deep link", () => {
+  for (const hashTab of ["overview", "fundamentals", "kpis", "deep-dive", "admin", ""]) {
     const landing = sessionStockLanding({ sessionStarted: false, hashTab, routePage: "stock" });
-    assert.equal(landing.tab, "overview");
+    assert.equal(landing.tab, "trends");
     assert.equal(landing.markSession, true);
-    assert.equal(landing.rewriteOverview, true);
+    assert.equal(landing.rewriteLanding, true);
   }
   const dashboard = sessionStockLanding({ sessionStarted: false, hashTab: "", routePage: "dashboard" });
-  assert.deepEqual(dashboard, { tab: "overview", markSession: true, rewriteOverview: true });
+  assert.deepEqual(dashboard, { tab: "trends", markSession: true, rewriteLanding: true });
 });
 
 test("a later load in the same session keeps the tab in the URL", () => {
-  const trends = sessionStockLanding({ sessionStarted: true, hashTab: "trends", routePage: "stock" });
-  assert.deepEqual(trends, { tab: "trends", markSession: false, rewriteOverview: false });
+  const technical = sessionStockLanding({ sessionStarted: true, hashTab: "overview", routePage: "stock" });
+  assert.deepEqual(technical, { tab: "overview", markSession: false, rewriteLanding: false });
   const bare = sessionStockLanding({ sessionStarted: true, hashTab: "", routePage: "stock" });
   assert.equal(bare.tab, "overview");
-  assert.equal(bare.rewriteOverview, false);
+  assert.equal(bare.rewriteLanding, false);
   const home = sessionStockLanding({ sessionStarted: true, hashTab: "", routePage: "dashboard" });
   assert.equal(home.tab, "trends");
-  assert.equal(home.rewriteOverview, false);
+  assert.equal(home.rewriteLanding, false);
 });
 
 test("research and other routes do not consume the first-load flag", () => {
   const research = sessionStockLanding({ sessionStarted: false, hashTab: "", routePage: "research" });
-  assert.deepEqual(research, { tab: "", markSession: false, rewriteOverview: false });
+  assert.deepEqual(research, { tab: "", markSession: false, rewriteLanding: false });
   const missing = sessionStockLanding({ sessionStarted: false, routePage: "not-found" });
   assert.equal(missing.markSession, false);
 });
@@ -64,7 +64,11 @@ test("first load is detected with sessionStorage and not localStorage", () => {
   const render = app.slice(app.indexOf("function renderDashboardNow"), app.indexOf("async function refreshData"));
   const landingAt = render.indexOf("applySessionStockLanding()");
   const trendsAt = render.indexOf("openTrendsLanding()");
-  assert.ok(landingAt >= 0 && trendsAt > landingAt, "Overview landing runs before the Trends fallback");
+  assert.ok(landingAt >= 0 && trendsAt > landingAt, "session landing runs before the dashboard Trends fallback");
+  const landing = app.slice(app.indexOf("function applySessionStockLanding"), app.indexOf("function openTrendsLanding"));
+  assert.match(landing, /rewriteLanding/);
+  assert.match(landing, /stockTabHash\(ticker, landing\.tab\)/);
+  assert.doesNotMatch(landing, /rewriteOverview|stockTabHash\(ticker, "overview"\)/);
   assert.doesNotMatch(app, /\b(window\.)?(sessionStorage|localStorage)\s*\./);
 });
 

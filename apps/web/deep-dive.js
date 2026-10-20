@@ -11,6 +11,32 @@ export function hasDeepDive(payload) {
   return Array.isArray(payload?.deep_dive?.sections) && payload.deep_dive.sections.length > 0;
 }
 
+function scoreboardSection(sections) {
+  const list = Array.isArray(sections) ? sections : [];
+  return list.find((item) => {
+    if (!item || typeof item !== "object") return false;
+    if (item.id === "scoreboard") return true;
+    if (/scoreboard/i.test(String(item.title || ""))) return true;
+    return (item.panels || []).some((panel) => panel?.kind === "scoreboard");
+  }) || null;
+}
+
+/**
+ * Placeholder notice for the Trends tab. It sits under the scoreboard title when
+ * the payload has one, and it is not drawn inside the Deep dive tab.
+ */
+export function renderTrendDisclaimer(payload, doc = document) {
+  if (!hasDeepDive(payload)) return null;
+  const dive = payload.deep_dive;
+  const text = String(dive.disclaimer || "").trim()
+    || "Figures appear when a source has been collected. Pending review values stay labeled. Empty series are not zero.";
+  const block = el(doc, "div", "trend-scoreboard-notice");
+  const section = scoreboardSection(dive.sections);
+  if (section?.title) block.append(el(doc, "h3", "stock-section-title", section.title));
+  block.append(el(doc, "p", "deep-dive-banner", text));
+  return block;
+}
+
 /** Primary sections first, then secondary, so the section strip matches the page. */
 export function orderedDeepDiveSections(sections) {
   const list = Array.isArray(sections) ? sections : [];
@@ -132,10 +158,6 @@ export function renderDeepDive(payload, doc = document, options = {}) {
     root.append(el(doc, "p", "data-state", "No deep dive is configured for this company."));
     return root;
   }
-  const banner = el(doc, "p", "deep-dive-banner");
-  banner.textContent = dive.disclaimer
-    || "Figures appear when a source has been collected. Pending review values stay labeled. Empty series are not zero.";
-  root.append(banner);
 
   const ticker = options.ticker || payload?.ticker || "";
   const nav = renderSectionNav(orderedDeepDiveSections(dive.sections), ticker, root, doc, options);
