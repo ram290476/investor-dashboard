@@ -81,7 +81,7 @@ test("company panel is generic for any watchlist ticker", () => {
 test("Trends on the company page includes Filings & events, and research keeps its panel", () => {
   const stock = slice("function renderStockPage", "function renderResearchPage");
   assert.match(stock, /renderTrendsLayout\(/);
-  const trends = slice("function renderTrendsLayout", "function renderQuarterlyNotes");
+  const trends = slice("function renderTrendsLayout", "function appendStatusAlerts");
   assert.match(trends, /renderFilings\(tickerData\)/);
   assert.match(trends, /tagTrendSection\(filings, "filings"\)|mark\(filings, "filings"\)/);
   const research = app.slice(app.indexOf("function renderResearchPage"));

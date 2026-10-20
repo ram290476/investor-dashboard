@@ -107,8 +107,8 @@ test("overview tiles stay name-only jump targets", () => {
     fundamentals: [],
     guidance: [{ latestPeriod: "2026Q3", text: "Raised the outlook." }],
   });
-  assert.deepEqual(bookmarks.map((item) => item.id), ["technical", "quarterly-notes"]);
-  assert.deepEqual(bookmarks.map((item) => item.title), ["Technical Summary", "Quarterly notes"]);
+  assert.deepEqual(bookmarks.map((item) => item.id), ["technical"]);
+  assert.deepEqual(bookmarks.map((item) => item.title), ["Technical Summary"]);
   assert.equal(bookmarks.some((item) => item.id === "metrics"), false);
   assert.equal(bookmarks.every((item) => item.headline == null), true);
 });
@@ -220,10 +220,9 @@ test("company section chips scroll to the section and write the tab hash", () =>
 test("the section strip is visible on load and tracks the section in view", () => {
   const bookmarks = companyBookmarks("overview", {
     history: [{ close: 10 }, { close: 12 }],
-    guidance: [{ id: "outlook", latestPeriod: "2026Q3", text: "Raised the outlook.", sourceUrl: "https://example.com/letter" }],
   });
   const page = element("div");
-  for (const id of ["price", "technical", "metrics", "quarterly-notes"]) {
+  for (const id of ["price", "technical", "metrics"]) {
     const section = element("section");
     section.dataset.companySection = id;
     section.dataset.stockPanel = "overview";
@@ -244,20 +243,19 @@ test("the section strip is visible on load and tracks the section in view", () =
   assert.equal(String(strip.className).includes("is-visible"), true);
   assert.equal(String(strip.className).includes("section-strip-docked"), true);
   assert.equal(strip.getAttribute("aria-hidden"), undefined);
-  const notesChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "quarterly-notes");
-  assert.equal(notesChip.getAttribute("tabindex"), undefined);
-  assert.equal(notesChip.href, "#stock/EXMPL/overview/quarterly-notes");
-  const notes = page.children.find((child) => child.dataset.companySection === "quarterly-notes");
-  observers[0].callback([{ target: notes, isIntersecting: true, intersectionRatio: 0.8 }]);
-  assert.equal(notesChip.getAttribute("aria-current"), "location");
+  assert.equal(byClass(view, "section-strip-chip").some((chip) => chip.dataset.sectionId === "quarterly-notes"), false);
   const technicalChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "technical");
-  assert.equal(technicalChip.getAttribute("aria-current"), undefined);
+  assert.equal(technicalChip.getAttribute("tabindex"), undefined);
+  assert.equal(technicalChip.href, "#stock/EXMPL/overview/technical");
+  const technical = page.children.find((child) => child.dataset.companySection === "technical");
+  observers[0].callback([{ target: technical, isIntersecting: true, intersectionRatio: 0.8 }]);
+  assert.equal(technicalChip.getAttribute("aria-current"), "location");
   assert.equal(String(strip.className).includes("is-visible"), true);
   assert.equal(strip.getAttribute("aria-hidden"), undefined);
-  assert.equal(notesChip.getAttribute("tabindex"), undefined);
-  const notesBookmark = bookmarks.find((item) => item.id === "quarterly-notes");
-  assert.equal(notesBookmark.title, "Quarterly notes");
-  assert.equal(notesBookmark.headline, undefined);
+  assert.equal(technicalChip.getAttribute("tabindex"), undefined);
+  const technicalBookmark = bookmarks.find((item) => item.id === "technical");
+  assert.equal(technicalBookmark.title, "Technical Summary");
+  assert.equal(technicalBookmark.headline, undefined);
 });
 
 test("the company page renders the sticky section strip for every tab except deep dive", () => {

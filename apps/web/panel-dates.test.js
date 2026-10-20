@@ -186,7 +186,7 @@ test("rendered metric and dashboard panel text has no ISO dates", () => {
   assert.match(rendered, /Adjusted EBITDA/);
   assert.match(rendered, /Energy generation/);
   assert.match(rendered, /Storage revenue/);
-  assert.match(rendered, /Quarterly notes/);
+  assert.doesNotMatch(rendered, /Quarterly notes/);
   assert.match(rendered, /Company metrics/);
 });
 

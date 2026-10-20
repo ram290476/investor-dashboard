@@ -612,46 +612,6 @@ export function callsCopy() {
   };
 }
 
-function notePoints(card) {
-  const points = [];
-  const text = String(card?.text || "").trim();
-  if (text) points.push(text);
-  if (card?.latest && card.latest !== "not reported") {
-    const line = `${card.name || "Note"}: ${card.latest}`;
-    if (!points.includes(line)) points.push(line);
-  }
-  for (const row of card?.rows || []) {
-    if (typeof row === "string" && row.trim()) points.push(row.trim());
-    else if (row && typeof row === "object") {
-      const point = String(row.point || row.text || row.note || row.title || "").trim();
-      if (point) points.push(point);
-    }
-  }
-  return points;
-}
-
-function quarterLabel(value) {
-  const match = QUARTER.exec(String(value || "").trim());
-  return match ? `Q${match[2]} ${match[1]}` : String(value || "").trim();
-}
-
-/** Guidance cards as quarterly notes, latest quarter first. The underlying metric fields stay on the cards. */
-export function quarterlyNoteEntries(guidance) {
-  const cards = [...(guidance || [])].filter(Boolean).sort((a, b) => (
-    String(b.latestPeriod || "").localeCompare(String(a.latestPeriod || ""))
-    || String(b.periodEnd || b.published || "").localeCompare(String(a.periodEnd || a.published || ""))
-  ));
-  return cards.map((card) => ({
-    id: card.id || "",
-    quarter: quarterLabel(card.latestPeriod),
-    date: String(card.periodEnd || card.published || "").trim(),
-    points: notePoints(card),
-    sourceUrl: card.sourceUrl || "",
-    sourceTitle: card.sourceTitle || "Source",
-    pending: Boolean(card.pending),
-  })).filter((note) => note.quarter || note.points.length || note.sourceUrl);
-}
-
 export function emptyKpiCopy() {
   return "No operating metrics collected yet.";
 }

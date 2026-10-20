@@ -26,7 +26,6 @@ const ICON_PATHS = {
   metrics: ["M3 4h10", "M3 8h10", "M3 12h6"],
   kpi: ["M3 13V9", "M7 13V5", "M11 13V7", "M3 13h10"],
   fundamentals: ["M4 2.5h6l3 3V13.5H4z", "M10 2.5V6h3"],
-  calls: ["M3 4h10v6H6l-3 2.5z"],
   default: ["M8 2.5l4.5 4.5L8 11.5 3.5 7z"],
 };
 
@@ -84,12 +83,6 @@ export function companyBookmarks(tab, context = {}) {
       title: "Technical Summary",
       anchorId: "stock-panel-technical",
       icon: "technical",
-    },
-    {
-      id: "quarterly-notes",
-      title: "Quarterly notes",
-      anchorId: "stock-panel-quarterly-notes",
-      icon: "calls",
     },
   ];
 }
