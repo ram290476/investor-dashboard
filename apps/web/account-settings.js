@@ -1,5 +1,5 @@
 // Account menu, the Settings pop-up, and the separate Data refresh pop-up.
-// Settings holds My tickers, Theme & display, Profile & time zone, and (admins only) Admin.
+// Settings holds Watchlist, Theme & display, Profile & time zone, and (admins only) Admin.
 // Data refresh is its own larger pop-up. Changes autosave through PUT /prefs.
 
 import { PERIODS, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
@@ -452,16 +452,16 @@ export function createAccountSettings(ctx) {
     return box;
   }
 
-  // ---------------------------------------------------------------- My tickers
+  // ---------------------------------------------------------------- Watchlist
   function renderTickersTab() {
     const prefs = session.prefs;
     const intro = el("div", "settings-intro");
     const count = `${prefs.tickers.length} ticker${prefs.tickers.length === 1 ? "" : "s"}`;
-    intro.append(el("h3", "", `My tickers · ${count} · ${prefs.pinned.length} of ${MAX_PINNED} pinned`));
+    intro.append(el("h3", "", `Watchlist · ${count} · ${prefs.pinned.length} of ${MAX_PINNED} pinned`));
     intro.append(el("p", "settings-hint", "Pinned tickers come first in the ticker bar. The order here is the bar order."));
 
     const list = el("ol", "my-tickers");
-    list.setAttribute("aria-label", "My tickers");
+    list.setAttribute("aria-label", "Watchlist");
     prefs.tickers.forEach((ticker, index) => list.append(renderTickerRow(ticker, index)));
     return [intro, list, renderAddSection()];
   }
@@ -537,7 +537,7 @@ export function createAccountSettings(ctx) {
     down.setAttribute("aria-label", `Move ${ticker} down`);
     down.disabled = index === prefs.tickers.length - 1;
     const remove = button("✕", "row-remove", () => removeWithUndo(ticker), `remove-${ticker}`);
-    remove.setAttribute("aria-label", `Remove ${ticker} from My tickers`);
+    remove.setAttribute("aria-label", `Remove ${ticker} from the watchlist`);
     if (!canRemove(prefs)) {
       remove.disabled = true;
       remove.title = "Keep at least one ticker.";
@@ -583,7 +583,7 @@ export function createAccountSettings(ctx) {
     const result = removeTicker(session.prefs, ticker);
     if (result.error) return;
     commit(result.prefs, { message: `${ticker} removed.` });
-    showToast(`${ticker} removed from My tickers.`, () => {
+    showToast(`${ticker} removed from the watchlist.`, () => {
       commit(restoreTicker(session.prefs, result.undo), { message: `${ticker} restored.` });
     });
     panel.querySelector('[data-key="add-input"]')?.focus();

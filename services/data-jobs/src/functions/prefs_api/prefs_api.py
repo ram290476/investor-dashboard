@@ -9,7 +9,7 @@ or write another user's item.
 
 Item (table user_prefs, partition key user_sub):
     user_sub      string   Cognito sub
-    tickers       list     "My tickers", in display order (max 25; legacy lists may shrink, not grow)
+    tickers       list     Watchlist, in display order (max 25; legacy lists may shrink, not grow)
     pinned        list     pinned tickers, in order (max 6, each also in tickers)
     display       map      time_zone (IANA, e.g. America/Los_Angeles), updown_palette (see PALETTES),
                            chart_period (1D|1W|1M|3M|YTD|1Y|3Y|5Y; unknown values are stored as 1M),

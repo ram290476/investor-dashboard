@@ -14,6 +14,10 @@ test("the account menu no longer offers All refresh jobs", () => {
 
 test("data refresh is its own dialog and is not a settings tab", () => {
   assert.deepEqual(SETTINGS_TABS.map((tab) => tab.id), ["tickers", "theme", "profile"]);
+  assert.equal(SETTINGS_TABS.find((tab) => tab.id === "tickers").label, "Watchlist");
+  assert.match(account, /Watchlist · \$\{count\}/);
+  assert.match(account, /aria-label", "Watchlist"/);
+  assert.doesNotMatch(account, /My tickers/);
   assert.equal(parseSettingsHash("#settings/refresh"), "refresh");
   assert.equal(parseSettingsHash("#settings/theme"), "theme");
   assert.match(account, /settings-dialog refresh-dialog/);
