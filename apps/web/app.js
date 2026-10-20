@@ -82,6 +82,7 @@ import {
   detailPanelGroups,
   fundamentalSummary,
   fundamentalObservation,
+  mergeCompanyFundamentals,
   isMarketOverlay,
   normalizePanelMode,
   overlayDefinition,
@@ -2164,12 +2165,26 @@ function renderChartPanel(page, ticker = session.selected, extras = {}) {
 }
 
 function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod, onSettingsChange, options = chartPanelOptions("dashboard")) {
+  // Fundamentals and KPIs keep the quote header only. Trends and research keep the chart.
+  const quoteOnly = options.stockPanel === "fundamentals" || options.stockPanel === "kpis";
+  if (!quoteOnly) {
+    chartData = mergeCompanyFundamentals(
+      chartData,
+      metricsForReview(session.stockPage[session.selected], session.metricReview || "all"),
+    );
+  }
   const history = servedPriceHistory(tickerData, chartDataState === "ready" ? chartData : null);
   const bars = validBars(history);
+  const chartSettings = chartSettingsView(session.prefs, session.selected);
   const requested = normalizePeriod(session.prefs.display?.chart_period);
   const waiting = chartDataState === "loading" && !periodQuote(history, requested).available;
   const activeId = waiting ? requested : resolveChartPeriod(requested, history);
   const quote = periodQuote(history, activeId);
+  const intradayBars = tickerData?.intraday?.bars || [];
+  const chartHistory = waiting ? [] : selectedChartBars({ ...tickerData, price_history: history });
+  const controls = quoteOnly ? null : chartControlsFor(tickerData, chartData, chartDataState, chartHistory);
+  const visibleOverlayIds = quoteOnly ? [] : controls.groups.flatMap(group => group.overlays).filter(overlay => overlay.available).map(overlay => overlay.id);
+  const visibleOverlays = quoteOnly ? [] : chartSettings.overlays.filter(id => visibleOverlayIds.includes(id));
   const panel = node("section", "panel price-panel");
   const overview = node("div", "overview");
   const quoteBlock = node("div", "overview-quote");
@@ -2186,6 +2201,7 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   } else if (quote.available) {
     meta.append(document.createTextNode(`As of ${asOf} · `));
     meta.append(node("span", polarity(quote.returnValue), `${formatPercent(quote.returnValue, 1)} ${activeId}`));
+    if (!quoteOnly) meta.append(document.createTextNode(" on the chart"));
   } else {
     meta.textContent = `As of ${asOf}`;
   }
@@ -2212,6 +2228,154 @@ function renderPricePanel(tickerData, chartData, chartDataState, onSelectPeriod,
   ));
   overview.append(quoteBlock, side);
   panel.append(overview);
+  if (quoteOnly) return panel;
+  panel.append(renderOverlayControls(controls.groups, chartDataState, onSettingsChange));
+  const filters = node("div", "catalyst-filters");
+  filters.setAttribute("role", "group");
+  filters.setAttribute("aria-label", "Chart catalyst categories");
+  filters.append(node("span", "signal-note", "Catalysts"));
+  const categories = catalystCategoriesInWindow(session.dashboard, session.selected, chartHistory);
+  categories.forEach(category => {
+    const enabled = activeCatalysts().includes(category.id);
+    const color = overlayColor(category.slot, session.prefs.display.theme);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "overlay-chip catalyst-chip";
+    toggle.style.setProperty("--catalyst-color", color);
+    toggle.dataset.catalystCategory = category.id;
+    toggle.dataset.catalystColor = color;
+    toggle.setAttribute("aria-pressed", String(enabled));
+    const swatch = node("span", "catalyst-swatch");
+    swatch.setAttribute("aria-hidden", "true");
+    toggle.append(swatch, document.createTextNode(category.label));
+    toggle.addEventListener("click", () => {
+      setActiveCatalysts(enabled ? activeCatalysts().filter(id => id !== category.id)
+        : [...activeCatalysts(), category.id]);
+      renderDashboard();
+      root.querySelector(`[data-catalyst-category="${category.id}"]`)?.focus({ preventScroll: true });
+    });
+    filters.append(toggle);
+  });
+  const clearCatalysts = action("Clear all", "overlay-chip bulk-control", () => {
+    setActiveCatalysts([]);
+    renderDashboard();
+    (root.querySelector("[data-catalyst-category]") || root.querySelector(".period-chip[aria-pressed='true']"))?.focus({ preventScroll: true });
+  });
+  clearCatalysts.dataset.clear = "catalysts";
+  clearCatalysts.setAttribute("aria-label", "Clear all catalyst markers");
+  clearCatalysts.disabled = !activeCatalysts().length;
+  filters.append(clearCatalysts);
+  if (chartDataState === "error") {
+    const error = node("p", "data-state error chart-data-error", "Historical overlay data could not be loaded. Use Refresh data to retry.");
+    error.setAttribute("role", "alert");
+    panel.append(error);
+  }
+
+  let placedLanes = false;
+  if (chartHistory.length >= 2) {
+    const chart = drawChart(chartHistory, session.selected, activeId, visibleOverlays, {
+      tickerData: { ...tickerData, price_history: history },
+      chartData,
+      dashboard: session.dashboard,
+      charts: session.chartData,
+    });
+    if (chart) {
+      const stack = node("div", "chart-stack");
+      stack.tabIndex = 0;
+      stack.setAttribute("role", "group");
+      stack.setAttribute("aria-label", `${session.selected} price chart and under-chart lanes. Left and right arrow keys move the date crosshair.`);
+      const readout = node("p", "chart-readout", "Hover, tap, or use arrow keys to read a date across the charts.");
+      readout.setAttribute("role", "status");
+      readout.setAttribute("aria-live", "polite");
+      const lanes = renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes, activeId);
+      const laneSeries = controls.lanes.filter((lane) => chartSettings.lanes.includes(lane.id)).map((lane) => ({
+        ...lane,
+        values: lane.id === "VOL" || chartDataState === "ready" ? laneValues(lane.id, chartHistory, chartData) : [],
+        percent: lane.id === "SI" && alignedLaneValues(chartData?.short_interest, chartHistory, "short_pct_denominator").some(isNumericValue),
+      }));
+      const theme = session.prefs.display.theme;
+      const overlaySeries = visibleOverlays.map((id) => ({
+        id,
+        definition: overlayDefinition(id),
+        unit: overlayUnit(id),
+        color: overlayColor(overlayDefinition(id)?.color, theme),
+        values: valuesForOverlay(id, {
+          bars: chartHistory,
+          tickerData: { ...tickerData, price_history: history },
+          chartData,
+          dashboard: session.dashboard,
+          charts: session.chartData,
+        }),
+      })).filter((overlay) => overlay.definition);
+      stack.append(readout, chart, lanes, renderTimeAxis(chartHistory, activeId));
+      attachSharedCrosshair(stack, chartHistory, activeId, laneSeries, overlaySeries);
+      panel.append(stack);
+      pinReadoutBelowControls(panel);
+      placedLanes = true;
+      const legend = node("div", "chart-legend");
+      const values = chartHistory.map(chartValue);
+      const numericValues = values.filter(isNumericValue).map(Number);
+      legend.append(
+        node(
+          "span",
+          "chart-legend-summary",
+          `${activeId} · ${formatPercent(activeId === "1D" && isNumericValue(live?.change_pct) ? live.change_pct : quote.returnValue, 1)} · ${chartHistory.length.toLocaleString()} ${activeId === "1D" && intradayBars.length >= 2 ? "hourly bars" : "sessions · daily closes"}`,
+        ),
+      );
+      if (chart.dataset.scaleMode === "percent") {
+        legend.append(node("span", "chart-legend-summary", "Price and market overlays · percent change from period start"));
+      }
+      legendItems({
+        ticker: session.selected,
+        prices: values,
+        adjustedMin: numericValues.length ? Math.min(...numericValues) : null,
+        adjustedMax: numericValues.length ? Math.max(...numericValues) : null,
+        overlays: overlaySeries.map(({ id, definition, values: series }) => {
+          const lastObservationIndex = series.findLastIndex(isNumericValue);
+          return {
+            definition,
+            values: series,
+            correlation: overlayCorrelation(id, tickerData, chartData),
+            summary: definition?.kind === "fundamental"
+              ? fundamentalSummary(id, chartData, chartHistory.at(-1)?.ts || chartHistory.at(-1)?.date)
+              : "",
+            observedOn: lastObservationIndex >= 0
+              ? formatPanelStamp(chartHistory[lastObservationIndex]?.ts || chartHistory[lastObservationIndex]?.date || "")
+              : "",
+          };
+        }),
+      }, { money: formatPrice }).forEach((item) => {
+        const label = node("span", "chart-legend-item");
+        if (item.id !== "price") label.dataset.overlay = item.id;
+        if (item.title) label.title = item.title;
+        const color = item.kind === "price"
+          ? "var(--price)"
+          : overlayColor(overlayDefinition(item.id).color, theme);
+        label.append(legendKey(item, color), node("span", "legend-copy", item.text));
+        legend.append(label);
+      });
+      panel.append(legend);
+    } else {
+      panel.append(node("p", "data-state", "Price history is incomplete; waiting for more valid observations."));
+    }
+  } else {
+    panel.append(
+      node(
+        "p",
+        "data-state",
+        session.dashboardState === "loading" || waiting
+          ? "Loading daily closes…"
+          : session.dashboardState === "error" && !tickerData
+            ? "Daily closes could not be loaded. Use Try again above."
+            : bars.length === 1
+              ? "Only one daily close is available; a line chart needs at least two points."
+              : "No historical closes are published yet. Start the initial backfill and this chart will fill as batches complete.",
+      ),
+    );
+  }
+  if (!placedLanes) panel.append(renderChartLanes(chartSettings, chartHistory, tickerData, chartData, chartDataState, controls.lanes, activeId));
+  panel.append(renderLaneControls(chartSettings, controls.lanes, chartDataState, onSettingsChange));
+  if (categories.length) panel.append(filters);
   return panel;
 }
 

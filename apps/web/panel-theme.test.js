@@ -120,7 +120,7 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   assert.match(toggle, /localPrefs\.getItem\("investor-dashboard\.metric-review"\)/);
   assert.match(toggle, /localPrefs\.setItem\("investor-dashboard\.metric-review"/);
   const price = slice("function renderPricePanel", "function renderContracts");
-  assert.doesNotMatch(price, /mergeCompanyFundamentals\(/);
+  assert.match(price, /mergeCompanyFundamentals\(/);
   assert.match(price, /renderPeriodChips\(/);
   const appended = page.slice(page.indexOf("page.append("));
   const metricsAt = appended.indexOf("renderCompanyMetrics(charts, pageState)");
