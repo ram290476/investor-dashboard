@@ -56,7 +56,7 @@ function metricBookmarks(metrics, icon, fallbackId, fallbackTitle) {
   });
 }
 
-/** Jump targets for the active company tab. Deep dive keeps its own section list. */
+/** Jump targets for the active company tab. Research keeps its own section list. */
 export function companyBookmarks(tab, context = {}) {
   if (tab === "trends") {
     const present = new Set(context.present?.length ? context.present : TREND_SECTIONS.map((item) => item.id));

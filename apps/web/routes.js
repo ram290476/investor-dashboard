@@ -2,8 +2,22 @@ const TICKER = /^[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
 const SECTION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$/;
 // Calls stays in the matcher so old bookmarks can be redirected. It is not a tab.
 // Admin is a real tab for signed-in admins. The page refuses it for everyone else.
-const STOCK_TABS = "trends|overview|fundamentals|kpis|deep-dive|calls|admin";
-const LIVE_TABS = ["trends", "overview", "fundamentals", "kpis", "deep-dive", "admin"];
+// `deep-dive` stays in the matcher so saved hashes open the Research tab.
+export const RESEARCH_TAB_ID = "research";
+const LEGACY_RESEARCH_TAB = "deep-dive";
+const STOCK_TABS = "trends|overview|fundamentals|kpis|research|deep-dive|calls|admin";
+const LIVE_TABS = ["trends", "overview", "fundamentals", "kpis", "research", "admin"];
+
+/** `deep-dive` is the previous Research tab id in hashes and saved session state. */
+export function canonicalStockTab(tab) {
+  const id = String(tab || "").trim();
+  return id === LEGACY_RESEARCH_TAB ? RESEARCH_TAB_ID : id;
+}
+
+function isResearchTab(tab) {
+  const id = String(tab || "").trim();
+  return id === RESEARCH_TAB_ID || id === LEGACY_RESEARCH_TAB;
+}
 
 // Bare hashes the main page used for its panels. Each one lands on the Trends section.
 export const MAIN_PAGE_SECTIONS = Object.freeze({
@@ -53,19 +67,19 @@ export function parseStockHash(hash) {
 
 /** Company tab in `#stock/<T>/<tab>`, or "" when the hash is only the company route. */
 export function parseStockTab(hash) {
-  return stockMatch(hash)?.[2] || "";
+  return canonicalStockTab(stockMatch(hash)?.[2] || "");
 }
 
-/** Bookmark id in `#stock/<T>/deep-dive/<section>`, or "" for a company-tab hash. */
+/** Bookmark id in `#stock/<T>/research/<section>`, or "" for a company-tab hash. */
 export function parseStockSection(hash) {
   const match = stockMatch(hash);
-  return match?.[2] === "deep-dive" ? (match[3] || "") : "";
+  return isResearchTab(match?.[2]) ? (match[3] || "") : "";
 }
 
-/** Bookmark id in `#stock/<T>/<tab>/<section>` for Trends, Overview, Fundamentals, KPIs, and Admin. */
+/** Bookmark id in `#stock/<T>/<tab>/<section>` for Trends, Technical, Fundamentals, KPIs, and Admin. */
 export function parseStockPanel(hash) {
   const match = stockMatch(hash);
-  if (!match?.[2] || match[2] === "deep-dive" || match[2] === "calls") return "";
+  if (!match?.[2] || isResearchTab(match[2]) || match[2] === "calls") return "";
   return match[3] || "";
 }
 
@@ -96,23 +110,23 @@ export function stockHash(ticker, sectionId = "") {
   if (!TICKER.test(symbol)) return null;
   const section = String(sectionId || "").trim();
   if (!section || !SECTION_ID.test(section)) return `#stock/${symbol}`;
-  return `#stock/${symbol}/deep-dive/${section}`;
+  return `#stock/${symbol}/${RESEARCH_TAB_ID}/${section}`;
 }
 
 /** `#stock/<T>` for Overview, `#stock/<T>/<tab>` for Trends and the other company tabs. */
 export function stockTabHash(ticker, tab = "") {
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;
-  const id = String(tab || "").trim();
+  const id = canonicalStockTab(tab);
   if (id === "calls") return stockPanelHash(symbol, "overview", "quarterly-notes");
   if (!id || id === "overview" || !LIVE_TABS.includes(id)) return `#stock/${symbol}`;
   return `#stock/${symbol}/${id}`;
 }
 
-/** Section bookmark on a company tab. Deep dive bookmarks keep `stockHash`. */
+/** Section bookmark on a company tab. Research bookmarks keep `stockHash`. */
 export function stockPanelHash(ticker, tab, sectionId = "") {
-  const id = String(tab || "overview").trim();
-  if (id === "deep-dive") return stockHash(ticker, sectionId);
+  const id = canonicalStockTab(tab || "overview");
+  if (id === RESEARCH_TAB_ID) return stockHash(ticker, sectionId);
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;
   if (id === "calls") return stockPanelHash(symbol, "overview", "quarterly-notes");

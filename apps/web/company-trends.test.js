@@ -15,18 +15,19 @@ function accessToken(claims) {
   return `e.${payload}.s`;
 }
 
-test("company tabs are Trends, Technical, Deep dive, Fundamentals, and KPIs", () => {
+test("company tabs are Trends, Technical, Research, Fundamentals, and KPIs", () => {
   assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(deepDive).map((tab) => tab.label), ["Trends", "Technical", "Deep dive", "Fundamentals", "KPIs"]);
+  assert.deepEqual(stockTabs(deepDive).map((tab) => tab.label), ["Trends", "Technical", "Research", "Fundamentals", "KPIs"]);
   assert.equal(stockTabs(deepDive).some((tab) => tab.label === "Overview"), false);
-  assert.equal(stockTabs({ deep_dive: { sections: [] } }).some((tab) => tab.id === "deep-dive"), false);
+  assert.equal(stockTabs(deepDive).some((tab) => tab.label === "Deep dive"), false);
+  assert.equal(stockTabs({ deep_dive: { sections: [] } }).some((tab) => tab.id === "research"), false);
   assert.equal(stockTabs(null).some((tab) => tab.id === "calls"), false);
   assert.equal(stockTabs(deepDive).some((tab) => tab.id === "admin"), false);
   const tabs = stockTabs(deepDive);
   assert.equal(nextStockTab("trends", "ArrowRight", tabs), "overview");
-  assert.equal(nextStockTab("overview", "ArrowRight", tabs), "deep-dive");
+  assert.equal(nextStockTab("overview", "ArrowRight", tabs), "research");
   assert.equal(nextStockTab("deep-dive", "ArrowRight", tabs), "fundamentals");
-  assert.equal(nextStockTab("fundamentals", "ArrowLeft", tabs), "deep-dive");
+  assert.equal(nextStockTab("fundamentals", "ArrowLeft", tabs), "research");
   assert.equal(nextStockTab("kpis", "ArrowRight", tabs), "trends");
   assert.equal(nextStockTab("kpis", "Home", tabs), "trends");
   assert.equal(nextStockTab("overview", "End", tabs), "kpis");
@@ -47,7 +48,7 @@ test("Admin is last, only for a signed-in admin, and a non-admin hash cannot ope
   const ownerToken = accessToken({ "cognito:groups": ["admin"], email: owner, username: owner });
   assert.equal(canApproveMetrics(ownerToken, owner), true);
   const tabs = stockTabs(deepDive, { admin: canApproveMetrics(ownerToken, owner) });
-  assert.deepEqual(tabs.map((tab) => tab.id), ["trends", "overview", "deep-dive", "fundamentals", "kpis", "admin"]);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["trends", "overview", "research", "fundamentals", "kpis", "admin"]);
   assert.equal(tabs.at(-1).label, "Admin");
   assert.equal(nextStockTab("kpis", "ArrowRight", tabs), "admin");
   assert.equal(nextStockTab("admin", "ArrowRight", tabs), "trends");
@@ -56,7 +57,9 @@ test("Admin is last, only for a signed-in admin, and a non-admin hash cannot ope
   assert.equal(nextStockTab("admin", "Home", tabs), "trends");
   assert.equal(visibleStockTab("admin", tabs, "overview"), "admin");
   assert.equal(visibleStockTab("", tabs, "admin"), "overview");
-  assert.equal(stockTabs({ deep_dive: { sections: [] } }, { admin: true }).some((tab) => tab.id === "deep-dive"), false);
+  assert.equal(stockTabs({ deep_dive: { sections: [] } }, { admin: true }).some((tab) => tab.id === "research"), false);
+  assert.equal(visibleStockTab("deep-dive", tabs, "overview"), "research");
+  assert.equal(visibleStockTab("research", tabs, "overview"), "research");
 
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   assert.match(page, /stockTabs\(payload, \{ admin: metricAdmin \}\)/);

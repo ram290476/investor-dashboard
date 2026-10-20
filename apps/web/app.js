@@ -16,7 +16,7 @@ import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAm
 import { applyTheme, overlayColor } from "./theme.js";
 import { clearRefreshToken, createAuthClient, performAuthorizedRequest } from "./auth-session.js";
 import { createSafeStorage } from "./safe-storage.js";
-import { parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { canonicalStockTab, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
   catalystDateLabel, catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
@@ -3957,9 +3957,10 @@ function renderStockPage(restoreDrawer = null) {
   const metricAdmin = canApproveMetrics(session.accessToken, session.email);
   const pageTabs = stockTabs(payload, { admin: metricAdmin });
   const hashSection = parseStockSection(location.hash);
+  session.stockTab = canonicalStockTab(session.stockTab);
   // A stock hash names the tab. `#stock/<T>` is Overview.
   // Admin is refused unless this caller is an admin, including when the hash asks for it.
-  // A deep-dive hash waits until that tab exists in the payload.
+  // A Research hash waits until that tab exists in the payload. `deep-dive` is the old id.
   if (parseStockHash(location.hash) === session.selected) {
     const hashTab = parseStockTab(location.hash);
     if (hashTab === "admin" && !metricAdmin) {
@@ -3970,12 +3971,16 @@ function renderStockPage(restoreDrawer = null) {
       }
     }
     session.stockTab = visibleStockTab(hashTab, pageTabs, session.stockTab);
-  } else if (hashSection && pageTabs.some((item) => item.id === "deep-dive")) session.stockTab = "deep-dive";
+  } else if (hashSection && pageTabs.some((item) => item.id === "research")) session.stockTab = "research";
   else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
   const page = node("main", "stock-page");
   page.dataset.stockTab = session.stockTab;
   if (hasDeepDive(payload)) page.dataset.hasDeepDive = "true";
-  page.setAttribute("aria-label", `${session.selected} company page`);
+  const companyLabel = companyName(session.selected, payload, tickerData);
+  page.setAttribute("aria-label", session.stockTab === "research" ? `${session.selected} Research` : `${session.selected} company page`);
+  document.title = session.stockTab === "research"
+    ? `${companyLabel} · Research · Investor Dashboard`
+    : "Investor Dashboard";
 
   const section = (id, label, cards, empty) => {
     const block = node("section", "panel stock-section company-section-target");
@@ -4023,15 +4028,15 @@ function renderStockPage(restoreDrawer = null) {
   tabs.setAttribute("aria-orientation", "horizontal");
   tabs.setAttribute("aria-label", "Company page sections");
   pageTabs.forEach((item) => {
-    if (item.id === "deep-dive") {
+    if (item.id === "research") {
       const separator = node("span", "stock-tab-separator");
       separator.setAttribute("aria-hidden", "true");
       tabs.append(separator);
     }
-    const tab = action(item.label, item.id === "deep-dive" ? "overlay-chip stock-tab stock-tab-deep" : "overlay-chip stock-tab", () => {
+    const tab = action(item.label, item.id === "research" ? "overlay-chip stock-tab stock-tab-deep" : "overlay-chip stock-tab", () => {
       selectStockTab(item.id);
     });
-    if (item.id === "deep-dive") {
+    if (item.id === "research") {
       const mark = node("span", "stock-tab-mark", "+");
       mark.setAttribute("aria-hidden", "true");
       tab.prepend(mark);
@@ -4053,7 +4058,7 @@ function renderStockPage(restoreDrawer = null) {
     });
     tabs.append(tab);
   });
-  // Same slot for every company page, with or without a deep dive, so the row does not jump.
+  // Same slot for every company page, with or without Research, so the row does not jump.
   page.prepend(tabs);
   requestAnimationFrame(() => {
     const selectedTab = tabs.querySelector('[aria-selected="true"]');
@@ -4061,7 +4066,7 @@ function renderStockPage(restoreDrawer = null) {
     const left = selectedTab.offsetLeft - (tabs.clientWidth - selectedTab.offsetWidth) / 2;
     tabs.scrollLeft = Math.max(0, left);
   });
-  if (session.stockTab !== "deep-dive") {
+  if (session.stockTab !== "research") {
     const bookmarks = renderCompanyBookmarks(companyBookmarks(session.stockTab, {
       history,
       technical: technicalSummaryView(technicalSummaryFor(session.selected)),
@@ -4110,6 +4115,7 @@ function renderResearchPage() {
   const label = company && company !== session.selected ? `${company} (${session.selected})` : session.selected;
   const title = node("h2", "", `${label} research`);
   title.id = "research-title";
+  document.title = `${label} research · Investor Dashboard`;
   title.tabIndex = -1;
   copy.append(title, node("p", "signal-note", "Published and curated data only; unsupported measurements remain unavailable."));
   heading.append(copy, action("← Dashboard", "button-link", () => navigateToDashboard()));
@@ -4345,6 +4351,7 @@ function renderNotFoundPage() {
   root.replaceChildren();
   applyTheme(session.prefs.display);
   root.append(renderAppHeader(), renderWatchlist());
+  document.title = "Investor Dashboard";
   const message = node("main", "panel research-not-found");
   message.append(node("h2", "", "Research page not found"));
   message.append(node("p", "signal-note", "That address is not a dashboard, company, or research page."));
@@ -4354,6 +4361,7 @@ function renderNotFoundPage() {
 }
 
 function selectStockTab(id) {
+  id = canonicalStockTab(id);
   if (id === "admin" && !canApproveMetrics(session.accessToken, session.email)) id = "overview";
   session.stockTab = id;
   session.scrolledStockSection = "";
@@ -4374,7 +4382,7 @@ function openCompanyBookmark(sectionId, href) {
 }
 
 function openDeepDiveBookmark(sectionId, href) {
-  session.stockTab = "deep-dive";
+  session.stockTab = "research";
   session.scrolledStockSection = `${session.selected}:${sectionId}`;
   if (href && href.startsWith("#") && location.hash !== href) {
     history.pushState(history.state, "", `${location.pathname}${location.search}${href}`);
@@ -4383,17 +4391,17 @@ function openDeepDiveBookmark(sectionId, href) {
 
 function scheduleStockSectionScroll() {
   const section = parseStockSection(location.hash);
-  if (section && session.stockTab === "deep-dive") {
+  if (section && session.stockTab === "research") {
     const key = `${session.selected}:${section}`;
     if (session.scrolledStockSection === key) return;
     session.scrolledStockSection = key;
     requestAnimationFrame(() => {
-      revealDeepDiveSection(document.getElementById("stock-panel-deep-dive"), section);
+      revealDeepDiveSection(document.getElementById("stock-panel-research"), section);
     });
     return;
   }
   const panel = parseStockPanel(location.hash);
-  if (!panel || session.stockTab === "deep-dive") return;
+  if (!panel || session.stockTab === "research") return;
   const key = `${session.selected}:${session.stockTab}:${panel}`;
   if (session.scrolledStockSection === key) return;
   session.scrolledStockSection = key;
@@ -4404,13 +4412,13 @@ function scheduleStockSectionScroll() {
 
 function navigateToStock(ticker, options = {}) {
   const keepTab = options.keepTab === true && session.route.page === "stock";
-  let tab = keepTab && session.stockTab ? session.stockTab : "overview";
+  let tab = canonicalStockTab(keepTab && session.stockTab ? session.stockTab : "overview");
   if (tab === "admin" && !canApproveMetrics(session.accessToken, session.email)) tab = "overview";
   const section = keepTab
-    ? (tab === "deep-dive" ? parseStockSection(location.hash) : parseStockPanel(location.hash))
+    ? (tab === "research" ? parseStockSection(location.hash) : parseStockPanel(location.hash))
     : "";
   const hash = section
-    ? (tab === "deep-dive" ? stockHash(ticker, section) : stockPanelHash(ticker, tab, section))
+    ? (tab === "research" ? stockHash(ticker, section) : stockPanelHash(ticker, tab, section))
     : stockTabHash(ticker, tab);
   if (!hash) return;
   if (session.route.page === "dashboard") session.dashboardSelection = session.selected;
@@ -4534,6 +4542,7 @@ function renderDashboardNow() {
     applyTheme(session.prefs.display);
     root.append(renderAppHeader(), renderWatchlist());
     appendStatusAlerts(errorMessage);
+    document.title = "Investor Dashboard";
     root.append(node("p", "data-state", "Add a ticker to your watchlist to see trends."));
     settings.refresh();
     return;

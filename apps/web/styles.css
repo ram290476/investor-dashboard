@@ -4158,6 +4158,7 @@ a.catalyst-edgar-link:hover {
 .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
 .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
 .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
+.stock-page[data-stock-tab="research"] [data-stock-panel="research"],
 .stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"],
 .stock-page[data-stock-tab="admin"] [data-stock-panel="admin"] {
   display: block;
@@ -4171,6 +4172,7 @@ a.catalyst-edgar-link:hover {
   display: grid;
 }
 
+.stock-page[data-stock-tab="research"] .deep-dive,
 .stock-page[data-stock-tab="deep-dive"] .deep-dive {
   display: grid;
 }
@@ -4226,6 +4228,7 @@ a.catalyst-edgar-link:hover {
   .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
   .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
   .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
+  .stock-page[data-stock-tab="research"] [data-stock-panel="research"],
   .stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"],
   .stock-page[data-stock-tab="admin"] [data-stock-panel="admin"] {
     display: block;
@@ -5095,8 +5098,9 @@ a.catalyst-edgar-link:hover {
   }
 }
 
-/* Deep dive is a company-page tab. The tab row itself is always visible.
-   data-has-deep-dive marks a page whose payload included deep_dive sections. */
+/* Research is a company-page tab. The tab row itself is always visible.
+   data-has-deep-dive marks a page whose payload included deep_dive sections.
+   data-stock-tab="deep-dive" remains so an old saved tab id still shows the panel. */
 
 .deep-dive {
   display: grid;
@@ -5105,7 +5109,7 @@ a.catalyst-edgar-link:hover {
   max-width: 100%;
 }
 
-/* Charts and tables fit the panel. The Deep dive section strip wraps instead of
+/* Charts and tables fit the panel. The Research section strip wraps instead of
    scrolling sideways. The ticker bar can scroll at any width. */
 .deep-dive > *,
 .deep-dive-section,
@@ -5697,6 +5701,7 @@ a.catalyst-edgar-link:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .stock-page[data-stock-tab="research"] .deep-dive,
   .stock-page[data-stock-tab="deep-dive"] .deep-dive {
     display: grid;
   }
@@ -5717,6 +5722,7 @@ a.catalyst-edgar-link:hover {
 }
 
 @media (max-width: 480px) {
+  .stock-page[data-stock-tab="research"] .section-strip,
   .stock-page[data-stock-tab="deep-dive"] .section-strip {
     top: 98px;
   }

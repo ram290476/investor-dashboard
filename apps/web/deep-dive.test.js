@@ -22,7 +22,7 @@ const geo = await readFile(new URL("./geo.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 const ci = await readFile(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
-const deepStyles = styles.slice(styles.indexOf("Deep dive is a company-page tab"));
+const deepStyles = styles.slice(styles.indexOf("Research is a company-page tab"));
 
 function element(tag) {
   const node = {
@@ -235,7 +235,7 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
   assert.equal(byClass(view, "deep-dive-jump-label").length, 0);
   assert.doesNotMatch(textOf(view), /On this page/);
   const strip = byClass(view, "section-strip")[0];
-  assert.equal(strip.getAttribute("aria-label"), "Sections");
+  assert.equal(strip.getAttribute("aria-label"), "Research sections");
   assert.equal(strip.getAttribute("aria-hidden"), undefined);
   assert.equal(String(strip.className).includes("is-visible"), true);
   assert.equal(String(strip.className).includes("section-strip-docked"), true);
@@ -248,10 +248,10 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
     assert.equal(chip.getAttribute("role"), undefined);
     assert.equal(chip.getAttribute("tabindex"), undefined);
     assert.doesNotMatch(chip.href, /^#deep-dive-/);
-    assert.match(chip.href, /^#stock\/ABCD\/deep-dive\//);
+    assert.match(chip.href, /^#stock\/ABCD\/research\//);
   }
   const forecast = chips.find((chip) => chip.dataset.sectionId === "forecast");
-  assert.equal(forecast.href, "#stock/ABCD/deep-dive/forecast");
+  assert.equal(forecast.href, "#stock/ABCD/research/forecast");
   assert.equal(forecast.getAttribute("aria-current"), "location");
   const modified = {
     button: 0,
@@ -275,7 +275,7 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
   };
   later.listeners.click[0](event);
   assert.equal(event.defaultPrevented, true);
-  assert.equal(booked, "later|#stock/ABCD/deep-dive/later");
+  assert.equal(booked, "later|#stock/ABCD/research/later");
   assert.equal(later.getAttribute("aria-current"), "location");
   assert.equal(forecast.getAttribute("aria-current"), undefined);
   const section = findId(view, "deep-dive-later");
@@ -300,12 +300,12 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
     preventDefault() {},
   });
   assert.equal(byClass(phone, "deep-dive-secondary-body")[0].hidden, false);
-  assert.equal(phoneLater.href, "#stock/ZZZZ/deep-dive/later");
+  assert.equal(phoneLater.href, "#stock/ZZZZ/research/later");
 
   const laterChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "later");
   assert.equal(laterChip.getAttribute("aria-current"), "location");
   assert.equal(laterChip.getAttribute("tabindex"), undefined);
-  assert.equal(laterChip.href, "#stock/ABCD/deep-dive/later");
+  assert.equal(laterChip.href, "#stock/ABCD/research/later");
 });
 
 test("section chips jump by name and leave the metric on the section", () => {
@@ -372,7 +372,7 @@ test("section chips jump by name and leave the metric on the section", () => {
   };
   notes.listeners.click[0](event);
   assert.equal(event.defaultPrevented, true);
-  assert.equal(booked, "notes|#stock/EXMPL/deep-dive/notes");
+  assert.equal(booked, "notes|#stock/EXMPL/research/notes");
   assert.equal(notes.getAttribute("aria-current"), "location");
   const section = findId(view, "deep-dive-notes");
   assert.equal(section.scrolled.behavior, "smooth");
@@ -459,13 +459,15 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(STOCK_TABS.length, 4);
   assert.equal(stockTabs(null).length, 4);
   assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["trends", "overview", "deep-dive", "fundamentals", "kpis"]);
-  assert.equal(stockTabs(sample).find((tab) => tab.id === "deep-dive").label, "Deep dive");
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["trends", "overview", "research", "fundamentals", "kpis"]);
+  assert.equal(stockTabs(sample).find((tab) => tab.id === "research").label, "Research");
+  assert.equal(stockTabs({ deep_dive: { title: "Deep dive", sections: sample.deep_dive.sections } }).find((tab) => tab.id === "research").label, "Research");
   assert.equal(stockTabs(sample).some((tab) => tab.id === "admin"), false);
   assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(sample)), "overview");
-  assert.equal(nextStockTab("overview", "ArrowRight", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("overview", "ArrowRight", stockTabs(sample)), "research");
+  assert.equal(nextStockTab("research", "ArrowRight", stockTabs(sample)), "fundamentals");
   assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "fundamentals");
-  assert.equal(nextStockTab("fundamentals", "ArrowLeft", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("fundamentals", "ArrowLeft", stockTabs(sample)), "research");
   assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "trends");
   assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "kpis");
   assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "trends");
@@ -513,7 +515,7 @@ test("rendered deep dive shows pending review, empty copy, and a placeholder for
   const phone = renderDeepDive(sample, fakeDocument(true));
   assert.equal(byClass(phone, "deep-dive-secondary-body")[0].hidden, true);
   const empty = renderDeepDive({}, fakeDocument(false));
-  assert.match(textOf(empty), /No deep dive is configured/);
+  assert.match(textOf(empty), /No research is configured/);
   assert.doesNotMatch(text, /EXAMPLE|TSLA|Tesla/);
 });
 

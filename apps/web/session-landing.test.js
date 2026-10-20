@@ -32,6 +32,11 @@ test("a later load in the same session keeps the tab in the URL", () => {
   const home = sessionStockLanding({ sessionStarted: true, hashTab: "", routePage: "dashboard" });
   assert.equal(home.tab, "trends");
   assert.equal(home.rewriteLanding, false);
+  const saved = sessionStockLanding({ sessionStarted: true, hashTab: "deep-dive", routePage: "stock" });
+  assert.equal(saved.tab, "research");
+  assert.equal(saved.rewriteLanding, false);
+  const named = sessionStockLanding({ sessionStarted: true, hashTab: "research", routePage: "stock" });
+  assert.equal(named.tab, "research");
 });
 
 test("research and other routes do not consume the first-load flag", () => {

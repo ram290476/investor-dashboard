@@ -3,6 +3,7 @@
 // Pending review. Chart cards do not repeat that status. Text is plain.
 import { periodQuote } from "./chart-period.js";
 import { catalystDateLabel } from "./roadmap.js";
+import { canonicalStockTab } from "./routes.js";
 
 export const LONG_PRESS_MS = 550;
 
@@ -16,7 +17,7 @@ export const STOCK_TABS = [
 // Last tab, and only for a signed-in admin. The demo account is never an admin.
 export const ADMIN_STOCK_TAB = { id: "admin", label: "Admin" };
 
-const STOCK_TAB_ORDER = ["trends", "overview", "deep-dive", "fundamentals", "kpis"];
+const STOCK_TAB_ORDER = ["trends", "overview", "research", "fundamentals", "kpis"];
 
 // Last resort only: companyName() uses the API company_name / SEC entity name first.
 // SPCX has no SEC entity name, so it keeps a display name here.
@@ -182,17 +183,18 @@ export function companyDescription(payload, tickerData) {
 }
 
 /**
- * Company tabs, in order. Technical follows Trends. Deep dive sits between Technical and Fundamentals, and only when sections exist.
+ * Company tabs, in order. Technical follows Trends. Research sits between Technical and Fundamentals, and only when sections exist.
+ * The label is always Research. `deep_dive.title` stays in the company document and is not shown.
  * Admin is last, and only when options.admin is true (a signed-in admin, never the demo account).
  */
 export function stockTabs(payload, options = {}) {
   const sections = payload?.deep_dive?.sections;
-  const deep = Array.isArray(sections) && sections.length
-    ? { id: "deep-dive", label: String(payload.deep_dive.title || "Deep dive").trim() || "Deep dive" }
+  const research = Array.isArray(sections) && sections.length
+    ? { id: "research", label: "Research" }
     : null;
   const byId = new Map(STOCK_TABS.map((tab) => [tab.id, tab]));
   const tabs = STOCK_TAB_ORDER
-    .map((id) => (id === "deep-dive" ? deep : byId.get(id)))
+    .map((id) => (id === "research" ? research : byId.get(id)))
     .filter(Boolean);
   if (options.admin === true) tabs.push({ ...ADMIN_STOCK_TAB });
   return tabs;
@@ -207,17 +209,18 @@ export function visibleStockTab(hashTab, tabs, current = "overview") {
   const ids = (Array.isArray(tabs) ? tabs : [])
     .map((tab) => (typeof tab === "string" ? tab : tab?.id))
     .filter(Boolean);
-  const requested = String(hashTab || "");
+  const requested = canonicalStockTab(hashTab);
   if (requested === "admin" && !ids.includes("admin")) return "overview";
   if (requested && ids.includes(requested)) return requested;
   if (!requested) return "overview";
-  if (current && ids.includes(current)) return current;
+  const kept = canonicalStockTab(current);
+  if (kept && ids.includes(kept)) return kept;
   return "overview";
 }
 
 export function nextStockTab(current, key, tabs = STOCK_TABS) {
   const ids = (Array.isArray(tabs) ? tabs : STOCK_TABS).map((tab) => tab.id);
-  const index = Math.max(0, ids.indexOf(current));
+  const index = Math.max(0, ids.indexOf(canonicalStockTab(current)));
   const next = key === "ArrowRight" ? (index + 1) % ids.length
     : key === "ArrowLeft" ? (index + ids.length - 1) % ids.length
     : key === "Home" ? 0

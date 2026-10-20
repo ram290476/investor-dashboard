@@ -260,10 +260,10 @@ test("the section strip is visible on load and tracks the section in view", () =
   assert.equal(notesBookmark.headline, undefined);
 });
 
-test("the company page renders the sticky section strip for every tab except deep dive", () => {
+test("the company page renders the sticky section strip for every tab except Research", () => {
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   assert.match(page, /renderCompanyBookmarks\(companyBookmarks/);
-  assert.match(page, /session\.stockTab !== "deep-dive"/);
+  assert.match(page, /session\.stockTab !== "research"/);
   assert.match(page, /parseStockTab\(location\.hash\)/);
   assert.match(page, /parseStockPanel\(location\.hash\)/);
   assert.match(app, /revealCompanySection\(root, panel, session\.stockTab\)/);
