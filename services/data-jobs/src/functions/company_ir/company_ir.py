@@ -2810,6 +2810,290 @@ def latest_periodic_filings(submissions: dict) -> list[dict]:
     return list(chosen.values())
 
 
+_THREE_MONTHS = re.compile(r"^(?:3|three)\s+months\s+ended\b", re.IGNORECASE)
+_HEADER_DATE = re.compile(
+    r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|"
+    r"Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4})",
+    re.IGNORECASE,
+)
+_SCALE_PHRASE = re.compile(r"\$\s*in\s+(thousands|millions|billions)", re.IGNORECASE)
+_SEGMENT_SCALE = {"thousands": 1_000.0, "millions": 1_000_000.0, "billions": 1_000_000_000.0}
+_HEADER_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def segment_report_files(xml_text: str, reports: list) -> list[str]:
+    """Html filenames from FilingSummary.xml whose ShortName is in the catalog list, in that order."""
+    import xml.etree.ElementTree as ET
+
+    wanted = [str(name).strip() for name in reports or [] if str(name).strip()]
+    if not wanted or not str(xml_text or "").strip():
+        return []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    by_short: dict[str, str] = {}
+    for report in root.iter("Report"):
+        short = (report.findtext("ShortName") or "").strip()
+        html_name = (report.findtext("HtmlFileName") or "").strip()
+        if short in wanted and html_name:
+            by_short.setdefault(short, html_name)
+    return [by_short[name] for name in wanted if name in by_short]
+
+
+class _SegmentCells(HTMLParser):
+    """Report rows with the XBRL defref kept on the label cell."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[dict]] = []
+        self._row: list[dict] | None = None
+        self._cell: dict | None = None
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        attr = {key.lower(): value for key, value in attrs}
+        if tag in {"script", "style"}:
+            self._skip += 1
+            return
+        if tag == "tr":
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            try:
+                colspan = int(attr.get("colspan") or 1)
+                rowspan = int(attr.get("rowspan") or 1)
+            except ValueError:
+                colspan, rowspan = 1, 1
+            self._cell = {"text": "", "defref": "", "colspan": max(1, colspan), "rowspan": max(1, rowspan)}
+        elif tag == "a" and self._cell is not None:
+            match = re.search(r"defref_([^'\"]+)", attr.get("onclick") or "")
+            if match:
+                self._cell["defref"] = match.group(1)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style"} and self._skip:
+            self._skip -= 1
+        elif tag in {"td", "th"} and self._cell is not None and self._row is not None:
+            self._cell["text"] = " ".join(self._cell["text"].split())
+            self._row.append(self._cell)
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if self._row:
+                self.rows.append(self._row)
+            self._row = None
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip and self._cell is not None:
+            self._cell["text"] += data
+
+
+def _segment_rows(html: str) -> list[list[dict]]:
+    parser = _SegmentCells()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except (ValueError, AssertionError, LookupError):
+        return []
+    return parser.rows
+
+
+def _segment_grid(rows: list[list[dict]]) -> list[dict[int, dict]]:
+    """Place cells on columns. A colspan or rowspan occupies every column it covers."""
+    grid: list[dict[int, dict]] = []
+    carry: dict[int, tuple[dict, int]] = {}
+    for row in rows:
+        line: dict[int, dict] = {}
+        col = 0
+        for cell in row:
+            while col in carry:
+                previous, left = carry[col]
+                line[col] = previous
+                if left <= 1:
+                    del carry[col]
+                else:
+                    carry[col] = (previous, left - 1)
+                col += 1
+            for offset in range(cell["colspan"]):
+                line[col + offset] = cell
+                if cell["rowspan"] > 1:
+                    carry[col + offset] = (cell, cell["rowspan"] - 1)
+            col += cell["colspan"]
+        while col in carry:
+            previous, left = carry[col]
+            line[col] = previous
+            if left <= 1:
+                del carry[col]
+            else:
+                carry[col] = (previous, left - 1)
+            col += 1
+        grid.append(line)
+    return grid
+
+
+def _header_date(text: str) -> date | None:
+    match = _HEADER_DATE.search(text or "")
+    if not match:
+        return None
+    month = _HEADER_MONTHS.get(match.group(1)[:3].lower())
+    if not month:
+        return None
+    try:
+        return date(int(match.group(3)), month, int(match.group(2)))
+    except ValueError:
+        return None
+
+
+def _quarter_columns(grid: list[dict[int, dict]]) -> list[tuple[int, date]]:
+    """Columns under a 3-months-ended header. Six-, nine-, and twelve-month totals are not quarters."""
+    for index, line in enumerate(grid):
+        seen: set[int] = set()
+        found: list[tuple[int, date]] = []
+        date_row = grid[index + 1] if index + 1 < len(grid) else {}
+        for col in sorted(line):
+            cell = line[col]
+            if id(cell) in seen:
+                continue
+            seen.add(id(cell))
+            if not _THREE_MONTHS.match(cell.get("text") or ""):
+                continue
+            for data_col in range(col, col + int(cell.get("colspan") or 1)):
+                parsed = _header_date((date_row.get(data_col) or {}).get("text") or "")
+                if parsed is not None:
+                    found.append((data_col, parsed))
+        if found:
+            return found
+    return []
+
+
+def _segment_scale(rows: list[list[dict]]) -> float:
+    text = " ".join(cell.get("text") or "" for row in rows[:3] for cell in row)
+    match = _SCALE_PHRASE.search(text)
+    if not match:
+        return 1.0
+    return _SEGMENT_SCALE.get(match.group(1).lower(), 1.0)
+
+
+def _segment_number(text: str) -> float | None:
+    raw = (text or "").replace("\xa0", " ").strip()
+    if not raw or raw in {"-", "\u2014", "\u2013"}:
+        return None
+    negative = raw.startswith("(") and raw.endswith(")")
+    cleaned = raw.strip("()").replace("$", "").replace(",", "").strip()
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?", cleaned):
+        return None
+    value = float(cleaned)
+    return -value if negative else value
+
+
+def _xbrl_local_name(token: str) -> str:
+    """`spcx_SpaceMember` and `us-gaap_Revenues` both drop the taxonomy prefix."""
+    if "_" not in token:
+        return token
+    return token.split("_", 1)[1]
+
+
+def _segment_member(defref: str, axes: list[str]) -> str | None:
+    for axis in axes:
+        marker = f"{axis}="
+        if marker in defref:
+            return _xbrl_local_name(defref.split(marker, 1)[1])
+    return None
+
+
+def _segment_fact(defref: str) -> str | None:
+    if not defref or "=" in defref:
+        return None
+    return _xbrl_local_name(defref)
+
+
+def segment_amounts(html: str, spec: dict) -> list[tuple[str, date, float]]:
+    """Quarterly segment amounts from one SEC R page. The catalog maps member names to metric ids.
+
+    A revenue row is kept only after a member header on a configured axis, and only in a
+    three-month column. The consolidated total that sits above the first member is ignored.
+    A blank cell is skipped. It is not stored as zero.
+    """
+    members = spec.get("members") if isinstance(spec.get("members"), dict) else {}
+    facts = {str(item) for item in (spec.get("facts") or []) if str(item).strip()}
+    axes = [str(item) for item in (spec.get("axes") or []) if str(item).strip()]
+    if not members or not facts or not axes:
+        return []
+    rows = _segment_rows(html)
+    grid = _segment_grid(rows)
+    columns = _quarter_columns(grid)
+    if not columns:
+        return []
+    scale = _segment_scale(rows)
+    found: list[tuple[str, date, float]] = []
+    seen: set[tuple[str, date]] = set()
+    current: str | None = None
+    for line in grid:
+        if not line:
+            continue
+        label = line[min(line)]
+        defref = str(label.get("defref") or "")
+        member = _segment_member(defref, axes)
+        if member:
+            current = member
+            continue
+        fact = _segment_fact(defref)
+        metric_id = members.get(current or "")
+        if not fact or fact not in facts or not metric_id:
+            continue
+        for col, end in columns:
+            cell = line.get(col)
+            if cell is None or cell is label:
+                continue
+            value = _segment_number(cell.get("text") or "")
+            if value is None:
+                continue
+            key = (str(metric_id), end)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append((str(metric_id), end, value * scale))
+    return found
+
+
+def segment_observations(html: str, catalog: dict, **kwargs) -> list[dict]:
+    """Proposed XBRL segment rows. An unmapped member or a missing catalog metric is skipped."""
+    spec = catalog.get("xbrl_segments") if isinstance(catalog.get("xbrl_segments"), dict) else {}
+    if not spec:
+        return []
+    fiscal_end_month = int(kwargs.get("fiscal_end_month") or catalog.get("fiscal_year_end_month") or 12)
+    ticker = kwargs["ticker"]
+    rows = []
+    for metric_id, end, value in segment_amounts(html, spec):
+        entry = catalog_entry(catalog, metric_id)
+        if entry is None:
+            continue
+        period = fiscal_period_for_end(end, fiscal_end_month)
+        rows.append(
+            _observation(
+                entry,
+                ticker=ticker,
+                fiscal_period=period,
+                value=value,
+                unit=entry.get("unit") or "USD",
+                source_url=kwargs.get("source_url") or "",
+                source_doc_hash=kwargs.get("source_doc_hash") or "",
+                extracted_at=kwargs["extracted_at"],
+                published_date=kwargs.get("published_date"),
+                method="table",
+                confidence=confidence_for("table"),
+                lower_bound=False,
+                source_kind="xbrl",
+                label=metric_id,
+                period_end=end,
+                fiscal_end_month=fiscal_end_month,
+            )
+        )
+    return rows
+
+
 def parse_deliveries_matrix(
     table: list[list[str]],
     fiscal_period: str,
@@ -3741,6 +4025,36 @@ def run_collect(
                 period = fiscal_period_for_end(date.fromisoformat(filing["report_date"]), fy_month)
             content = document.content if isinstance(document.content, bytes) else document.text.encode()
             save(ticker, period, url, content, "text/html", "note", filing["accession"], filing.get("filed"), fy_month)
+            segment_spec = catalog.get("xbrl_segments") if isinstance(catalog.get("xbrl_segments"), dict) else {}
+            if segment_spec.get("reports") and segment_spec.get("members"):
+                summary = pull(
+                    archive_url(cik, filing["accession"], "FilingSummary.xml"),
+                    f"edgar:{ticker}:{filing['accession']}:summary",
+                    optional=True,
+                )
+                names: list[str] = []
+                if summary is not None:
+                    names = segment_report_files(summary.text, segment_spec.get("reports") or [])
+                for name in names:
+                    page = pull(
+                        archive_url(cik, filing["accession"], name),
+                        f"edgar:{ticker}:{filing['accession']}:segments",
+                        optional=True,
+                    )
+                    if page is None:
+                        continue
+                    page_body = page.content if isinstance(page.content, bytes) else page.text.encode()
+                    save(
+                        ticker,
+                        period,
+                        archive_url(cik, filing["accession"], name),
+                        page_body,
+                        "text/html",
+                        "xbrl_segments",
+                        filing["accession"],
+                        filing.get("filed"),
+                        fy_month,
+                    )
         facts_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
         facts = pull(facts_url, f"edgar:{ticker}:companyfacts")
         if facts is not None:
@@ -3871,6 +4185,19 @@ def run_extract(
                 entity_names[ticker] = entity
             by_ticker.setdefault(ticker, []).extend(rows)
             scale_flags.extend(flags)
+            continue
+        if kind == "xbrl_segments":
+            segment_rows = segment_observations(
+                text,
+                catalog,
+                ticker=ticker,
+                source_url=item.get("source_url") or "",
+                source_doc_hash=item.get("sha256") or "",
+                extracted_at=extracted_at,
+                published_date=item.get("published_date"),
+                fiscal_end_month=fiscal_end_month,
+            )
+            by_ticker.setdefault(ticker, []).extend(segment_rows)
             continue
         if kind == "note":
             continue

@@ -153,6 +153,18 @@ def validate_deep_dive(block) -> list[str]:
     if forecast is not None:
         if not isinstance(forecast, dict) or not isinstance(forecast.get("segments"), list):
             errors.append("deep_dive.forecast.segments must be a list")
+    derived = block.get("derived")
+    if derived is not None:
+        if not isinstance(derived, list):
+            errors.append("deep_dive.derived must be a list")
+        else:
+            for spec in derived:
+                if not isinstance(spec, dict) or not _METRIC_ID.match(str(spec.get("metric_id") or "")):
+                    errors.append("derived series needs a metric id")
+                elif not _METRIC_ID.match(str(spec.get("from") or "")):
+                    errors.append(f"{spec.get('metric_id')} derived series needs a from metric")
+                elif spec.get("op") not in {None, "running_sum"}:
+                    errors.append(f"{spec.get('metric_id')} has unsupported derived op")
     return errors
 
 
@@ -946,6 +958,7 @@ def assemble_deep_dive(
         metrics[series["metric_id"]] = series
     for series in estimate_rows:
         estimates[series["metric_id"]] = series
+    _apply_derived(block, metrics, estimates)
     forecast = apply_projections(
         placeholder_forecast(block.get("forecast"), metrics),
         projections if projections is not None else (observations or {}).get("stored_headlines"),
@@ -1221,14 +1234,77 @@ def build_observations(
     }
 
 
+def _running_sum_series(source: dict, metric_id: str, unit: str, *, estimate: bool) -> dict | None:
+    """Sum reported points in period order. A missing period is skipped, not treated as zero."""
+    total = 0.0
+    points = []
+    ordered = sorted(
+        source.get("points") or [],
+        key=lambda point: _period_sort_key(str((point or {}).get("period") or "")),
+    )
+    for point in ordered:
+        if not isinstance(point, dict) or not point.get("reported"):
+            continue
+        value = _as_float(point.get("value"))
+        if value is None:
+            continue
+        total += value
+        points.append({"period": point["period"], "value": total, "reported": True})
+    if not points:
+        return None
+    return {
+        "metric_id": metric_id,
+        "label": metric_id,
+        "unit": unit or source.get("unit") or "",
+        "cadence": source.get("cadence") or "quarterly",
+        "confidence": source.get("confidence") or "medium",
+        "approval_state": "proposed",
+        "approved": False,
+        "estimate": estimate,
+        "source_kind": "news_estimate" if estimate else "derived",
+        "source_url": source.get("source_url") or "",
+        "source_title": f"Running sum of {source.get('metric_id') or metric_id}",
+        "disclosure_status": "numeric",
+        "points": points,
+        "notes": [
+            "Running sum of the source series. Missing periods are skipped, not treated as zero. Pending review."
+        ],
+    }
+
+
+def _apply_derived(block: dict, metrics: dict[str, dict], estimates: dict[str, dict]) -> None:
+    """Catalog-declared running sums. A series that already has points is left alone."""
+    for spec in (block or {}).get("derived") or []:
+        if not isinstance(spec, dict) or spec.get("op") not in {None, "running_sum"}:
+            continue
+        metric_id = str(spec.get("metric_id") or "")
+        origin = str(spec.get("from") or "")
+        if not metric_id or not origin or metric_id in metrics or metric_id in estimates:
+            continue
+        reported = metrics.get(origin)
+        reported_points = (reported or {}).get("points") or []
+        has_reported = any(point.get("reported") and point.get("value") is not None for point in reported_points)
+        if reported and has_reported:
+            built = _running_sum_series(reported, metric_id, str(spec.get("unit") or ""), estimate=False)
+            if built:
+                metrics[metric_id] = built
+            continue
+        estimate = estimates.get(origin)
+        if estimate:
+            built = _running_sum_series(estimate, metric_id, str(spec.get("unit") or ""), estimate=True)
+            if built:
+                estimates[metric_id] = _force_news_estimate(built)
+
+
 def _collect_catalog_sources(
     catalog: dict,
     fetch,
     *,
     generated_at: str,
     previous: dict | None,
+    fetch_bytes=None,
 ) -> tuple[list[dict], list[dict]]:
-    """Launch Library 2, CelesTrak, and AV regulator pages, only when the catalog declares them."""
+    """Keyless catalog sources. Each runs only when that catalog declares it."""
     series: list[dict] = []
     statuses: list[dict] = []
     for source in (catalog.get("deep_dive") or {}).get("sources") or []:
@@ -1244,6 +1320,14 @@ def _collect_catalog_sources(
             statuses.append(status)
         elif source.get("id") == "av_regulator":
             found, status = sources.collect_av_regulator(source, fetch, generated_at, previous)
+            series.extend(found)
+            statuses.append(status)
+        elif source.get("id") == "nhtsa_odi":
+            found, status = sources.collect_nhtsa_odi(source, fetch, fetch_bytes, generated_at)
+            series.extend(found)
+            statuses.append(status)
+        elif source.get("id") == "state_registrations":
+            found, status = sources.collect_state_registrations(source, fetch, generated_at, previous)
             series.extend(found)
             statuses.append(status)
     return series, statuses
@@ -1297,6 +1381,7 @@ def run_collect(
     tickers: list[str],
     load_catalog,
     now: str | None = None,
+    fetch_bytes=None,
 ) -> dict:
     """Collect NHTSA SGO aggregates and copy manual entries. No metric is approved."""
     generated_at = now or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -1350,6 +1435,7 @@ def run_collect(
             fetch,
             generated_at=generated_at,
             previous=previous,
+            fetch_bytes=fetch_bytes,
         )
         statuses.extend(extra_status)
         document = build_observations(
@@ -1426,6 +1512,11 @@ def handler(event, context):
             response.raise_for_status()
             return response.text
 
+        def fetch_bytes(url: str) -> bytes:
+            response = http.get(url, timeout=60.0)
+            response.raise_for_status()
+            return response.content
+
         def read(key: str) -> dict:
             return read_optional(lambda item: lake_read_json(item, bucket), key)
 
@@ -1442,6 +1533,7 @@ def handler(event, context):
                 write_json=lambda key, obj: write_json(obj, key, bucket=bucket),
                 tickers=symbols,
                 load_catalog=load_catalog,
+                fetch_bytes=fetch_bytes,
             )
 
     return run(event, context)

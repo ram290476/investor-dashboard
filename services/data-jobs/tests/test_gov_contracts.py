@@ -193,9 +193,11 @@ WATCH_NAMES = {"TSLA": "Tesla, Inc.", "SPCX": None, "PLTR": "Palantir Technologi
 
 def test_name_map_built_from_watchlist_entity_names():
     entries = gov_contracts.name_map_from_watchlist(WATCH_NAMES)
+    assert ("tesla", "TSLA") in entries
+    assert ("space exploration technologies", "SPCX") in entries
     assert ("palantir technologies", "PLTR") in entries
     assert ("amazon", "AMZN") in entries
-    assert entries[:3] == list(gov_contracts.NAME_OVERRIDES)
+    assert not hasattr(gov_contracts, "NAME_OVERRIDES")
     saved = list(gov_contracts.NAME_TO_TICKER)
     try:
         gov_contracts.use_watchlist_names(WATCH_NAMES)
@@ -216,7 +218,7 @@ def test_recipient_searches_and_sam_rotation_cover_the_watchlist():
     ]
     picked = {gov_contracts.sam_query_for(searches, date(2026, 10, d)) for d in range(1, 4)}
     assert picked == {"Tesla", "Space Exploration Technologies", "Palantir Technologies"}
-    assert gov_contracts.sam_query_for([], date(2026, 10, 1)) == "SpaceX"
+    assert gov_contracts.sam_query_for([], date(2026, 10, 1)) == ""
 
 
 def test_rollup_covers_every_watchlist_ticker_with_awards():
@@ -293,3 +295,30 @@ def test_retry_after_delay_handles_bad_header():
     assert gov_contracts.retry_after_delay("soon", 0) == gov_contracts.NASA_BASE_DELAY_S
     assert gov_contracts.retry_after_delay(None, 1) == gov_contracts.NASA_BASE_DELAY_S * 2
     assert gov_contracts.retry_after_delay("Wed, 21 Oct 2015 07:28:00 GMT", 0) == 0.0
+
+
+def test_dod_paragraph_keeps_the_matched_spelling_from_the_catalog():
+    from pathlib import Path
+
+    rows = gov_contracts.parse_dod(
+        "Space Exploration Technologies Corp was awarded a contract for $1,000,000.",
+        "2026-10-06T00:00:00+00:00",
+        date(2026, 10, 6),
+    )
+    assert rows[0]["ticker"] == "SPCX"
+    assert rows[0]["recipient_name"] == "Space Exploration Technologies"
+    tesla = gov_contracts.parse_dod(
+        "Tesla Motors received a contract for $5.",
+        "2026-10-06T00:00:00+00:00",
+        date(2026, 10, 6),
+    )
+    assert tesla[0]["ticker"] == "TSLA"
+    assert tesla[0]["recipient_name"] == "Tesla"
+    assert gov_contracts.parse_dod(
+        "Teslaco Holdings received a contract for $5.",
+        "2026-10-06T00:00:00+00:00",
+        date(2026, 10, 6),
+    ) == []
+    source = Path(gov_contracts.__file__).read_text(encoding="utf-8")
+    for word in ("TSLA", "SPCX", "Tesla", "SpaceX"):
+        assert word not in source
