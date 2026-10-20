@@ -1230,6 +1230,23 @@
     "www.tesla.com",
     "tesla.com"
   ],
+  "xbrl_segments": {
+    "axes": ["StatementBusinessSegmentsAxis", "ProductOrServiceAxis"],
+    "reports": [
+      "Segment Reporting and Information about Geographic Areas - Schedule of Total Revenues and Gross Profit by Reportable Segment (Details)",
+      "Summary of Significant Accounting Policies - Schedule of Disaggregation of Revenue by Major Source (Details)"
+    ],
+    "facts": ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"],
+    "members": {
+      "AutomotiveSegmentMember": "automotive_revenue",
+      "EnergyGenerationAndStorageSegmentMember": "energy_revenue",
+      "ServicesAndOtherMember": "services_revenue"
+    }
+  },
+  "gov_contracts": {
+    "name_aliases": ["tesla"],
+    "recipient": "Tesla"
+  },
   "deep_dive": {
     "version": 1,
     "title": "Deep dive",
@@ -1406,6 +1423,31 @@
             ]
           }
         ]
+      },
+      {
+        "id": "nhtsa_odi",
+        "make": "TESLA",
+        "model_years": 3,
+        "recalls_metric": "nhtsa_recalls",
+        "complaints_metric": "nhtsa_complaints",
+        "investigations_metric": "nhtsa_investigations",
+        "investigations_url": "https://static.nhtsa.gov/odi/ffdd/inv/FLAT_INV.zip"
+      },
+      {
+        "id": "state_registrations",
+        "makes": ["TESLA"],
+        "metric_id": "ca_registered_vehicles",
+        "unit": "vehicles",
+        "max_files": 4,
+        "package_url": "https://data.ca.gov/api/3/action/package_show?id=vehicle-fuel-type-count-by-zip-code"
+      }
+    ],
+    "derived": [
+      {
+        "metric_id": "semi_production_cumulative",
+        "from": "semi_production",
+        "op": "running_sum",
+        "unit": "vehicles"
       }
     ],
     "forecast": {
@@ -1476,6 +1518,15 @@
                 "label": "NHTSA ADS reports",
                 "inverse": true,
                 "disclosure_status": "not_collected"
+              },
+              {
+                "metric_id": "nhtsa_recalls",
+                "label": "NHTSA recalls",
+                "inverse": true
+              },
+              {
+                "metric_id": "ca_registered_vehicles",
+                "label": "CA registrations"
               },
               {
                 "metric_id": "energy_storage_deployed",
@@ -1835,7 +1886,7 @@
             "title": "Semi production",
             "subtitle": "Quarterly production when a number is actually disclosed.",
             "width": "wide",
-            "source_note": "A reported production count stays on its own series. A news-derived estimate is separate, pending review, and is not treated as a disclosure.",
+            "source_note": "A reported production count stays on its own series. Cumulative is the running sum of that series; a missing quarter is skipped, not treated as zero. A news-derived estimate is separate, pending review, and is not treated as a disclosure.",
             "kpis": [
               {
                 "metric_id": "semi_production",
@@ -2254,6 +2305,78 @@
                 }
               ]
             }
+          }
+        ]
+      },
+      {
+        "id": "public-records",
+        "title": "Public vehicle records",
+        "headline": "ca_registered_vehicles",
+        "placement": "primary",
+        "panels": [
+          {
+            "id": "nhtsa-odi",
+            "kind": "trend-bars",
+            "title": "NHTSA recalls, complaints, and investigations",
+            "subtitle": "Monthly counts for the catalog make. Not a fault finding.",
+            "width": "wide",
+            "cadence": "monthly",
+            "source_note": "NHTSA recalls and complaints by make, model, and model year, plus the public investigations file. Pending review. A failed fetch is not zero.",
+            "kpis": [
+              {
+                "metric_id": "nhtsa_recalls",
+                "label": "Recalls",
+                "inverse": true
+              },
+              {
+                "metric_id": "nhtsa_complaints",
+                "label": "Complaints",
+                "inverse": true
+              },
+              {
+                "metric_id": "nhtsa_investigations",
+                "label": "Investigations",
+                "inverse": true
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "nhtsa_recalls",
+                "label": "Recalls",
+                "role": "bar"
+              },
+              {
+                "metric_id": "nhtsa_complaints",
+                "label": "Complaints",
+                "role": "bar"
+              },
+              {
+                "metric_id": "nhtsa_investigations",
+                "label": "Investigations",
+                "role": "line"
+              }
+            ]
+          },
+          {
+            "id": "ca-registrations",
+            "kind": "trend-bars",
+            "title": "California registrations",
+            "subtitle": "Year-end vehicle counts for the catalog make, placed on Q4.",
+            "width": "half",
+            "source_note": "California DMV fuel-type counts by ZIP, summed for the catalog make. Annual. Pending review. A failed fetch is not zero.",
+            "kpis": [
+              {
+                "metric_id": "ca_registered_vehicles",
+                "label": "Registered"
+              }
+            ],
+            "series": [
+              {
+                "metric_id": "ca_registered_vehicles",
+                "label": "Registered",
+                "role": "bar"
+              }
+            ]
           }
         ]
       }

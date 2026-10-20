@@ -8,9 +8,12 @@ supplies provider filters, metric ids, entity names, and the words that mark a t
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
-from datetime import UTC, datetime, timedelta
+import zipfile
+from datetime import UTC, date, datetime, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urlencode
 
@@ -74,6 +77,18 @@ LAUNCH_NOTE = (
 )
 CONSTELLATION_NOTE = (
     "Count of objects in the public GP element set. Pending review. Not a company disclosure."
+)
+SATCAT_NOTE = (
+    "Deployed count is objects in the public SATCAT whose name starts with the catalog prefix, "
+    "grouped by launch quarter. Pending review. A failed fetch is not stored as zero."
+)
+NHTSA_ODI_NOTE = (
+    "NHTSA recalls and complaints by the catalog make, plus investigations from the public flat file. "
+    "Pending review. Counts are reports, not fault findings. A failed fetch is not stored as zero."
+)
+REGISTRATION_NOTE = (
+    "Year-end vehicle registrations summed from the public state file for the catalog makes. "
+    "Pending review. A failed fetch is not stored as zero."
 )
 
 
@@ -163,6 +178,25 @@ def validate_extra_source(source: dict) -> list[str]:
             errors.append("celestrak url must be https")
         if not str(source.get("metric_id") or "").strip():
             errors.append("celestrak needs metric_id")
+        if str(source.get("deployed_metric") or "").strip():
+            if not str(source.get("satcat_url") or "").startswith("https://"):
+                errors.append("celestrak deployed series needs an https satcat_url")
+            if not str(source.get("name_prefix") or "").strip():
+                errors.append("celestrak deployed series needs name_prefix")
+    elif sid == "nhtsa_odi":
+        if not str(source.get("make") or "").strip():
+            errors.append("nhtsa_odi source needs make")
+        metrics = [source.get("recalls_metric"), source.get("complaints_metric"), source.get("investigations_metric")]
+        if not any(str(item or "").strip() for item in metrics):
+            errors.append("nhtsa_odi source needs a metric id")
+    elif sid == "state_registrations":
+        makes = source.get("makes")
+        if not isinstance(makes, list) or not any(str(item or "").strip() for item in makes):
+            errors.append("state_registrations source needs makes")
+        if not str(source.get("metric_id") or "").strip():
+            errors.append("state_registrations source needs metric_id")
+        if not str(source.get("package_url") or "").startswith("https://"):
+            errors.append("state_registrations package_url must be https")
     elif sid == "news_topics":
         if not str(source.get("metric_id") or "").strip():
             errors.append("news_topics needs metric_id")
@@ -526,11 +560,34 @@ def collect_constellation(source: dict, fetch, generated_at: str, previous: dict
     series = merge_level_series(previous, constellation_series(source, count, generated_at))
     if not series.get("points"):
         return [], {"id": "celestrak", "status": "failed", "note": "no period"}
-    return [series], {
+    found = [series]
+    status = "ok"
+    note = CONSTELLATION_NOTE
+    deployed_id = str(source.get("deployed_metric") or "").strip()
+    if deployed_id:
+        satcat_url = str(source.get("satcat_url") or "")
+        prefix = str(source.get("name_prefix") or "").strip()
+        if not satcat_url.startswith("https://") or not prefix:
+            status = "partial"
+            note = "Constellation count is in. The deployed series needs satcat_url and name_prefix."
+        else:
+            try:
+                deployed = satcat_deployed_series(source, fetch(satcat_url) or "")
+            except _FETCH_ERRORS as exc:
+                status = "partial"
+                note = f"Constellation count is in. SATCAT fetch failed ({type(exc).__name__}). Not stored as zero."
+            else:
+                if deployed.get("points"):
+                    found.append(deployed)
+                    note = f"{CONSTELLATION_NOTE} {SATCAT_NOTE}"
+                else:
+                    status = "partial"
+                    note = "Constellation count is in. SATCAT had no launches for the catalog name prefix."
+    return found, {
         "id": "celestrak",
-        "status": "ok",
+        "status": status,
         "rows": count,
-        "note": CONSTELLATION_NOTE,
+        "note": note,
     }
 
 
@@ -1474,3 +1531,412 @@ def series_from_rollup(rollup: dict | None) -> tuple[list[dict], list[dict]]:
         series["approved"] = False
         series["estimate"] = False
     return topics, estimates
+
+
+def satcat_quarter_counts(text: str, *, name_prefix: str, object_types: list | None = None) -> dict[str, int]:
+    """Launch-quarter counts for catalog name prefixes. Decay does not remove a launch."""
+    counts: dict[str, int] = {}
+    prefix = str(name_prefix or "").casefold()
+    if not prefix:
+        return counts
+    allowed = {str(item).casefold() for item in object_types or [] if str(item).strip()}
+    reader = csv.DictReader(io.StringIO(text or ""))
+    for row in reader:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("OBJECT_NAME") or "")
+        if not name.casefold().startswith(prefix):
+            continue
+        kind = str(row.get("OBJECT_TYPE") or "")
+        if allowed and kind.casefold() not in allowed:
+            continue
+        period = quarter_of(str(row.get("LAUNCH_DATE") or ""))
+        if not period:
+            continue
+        counts[period] = counts.get(period, 0) + 1
+    return counts
+
+
+def satcat_deployed_series(source: dict, text: str) -> dict:
+    counts = satcat_quarter_counts(
+        text,
+        name_prefix=str(source.get("name_prefix") or ""),
+        object_types=source.get("object_types") if isinstance(source.get("object_types"), list) else None,
+    )
+    points = [
+        {"period": period, "value": counts[period], "reported": True}
+        for period in sorted(counts, key=period_sort_key)
+        if counts[period] > 0
+    ]
+    return _collected_series(
+        str(source.get("deployed_metric") or ""),
+        points,
+        unit=str(source.get("unit") or "satellites"),
+        source_url=str(source.get("satcat_url") or ""),
+        source_title="CelesTrak SATCAT",
+        source_kind="celestrak",
+        confidence="high",
+        notes=[SATCAT_NOTE],
+    )
+
+
+def _model_years(source: dict, generated_at: str) -> list[int]:
+    listed = source.get("years")
+    if isinstance(listed, list) and listed:
+        years = []
+        for item in listed:
+            try:
+                years.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return years
+    try:
+        count = max(1, int(source.get("model_years") or 3))
+    except (TypeError, ValueError):
+        count = 3
+    stamp = _parse_stamp(generated_at)
+    year = stamp.year if stamp else datetime.now(UTC).year
+    return list(range(year - count + 1, year + 1))
+
+
+def _nhtsa_models_url(source: dict, make: str, year: int) -> str:
+    base = str(source.get("models_url") or "https://api.nhtsa.gov/products/vehicle/models")
+    query = urlencode({"modelYear": year, "make": make, "issueType": "r"})
+    return f"{base}?{query}"
+
+
+def _nhtsa_vehicle_url(source: dict, kind: str, make: str, model: str, year: int) -> str:
+    default = (
+        "https://api.nhtsa.gov/recalls/recallsByVehicle"
+        if kind == "recalls"
+        else "https://api.nhtsa.gov/complaints/complaintsByVehicle"
+    )
+    base = str(source.get(f"{kind}_url") or default)
+    return f"{base}?{urlencode({'make': make, 'model': model, 'modelYear': year})}"
+
+
+def _json_results(payload) -> list[dict]:
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get("results") or payload.get("Results") or []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def model_names(payload) -> list[str]:
+    names = []
+    for row in _json_results(payload):
+        model = str(row.get("model") or row.get("Model") or "").strip()
+        if model and model not in names:
+            names.append(model)
+    return names
+
+
+def _slash_date(text: str, *, day_first: bool) -> date | None:
+    parts = re.findall(r"\d+", text or "")
+    if len(parts) < 3:
+        return None
+    first, second, year = int(parts[0]), int(parts[1]), int(parts[2])
+    if year < 100:
+        year += 2000
+    if first > 12 and second <= 12:
+        day, month = first, second
+    elif second > 12 and first <= 12:
+        month, day = first, second
+    elif day_first and second <= 12 and first <= 31:
+        day, month = first, second
+    elif first <= 12 and second <= 31:
+        month, day = first, second
+    else:
+        return None
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _compact_date(text: str) -> date | None:
+    digits = re.sub(r"\D", "", text or "")
+    if len(digits) < 8:
+        return None
+    try:
+        return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+    except ValueError:
+        return None
+
+
+def _month_period(day: date | None) -> str | None:
+    if day is None:
+        return None
+    return f"{day.year}-{day.month:02d}"
+
+
+def _add_month(counts: dict[str, int], period: str | None) -> None:
+    if period:
+        counts[period] = counts.get(period, 0) + 1
+
+
+def recall_months(payloads: list) -> dict[str, int]:
+    """One count per campaign, dated from Report Received. Recalls use day/month/year."""
+    seen: set[str] = set()
+    counts: dict[str, int] = {}
+    for payload in payloads:
+        for row in _json_results(payload):
+            campaign = str(row.get("NHTSACampaignNumber") or "").strip()
+            if not campaign or campaign in seen:
+                continue
+            period = _month_period(_slash_date(str(row.get("ReportReceivedDate") or ""), day_first=True))
+            if not period:
+                continue
+            seen.add(campaign)
+            _add_month(counts, period)
+    return counts
+
+
+def complaint_months(payloads: list) -> dict[str, int]:
+    """One count per ODI number. Complaint dates are month/day/year."""
+    seen: set[str] = set()
+    counts: dict[str, int] = {}
+    for payload in payloads:
+        for row in _json_results(payload):
+            number = str(row.get("odiNumber") or "").strip()
+            if number and number in seen:
+                continue
+            period = _month_period(_slash_date(str(row.get("dateComplaintFiled") or ""), day_first=False))
+            if not period:
+                continue
+            if number:
+                seen.add(number)
+            _add_month(counts, period)
+    return counts
+
+
+def investigation_months(payload: bytes, make: str) -> dict[str, int]:
+    """FLAT_INV has no header. Make is the second column and the open date is YYYYMMDD in column 7."""
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        name = next(item for item in archive.namelist() if item.lower().endswith(".txt"))
+        text = archive.read(name).decode("latin-1", errors="replace")
+    wanted = make.casefold()
+    seen: set[str] = set()
+    counts: dict[str, int] = {}
+    for line in text.splitlines():
+        cols = line.split("\t")
+        if len(cols) < 7:
+            continue
+        if cols[1].strip().casefold() != wanted:
+            continue
+        inv_id = cols[0].strip()
+        if not inv_id or inv_id.casefold() in {"nhtsa action number", "campno"} or inv_id in seen:
+            continue
+        period = _month_period(_compact_date(cols[6]))
+        if not period:
+            continue
+        seen.add(inv_id)
+        _add_month(counts, period)
+    return counts
+
+
+def _monthly_count_series(metric_id: str, counts: dict[str, int], source_url: str, note: str) -> dict:
+    points = [
+        {"period": period, "value": counts[period], "reported": True}
+        for period in sorted(counts, key=period_sort_key)
+        if counts[period] > 0
+    ]
+    return _collected_series(
+        metric_id,
+        points,
+        unit="reports",
+        source_url=source_url,
+        source_title="NHTSA",
+        source_kind="nhtsa_odi",
+        confidence="high",
+        notes=[note],
+        cadence="monthly",
+    )
+
+
+def collect_nhtsa_odi(source: dict, fetch, fetch_bytes, generated_at: str) -> tuple[list[dict], dict]:
+    """Recalls, complaints, and investigations for the catalog make. Empty months stay absent."""
+    make = str(source.get("make") or "").strip()
+    if not make:
+        return [], {"id": "nhtsa_odi", "status": "failed", "note": "catalog source needs make"}
+    errors: list[str] = []
+    recall_payloads: list = []
+    complaint_payloads: list = []
+    for year in _model_years(source, generated_at):
+        try:
+            models = model_names(json.loads(fetch(_nhtsa_models_url(source, make, year)) or ""))
+        except _FETCH_ERRORS as exc:
+            errors.append(type(exc).__name__)
+            continue
+        for model in models:
+            if source.get("recalls_metric"):
+                try:
+                    recall_url = _nhtsa_vehicle_url(source, "recalls", make, model, year)
+                    recall_payloads.append(json.loads(fetch(recall_url) or ""))
+                except _FETCH_ERRORS as exc:
+                    errors.append(type(exc).__name__)
+            if source.get("complaints_metric"):
+                try:
+                    complaint_payloads.append(
+                        json.loads(fetch(_nhtsa_vehicle_url(source, "complaints", make, model, year)) or "")
+                    )
+                except _FETCH_ERRORS as exc:
+                    errors.append(type(exc).__name__)
+    series: list[dict] = []
+    recalls_id = str(source.get("recalls_metric") or "").strip()
+    if recalls_id and recall_payloads:
+        counts = recall_months(recall_payloads)
+        if counts:
+            series.append(
+                _monthly_count_series(
+                    recalls_id, counts, _nhtsa_vehicle_url(source, "recalls", make, "", 0), NHTSA_ODI_NOTE
+                )
+            )
+    complaints_id = str(source.get("complaints_metric") or "").strip()
+    if complaints_id and complaint_payloads:
+        counts = complaint_months(complaint_payloads)
+        if counts:
+            series.append(
+                _monthly_count_series(
+                    complaints_id, counts, _nhtsa_vehicle_url(source, "complaints", make, "", 0), NHTSA_ODI_NOTE
+                )
+            )
+    investigations_id = str(source.get("investigations_metric") or "").strip()
+    if investigations_id:
+        inv_url = str(source.get("investigations_url") or "https://static.nhtsa.gov/odi/ffdd/inv/FLAT_INV.zip")
+        if fetch_bytes is None or not inv_url.startswith("https://"):
+            errors.append("investigations_unavailable")
+        else:
+            try:
+                counts = investigation_months(fetch_bytes(inv_url), make)
+            except (*_FETCH_ERRORS, zipfile.BadZipFile, StopIteration) as exc:
+                errors.append(type(exc).__name__)
+            else:
+                if counts:
+                    series.append(_monthly_count_series(investigations_id, counts, inv_url, NHTSA_ODI_NOTE))
+    if series and errors:
+        status = "partial"
+    elif series:
+        status = "ok"
+    else:
+        status = "failed"
+    note = NHTSA_ODI_NOTE if status != "failed" else (errors[0] if errors else "no rows")
+    return series, {"id": "nhtsa_odi", "status": status, "note": note}
+
+
+def _census_date(text: str) -> date | None:
+    match = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(text or "").strip())
+    if match:
+        try:
+            return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            return None
+    return _slash_date(text, day_first=False)
+
+
+def registration_year_counts(csv_text: str, makes: list[str]) -> dict[int, int]:
+    wanted = {str(item).strip().casefold() for item in makes if str(item).strip()}
+    counts: dict[int, int] = {}
+    reader = csv.DictReader(io.StringIO(csv_text or ""))
+    for row in reader:
+        if not isinstance(row, dict):
+            continue
+        mapped = {str(key or "").strip().casefold(): value for key, value in row.items()}
+        if str(mapped.get("make") or "").strip().casefold() not in wanted:
+            continue
+        raw = str(mapped.get("vehicles") or "").replace(",", "").strip()
+        try:
+            vehicles = int(float(raw))
+        except ValueError:
+            continue
+        when = _census_date(str(mapped.get("date") or ""))
+        if when is None:
+            continue
+        counts[when.year] = counts.get(when.year, 0) + vehicles
+    return counts
+
+
+def registration_resource_urls(package, *, max_files: int) -> list[str]:
+    result = package.get("result") if isinstance(package, dict) and isinstance(package.get("result"), dict) else package
+    resources = (result or {}).get("resources") if isinstance(result, dict) else None
+    ranked: list[tuple[int, str]] = []
+    for resource in resources or []:
+        if not isinstance(resource, dict):
+            continue
+        url = str(resource.get("url") or "")
+        fmt = str(resource.get("format") or "")
+        if not url.startswith("https://"):
+            continue
+        if "csv" not in fmt.casefold() and not url.lower().split("?", 1)[0].endswith(".csv"):
+            continue
+        year_match = re.search(r"(20\d{2})", f"{resource.get('name') or ''} {url}")
+        ranked.append((int(year_match.group(1)) if year_match else 0, url))
+    ranked.sort(reverse=True)
+    urls: list[str] = []
+    for _year, url in ranked:
+        if url not in urls:
+            urls.append(url)
+        if len(urls) >= max_files:
+            break
+    return urls
+
+
+def collect_state_registrations(
+    source: dict, fetch, generated_at: str, previous: dict | None
+) -> tuple[list[dict], dict]:
+    """Sum the catalog makes in the newest state census files. The point sits on that year's Q4."""
+    makes = [str(item).strip() for item in (source.get("makes") or []) if str(item).strip()]
+    metric_id = str(source.get("metric_id") or "").strip()
+    package_url = str(source.get("package_url") or "")
+    if not makes or not metric_id or not package_url.startswith("https://"):
+        return [], {"id": "state_registrations", "status": "failed", "note": "catalog source is incomplete"}
+    try:
+        package = json.loads(fetch(package_url) or "")
+    except _FETCH_ERRORS as exc:
+        return [], {"id": "state_registrations", "status": "failed", "note": type(exc).__name__}
+    try:
+        max_files = max(1, int(source.get("max_files") or 4))
+    except (TypeError, ValueError):
+        max_files = 4
+    urls = registration_resource_urls(package, max_files=max_files)
+    if not urls:
+        return [], {"id": "state_registrations", "status": "failed", "note": "no csv resources"}
+    counts: dict[int, int] = {}
+    errors: list[str] = []
+    for url in urls:
+        try:
+            text = fetch(url) or ""
+        except _FETCH_ERRORS as exc:
+            errors.append(type(exc).__name__)
+            continue
+        for year, total in registration_year_counts(text, makes).items():
+            counts[year] = total
+    points = [
+        {"period": f"{year}Q4", "value": counts[year], "reported": True}
+        for year in sorted(counts)
+        if counts[year] > 0
+    ]
+    series = _collected_series(
+        metric_id,
+        points,
+        unit=str(source.get("unit") or "vehicles"),
+        source_url=package_url,
+        source_title="State vehicle registrations",
+        source_kind="state_registrations",
+        confidence="high",
+        notes=[REGISTRATION_NOTE],
+    )
+    series = merge_level_series(previous, series)
+    if not series.get("points"):
+        return [], {
+            "id": "state_registrations",
+            "status": "failed" if errors else "ok",
+            "note": errors[0] if errors else "make not in the downloaded files",
+        }
+    status = "partial" if errors else "ok"
+    return [series], {
+        "id": "state_registrations",
+        "status": status,
+        "rows": len(series["points"]),
+        "note": REGISTRATION_NOTE,
+    }

@@ -811,6 +811,9 @@ def test_packaged_free_sources_validate_and_name_no_ticker_in_code():
     assert "www.dmv.ca.gov" in ALLOWED_HOSTS
     assert "www.cpuc.ca.gov" in ALLOWED_HOSTS
     assert "www.txdmv.gov" in ALLOWED_HOSTS
+    assert "data.ca.gov" in ALLOWED_HOSTS
+    assert "publish.data.ca.gov" in ALLOWED_HOSTS
+    assert "83025b28472d6aa2bf5ae59f3724aa78.us.r2.cloudflarestorage.com" in ALLOWED_HOSTS
 
 
 _DMV_HTML = """
@@ -914,7 +917,7 @@ def test_regulator_record_sits_beside_the_estimate_and_catalog_order_holds():
     ids = [section["id"] for section in catalog["deep_dive"]["sections"]]
     assert ids == [
         "scoreboard", "forecast", "robotaxi", "energy", "semi", "chargers", "fsd",
-        "vehicles", "optimus", "factories", "energy-secondary",
+        "vehicles", "optimus", "factories", "energy-secondary", "public-records",
     ]
     source_ids = [item["id"] for item in catalog["deep_dive"]["sources"]]
     assert "av_regulator" in source_ids
@@ -979,3 +982,221 @@ def test_regulator_record_sits_beside_the_estimate_and_catalog_order_holds():
     assert tile["approved"] is False
     spcx = [section["id"] for section in ir.load_catalog("SPCX")["deep_dive"]["sections"]]
     assert spcx[:4] == ["scoreboard", "forecast", "launches", "projected-launches"]
+
+
+def test_satcat_counts_launch_quarters_and_a_failed_fetch_is_not_zero():
+    text = (
+        "OBJECT_NAME,OBJECT_TYPE,LAUNCH_DATE\n"
+        "STARLINK-1,PAY,2026-04-15\n"
+        "STARLINK-2,PAY,2026-04-20\n"
+        "STARLINK-3,DEB,2026-04-20\n"
+        "OTHERSAT,PAY,2026-04-20\n"
+        "STARLINK-4,PAY,2026-01-02\n"
+    )
+    counts = src.satcat_quarter_counts(text, name_prefix="STARLINK", object_types=["PAY"])
+    assert counts == {"2026Q1": 1, "2026Q2": 2}
+    source = {
+        "id": "celestrak",
+        "url": "https://celestrak.org/gp.json",
+        "metric_id": "constellation",
+        "unit": "satellites",
+        "deployed_metric": "deployed",
+        "satcat_url": "https://celestrak.org/pub/satcat.csv",
+        "name_prefix": "STARLINK",
+        "object_types": ["PAY"],
+    }
+    pages = {
+        source["url"]: json.dumps([{"OBJECT_NAME": "A"}]),
+        source["satcat_url"]: text,
+    }
+    series, status = src.collect_constellation(source, pages.get, "2026-10-19T00:00:00Z", None)
+    by_id = {item["metric_id"]: item for item in series}
+    assert status["status"] == "ok"
+    assert by_id["constellation"]["points"][-1]["value"] == 1
+    assert by_id["deployed"]["approved"] is False
+    assert by_id["deployed"]["source_kind"] == "celestrak"
+    assert {point["period"]: point["value"] for point in by_id["deployed"]["points"]} == {"2026Q1": 1, "2026Q2": 2}
+
+    def fail_satcat(url):
+        if url == source["satcat_url"]:
+            raise httpx.ConnectError("down")
+        return pages[source["url"]]
+
+    kept, partial = src.collect_constellation(source, fail_satcat, "2026-10-19T00:00:00Z", None)
+    assert partial["status"] == "partial"
+    assert [item["metric_id"] for item in kept] == ["constellation"]
+    assert "zero" in partial["note"].lower()
+
+
+def test_nhtsa_odi_dedupes_and_keeps_a_partial_result():
+    import io
+    import zipfile
+
+    source = {
+        "id": "nhtsa_odi",
+        "make": "EXAMPLE",
+        "years": [2025],
+        "recalls_metric": "recalls",
+        "complaints_metric": "complaints",
+        "investigations_metric": "investigations",
+        "investigations_url": "https://static.nhtsa.gov/odi/ffdd/inv/FLAT_INV.zip",
+    }
+    recalls = {
+        "results": [
+            {"NHTSACampaignNumber": "24V935000", "ReportReceivedDate": "17/12/2024"},
+            {"NHTSACampaignNumber": "24V935000", "ReportReceivedDate": "01/02/2025"},
+            {"NHTSACampaignNumber": "25V002000", "ReportReceivedDate": "05/06/2025"},
+        ]
+    }
+    complaints = {
+        "results": [
+            {"odiNumber": "100", "dateComplaintFiled": "10/14/2026"},
+            {"odiNumber": "100", "dateComplaintFiled": "10/15/2026"},
+            {"odiNumber": "101", "dateComplaintFiled": "05/06/2026"},
+        ]
+    }
+    models = {"results": [{"model": "MODEL A"}, {"model": "MODEL A"}]}
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "FLAT_INV.txt",
+            "INV9\tEXAMPLE\tx\tx\tx\tx\t20260315\n"
+            "INV9\tEXAMPLE\tx\tx\tx\tx\t20260315\n"
+            "INV8\tOTHER\tx\tx\tx\tx\t20260315\n",
+        )
+
+    def fetch(url):
+        if "models" in url:
+            return json.dumps(models)
+        if "recalls" in url:
+            return json.dumps(recalls)
+        if "complaints" in url:
+            return json.dumps(complaints)
+        raise AssertionError(url)
+
+    series, status = src.collect_nhtsa_odi(source, fetch, lambda url: buffer.getvalue(), "2026-10-19T00:00:00Z")
+    by_id = {item["metric_id"]: item for item in series}
+    assert status["status"] == "ok"
+    assert by_id["recalls"]["cadence"] == "monthly"
+    assert by_id["recalls"]["approved"] is False
+    assert {point["period"]: point["value"] for point in by_id["recalls"]["points"]} == {"2024-12": 1, "2025-06": 1}
+    assert {point["period"]: point["value"] for point in by_id["complaints"]["points"]} == {"2026-05": 1, "2026-10": 1}
+    assert {point["period"]: point["value"] for point in by_id["investigations"]["points"]} == {"2026-03": 1}
+
+    partial_series, partial = src.collect_nhtsa_odi(
+        source,
+        fetch,
+        lambda url: (_ for _ in ()).throw(OSError("zip")),
+        "2026-10-19T00:00:00Z",
+    )
+    assert partial["status"] == "partial"
+    assert "investigations" not in {item["metric_id"] for item in partial_series}
+    assert "recalls" in {item["metric_id"] for item in partial_series}
+
+
+def test_state_registration_counts_sum_a_make_onto_q4():
+    source = {
+        "id": "state_registrations",
+        "makes": ["EXAMPLE"],
+        "metric_id": "registered",
+        "unit": "vehicles",
+        "max_files": 2,
+        "package_url": "https://data.ca.gov/api/3/action/package_show?id=example",
+    }
+    package = {
+        "result": {
+            "resources": [
+                {"format": "CSV", "name": "2019 counts", "url": "https://publish.data.ca.gov/2019.csv"},
+                {"format": "CSV", "name": "2025 counts", "url": "https://publish.data.ca.gov/2025.csv"},
+                {"format": "CSV", "name": "2024 counts", "url": "https://publish.data.ca.gov/2024.csv"},
+            ]
+        }
+    }
+    files = {
+        "https://publish.data.ca.gov/2025.csv": (
+            "Date,ZIP,Model Year,Fuel,Make,Duty,Vehicles\n"
+            "2025-12-31,90001,2024,Electric,EXAMPLE,Light,10\n"
+            "2025-12-31,90002,2023,Electric,EXAMPLE,Light,5\n"
+            "2025-12-31,90001,2024,Electric,OTHER,Light,100\n"
+        ),
+        "https://publish.data.ca.gov/2024.csv": (
+            "Date,ZIP,Make,Vehicles\n2024-12-31,90001,EXAMPLE,7\n"
+        ),
+    }
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        if url == source["package_url"]:
+            return json.dumps(package)
+        return files[url]
+
+    series, status = src.collect_state_registrations(source, fetch, "2026-10-19T00:00:00Z", None)
+    assert status["status"] == "ok"
+    assert "2019.csv" not in " ".join(fetched)
+    assert series[0]["approved"] is False
+    assert series[0]["source_kind"] == "state_registrations"
+    assert {point["period"]: point["value"] for point in series[0]["points"]} == {"2024Q4": 7, "2025Q4": 15}
+    failed, failed_status = src.collect_state_registrations(
+        source,
+        lambda url: (_ for _ in ()).throw(httpx.ConnectError("down")),
+        "2026-10-19T00:00:00Z",
+        None,
+    )
+    assert failed == []
+    assert failed_status["status"] == "failed"
+
+
+def test_running_sum_skips_a_missing_quarter_and_stays_pending():
+    block = {
+        "derived": [{
+            "metric_id": "semi_production_cumulative",
+            "from": "semi_production",
+            "op": "running_sum",
+            "unit": "vehicles",
+        }]
+    }
+    reported = {
+        "metric_id": "semi_production",
+        "unit": "vehicles",
+        "cadence": "quarterly",
+        "source_kind": "manual",
+        "source_url": "https://example.test/semi",
+        "points": [
+            {"period": "2025Q1", "value": 10, "reported": True},
+            {"period": "2025Q3", "value": 5, "reported": True},
+        ],
+    }
+    metrics = {"semi_production": reported}
+    estimates = {}
+    dd._apply_derived(block, metrics, estimates)
+    cumulative = metrics["semi_production_cumulative"]
+    assert cumulative["approved"] is False
+    assert cumulative["estimate"] is False
+    assert cumulative["source_kind"] == "derived"
+    assert [point["value"] for point in cumulative["points"]] == [10, 15]
+    assert [point["period"] for point in cumulative["points"]] == ["2025Q1", "2025Q3"]
+    estimate = {
+        "metric_id": "semi_production",
+        "source_kind": "news_estimate",
+        "estimate": True,
+        "points": [{"period": "2025Q2", "value": 4, "reported": True}],
+    }
+    metrics = {}
+    estimates = {"semi_production": estimate}
+    dd._apply_derived(block, metrics, estimates)
+    derived_estimate = estimates["semi_production_cumulative"]
+    assert derived_estimate["estimate"] is True
+    assert derived_estimate["source_kind"] == "news_estimate"
+    assert derived_estimate["approved"] is False
+    catalog = ir.load_catalog("TSLA")
+    sections = {section["id"] for section in catalog["deep_dive"]["sections"]}
+    assert "public-records" in sections
+    source_ids = {item["id"] for item in catalog["deep_dive"]["sources"]}
+    assert {"nhtsa_odi", "state_registrations"} <= source_ids
+    assert catalog["deep_dive"]["derived"][0]["from"] == "semi_production"
+    spcx = ir.load_catalog("SPCX")
+    assert spcx["xbrl_segments"]["members"]["SpaceMember"] == "revenue_space"
+    celestrak = next(item for item in spcx["deep_dive"]["sources"] if item["id"] == "celestrak")
+    assert celestrak["deployed_metric"] == "starlink_satellites_deployed"
+    assert celestrak["name_prefix"] == "STARLINK"

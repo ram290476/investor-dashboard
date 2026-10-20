@@ -597,15 +597,17 @@ variable "jobs" {
       api_keys       = []
       reads_prefs    = false
     }
-    # Monday 08:00 ET. NHTSA SGO files, Launch Library 2, and CelesTrak are public
-    # (no API key). News estimates are read from the news job's rollup. Manual
-    # deep-dive entries stay proposed. deploy.yml applies this map; do not terraform apply locally.
+    # Monday 08:00 ET. NHTSA SGO and ODI files, Launch Library 2, CelesTrak, the
+    # California registration CSV, and AV regulator pages are public (no API key).
+    # News estimates are read from the news job's rollup. Manual deep-dive entries
+    # stay proposed. deploy.yml applies this map; do not terraform apply locally.
+    # Timeout covers the registration CSV and the investigations zip in one run.
     deep-dive-collect = {
       handler        = "deep_dive.handler"
       schedule       = "cron(0 8 ? * MON *)"
       triggers       = ["ticker-added"]
       memory         = 1024
-      timeout        = 120
+      timeout        = 300
       read_prefixes  = ["manual/deep_dive/", "curated/deep_dive/", "curated/company_metrics/", "curated/news_topics/"]
       write_prefixes = ["curated/deep_dive/"]
       api_keys       = []

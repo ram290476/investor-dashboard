@@ -63,6 +63,11 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
         "static.nhtsa.gov",
         "api.nhtsa.gov",
         "www.nhtsa.gov",
+        "data.ca.gov",  # CKAN package for vehicle fuel-type counts
+        "publish.data.ca.gov",  # CSV download; redirects to the R2 host below
+        # Signed redirect target for the California open-data CSVs. The hash is that
+        # bucket's host, not a credential. Other R2 hosts stay blocked.
+        "83025b28472d6aa2bf5ae59f3724aa78.us.r2.cloudflarestorage.com",
         "www.dmv.ca.gov",
         "www.cpuc.ca.gov",
         "www.txdmv.gov",

@@ -1976,3 +1976,207 @@ def test_bridge_structure_cash_flow_wording_and_gaap_labels_stay_out_of_proposal
         "apac_revenues",
         "other_americas_revenues",
     }
+
+
+_DISAGG_REPORT = (
+    "Summary of Significant Accounting Policies - "
+    "Schedule of Disaggregation of Revenue by Major Source (Details)"
+)
+_SEGMENT_SUMMARY = f"""<?xml version="1.0"?>
+<FilingSummary>
+  <Report><ShortName>Cover</ShortName><HtmlFileName>R1.htm</HtmlFileName></Report>
+  <Report><ShortName>Segments (Details)</ShortName><HtmlFileName>R83.htm</HtmlFileName></Report>
+  <Report><ShortName>{_DISAGG_REPORT}</ShortName><HtmlFileName>R35.htm</HtmlFileName></Report>
+</FilingSummary>
+"""
+
+
+def _xbrl_cell(defref: str, label: str) -> str:
+    opener = "<td><a onclick=\"Show.showAR( this, 'defref_"
+    return opener + defref + "', window );\">" + label + "</a></td>"
+
+
+def _segment_table(rows: list[str], *, six_months_first: bool) -> str:
+    """SEC-style R page. Six-month columns can sit left of the quarter columns."""
+    quarter = '<td colspan="2">3 Months Ended</td>'
+    half = '<td colspan="2">6 Months Ended</td>'
+    header = f"<tr><td></td>{half}{quarter}</tr>" if six_months_first else f"<tr><td></td>{quarter}</tr>"
+    if six_months_first:
+        dates = (
+            "<tr><td></td><td>Jun. 30, 2026</td><td>Jun. 30, 2025</td>"
+            "<td>Jun. 30, 2026</td><td>Jun. 30, 2025</td></tr>"
+        )
+    else:
+        dates = "<tr><td></td><td>Jun. 30, 2026</td><td>Jun. 30, 2025</td></tr>"
+    body = "".join(rows)
+    return f"<table><tr><td colspan=\"5\">$ in Millions</td></tr>{header}{dates}{body}</table>"
+
+
+def _member_rows(defref: str, label: str, fact: str, values: list[str]) -> str:
+    cells = "".join(f"<td>{value}</td>" for value in values)
+    return f"<tr>{_xbrl_cell(defref, label)}</tr><tr>{_xbrl_cell(fact, 'Revenues')}{cells}</tr>"
+
+
+_REVENUE_FACT = "us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax"
+_SEGMENT_HTML = _segment_table(
+    [
+        "<tr>" + _xbrl_cell(_REVENUE_FACT, "Total") + "<td>12,508</td><td>9,000</td><td>7,814</td><td>4,000</td></tr>",
+        _member_rows(
+            "us-gaap_StatementBusinessSegmentsAxis=spcx_SpaceMember",
+            "Space",
+            _REVENUE_FACT,
+            ["1,500", "1,200", "962", ""],
+        ),
+        _member_rows(
+            "us-gaap_StatementBusinessSegmentsAxis=spcx_ConnectivityMember",
+            "Connectivity",
+            _REVENUE_FACT,
+            ["8,000", "6,000", "4,291", "3,100"],
+        ),
+        _member_rows(
+            "us-gaap_StatementBusinessSegmentsAxis=spcx_AIMember",
+            "AI",
+            _REVENUE_FACT,
+            ["3,008", "1,800", "2,561", "\u2014"],
+        ),
+        _member_rows(
+            "us-gaap_StatementBusinessSegmentsAxis=spcx_UnknownMember",
+            "Other",
+            _REVENUE_FACT,
+            ["1", "1", "9", "9"],
+        ),
+    ],
+    six_months_first=True,
+)
+_TESLA_SEGMENT_HTML = _segment_table(
+    [
+        _member_rows(
+            "us-gaap_StatementBusinessSegmentsAxis=tsla_AutomotiveSegmentMember",
+            "Automotive",
+            "us-gaap_Revenues",
+            ["20,000", "18,000"],
+        ),
+        "<tr>" + _xbrl_cell("us-gaap_GrossProfit", "Gross profit") + "<td>999</td><td>888</td></tr>",
+        _member_rows(
+            "us-gaap_StatementBusinessSegmentsAxis=tsla_EnergyGenerationAndStorageSegmentMember",
+            "Energy",
+            "us-gaap_Revenues",
+            ["3,000", "2,500"],
+        ),
+        _member_rows(
+            "srt_ProductOrServiceAxis=us-gaap_ServicesAndOtherMember",
+            "Services",
+            _REVENUE_FACT,
+            ["2,500", ""],
+        ),
+    ],
+    six_months_first=False,
+)
+
+
+def test_segment_report_keeps_three_month_members_and_ignores_the_company_total():
+    names = ir.segment_report_files(_SEGMENT_SUMMARY, ["Segments (Details)", "Missing"])
+    assert names == ["R83.htm"]
+    tesla_reports = ir.load_catalog("TSLA")["xbrl_segments"]["reports"]
+    assert ir.segment_report_files(_SEGMENT_SUMMARY, tesla_reports) == ["R35.htm"]
+    rows = ir.segment_observations(
+        _SEGMENT_HTML,
+        ir.load_catalog("SPCX"),
+        ticker="SPCX",
+        source_url="https://www.sec.gov/Archives/edgar/data/1181412/R83.htm",
+        source_doc_hash="f" * 64,
+        extracted_at=EXTRACTED,
+        published_date="2026-08-05",
+    )
+    assert _value(rows, "revenue_space", "2026Q2") == 962_000_000
+    assert _value(rows, "revenue_connectivity", "2026Q2") == 4_291_000_000
+    assert _value(rows, "revenue_connectivity", "2025Q2") == 3_100_000_000
+    assert _value(rows, "revenue_ai", "2026Q2") == 2_561_000_000
+    assert not any(row["metric_id"] == "revenue_space" and row["fiscal_period"] == "2025Q2" for row in rows)
+    assert not any(row["metric_id"] == "revenue_ai" and row["fiscal_period"] == "2025Q2" for row in rows)
+    assert not any(row["value"] in {1_500_000_000, 7_814_000_000, 9_000_000} for row in rows)
+    assert all(row["approved"] is False and row["source_kind"] == "xbrl" for row in rows)
+    tesla = ir.segment_observations(
+        _TESLA_SEGMENT_HTML,
+        ir.load_catalog("TSLA"),
+        ticker="TSLA",
+        source_url="https://www.sec.gov/Archives/edgar/data/1318605/R63.htm",
+        source_doc_hash="a" * 64,
+        extracted_at=EXTRACTED,
+    )
+    assert _value(tesla, "automotive_revenue", "2026Q2") == 20_000_000_000
+    assert _value(tesla, "energy_revenue", "2026Q2") == 3_000_000_000
+    assert _value(tesla, "services_revenue", "2026Q2") == 2_500_000_000
+    assert not any(row["value"] == 999_000_000 for row in tesla)
+    written = {}
+    result = ir.run_extract(
+        {"manifests": [{
+            "ticker": "SPCX",
+            "key": "seg",
+            "source_kind": "xbrl_segments",
+            "source_url": "https://www.sec.gov/Archives/edgar/data/1181412/R83.htm",
+            "sha256": "f" * 64,
+            "published_date": "2026-08-05",
+        }]},
+        read_bytes=lambda key: _SEGMENT_HTML.encode(),
+        read_json=lambda key: None,
+        write_parquet=lambda frame, key: written.__setitem__(key, frame.height),
+        write_json=lambda key, obj: written.__setitem__(key, obj),
+        now=EXTRACTED,
+    )
+    assert result["status"] == "ok"
+    stored = next(obj["rows"] for obj in written.values() if isinstance(obj, dict) and "rows" in obj)
+    assert _value(stored, "revenue_space", "2026Q2") == 962_000_000
+    assert all(row["approved"] is False for row in stored)
+
+
+def test_spacex_companyfacts_uses_the_quarterly_fact_and_the_backlog_tag():
+    def fact(start, end, value, form="10-Q"):
+        row = {
+            "end": end,
+            "val": value,
+            "form": form,
+            "filed": "2026-08-05",
+            "accn": "0001628280-26-052535",
+            "fp": "Q2",
+            "fy": 2026,
+        }
+        if start:
+            row["start"] = start
+        return row
+
+    gaap = {
+        "RevenueFromContractWithCustomerExcludingAssessedTax": {
+            "units": {"USD": [
+                fact("2026-01-01", "2026-03-31", 4_694_000_000),
+                fact("2026-04-01", "2026-06-30", 7_814_000_000),
+                fact("2026-01-01", "2026-06-30", 20_000_000_000),
+            ]}
+        },
+        "EarningsPerShareDiluted": {
+            "units": {"USD/shares": [
+                fact("2026-01-01", "2026-03-31", -1.03),
+                fact("2026-04-01", "2026-06-30", -0.09),
+                fact("2026-01-01", "2026-06-30", -5.00),
+            ]}
+        },
+        "RevenueRemainingPerformanceObligation": {
+            "units": {"USD": [fact(None, "2026-06-30", 47_461_000_000)]}
+        },
+    }
+    catalog = ir.load_catalog("SPCX")
+    backlog = next(item for item in catalog["metrics"] if item["metric_id"] == "backlog")
+    assert backlog["category"] == "fundamentals"
+    rows, _flags = ir.companyfacts_observations(
+        {"facts": {"us-gaap": gaap}},
+        catalog,
+        ticker="SPCX",
+        source_url="https://data.sec.gov/api/xbrl/companyfacts/CIK0001181412.json",
+        source_doc_hash="c" * 64,
+        extracted_at=EXTRACTED,
+    )
+    assert _value(rows, "revenue_gaap", "2026Q2") == 7_814_000_000
+    assert _value(rows, "eps_diluted", "2026Q2") == pytest.approx(-0.09)
+    assert _value(rows, "backlog", "2026Q2") == 47_461_000_000
+    assert not any(row["value"] in {20_000_000_000, -5.0} for row in rows)
+    assert all(row["approved"] is False for row in rows)

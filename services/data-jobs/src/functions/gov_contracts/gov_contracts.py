@@ -6,9 +6,11 @@ a run and 10 a day. A 401 or 403 is a partial run, not a failed job.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, date, datetime, timedelta
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import polars as pl
@@ -22,17 +24,52 @@ STATE_KEY = "curated/contracts/_state.json"
 USASPENDING_CONTRACT_CODES = ("A", "B", "C", "D")
 USASPENDING_PAGE_SIZE = 100
 USASPENDING_MAX_PAGES = 20
-# Recipient spellings SEC entity names do not cover. Watchlist names are added per run.
-NAME_OVERRIDES: tuple[tuple[str, str], ...] = (
-    ("space exploration technologies", "SPCX"),
-    ("spacex", "SPCX"),
-    ("tesla", "TSLA"),
-)
-NAME_TO_TICKER: list[tuple[str, str]] = list(NAME_OVERRIDES)
-# USAspending recipient search term per ticker when the SEC name is not the contracting entity.
-RECIPIENT_OVERRIDES = {"SPCX": "Space Exploration Technologies", "TSLA": "Tesla"}
 # UEIs are filled as awards identify them. A listed UEI wins over the name match.
 UEI_TO_TICKER: dict[str, str] = {}
+
+
+def catalog_dir() -> Path:
+    """Ticker catalogs. Tests keep this file beside company_ir/; the Lambda image flattens both."""
+    here = Path(__file__).resolve().parent
+    for candidate in (here / "catalog", here.parent / "company_ir" / "catalog"):
+        if candidate.is_dir():
+            return candidate
+    return here / "catalog"
+
+
+def catalog_contract_blocks() -> dict[str, dict]:
+    """`gov_contracts` blocks from every packaged catalog. Names are not hard-coded here."""
+    found: dict[str, dict] = {}
+    root = catalog_dir()
+    if not root.is_dir():
+        return found
+    for path in sorted(root.glob("*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        block = document.get("gov_contracts")
+        if not isinstance(block, dict):
+            continue
+        ticker = str(document.get("ticker") or path.stem).upper()
+        if ticker:
+            found[ticker] = block
+    return found
+
+
+def _alias_entries(blocks: dict[str, dict], tickers: list[str] | None = None) -> list[tuple[str, str]]:
+    chosen = list(blocks) if tickers is None else [str(ticker or "").upper() for ticker in tickers]
+    entries: list[tuple[str, str]] = []
+    for ticker in chosen:
+        block = blocks.get(ticker) or {}
+        for alias in block.get("name_aliases") or []:
+            needle = " ".join(re.sub(r"[^a-z0-9]+", " ", str(alias).lower()).split())
+            if needle and len(needle) >= 3 and all(needle != known for known, _owner in entries):
+                entries.append((needle, ticker))
+    return entries
+
+
+NAME_TO_TICKER: list[tuple[str, str]] = _alias_entries(catalog_contract_blocks())
 
 
 def is_business_day(day: date) -> bool:
@@ -60,26 +97,33 @@ def fiscal_quarter(day: date) -> str:
     return f"FY{year}Q{quarter}"
 
 
-def ticker_for(name: str | None, uei: str | None = None) -> str | None:
-    if uei and uei in UEI_TO_TICKER:
-        return UEI_TO_TICKER[uei]
-    lowered = f" {re.sub(r'[^a-z0-9]+', ' ', (name or '').lower())} "
+def match_ticker(text: str | None) -> tuple[str, str] | None:
+    """(ticker, matched spelling) using word boundaries. The spelling keeps the source's case."""
+    raw = text or ""
     for needle, ticker in NAME_TO_TICKER:
-        if f" {needle} " in lowered:
-            return ticker
+        found = re.search(rf"(?<![A-Za-z0-9]){re.escape(needle)}(?![A-Za-z0-9])", raw, re.IGNORECASE)
+        if found:
+            return ticker, found.group(0)
     return None
 
 
+def ticker_for(name: str | None, uei: str | None = None) -> str | None:
+    if uei and uei in UEI_TO_TICKER:
+        return UEI_TO_TICKER[uei]
+    matched = match_ticker(name)
+    return None if matched is None else matched[0]
+
+
 def name_map_from_watchlist(names: dict[str, str | None]) -> list[tuple[str, str]]:
-    """Overrides first, then the cleaned SEC entity name of every watchlist ticker."""
+    """Catalog aliases for these tickers, then each cleaned SEC entity name."""
     from universe import short_company_name
 
-    entries = list(NAME_OVERRIDES)
+    entries = _alias_entries(catalog_contract_blocks(), list(names))
     for ticker, name in names.items():
         needle = " ".join(short_company_name(name).lower().replace("&", " ").split())
         needle = " ".join(re.sub(r"[^a-z0-9]+", " ", needle).split())
-        if needle and len(needle) >= 3 and all(needle != known for known, _ in entries):
-            entries.append((needle, ticker.upper()))
+        if needle and len(needle) >= 3 and all(needle != known for known, _owner in entries):
+            entries.append((needle, str(ticker).upper()))
     return entries
 
 
@@ -93,18 +137,22 @@ def recipient_searches(tickers: list[str], names: dict[str, str | None]) -> list
     """(ticker, USAspending recipient search text) for each watchlist ticker with a usable name."""
     from universe import short_company_name
 
+    blocks = catalog_contract_blocks()
     searches = []
     for ticker in tickers:
-        text = RECIPIENT_OVERRIDES.get(ticker) or short_company_name(names.get(ticker))
+        symbol = str(ticker or "").upper()
+        text = str((blocks.get(symbol) or {}).get("recipient") or "").strip()
+        if not text:
+            text = short_company_name(names.get(ticker))
         if text:
-            searches.append((ticker, text))
+            searches.append((symbol, text))
     return searches
 
 
 def sam_query_for(searches: list[tuple[str, str]], day: date) -> str:
     """SAM.gov allows ~10 calls a day, so one watchlist name per day, in rotation."""
     if not searches:
-        return "SpaceX"
+        return ""
     return searches[day.toordinal() % len(searches)][1]
 
 
@@ -308,14 +356,15 @@ def parse_sam(payload: dict, ingested_at: str, kind: str = "sam-awards") -> list
 
 
 def parse_dod(text: str, ingested_at: str, day: date) -> list[dict]:
-    """DoD paragraphs that name SpaceX or Tesla. A PIID is reconciled; otherwise the row stays provisional."""
+    """DoD paragraphs that name a watchlist company. A PIID is reconciled; otherwise the row stays provisional."""
     rows = []
     for paragraph in (text or "").split("\n\n"):
         if "contract" not in paragraph.lower():
             continue
-        ticker = ticker_for(paragraph)
-        if not ticker:
+        matched = match_ticker(paragraph)
+        if not matched:
             continue
+        ticker, recipient = matched
         piid = None
         for token in paragraph.replace(",", " ").split():
             if len(token) >= 8 and any(char.isdigit() for char in token) and "-" in token:
@@ -329,7 +378,7 @@ def parse_dod(text: str, ingested_at: str, day: date) -> list[dict]:
             {
                 "award_id": piid or f"DoD-{ticker}-{day.isoformat()}-{len(rows)}",
                 "parent_award_id": None,
-                "recipient_name": "SpaceX" if ticker == "SPCX" else "Tesla",
+                "recipient_name": recipient,
                 "recipient_uei": None,
                 "ticker": ticker,
                 "agency": "Department of Defense",
@@ -506,7 +555,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                 if record["outcome"] == "failure":
                     usaspending_ok = False
             used = 0
-            if budget:
+            if budget and sam_query:
                 with source_run("sam-awards") as record:
                     response = http.get(
                         "https://api.sam.gov/contract-awards/v1/search",
@@ -524,7 +573,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
                     found = parse_sam(payload, ingested_at)
                     awards.extend(found)
                     record["rows"] = len(found)
-            if budget >= 2:
+            if budget >= 2 and sam_query:
                 with source_run("sam-opportunities") as record:
                     response = http.get(
                         "https://api.sam.gov/opportunities/v2/search",

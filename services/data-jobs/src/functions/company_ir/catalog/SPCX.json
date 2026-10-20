@@ -167,7 +167,10 @@
       "panel_order": 80,
       "aliases": [
         "Mass to orbit",
-        "Mass to orbit (in metric tons)"
+        "Mass to orbit (in metric tons)",
+        "Mass delivered to orbit",
+        "Payload mass to orbit",
+        "Metric tons delivered to orbit"
       ],
       "disclosure_status": "numeric",
       "scale": 1,
@@ -188,7 +191,12 @@
       "panel_order": 90,
       "aliases": [
         "Starlink Subscribers",
-        "Starlink Subscribers (#, in millions, as of period end)"
+        "Starlink Subscribers (#, in millions, as of period end)",
+        "Starlink subscribers",
+        "Starlink customers",
+        "Number of Starlink subscribers",
+        "Ending Starlink subscribers",
+        "Subscribers (in millions)"
       ],
       "disclosure_status": "numeric",
       "scale": 1000000,
@@ -209,7 +217,11 @@
       "panel_order": 100,
       "aliases": [
         "Starlink ARPU",
-        "Starlink ARPU ($ per month)"
+        "Starlink ARPU ($ per month)",
+        "Average revenue per user",
+        "Average monthly revenue per user",
+        "Monthly ARPU",
+        "ARPU"
       ],
       "disclosure_status": "numeric",
       "scale": 1,
@@ -244,16 +256,22 @@
       "metric_id": "backlog",
       "display_name": "Backlog",
       "unit": "USD",
-      "definition": "Narrative backlog from the earnings release. Proposed.",
-      "category": "operating",
+      "definition": "Remaining performance obligation from SEC companyfacts, or the backlog row in a filing. Proposed until a reviewer approves it.",
+      "category": "fundamentals",
       "status": "proposed",
       "approved_by": null,
       "approved_at": null,
       "panel_order": 120,
       "aliases": [
-        "Backlog"
+        "Backlog",
+        "Remaining performance obligation",
+        "Remaining performance obligations",
+        "RPO"
       ],
-      "disclosure_status": "narrative",
+      "xbrl_tags": ["RevenueRemainingPerformanceObligation"],
+      "xbrl_kind": "instant",
+      "xbrl_mode": "instant",
+      "disclosure_status": "numeric",
       "scale": 1,
       "source_priority": [
         "press_release",
@@ -752,6 +770,20 @@
       ]
     }
   ],
+  "xbrl_segments": {
+    "axes": ["StatementBusinessSegmentsAxis"],
+    "reports": ["Segments (Details)"],
+    "facts": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues"],
+    "members": {
+      "SpaceMember": "revenue_space",
+      "ConnectivityMember": "revenue_connectivity",
+      "AIMember": "revenue_ai"
+    }
+  },
+  "gov_contracts": {
+    "name_aliases": ["space exploration technologies", "spacex"],
+    "recipient": "Space Exploration Technologies"
+  },
   "deep_dive": {
     "version": 1,
     "title": "Deep dive",
@@ -796,7 +828,11 @@
         "id": "celestrak",
         "url": "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json",
         "metric_id": "starlink_constellation",
-        "unit": "satellites"
+        "unit": "satellites",
+        "deployed_metric": "starlink_satellites_deployed",
+        "satcat_url": "https://celestrak.org/pub/satcat.csv",
+        "name_prefix": "STARLINK",
+        "object_types": ["PAY"]
       },
       {
         "id": "news_estimates",
@@ -1215,7 +1251,7 @@
             "cadence": "quarterly",
             "map": "world",
             "map_metric": "starlink_deployed_by_country",
-            "source_note": "Constellation size is the count of objects in the public CelesTrak group. No API key. It stays pending review. Built and deployed totals are still manual.",
+            "source_note": "Constellation size is the count of objects in the public CelesTrak group. Deployed is a SATCAT count by launch quarter for the catalog name prefix. No API key. Both stay pending review. Built totals are still manual.",
             "kpis": [
               {
                 "metric_id": "starlink_subscribers",
