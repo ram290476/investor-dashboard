@@ -493,13 +493,15 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(trendTone(-0.1, false), "down");
   assert.equal(trendTone(0, true), "flat");
   assert.equal(STOCK_TABS.length, 4);
-  assert.equal(stockTabs(null).length, 4);
-  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["overview", "kpis", "fundamentals", "calls", "deep-dive"]);
-  assert.equal(stockTabs(sample).at(-1).id, "deep-dive");
-  assert.equal(stockTabs(sample).at(-1).label, "Deep dive");
-  assert.equal(nextStockTab("calls", "ArrowRight", stockTabs(sample)), "deep-dive");
-  assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "deep-dive");
-  assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "overview");
+  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["overview", "fundamentals", "kpis", "calls"]);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.label), ["Overview", "Fundamentals", "Deep dive", "KPIs", "Calls"]);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["overview", "fundamentals", "deep-dive", "kpis", "calls"]);
+  assert.equal(stockTabs(sample)[2].label, "Deep dive");
+  assert.equal(nextStockTab("fundamentals", "ArrowRight", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "kpis");
+  assert.equal(nextStockTab("kpis", "ArrowLeft", stockTabs(sample)), "deep-dive");
+  assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "calls");
+  assert.equal(nextStockTab("calls", "ArrowRight", stockTabs(sample)), "overview");
 });
 
 test("rendered deep dive shows pending review, empty copy, and a placeholder forecast", () => {

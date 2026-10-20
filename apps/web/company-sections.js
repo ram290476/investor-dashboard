@@ -1,4 +1,4 @@
-// Section tiles for the company page (Overview, KPIs, Fundamentals, Calls).
+// Section tiles for the company page (Overview, Fundamentals, KPIs, Calls).
 // The same card, hash, and sticky-nav behavior as the deep dive. No ticker names.
 import { trendTone } from "./deep-dive.js";
 import { stockPanelHash } from "./routes.js";

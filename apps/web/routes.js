@@ -28,7 +28,7 @@ export function parseStockSection(hash) {
   return match?.[2] === "deep-dive" ? (match[3] || "") : "";
 }
 
-/** Bookmark id in `#stock/<T>/<tab>/<section>` for Overview, KPIs, Fundamentals, and Calls. */
+/** Bookmark id in `#stock/<T>/<tab>/<section>` for Overview, Fundamentals, KPIs, and Calls. */
 export function parseStockPanel(hash) {
   const match = stockMatch(hash);
   if (!match?.[2] || match[2] === "deep-dive") return "";

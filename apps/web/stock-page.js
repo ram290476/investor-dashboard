@@ -8,8 +8,8 @@ export const LONG_PRESS_MS = 550;
 
 export const STOCK_TABS = [
   { id: "overview", label: "Overview" },
-  { id: "kpis", label: "KPIs" },
   { id: "fundamentals", label: "Fundamentals" },
+  { id: "kpis", label: "KPIs" },
   { id: "calls", label: "Calls" },
 ];
 
@@ -176,12 +176,16 @@ export function companyDescription(payload, tickerData) {
   return "";
 }
 
-/** Base tabs, plus Deep dive when this payload's catalog published a deep_dive block. */
+/** Company tabs, in order. Deep dive is third, and only when this payload published sections. */
 export function stockTabs(payload) {
   const sections = payload?.deep_dive?.sections;
-  if (!Array.isArray(sections) || !sections.length) return STOCK_TABS;
-  const label = String(payload.deep_dive.title || "Deep dive").trim() || "Deep dive";
-  return [...STOCK_TABS, { id: "deep-dive", label }];
+  const deep = Array.isArray(sections) && sections.length
+    ? { id: "deep-dive", label: String(payload.deep_dive.title || "Deep dive").trim() || "Deep dive" }
+    : null;
+  const byId = new Map(STOCK_TABS.map((tab) => [tab.id, tab]));
+  return ["overview", "fundamentals", "deep-dive", "kpis", "calls"]
+    .map((id) => (id === "deep-dive" ? deep : byId.get(id)))
+    .filter(Boolean);
 }
 
 export function nextStockTab(current, key, tabs = STOCK_TABS) {

@@ -329,7 +329,9 @@ test("review mode shows or hides operating, guidance, and CapEx panels together"
 });
 
 test("stock tabs move by keyboard and calls stay unlicensed", () => {
-  assert.equal(nextStockTab("overview", "ArrowRight"), "kpis");
+  assert.deepEqual(STOCK_TABS.map((tab) => tab.id), ["overview", "fundamentals", "kpis", "calls"]);
+  assert.equal(nextStockTab("overview", "ArrowRight"), "fundamentals");
+  assert.equal(nextStockTab("fundamentals", "ArrowRight"), "kpis");
   assert.equal(nextStockTab("overview", "End"), "calls");
   assert.equal(nextStockTab("calls", "ArrowRight"), "overview");
   assert.equal(STOCK_TABS.length, 4);
