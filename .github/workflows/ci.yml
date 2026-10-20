@@ -88,6 +88,7 @@ jobs:
           node --check apps/web/auth-session.js
           node --check apps/web/trend-state.js
           node --check apps/web/settings-model.js
+          node --check apps/web/session-landing.js
           node --check apps/web/account-settings.js
           node --check apps/web/theme.js
           node --check apps/web/signals.js

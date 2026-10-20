@@ -19,6 +19,18 @@ export function settingsTabs(admin = false) {
   return admin ? [...SETTINGS_TABS, ADMIN_TAB] : SETTINGS_TABS;
 }
 
+/** Account menu rows under Data refresh. Admin Settings is present only for an admin. */
+export function accountMenuModel(admin = false) {
+  const items = [
+    { id: "tickers", label: "Manage Watchlist", hint: "add · pin · reorder" },
+    { id: "theme", label: "Theme & display", hint: "colors · chart period" },
+    { id: "profile", label: "Profile & time zone", hint: "" },
+    { id: "sign-out", label: "Sign out", hint: "" },
+  ];
+  if (admin) items.splice(items.length - 1, 0, { id: "admin", label: "Admin Settings", hint: "fund flag" });
+  return items;
+}
+
 export const PALETTES = [
   { id: "theme", label: "Theme default" },
   { id: "green-red", label: "Green / Red" },
