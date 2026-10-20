@@ -116,6 +116,62 @@ export function trendTone(change, inverse = false) {
   return (inverse ? !up : up) ? "up" : "down";
 }
 
+// Visible text for the sticky section bar. Keys are catalog titles; the chip
+// tooltip keeps the original wording. Unknown titles pass through with the
+// same word abbreviations, so a new company does not need its own list.
+const SECTION_SHORT_LABELS = {
+  "trend scoreboard": "Scoreboard",
+  "revenue & earnings forecast": "Rev & EPS",
+  "revenue and earnings forecast": "Rev & EPS",
+  "robotaxi & autonomy": "Robotaxi",
+  "commercial energy": "Comm. energy",
+  "fsd by region": "FSD regions",
+  "production & deliveries": "Prod. & deliveries",
+  "manufacturing footprint": "Mfg. footprint",
+  "energy projects & news": "Energy news",
+  "public vehicle records": "Vehicle records",
+  "segment gross margin": "Seg. margin",
+  "government obligations": "Gov. obligations",
+  "projected launches": "Proj. launches",
+  "new factories": "Factories",
+  "revenue by segment": "Rev by segment",
+  "revenue mix": "Rev mix",
+  "segment operating income": "Seg. op. income",
+  "net sales by product": "Sales by product",
+  "operating income": "Op. income",
+  "sales by segment": "Sales by seg.",
+  "sales by product": "Sales by product",
+  "revenue by channel": "Rev by channel",
+  "gross profit and operating income": "GP & op. income",
+  "operating income by segment": "Op. income by seg.",
+  "revenue by end market": "Rev by market",
+  "reportable segments": "Segments",
+  "revenue by market": "Rev by market",
+  "revenue by customer": "Rev by customer",
+};
+
+/** Short chip label. The caller keeps the catalog title for the tooltip. */
+export function shortSectionLabel(title) {
+  const original = String(title || "").replace(/\s+/g, " ").trim();
+  if (!original) return "";
+  const known = SECTION_SHORT_LABELS[original.toLowerCase()];
+  if (known) return known;
+  // A leading maker name before Semi is not part of the chip.
+  if (/^[A-Z][a-z]+\s+Semi$/.test(original)) return "Semi";
+  return original
+    .replace(/\bRevenue\b/g, "Rev")
+    .replace(/\bearnings\b/g, "EPS")
+    .replace(/\bOperating\b/g, "Op.")
+    .replace(/\boperating\b/g, "op.")
+    .replace(/\bSegment\b/g, "Seg.")
+    .replace(/\bsegment\b/g, "seg.")
+    .replace(/\bProjected\b/g, "Proj.")
+    .replace(/\bProduction\b/g, "Prod.")
+    .replace(/\bManufacturing\b/g, "Mfg.")
+    .replace(/\bGovernment\b/g, "Gov.")
+    .replace(/\bGross profit\b/g, "GP");
+}
+
 function el(doc, tag, className, text) {
   const node = doc.createElement(tag);
   if (className) node.className = className;
@@ -202,7 +258,13 @@ function renderSectionNav(sections, ticker, root, doc, options) {
   strip.setAttribute("aria-label", "Sections");
   const track = el(doc, "div", "section-strip-track");
   for (const section of sections || []) {
-    const chip = el(doc, "a", "section-strip-chip", section.title || section.id || "");
+    const full = String(section.title || section.id || "").replace(/\s+/g, " ").trim();
+    const chip = el(doc, "a", "section-strip-chip", shortSectionLabel(full));
+    if (full) {
+      chip.title = full;
+      chip.setAttribute("title", full);
+      chip.setAttribute("aria-label", full);
+    }
     bindSectionLink(chip, section, ticker, root, doc, options);
     track.append(chip);
   }

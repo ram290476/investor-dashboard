@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import {
   axisLabel,
@@ -12,6 +12,7 @@ import {
   renderDeepDive,
   renderTrendDisclaimer,
   revealDeepDiveSection,
+  shortSectionLabel,
   trendTone,
 } from "./deep-dive.js";
 import { nextStockTab, stockTabs, STOCK_TABS } from "./stock-page.js";
@@ -351,12 +352,16 @@ test("section chips jump by name and leave the metric on the section", () => {
   });
   const sites = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "fleet");
   assert.equal(textOf(sites), "Fleet");
+  assert.equal(sites.getAttribute("title"), "Fleet");
+  assert.equal(sites.getAttribute("aria-label"), "Fleet");
   assert.equal(byClass(view, "deep-dive-section-tile").length, 0);
   const sitesMetric = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Sites"));
   assert.match(textOf(sitesMetric), /Estimate/);
   assert.match(textOf(sitesMetric), /Pending review/);
   const notes = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "notes");
   assert.equal(textOf(notes), "Notes");
+  assert.equal(notes.getAttribute("title"), "Notes");
+  assert.equal(notes.getAttribute("aria-label"), "Notes");
   const event = {
     button: 0,
     metaKey: false,
@@ -551,10 +556,88 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*width:\s*100%/);
   assert.match(deepStyles, /\.deep-dive-table\s*\{[^}]*table-layout:\s*fixed/);
   assert.match(deepStyles, /\.section-strip-track\s*\{[^}]*flex-wrap:\s*wrap/);
-  assert.doesNotMatch(deepStyles, /\.deep-dive-panel[\s\S]*overflow-x:\s*auto/);
+  assert.match(deepStyles, /\.deep-dive \.section-strip-chip\s*\{[^}]*white-space:\s*nowrap/);
+  assert.match(deepStyles, /@media \(max-width:\s*640px\)\s*\{\s*\.deep-dive \.section-strip-track\s*\{[^}]*flex-wrap:\s*nowrap/);
+  assert.match(deepStyles, /@media \(max-width:\s*640px\)\s*\{\s*\.deep-dive \.section-strip-track\s*\{[^}]*overflow-x:\s*auto/);
+  assert.deepEqual(deepStyles.match(/overflow-x:\s*auto/g), ["overflow-x: auto"]);
   assert.match(styles, /\.stock-page-tabs\s*\{[^}]*display:\s*flex/);
   assert.match(ci, /node --check apps\/web\/deep-dive\.js/);
   assert.match(ci, /node --check apps\/web\/geo\.js/);
+});
+
+test("deep dive section chips abbreviate catalog titles and keep the full label as the tooltip", async () => {
+  const expected = {
+    "AI deals": "AI deals",
+    "Chargers": "Chargers",
+    "Commercial energy": "Comm. energy",
+    "Energy projects & news": "Energy news",
+    "FSD by region": "FSD regions",
+    "Government obligations": "Gov. obligations",
+    "Gross profit and operating income": "GP & op. income",
+    "Launches": "Launches",
+    "Manufacturing footprint": "Mfg. footprint",
+    "Net sales by product": "Sales by product",
+    "New factories": "Factories",
+    "Operating income": "Op. income",
+    "Operating income by segment": "Op. income by seg.",
+    "Optimus": "Optimus",
+    "Production & deliveries": "Prod. & deliveries",
+    "Projected launches": "Proj. launches",
+    "Public vehicle records": "Vehicle records",
+    "Reportable segments": "Segments",
+    "Revenue & earnings forecast": "Rev & EPS",
+    "Revenue and earnings forecast": "Rev & EPS",
+    "Revenue by channel": "Rev by channel",
+    "Revenue by customer": "Rev by customer",
+    "Revenue by end market": "Rev by market",
+    "Revenue by market": "Rev by market",
+    "Revenue by segment": "Rev by segment",
+    "Revenue mix": "Rev mix",
+    "Robotaxi & autonomy": "Robotaxi",
+    "Sales by product": "Sales by product",
+    "Sales by segment": "Sales by seg.",
+    "Segment gross margin": "Seg. margin",
+    "Segment operating income": "Seg. op. income",
+    "Starlink": "Starlink",
+    "Starmind": "Starmind",
+    "Starship": "Starship",
+    "Terraform": "Terraform",
+    "Tesla Semi": "Semi",
+    "Trend scoreboard": "Scoreboard",
+  };
+  const dir = new URL("../../services/data-jobs/src/functions/company_ir/catalog/", import.meta.url);
+  const titles = new Set();
+  for (const name of await readdir(dir)) {
+    const catalog = JSON.parse(await readFile(new URL(name, dir), "utf8"));
+    for (const section of catalog.deep_dive?.sections || []) {
+      if (section?.title) titles.add(section.title);
+    }
+  }
+  assert.deepEqual([...titles].sort(), Object.keys(expected).sort());
+  for (const [title, label] of Object.entries(expected)) {
+    assert.equal(shortSectionLabel(title), label);
+    assert.ok(label.length <= title.length, `${title} grew`);
+  }
+  assert.equal(shortSectionLabel("Revenue outlook"), "Rev outlook");
+  const view = renderDeepDive({
+    deep_dive: {
+      sections: [...titles].map((title, index) => ({
+        id: `section-${index}`,
+        title,
+        panels: [{ id: `panel-${index}`, kind: "note", title }],
+      })),
+    },
+  }, fakeDocument(false), { ticker: "exmpl" });
+  const chips = byClass(view, "section-strip-chip");
+  assert.equal(chips.length, titles.size);
+  for (const chip of chips) {
+    const full = chip.getAttribute("title");
+    assert.equal(chip.getAttribute("aria-label"), full);
+    assert.equal(textOf(chip), expected[full]);
+  }
+  const headings = byClass(view, "stock-section-title").map((node) => node.textContent);
+  assert.deepEqual(headings.sort(), [...titles].sort());
+  assert.doesNotMatch(source, /TSLA|Tesla|NVDA|SPCX|SpaceX/);
 });
 
 test("a second company page uses the same panels for launches, forecast, and voice labels", () => {

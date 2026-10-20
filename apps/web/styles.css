@@ -5105,7 +5105,8 @@ a.catalyst-edgar-link:hover {
   max-width: 100%;
 }
 
-/* Charts and tables fit the panel. The ticker bar is the only horizontal scroller. */
+/* Charts and tables fit the panel. The Deep dive section strip scrolls sideways
+   only on a very narrow screen. The ticker bar can scroll at any width. */
 .deep-dive > *,
 .deep-dive-section,
 .deep-dive-grid > *,
@@ -5264,6 +5265,23 @@ a.catalyst-edgar-link:hover {
   text-decoration: none;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+/* Deep dive chips stay one line so the shortened label does not break mid-word.
+   The row wraps at common widths. Below 640px the track scrolls inside itself. */
+.deep-dive .section-strip-chip {
+  flex: 0 0 auto;
+  max-width: none;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .deep-dive .section-strip-track {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
 }
 
 .section-strip-chip[aria-current="location"] {
