@@ -36,7 +36,6 @@ XBRL_TAGS = {
     "gross_profit_gaap": ["GrossProfit"],
 }
 MANUAL_METRICS = {"deliveries": "vehicles", "fsd_subscribers": "subscribers"}
-ALLOWED_METRICS = {"gross_margin_gaap", "revenue_gaap", "gross_profit_gaap", *MANUAL_METRICS}
 QUARTER_RE = re.compile(r"^\d{4}Q[1-4]$")
 SCHEMA = {
     "ticker": pl.Utf8,

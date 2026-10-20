@@ -10,7 +10,7 @@ Options (DS-92, job options_daily): chain snapshots on the free 'indicative' fee
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date
 
 DATA = "https://data.alpaca.markets"
 BARS_PATH = "/v2/stocks/bars"
@@ -114,7 +114,3 @@ def chain_params(as_of: date, page_token: str | None = None) -> dict:
     if page_token:
         p["page_token"] = page_token
     return p
-
-
-def iso_date(ts: str) -> date:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00")).date()

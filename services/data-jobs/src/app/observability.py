@@ -12,7 +12,7 @@ Gives every collector and build job the same structured logs, traces and metrics
 
 Usage in a collector:
 
-    from observability import job_handler, source_run, record_rate_headroom
+    from observability import job_handler, source_run
 
     @job_handler("H1")
     def handler(event, context):
@@ -20,7 +20,6 @@ Usage in a collector:
             bars = fetch_alpaca_bars()
             write_curated(bars)
             run["rows"] = len(bars)
-        record_rate_headroom(provider="alpaca", used=7, limit=288_000)
 
 Lambda environment (Terraform output `lambda_environment`):
     POWERTOOLS_SERVICE_NAME, POWERTOOLS_METRICS_NAMESPACE, AWS_USE_FIPS_ENDPOINT=true
@@ -61,9 +60,6 @@ def redact_secrets(text: str) -> str:
     """Replace credential values in URL query strings with [REDACTED]."""
     return _SECRET_PARAM.sub(lambda m: f"{m.group(1)}=[REDACTED]", text)
 
-
-# Max age before a source counts as stale, by refresh tier (matches the doc's freshness rules).
-MAX_AGE_HOURS = {"hourly": 2, "daily": 30, "weekly": 24 * 8, "monthly": 24 * 35, "quarterly": 24 * 100}
 
 _runs: list[dict[str, Any]] = []
 
@@ -327,42 +323,3 @@ def source_run(source_id: str) -> Iterator[dict[str, Any]]:
             log = logger.error if run["outcome"] == "failure" else logger.info
             log("source_run", extra={"event": "source_run", **run})
             _runs.append(run)
-
-
-def record_rate_headroom(provider: str, used: int, limit: int) -> None:
-    """Report how much of a provider's free quota is left (alarm under 20%)."""
-    headroom = max(0.0, 100.0 * (1 - used / limit)) if limit else 100.0
-    logger.info("rate_headroom", extra={"event": "rate_headroom", "provider": provider, "used": used, "limit": limit})
-    metrics.add_metric(name="RateLimitHeadroomPct", unit=MetricUnit.Percent, value=round(headroom, 1))
-
-
-def publish_freshness(latest_success: list[dict[str, Any]], now: datetime | None = None) -> dict[str, Any]:
-    """Build job: compute freshness from the latest successful run per source.
-
-    latest_success rows: {"source_id", "priority" ("P1"/"P2"/"P3"), "tier", "last_success" (aware datetime),
-    "due" (bool: False on weekends/holidays when the source is not expected to update)}.
-    Emits StaleP1Sources, StaleSources and FreshP1Ratio, and returns the public health.json body.
-    """
-    now = now or datetime.now(UTC)
-    stale, stale_p1, p1_due = [], 0, 0
-    for row in latest_success:
-        if not row.get("due", True):
-            continue
-        age_h = (now - row["last_success"]).total_seconds() / 3600
-        if age_h > MAX_AGE_HOURS[row["tier"]]:
-            stale.append(row["source_id"])
-            stale_p1 += row["priority"] == "P1"
-        p1_due += row["priority"] == "P1"
-
-    metrics.add_metric(name="StaleSources", unit=MetricUnit.Count, value=len(stale))
-    metrics.add_metric(name="StaleP1Sources", unit=MetricUnit.Count, value=stale_p1)
-    if p1_due:
-        metrics.add_metric(name="FreshP1Ratio", unit=MetricUnit.Count, value=round(1 - stale_p1 / p1_due, 4))
-    logger.info("freshness", extra={"event": "freshness", "stale": stale, "stale_p1": stale_p1, "p1_due": p1_due})
-
-    # Public, non-sensitive health document read by the external canary.
-    return {
-        "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "stale_p1": stale_p1,
-        "stale_total": len(stale),
-    }

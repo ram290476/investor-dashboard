@@ -77,10 +77,6 @@ def curated_filings_prefix(ticker: str) -> str:
     return f"curated/sec_filings/ticker={ticker.upper()}/"
 
 
-def curated_filings_key(ticker: str) -> str:
-    return f"{curated_filings_prefix(ticker)}filings.parquet"
-
-
 def serving_filings_key(ticker: str) -> str:
     return f"serving/filings/{ticker.upper()}.json"
 
