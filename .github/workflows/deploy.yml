@@ -206,14 +206,34 @@ jobs:
           echo "SITE_BUCKET=$(jq -r '.bucket_name' <<< "$site_output")" >> "$GITHUB_ENV"
           echo "CLOUDFRONT_DISTRIBUTION_ID=$(jq -r '.distribution_id' <<< "$site_output")" >> "$GITHUB_ENV"
 
+      # Short SHA on script, stylesheet, and relative module imports so a browser
+      # cannot mix this deploy with a cached copy of an older module (#263).
+      - name: Stamp cache-busting asset URLs
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          short="$(printf '%s' "$DEPLOY_SHA" | tr '[:upper:]' '[:lower:]' | cut -c1-7)"
+          node apps/web/stamp-assets.mjs apps/web "$short"
+
       - name: Publish static dashboard
         run: |
           set -euo pipefail
+          # Versioned JS/CSS can stay cached. index.html and config.json are
+          # uploaded afterwards with Cache-Control: no-cache (#263).
           aws s3 sync apps/web "s3://${SITE_BUCKET}" \
             --delete \
             --exclude config.example.json \
             --exclude package.json \
-            --exclude "*.test.js"
+            --exclude "*.test.js" \
+            --exclude stamp-assets.mjs \
+            --exclude index.html \
+            --exclude config.json \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp apps/web/index.html "s3://${SITE_BUCKET}/index.html" \
+            --cache-control "no-cache"
+          aws s3 cp apps/web/config.json "s3://${SITE_BUCKET}/config.json" \
+            --cache-control "no-cache"
           aws cloudfront create-invalidation \
             --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
             --paths '/*'
