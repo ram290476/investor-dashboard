@@ -5105,7 +5105,7 @@ a.catalyst-edgar-link:hover {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  min-height: 112px;
+  min-height: 44px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -5154,63 +5154,6 @@ a.catalyst-edgar-link:hover {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.deep-dive-section-tile-value {
-  color: var(--text);
-  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
-}
-
-.deep-dive-section-tile-value.is-empty {
-  color: var(--muted);
-  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.deep-dive-section-tile-metric {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.deep-dive-section-tile-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  align-items: center;
-}
-
-.deep-dive-section-change {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 11px;
-}
-
-.deep-dive-section-change.direction-mark-up {
-  color: var(--green);
-}
-
-.deep-dive-section-change.direction-mark-down {
-  color: var(--red);
-}
-
-.deep-dive-section-change.direction-mark-flat {
-  color: var(--muted);
-}
-
-.deep-dive-section-tile .deep-dive-spark {
-  width: 100%;
-  height: 28px;
-  margin-top: auto;
 }
 
 .section-strip {

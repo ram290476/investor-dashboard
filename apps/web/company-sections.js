@@ -1,12 +1,9 @@
-// Section tiles and the sticky section strip for every company tab.
+// Section jump tiles and the sticky section strip for every company tab.
 // No ticker names. The strip replaces the Sections dropdown.
-import { trendTone } from "./deep-dive.js";
 import { stockPanelHash } from "./routes.js";
-import { formatChange, formatMetricValue, quarterlyNoteEntries } from "./stock-page.js";
 
 export const TREND_SECTIONS = [
   { id: "price", title: "Price", icon: "price" },
-  { id: "technical", title: "Technical Summary", icon: "technical" },
   { id: "rates", title: "Rates & yields", icon: "default" },
   { id: "inflation", title: "Inflation surprise", icon: "default" },
   { id: "market-comparison", title: "Market comparison", icon: "default" },
@@ -38,71 +35,6 @@ export function sectionSlug(id) {
   return /^[A-Za-z0-9]/.test(slug) ? slug : "";
 }
 
-function closesOf(history) {
-  return (history || []).map((bar) => {
-    const number = Number(bar?.adj_close ?? bar?.close ?? bar?.price);
-    return Number.isFinite(number) ? number : null;
-  }).filter((value) => value != null);
-}
-
-function finite(value) {
-  if (value == null || value === "") return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-/** Headline for one company metric card. Null when the card has no reported figure. */
-export function metricHeadline(metric) {
-  if (!metric || metric.unavailable || metric.panelType === "text") return null;
-  const display = metric.latest && metric.latest !== "not reported" ? String(metric.latest) : "";
-  if (!display) return null;
-  const reported = (metric.series || []).filter((point) => point?.reported && finite(point.value) != null);
-  const change = finite(metric.qoqValue);
-  const prior = reported.length > 1 ? finite(reported.at(-2).value) : null;
-  const latest = reported.length ? finite(reported.at(-1).value) : null;
-  const derived = change == null && latest != null && prior != null && prior !== 0
-    ? (latest - prior) / Math.abs(prior)
-    : change;
-  return {
-    display,
-    label: metric.latestPeriod || metric.unit || "",
-    change: derived,
-    sparkline: reported.map((point) => finite(point.value)),
-    pending: Boolean(metric.pending),
-    estimate: metric.estimate === true,
-  };
-}
-
-function firstHeadline(lists) {
-  for (const metric of lists.flat().filter(Boolean)) {
-    const headline = metricHeadline(metric);
-    if (!headline) continue;
-    return { ...headline, label: metric.name || headline.label };
-  }
-  return null;
-}
-
-function priceHeadline(history) {
-  const closes = closesOf(history);
-  if (!closes.length) return null;
-  const latest = closes.at(-1);
-  const prior = closes.length > 1 ? closes.at(-2) : null;
-  const change = prior != null && prior !== 0 ? (latest - prior) / Math.abs(prior) : null;
-  return {
-    value: latest,
-    unit: "USD",
-    label: "Last close",
-    change,
-    sparkline: closes.slice(-32),
-  };
-}
-
-function technicalHeadline(technical) {
-  const row = (technical?.rows || []).find((item) => item?.enoughData && item.rating);
-  if (!row) return null;
-  return { display: String(row.rating), label: row.label || "Consensus" };
-}
-
 function metricBookmarks(metrics, icon, fallbackId, fallbackTitle) {
   const cards = (metrics || []).filter(Boolean);
   if (!cards.length) {
@@ -111,7 +43,6 @@ function metricBookmarks(metrics, icon, fallbackId, fallbackTitle) {
       title: fallbackTitle,
       anchorId: `stock-panel-${fallbackId}`,
       icon,
-      headline: null,
     }];
   }
   return cards.map((metric) => {
@@ -121,30 +52,19 @@ function metricBookmarks(metrics, icon, fallbackId, fallbackTitle) {
       title: metric.name || id,
       anchorId: `stock-metric-${id}`,
       icon,
-      headline: metricHeadline(metric),
     };
   });
 }
 
-function textHeadline(display, label) {
-  const value = String(display || "").trim();
-  if (!value) return null;
-  return { display: value, label: label || "" };
-}
-
-/** Tiles for the active company tab. Deep dive keeps its own section list. */
+/** Jump targets for the active company tab. Deep dive keeps its own section list. */
 export function companyBookmarks(tab, context = {}) {
   if (tab === "trends") {
     const present = new Set(context.present?.length ? context.present : TREND_SECTIONS.map((item) => item.id));
-    const supplied = context.headlines || {};
     return TREND_SECTIONS.filter((item) => present.has(item.id)).map((item) => ({
       id: item.id,
       title: item.title,
       anchorId: `trends-panel-${item.id}`,
       icon: item.icon,
-      headline: supplied[item.id]
-        || (item.id === "price" ? priceHeadline(context.history) : null)
-        || (item.id === "technical" ? technicalHeadline(context.technical) : null),
     }));
   }
   if (tab === "kpis") return metricBookmarks(context.operating, "kpi", "kpis", "Operating KPIs");
@@ -155,33 +75,27 @@ export function companyBookmarks(tab, context = {}) {
       title: "Company metrics",
       anchorId: "stock-panel-metrics",
       icon: "metrics",
-      headline: firstHeadline([context.operating, context.fundamentals, context.guidance]),
     }];
   }
   if (tab !== "overview") return [];
-  const notes = quarterlyNoteEntries(context.guidance);
-  const latestQuarter = notes[0]?.quarter || "";
   return [
     {
       id: "price",
       title: "Price",
       anchorId: "stock-panel-price",
       icon: "price",
-      headline: priceHeadline(context.history),
     },
     {
       id: "technical",
       title: "Technical Summary",
       anchorId: "stock-panel-technical",
       icon: "technical",
-      headline: technicalHeadline(context.technical),
     },
     {
       id: "quarterly-notes",
       title: "Quarterly notes",
       anchorId: "stock-panel-quarterly-notes",
       icon: "calls",
-      headline: textHeadline(latestQuarter, "Latest quarter"),
     },
   ];
 }
@@ -217,63 +131,6 @@ function sectionIcon(doc, kind) {
     }));
   }
   return svg;
-}
-
-function sparkline(doc, values) {
-  const nums = (values || []).map((value) => finite(value));
-  if (!nums.some((value) => value != null)) return null;
-  const finiteValues = nums.filter((value) => value != null);
-  const min = Math.min(...finiteValues);
-  const max = Math.max(...finiteValues);
-  const span = max - min || 1;
-  const width = 96;
-  const height = 28;
-  const step = nums.length > 1 ? width / (nums.length - 1) : width;
-  const coords = [];
-  nums.forEach((value, index) => {
-    if (value == null) return;
-    coords.push(`${(index * step).toFixed(1)},${(height - ((value - min) / span) * (height - 4) - 2).toFixed(1)}`);
-  });
-  const svg = svgEl(doc, "svg", { class: "deep-dive-spark", viewBox: `0 0 ${width} ${height}` });
-  svg.setAttribute("aria-hidden", "true");
-  svg.append(svgEl(doc, "polyline", {
-    points: coords.join(" "),
-    fill: "none",
-    stroke: "var(--series-1)",
-    "stroke-width": "1.5",
-  }));
-  return svg;
-}
-
-function changeLine(doc, change) {
-  const number = finite(change);
-  if (number == null) return null;
-  const tone = trendTone(number, false);
-  const arrow = number > 0 ? "▲" : number < 0 ? "▼" : "▬";
-  const word = tone === "up" ? "Up" : tone === "down" ? "Down" : "Flat";
-  const formatted = formatChange(number);
-  const line = el(doc, "span", `deep-dive-section-change direction-mark-${tone}`);
-  line.append(el(doc, "span", "deep-dive-section-arrow", arrow), el(doc, "span", "mono", formatted || ""));
-  line.setAttribute("aria-label", `${word} ${formatted} versus the prior period`);
-  return line;
-}
-
-function headlineText(headline) {
-  if (!headline) return "";
-  if (headline.display) return headline.display;
-  if (headline.value == null) return headline.empty_label || "Not yet disclosed";
-  return formatMetricValue(headline.value, headline.unit);
-}
-
-function tileLabel(bookmark) {
-  const parts = [bookmark.title || bookmark.id];
-  if (bookmark.headline) {
-    parts.push(headlineText(bookmark.headline));
-    if (bookmark.headline.label) parts.push(bookmark.headline.label);
-    if (bookmark.headline.estimate) parts.push("Estimate");
-    if (bookmark.headline.pending) parts.push("Pending review");
-  }
-  return parts.filter(Boolean).join(", ");
 }
 
 function setClass(node, name, on) {
@@ -328,25 +185,11 @@ function bindBookmark(node, bookmark, root, options) {
 
 function renderTile(bookmark, root, doc, options) {
   const tile = el(doc, "a", "deep-dive-section-tile");
-  tile.setAttribute("aria-label", tileLabel(bookmark));
+  const label = bookmark.title || bookmark.id;
+  tile.setAttribute("aria-label", label);
   const head = el(doc, "span", "deep-dive-section-tile-head");
-  head.append(sectionIcon(doc, bookmark.icon), el(doc, "span", "deep-dive-section-tile-name", bookmark.title || bookmark.id));
+  head.append(sectionIcon(doc, bookmark.icon), el(doc, "span", "deep-dive-section-tile-name", label));
   tile.append(head);
-  const headline = bookmark.headline;
-  if (headline) {
-    const value = el(doc, "span", `deep-dive-section-tile-value mono${headline.display || headline.value != null ? "" : " is-empty"}`);
-    value.textContent = headlineText(headline);
-    tile.append(value);
-    if (headline.label) tile.append(el(doc, "span", "deep-dive-section-tile-metric", headline.label));
-    const meta = el(doc, "span", "deep-dive-section-tile-meta");
-    if (headline.estimate) meta.append(el(doc, "span", "deep-dive-estimate", "Estimate"));
-    if (headline.pending && (headline.display || headline.value != null)) meta.append(el(doc, "span", "review-badge", "Pending review"));
-    const change = changeLine(doc, headline.change);
-    if (change) meta.append(change);
-    if (meta.childNodes.length) tile.append(meta);
-    const spark = sparkline(doc, headline.sparkline || []);
-    if (spark) tile.append(spark);
-  }
   bindBookmark(tile, bookmark, root, options);
   return tile;
 }

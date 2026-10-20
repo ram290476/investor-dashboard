@@ -4172,9 +4172,6 @@ function renderTrendsLayout(tickerData, chartData, chartDataState) {
   chart.querySelector("[data-company-page]")?.remove();
   mark(chart, "price");
   primary.append(chart);
-  const technical = renderTechnicalSummary(session.selected, tickerData?.price_history || []);
-  mark(technical, "technical");
-  primary.append(technical);
   primary.append(renderPanelToolbar("chart"));
   const macros = renderMacroPanels(tickerData, chartData, chartDataState);
   const drawerSection = {

@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   companyBookmarks,
-  metricHeadline,
   renderCompanyBookmarks,
   sectionSlug,
 } from "./company-sections.js";
@@ -95,52 +94,23 @@ function byClass(node, className) {
   return found;
 }
 
-test("a metric headline uses the reported value, then nothing when the card has no figure", () => {
+test("section ids stay safe for hashes", () => {
   assert.equal(sectionSlug("edgar:revenue_gaap"), "edgar-revenue_gaap");
-  const pending = metricHeadline({
-    id: "deliveries",
-    name: "Deliveries",
-    latest: "12",
-    latestPeriod: "2026Q2",
-    qoqValue: 0.25,
-    pending: true,
-    estimate: true,
-    series: [
-      { reported: true, value: 8 },
-      { reported: true, value: 12 },
-    ],
-  });
-  assert.equal(pending.display, "12");
-  assert.equal(pending.label, "2026Q2");
-  assert.equal(pending.change, 0.25);
-  assert.equal(pending.pending, true);
-  assert.equal(pending.estimate, true);
-  assert.deepEqual(pending.sparkline, [8, 12]);
-  assert.equal(metricHeadline({ latest: "not reported", series: [] }), null);
-  assert.equal(metricHeadline({ panelType: "text", latest: "A note", text: "A note" }), null);
-  assert.equal(metricHeadline({ unavailable: true, latest: "4" }), null);
+  assert.equal(sectionSlug(""), "");
 });
 
-test("overview tiles fall back to a name and icon when a section has no metric", () => {
+test("overview tiles stay name-only jump targets", () => {
   const bookmarks = companyBookmarks("overview", {
-    history: [],
-    technical: { rows: [{ enoughData: false, label: "Short term" }] },
-    operating: [],
-    fundamentals: [],
-    guidance: [],
-  });
-  assert.deepEqual(bookmarks.map((item) => item.id), ["price", "technical", "quarterly-notes"]);
-  assert.equal(bookmarks.some((item) => item.id === "metrics"), false);
-  assert.equal(bookmarks.every((item) => item.headline == null), true);
-  const withPrice = companyBookmarks("overview", {
     history: [{ close: 10 }, { close: 12 }],
     technical: { rows: [{ enoughData: true, rating: "Buy", label: "Medium term" }] },
     operating: [{ id: "deliveries", name: "Deliveries", latest: "12", latestPeriod: "2026Q2", qoqValue: 0.1, series: [{ reported: true, value: 12 }] }],
+    fundamentals: [],
+    guidance: [{ latestPeriod: "2026Q3", text: "Raised the outlook." }],
   });
-  assert.equal(withPrice[0].headline.value, 12);
-  assert.equal(withPrice[0].headline.unit, "USD");
-  assert.equal(withPrice[1].headline.display, "Buy");
-  assert.equal(withPrice.some((item) => item.id === "metrics"), false);
+  assert.deepEqual(bookmarks.map((item) => item.id), ["price", "technical", "quarterly-notes"]);
+  assert.deepEqual(bookmarks.map((item) => item.title), ["Price", "Technical Summary", "Quarterly notes"]);
+  assert.equal(bookmarks.some((item) => item.id === "metrics"), false);
+  assert.equal(bookmarks.every((item) => item.headline == null), true);
 });
 
 test("company metrics move to the Admin tab and stay pending review", () => {
@@ -160,16 +130,16 @@ test("company metrics move to the Admin tab and stay pending review", () => {
   assert.deepEqual(admin.map((item) => item.id), ["metrics"]);
   assert.equal(admin[0].title, "Company metrics");
   assert.equal(admin[0].anchorId, "stock-panel-metrics");
-  assert.equal(admin[0].headline.display, "12");
-  assert.equal(admin[0].headline.label, "Deliveries");
-  assert.equal(admin[0].headline.pending, true);
+  assert.equal(admin[0].headline, undefined);
   const view = renderCompanyBookmarks(admin, fakeDocument(), { ticker: "exmpl", tab: "admin" });
   const tile = byClass(view, "deep-dive-section-tile")[0];
   const chip = byClass(view, "section-strip-chip")[0];
   assert.equal(tile.href, "#stock/EXMPL/admin/metrics");
   assert.equal(chip.href, "#stock/EXMPL/admin/metrics");
   assert.equal(byClass(view, "section-strip")[0].getAttribute("aria-label"), "Sections");
-  assert.match(tile.getAttribute("aria-label"), /Pending review/);
+  assert.equal(tile.getAttribute("aria-label"), "Company metrics");
+  assert.equal(byClass(tile, "deep-dive-section-tile-value").length, 0);
+  assert.equal(byClass(tile, "deep-dive-spark").length, 0);
   const metrics = app.slice(app.indexOf("function renderCompanyMetrics"), app.indexOf("function appendMetricGroups"));
   assert.match(metrics, /dataset\.stockPanel = "admin"/);
   assert.doesNotMatch(metrics, /dataset\.stockPanel = "overview"/);
@@ -232,11 +202,12 @@ test("company section tiles scroll to the section and write the tab hash", () =>
   const deliveries = tiles[0];
   assert.equal(byClass(deliveries, "deep-dive-section-icon").length, 1);
   assert.equal(deliveries.href, "#stock/EXMPL/kpis/deliveries");
-  assert.match(deliveries.getAttribute("aria-label"), /Deliveries/);
-  assert.match(deliveries.getAttribute("aria-label"), /Pending review/);
-  assert.match(textOf(deliveries), /Estimate/);
-  assert.equal(byClass(deliveries, "deep-dive-spark").length, 1);
+  assert.equal(deliveries.getAttribute("aria-label"), "Deliveries");
+  assert.equal(textOf(deliveries), "Deliveries");
+  assert.equal(byClass(deliveries, "deep-dive-section-tile-value").length, 0);
+  assert.equal(byClass(deliveries, "deep-dive-spark").length, 0);
   const notesTile = tiles[1];
+  assert.equal(notesTile.getAttribute("aria-label"), "Factory notes");
   assert.equal(byClass(notesTile, "deep-dive-section-tile-value").length, 0);
   assert.equal(byClass(notesTile, "deep-dive-spark").length, 0);
   let prevented = false;
@@ -291,7 +262,9 @@ test("the section strip appears when the grid leaves view and tracks the section
   assert.equal(String(strip.className).includes("is-visible"), false);
   assert.equal(strip.getAttribute("aria-hidden"), "true");
   assert.equal(notesChip.getAttribute("tabindex"), "-1");
-  assert.equal(bookmarks.find((item) => item.id === "quarterly-notes").headline.display, "Q3 2026");
+  const notesBookmark = bookmarks.find((item) => item.id === "quarterly-notes");
+  assert.equal(notesBookmark.title, "Quarterly notes");
+  assert.equal(notesBookmark.headline, undefined);
 });
 
 test("the company page renders section tiles for every tab except deep dive", () => {

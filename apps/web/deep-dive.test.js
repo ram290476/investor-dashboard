@@ -11,7 +11,6 @@ import {
   orderedDeepDiveSections,
   renderDeepDive,
   revealDeepDiveSection,
-  sectionHeadline,
   trendTone,
 } from "./deep-dive.js";
 import { nextStockTab, stockTabs, STOCK_TABS } from "./stock-page.js";
@@ -306,7 +305,7 @@ test("deep dive bookmarks scroll in page and keep the company hash", () => {
   assert.equal(laterChip.href, "#stock/ABCD/deep-dive/later");
 });
 
-test("section tiles use a catalog headline, then the first series, and omit a metric when none exists", () => {
+test("section tiles jump by name and leave the metric on the section", () => {
   const fleet = {
     id: "fleet",
     title: "Fleet",
@@ -329,40 +328,6 @@ test("section tiles use a catalog headline, then the first series, and omit a me
       ],
     }],
   };
-  const picked = sectionHeadline(fleet);
-  assert.equal(picked.metric_id, "sites");
-  assert.equal(picked.value, 4);
-  assert.equal(picked.estimate, true);
-  assert.equal(picked.approval_state, "proposed");
-  assert.equal(picked.change, -0.25);
-  assert.equal(sectionHeadline({ ...fleet, headline: "" }).metric_id, "fleet");
-  assert.equal(sectionHeadline({ ...fleet, headline: "not_there" }).metric_id, "fleet");
-  const fromSeries = sectionHeadline({
-    id: "output",
-    title: "Output",
-    panels: [{
-      kind: "trend-bars",
-      series: [{
-        metric_id: "built",
-        label: "Built",
-        unit: "count",
-        approval_state: "proposed",
-        points: [
-          { period: "2025Q1", value: 2, reported: true },
-          { period: "2025Q2", value: 4, reported: true },
-        ],
-      }],
-    }],
-  });
-  assert.equal(fromSeries.metric_id, "built");
-  assert.equal(fromSeries.value, 4);
-  assert.equal(fromSeries.change, 1);
-  assert.equal(fromSeries.approval_state, "proposed");
-  assert.equal(sectionHeadline({
-    id: "notes",
-    title: "Notes",
-    panels: [{ kind: "table", title: "Notes", table: { columns: [{ id: "a", label: "A" }], rows: [] } }],
-  }), null);
 
   let booked = "";
   const view = renderDeepDive({
@@ -383,15 +348,17 @@ test("section tiles use a catalog headline, then the first series, and omit a me
     },
   });
   const sites = byClass(view, "deep-dive-section-tile").find((tile) => tile.dataset.sectionId === "fleet");
-  assert.match(textOf(sites), /Sites/);
-  assert.match(textOf(sites), /Estimate/);
-  assert.match(textOf(sites), /Pending review/);
-  assert.equal(byClass(sites, "deep-dive-spark").length, 1);
+  assert.equal(textOf(sites), "Fleet");
+  assert.equal(byClass(sites, "deep-dive-spark").length, 0);
+  assert.equal(byClass(sites, "deep-dive-section-tile-value").length, 0);
   assert.equal(byClass(sites, "deep-dive-section-icon").length, 1);
+  const sitesMetric = byClass(view, "deep-dive-tile").find((tile) => textOf(tile).includes("Sites"));
+  assert.match(textOf(sitesMetric), /Estimate/);
+  assert.match(textOf(sitesMetric), /Pending review/);
   const notes = byClass(view, "deep-dive-section-tile").find((tile) => tile.dataset.sectionId === "notes");
   assert.equal(byClass(notes, "deep-dive-section-tile-value").length, 0);
   assert.equal(byClass(notes, "deep-dive-spark").length, 0);
-  assert.match(textOf(notes), /Notes/);
+  assert.equal(textOf(notes), "Notes");
   const event = {
     button: 0,
     metaKey: false,
@@ -547,7 +514,7 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.doesNotMatch(source, /#deep-dive-\$\{/);
   assert.doesNotMatch(source, /overlay-chip deep-dive-jump-chip/);
   assert.doesNotMatch(source, /On this page/);
-  assert.match(source, /sectionHeadline/);
+  assert.doesNotMatch(source, /sectionHeadline/);
   assert.match(source, /deep-dive-section-tile/);
   assert.match(styles, /\.deep-dive-sections\s*\{[^}]*grid-template-columns:\s*repeat\(6/);
   assert.match(styles, /\.deep-dive-section-tile:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--amber\)/);
