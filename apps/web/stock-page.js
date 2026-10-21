@@ -188,6 +188,8 @@ export function companyDescription(payload, tickerData) {
  * on the dashboard snapshot. Overview and Analysis stay the first two tabs on every ticker, so the
  * landing chart and the technical read do not move. Fund is next because its panels are the
  * fund-specific read that used to sit on Analysis. Research follows Fund, and only when sections exist.
+ * Fundamentals and KPIs follow Research on a stock. The same options.fund flag omits both on a fund,
+ * so a fund row is Overview, Analysis, Fund, Research, and Admin when those conditional tabs are present.
  * Overview uses the id `summary`. Analysis uses the id `analysis`. Fund uses the id `fund`.
  * Saved `trends` opens Overview. Saved `overview` and `technical` open Analysis. Saved `deep-dive` opens Research.
  * The label is always Research. `deep_dive.title` stays in the company document and is not shown.
@@ -201,7 +203,12 @@ export function stockTabs(payload, options = {}) {
   const fund = options.fund === true ? { id: FUND_TAB_ID, label: "Fund" } : null;
   const byId = new Map(STOCK_TABS.map((tab) => [tab.id, tab]));
   const tabs = STOCK_TAB_ORDER
-    .map((id) => (id === "research" ? research : id === FUND_TAB_ID ? fund : byId.get(id)))
+    .map((id) => {
+      if (options.fund === true && (id === "fundamentals" || id === "kpis")) return null;
+      if (id === "research") return research;
+      if (id === FUND_TAB_ID) return fund;
+      return byId.get(id);
+    })
     .filter(Boolean);
   if (options.admin === true) tabs.push({ ...ADMIN_STOCK_TAB });
   return tabs;
@@ -210,6 +217,8 @@ export function stockTabs(payload, options = {}) {
 /**
  * Tab a company hash may open.
  * Admin is refused unless that tab is in the visible list, so a non-admin URL cannot open it.
+ * Fund is refused unless that tab is in the visible list.
+ * Fundamentals and KPIs are refused when they are absent (a fund hides them) and open Overview.
  * A bare company hash is Analysis. An unknown tab keeps the current one when it is still visible.
  */
 export function visibleStockTab(hashTab, tabs, current = ANALYSIS_TAB_ID) {
@@ -220,6 +229,7 @@ export function visibleStockTab(hashTab, tabs, current = ANALYSIS_TAB_ID) {
   if ((requested === "admin" && !ids.includes("admin")) || (requested === FUND_TAB_ID && !ids.includes(FUND_TAB_ID))) {
     return ANALYSIS_TAB_ID;
   }
+  if ((requested === "fundamentals" || requested === "kpis") && !ids.includes(requested)) return OVERVIEW_TAB_ID;
   if (requested && ids.includes(requested)) return requested;
   if (!requested) return ANALYSIS_TAB_ID;
   const kept = canonicalStockTab(current);

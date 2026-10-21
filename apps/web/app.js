@@ -3969,12 +3969,15 @@ function renderStockPage(restoreDrawer = null) {
   // `#stock/<T>/technical` are Analysis. `#stock/<T>/trends` and `#stock/<T>/summary` are Overview.
   // Admin is refused unless this caller is an admin, including when the hash asks for it.
   // Fund is refused unless this ticker's dashboard record is a fund, including when the hash asks for it.
+  // Fundamentals and KPIs are refused on a fund. Those hashes open Overview. The same isFund
+  // check that shows the Fund tab hides them. No ticker list.
   // A Research hash waits until that tab exists in the payload. `deep-dive` is the old id.
   if (parseStockHash(location.hash) === session.selected) {
     const hashTab = parseStockTab(location.hash);
+    const fundHidden = fundTicker && (hashTab === "fundamentals" || hashTab === "kpis");
     const refused = (hashTab === "admin" && !metricAdmin) || (hashTab === FUND_TAB_ID && tickerData && !fundTicker);
-    if (refused) {
-      const fallback = stockTabHash(session.selected, ANALYSIS_TAB_ID);
+    if (fundHidden || refused) {
+      const fallback = stockTabHash(session.selected, fundHidden ? OVERVIEW_TAB_ID : ANALYSIS_TAB_ID);
       if (fallback && location.hash !== fallback) {
         // `history` in this function is the price series. The session history is on window.
         window.history.replaceState(window.history.state, "", `${location.pathname}${location.search}${fallback}`);
@@ -3982,7 +3985,11 @@ function renderStockPage(restoreDrawer = null) {
     }
     session.stockTab = visibleStockTab(hashTab, pageTabs, session.stockTab);
   } else if (hashSection && pageTabs.some((item) => item.id === "research")) session.stockTab = "research";
-  else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = ANALYSIS_TAB_ID;
+  else if (!pageTabs.some((item) => item.id === session.stockTab)) {
+    session.stockTab = fundTicker && (session.stockTab === "fundamentals" || session.stockTab === "kpis")
+      ? OVERVIEW_TAB_ID
+      : ANALYSIS_TAB_ID;
+  }
   const page = node("main", "stock-page");
   page.dataset.stockTab = session.stockTab;
   if (hasDeepDive(payload)) page.dataset.hasDeepDive = "true";
@@ -4341,6 +4348,7 @@ function selectStockTab(id) {
   id = canonicalStockTab(id);
   if (id === "admin" && !canApproveMetrics(session.accessToken, session.email)) id = ANALYSIS_TAB_ID;
   if (id === FUND_TAB_ID && !isFund(selectedData())) id = ANALYSIS_TAB_ID;
+  if ((id === "fundamentals" || id === "kpis") && isFund(selectedData())) id = OVERVIEW_TAB_ID;
   session.stockTab = id;
   session.scrolledStockSection = "";
   const hash = stockTabHash(session.selected, id);
@@ -4393,6 +4401,7 @@ function navigateToStock(ticker, options = {}) {
   let tab = canonicalStockTab(keepTab && session.stockTab ? session.stockTab : ANALYSIS_TAB_ID);
   if (tab === "admin" && !canApproveMetrics(session.accessToken, session.email)) tab = ANALYSIS_TAB_ID;
   if (tab === FUND_TAB_ID && !isFund(session.dashboard?.tickers?.[ticker])) tab = ANALYSIS_TAB_ID;
+  if ((tab === "fundamentals" || tab === "kpis") && isFund(session.dashboard?.tickers?.[ticker])) tab = OVERVIEW_TAB_ID;
   const section = keepTab
     ? (tab === "research" ? parseStockSection(location.hash) : parseStockPanel(location.hash))
     : "";
