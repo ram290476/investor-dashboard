@@ -5469,10 +5469,25 @@ a.catalyst-edgar-link:hover {
   height: 28px;
 }
 
+.deep-dive-forecast-block {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.deep-dive-forecast-block[data-width="wide"] {
+  grid-column: 1 / -1;
+}
+
 .deep-dive-axis {
   fill: var(--muted);
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 9px;
+}
+
+.deep-dive-axis-month {
+  font-size: 8px;
 }
 
 .deep-dive-axis-year {

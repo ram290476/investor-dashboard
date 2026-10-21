@@ -22,19 +22,22 @@ function scoreboardSection(sections) {
 }
 
 /**
- * Placeholder notice for the Overview tab. It sits under the scoreboard title when
- * the payload has one, and it is not drawn inside the Research tab.
+ * Scoreboard title for the Overview tab. The placeholder forecast label is not
+ * drawn here. It sits once, above the forecast panel, on the Research tab.
  */
 export function renderTrendDisclaimer(payload, doc = document) {
   if (!hasDeepDive(payload)) return null;
-  const dive = payload.deep_dive;
-  const text = String(dive.disclaimer || "").trim()
-    || "Figures appear when a source has been collected. Pending review values stay labeled. Empty series are not zero.";
+  const section = scoreboardSection(payload.deep_dive.sections);
+  if (!section?.title) return null;
   const block = el(doc, "div", "trend-scoreboard-notice");
-  const section = scoreboardSection(dive.sections);
-  if (section?.title) block.append(el(doc, "h3", "stock-section-title", section.title));
-  block.append(el(doc, "p", "deep-dive-banner", text));
+  block.append(el(doc, "h3", "stock-section-title", section.title));
   return block;
+}
+
+/** Label moved off the scoreboard. The wording stays the serving disclaimer. */
+export function forecastDisclaimerText(dive) {
+  return String(dive?.disclaimer || "").trim()
+    || "Figures appear when a source has been collected. Pending review values stay labeled. Empty series are not zero.";
 }
 
 /** Primary sections first, then secondary, so the section strip matches the page. */
@@ -92,6 +95,76 @@ export function axisLabels(periods) {
     if (item.secondary) previous = item.secondary;
     return { ...item, secondary: show ? item.secondary : "" };
   });
+}
+
+const NHTSA_RANGE_START = "2024-01";
+const NHTSA_AXIS_FONT = 8;
+
+/** `Jan '24`. Used by the recalls, complaints, and investigations chart. */
+export function nhtsaMonthLabel(period) {
+  const month = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(String(period || ""));
+  if (!month) return "";
+  return `${MONTHS[Number(month[2]) - 1]} '${month[1].slice(2)}`;
+}
+
+/**
+ * Months to draw for the NHTSA chart. The range starts at Jan 2024, or at the
+ * earliest reported month when that month is later. Earlier points are dropped.
+ */
+export function nhtsaPeriods(seriesList) {
+  const periods = periodsOf(seriesList);
+  const reported = periods.filter((period) => (seriesList || []).some((series) => {
+    const value = valueAt(series, period);
+    return value != null && value !== "" && Number.isFinite(Number(value));
+  }));
+  if (!reported.length) return [];
+  const earliest = reported.slice().sort()[0];
+  const start = earliest > NHTSA_RANGE_START ? earliest : NHTSA_RANGE_START;
+  return periods.filter((period) => period >= start);
+}
+
+function nhtsaLabelWidth(text, fontSize) {
+  return String(text || "").length * fontSize * 0.62;
+}
+
+/**
+ * Month ticks for a rendered width. Thin until the labels fit. If that would
+ * skip more than every third month, rotate the labels and thin only as much
+ * as the rotated width needs.
+ */
+export function layoutNhtsaAxis(periods, slotPx, fontSize = NHTSA_AXIS_FONT) {
+  const labels = (periods || []).map((period) => ({
+    period,
+    primary: nhtsaMonthLabel(period) || String(period),
+    secondary: "",
+    kind: "month",
+  }));
+  if (!labels.length) return { ticks: [], rotate: false, fontSize, step: 1 };
+  const widest = labels.reduce((max, item) => Math.max(max, nhtsaLabelWidth(item.primary, fontSize)), 1);
+  const gap = 6;
+  const slot = Math.max(Number(slotPx) || 0, 1);
+  const thin = (size) => {
+    const chosen = labels.filter((item, index) => (
+      index === 0 || index === labels.length - 1 || index % size === 0
+    ));
+    if (chosen.length >= 3) {
+      const previous = labels.indexOf(chosen[chosen.length - 2]);
+      if (labels.length - 1 - previous < size) chosen.splice(chosen.length - 2, 1);
+    }
+    return chosen;
+  };
+  const uprightStep = Math.max(1, Math.ceil((widest + gap) / slot));
+  if (uprightStep <= 3) return { ticks: thin(uprightStep), rotate: false, fontSize, step: uprightStep };
+  const rotated = widest * Math.SQRT1_2 + fontSize;
+  const rotateStep = Math.max(1, Math.ceil((rotated + gap) / slot));
+  return { ticks: thin(rotateStep), rotate: true, fontSize, step: rotateStep };
+}
+
+function isNhtsaChart(panel) {
+  const series = panel?.series || [];
+  if (series.some((item) => item?.source_kind === "nhtsa_odi")) return true;
+  const title = String(panel?.title || "");
+  return /recalls/i.test(title) && /complaints/i.test(title) && /investigations/i.test(title);
 }
 
 /** Drop ticks that would collide. Shown quarter ticks still carry the year underneath. */
@@ -216,12 +289,23 @@ export function renderDeepDive(payload, doc = document, options = {}) {
   }
 
   const ticker = options.ticker || payload?.ticker || "";
-  const nav = renderSectionNav(orderedDeepDiveSections(dive.sections), ticker, root, doc, options);
+  const forecastLabel = forecastDisclaimerText(dive);
+  let forecastLabelPlaced = false;
+  const claimForecastLabel = () => {
+    if (forecastLabelPlaced) return "";
+    forecastLabelPlaced = true;
+    return forecastLabel;
+  };
+  const visibleSections = orderedDeepDiveSections(dive.sections).filter((section) => (
+    (section?.panels || []).some(panelShown)
+  ));
+  const nav = renderSectionNav(visibleSections, ticker, root, doc, options);
   root.append(nav);
 
   const secondary = [];
-  for (const section of orderedDeepDiveSections(dive.sections)) {
-    const block = renderSection(section, doc);
+  for (const section of visibleSections) {
+    const block = renderSection(section, doc, claimForecastLabel);
+    if (!block) continue;
     if (section.placement === "secondary") secondary.push(block);
     else root.append(block);
   }
@@ -250,7 +334,38 @@ export function renderDeepDive(payload, doc = document, options = {}) {
     root.append(wrap);
   }
   watchSectionNav(root, doc);
+  watchNhtsaAxes(root, doc);
   return root;
+}
+
+/** A marker counts when a place has a reported number. Empty and undisclosed maps do not. */
+export function mapDataPoints(panel) {
+  return (panel?.markers || []).filter((marker) => {
+    if (!marker || typeof marker !== "object") return false;
+    if (!String(marker.place || "").trim()) return false;
+    if (!marker.reported) return false;
+    const value = Number(marker.value);
+    return marker.value != null && marker.value !== "" && Number.isFinite(value);
+  });
+}
+
+function nonMapContent(panel) {
+  return Boolean(
+    (panel?.kpis || []).length
+    || (panel?.series || []).length
+    || (panel?.modes || []).length
+    || (panel?.multiples || []).length
+    || (panel?.milestones || []).length
+    || panel?.table
+    || (panel?.notes || []).length
+  );
+}
+
+function panelShown(panel) {
+  if (!panel || typeof panel !== "object") return false;
+  if (panel.kind === "forecast-band" || panel.kind === "stacked-area" || panel.kind === "headline-card") return true;
+  if (panel.map && !mapDataPoints(panel).length && !nonMapContent(panel)) return false;
+  return true;
 }
 
 function renderSectionNav(sections, ticker, root, doc, options) {
@@ -397,18 +512,20 @@ export function revealDeepDiveSection(root, sectionId) {
   return target;
 }
 
-function renderSection(section, doc) {
+function renderSection(section, doc, claimForecastLabel) {
+  const panels = (section.panels || []).filter(panelShown);
+  if (!panels.length) return null;
   const block = el(doc, "section", "deep-dive-section");
   block.id = `deep-dive-${section.id}`;
   block.dataset.placement = section.placement || "primary";
   const title = el(doc, "h3", "stock-section-title", section.title || "");
   const grid = el(doc, "div", "deep-dive-grid");
-  for (const panel of section.panels || []) grid.append(renderPanel(panel, doc));
+  for (const panel of panels) grid.append(renderPanel(panel, doc, claimForecastLabel));
   block.append(title, grid);
   return block;
 }
 
-function renderPanel(panel, doc) {
+function renderPanel(panel, doc, claimForecastLabel) {
   const article = el(doc, "article", "panel deep-dive-panel");
   article.dataset.width = panel.width || "wide";
   article.dataset.kind = panel.kind || "";
@@ -420,15 +537,16 @@ function renderPanel(panel, doc) {
   if (panel.cadence) tools.append(el(doc, "span", "overlay-chip", panel.cadence === "monthly" ? "Monthly" : "Quarterly"));
   header.append(copy, tools);
   const body = el(doc, "div", "panel-body");
-  if (panel.kind === "forecast-band") body.append(renderForecast(panel, doc));
+  const forecastLabel = panel.kind === "forecast-band" && claimForecastLabel ? claimForecastLabel() : "";
+  if (panel.kind === "forecast-band") body.append(renderForecast(panel, doc, forecastLabel));
   else if (panel.kind === "stacked-area" || panel.kind === "headline-card") {
     body.append(renderArchetypePanel(panel, doc));
   } else {
     if (panel.kpis?.length && panel.kind === "scoreboard") body.append(renderScoreboard(panel.kpis, doc));
     else if (panel.kpis?.length) body.append(renderKpis(panel.kpis, doc));
     if (panel.modes?.length) body.append(renderModes(panel, doc));
-    else if (panel.series?.length) body.append(renderChart(panel.series, doc));
-    if (panel.map) body.append(renderMap(panel, doc));
+    else if (panel.series?.length) body.append(renderChart(panel.series, doc, { axis: isNhtsaChart(panel) ? "nhtsa" : "" }));
+    if (panel.map && mapDataPoints(panel).length) body.append(renderMap(panel, doc));
     if (panel.multiples?.length) body.append(renderMultiples(panel.multiples, doc));
     if (panel.milestones?.length) body.append(renderMilestones(panel.milestones, doc));
     if (panel.table) body.append(renderTable(panel.table, doc, panel.empty_label));
@@ -443,7 +561,12 @@ function renderPanel(panel, doc) {
     article.append(foot);
   }
   for (const note of panel.notes || []) body.append(el(doc, "p", "deep-dive-note", note));
-  return article;
+  if (!forecastLabel) return article;
+  const stack = el(doc, "div", "deep-dive-forecast-block");
+  stack.dataset.width = panel.width || "wide";
+  stack.setAttribute("data-width", panel.width || "wide");
+  stack.append(el(doc, "p", "deep-dive-banner", forecastLabel), article);
+  return stack;
 }
 
 function hasVisibleData(panel) {
@@ -455,7 +578,7 @@ function hasVisibleData(panel) {
   if ((panel.multiples || []).length) return true;
   if ((panel.milestones || []).length) return true;
   if (panel.table) return true;
-  if (panel.map) return true;
+  if (mapDataPoints(panel).length) return true;
   return false;
 }
 
@@ -623,14 +746,15 @@ function sparkline(doc, values, scale) {
   return svg;
 }
 
-function renderChart(seriesList, doc) {
+function renderChart(seriesList, doc, options = {}) {
+  const nhtsa = options.axis === "nhtsa";
   const drawn = (seriesList || []).filter((series) => (series.points || []).length);
   if (!drawn.length) return el(doc, "p", "deep-dive-empty", "Not yet disclosed");
-  const periods = periodsOf(drawn);
+  const periods = nhtsa ? nhtsaPeriods(drawn) : periodsOf(drawn);
   if (!periods.length) return el(doc, "p", "deep-dive-empty", "Not yet disclosed");
   const width = 640;
-  const height = 220;
-  const pad = { l: 36, r: 36, t: 12, b: 36 };
+  const height = nhtsa ? 250 : 220;
+  const pad = { l: nhtsa ? 44 : 36, r: 36, t: 12, b: nhtsa ? 64 : 36 };
   const innerW = width - pad.l - pad.r;
   const innerH = height - pad.t - pad.b;
   const bars = drawn.filter((series) => series.role !== "line" && series.role !== "line-dashed");
@@ -639,6 +763,14 @@ function renderChart(seriesList, doc) {
   const rightMax = lines.some((series) => series.axis === "right") ? maxOf(lines.filter((series) => series.axis === "right"), periods) : null;
   const svg = svgEl(doc, "svg", { class: "deep-dive-chart", viewBox: `0 0 ${width} ${height}`, role: "img" });
   svg.append(svgEl(doc, "title", {}, "Trend chart"));
+  if (nhtsa) {
+    svg.setAttribute("data-nhtsa-axis", "1");
+    svg.setAttribute("data-periods", periods.join(","));
+    svg.setAttribute("data-view-width", String(width));
+    svg.setAttribute("data-inner-width", String(innerW));
+    svg.setAttribute("data-view-height", String(height));
+    svg.setAttribute("data-pad-left", String(pad.l));
+  }
   const slot = innerW / periods.length;
   periods.forEach((period, index) => {
     let stacked = 0;
@@ -680,16 +812,34 @@ function renderChart(seriesList, doc) {
     }
   }
   const slotWidth = periods.length ? innerW / periods.length : innerW;
-  for (const label of axisTicks(periods, slotWidth)) {
+  const widthPx = Number(options.widthPx) || width;
+  const slotPx = nhtsa ? slotWidth * (widthPx / width) : slotWidth;
+  const ticks = nhtsa ? layoutNhtsaAxis(periods, slotPx).ticks : axisTicks(periods, slotWidth);
+  const rotate = nhtsa ? layoutNhtsaAxis(periods, slotPx).rotate : false;
+  paintAxisLabels(svg, doc, periods, ticks, { slot, padLeft: pad.l, height, rotate, nhtsa });
+  const wrap = el(doc, "div", "deep-dive-chart-wrap");
+  wrap.append(svg, legend(doc, drawn));
+  return wrap;
+}
+
+function paintAxisLabels(svg, doc, periods, ticks, geometry) {
+  const { slot, padLeft, height, rotate, nhtsa } = geometry;
+  if (svg.querySelectorAll) {
+    for (const node of svg.querySelectorAll(".deep-dive-axis")) node.remove();
+  }
+  for (const label of ticks) {
     const index = periods.indexOf(label.period);
     if (index < 0) continue;
-    const x = (pad.l + index * slot + slot / 2).toFixed(1);
-    svg.append(svgEl(doc, "text", {
+    const x = (padLeft + index * slot + slot / 2).toFixed(1);
+    const y = rotate ? height - 4 : height - (nhtsa ? 22 : 18);
+    const text = svgEl(doc, "text", {
       x,
-      y: height - 18,
-      class: "deep-dive-axis",
-      "text-anchor": "middle",
-    }, label.primary));
+      y,
+      class: nhtsa ? "deep-dive-axis deep-dive-axis-month" : "deep-dive-axis",
+      "text-anchor": rotate ? "end" : "middle",
+    }, label.primary);
+    if (rotate) text.setAttribute("transform", `rotate(-45 ${x} ${y})`);
+    svg.append(text);
     if (label.secondary) {
       svg.append(svgEl(doc, "text", {
         x,
@@ -699,9 +849,42 @@ function renderChart(seriesList, doc) {
       }, label.secondary));
     }
   }
-  const wrap = el(doc, "div", "deep-dive-chart-wrap");
-  wrap.append(svg, legend(doc, drawn));
-  return wrap;
+}
+
+/** Re-fit NHTSA month labels to the chart's rendered width. Hidden charts are left alone. */
+export function fitNhtsaAxes(root) {
+  if (!root?.querySelectorAll) return;
+  for (const svg of root.querySelectorAll("[data-nhtsa-axis='1']")) {
+    const width = svg.getBoundingClientRect?.().width || 0;
+    if (width < 40) continue;
+    const fitted = Number(svg.getAttribute("data-axis-fitted") || 0);
+    if (Math.abs(fitted - width) < 4) continue;
+    const periods = String(svg.getAttribute("data-periods") || "").split(",").filter(Boolean);
+    if (!periods.length) continue;
+    const viewW = Number(svg.getAttribute("data-view-width") || 640);
+    const inner = Number(svg.getAttribute("data-inner-width") || viewW - 80);
+    const height = Number(svg.getAttribute("data-view-height") || 250);
+    const padLeft = Number(svg.getAttribute("data-pad-left") || 44);
+    const slot = inner / periods.length;
+    const slotPx = slot * (width / viewW);
+    const plan = layoutNhtsaAxis(periods, slotPx);
+    paintAxisLabels(svg, svg.ownerDocument || root.ownerDocument, periods, plan.ticks, {
+      slot, padLeft, height, rotate: plan.rotate, nhtsa: true,
+    });
+    svg.setAttribute("data-axis-fitted", String(Math.round(width)));
+  }
+}
+
+function watchNhtsaAxes(root, doc) {
+  const fit = () => fitNhtsaAxes(root);
+  const view = doc?.defaultView;
+  if (typeof view?.requestAnimationFrame === "function") view.requestAnimationFrame(fit);
+  if (typeof view?.ResizeObserver === "function") {
+    const observer = new view.ResizeObserver(fit);
+    if (root.querySelectorAll) {
+      for (const node of root.querySelectorAll("[data-nhtsa-axis='1']")) observer.observe(node);
+    }
+  }
 }
 
 function maxOf(seriesList, periods) {
@@ -985,12 +1168,13 @@ function renderTable(table, doc, emptyLabel) {
   return node;
 }
 
-function renderForecast(panel, doc) {
+function renderForecast(panel, doc, shownLabel = "") {
   const forecast = panel.forecast || {};
   const wrap = el(doc, "div", "deep-dive-forecast");
   const flag = el(doc, "p", "deep-dive-model-flag", "Not a real model");
   wrap.append(flag);
-  wrap.append(el(doc, "p", "deep-dive-note", forecast.disclaimer || panel.subtitle || ""));
+  const note = String(forecast.disclaimer || panel.subtitle || "").trim();
+  if (note && note !== String(shownLabel || "").trim()) wrap.append(el(doc, "p", "deep-dive-note", note));
   const headlines = el(doc, "div", "deep-dive-kpis");
   const total = (forecast.segments || []).find((segment) => segment.id === "total") || (forecast.segments || [])[0];
   if (total) {
