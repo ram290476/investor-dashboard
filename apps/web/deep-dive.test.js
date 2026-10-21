@@ -8,6 +8,10 @@ import {
   confidenceLabel,
   formatDeepValue,
   hasDeepDive,
+  layoutNhtsaAxis,
+  mapDataPoints,
+  nhtsaMonthLabel,
+  nhtsaPeriods,
   orderedDeepDiveSections,
   renderDeepDive,
   renderTrendDisclaimer,
@@ -477,21 +481,36 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "summary");
 });
 
-test("the forecast notice sits under the scoreboard title on Overview, not in Research", () => {
+test("the forecast label sits once above the Research forecast panel, not under the scoreboard", () => {
   const notice = renderTrendDisclaimer(sample, fakeDocument(false));
   assert.equal(byClass(notice, "stock-section-title")[0].textContent, "Scoreboard");
-  assert.equal(byClass(notice, "deep-dive-banner")[0].textContent, sample.deep_dive.disclaimer);
-  assert.equal(notice.children[0].className, "stock-section-title");
-  assert.equal(notice.children[1].className, "deep-dive-banner");
+  assert.equal(byClass(notice, "deep-dive-banner").length, 0);
+  assert.doesNotMatch(textOf(notice), /Pending values stay labeled/);
+  const label = "Placeholder only — not a real forecast model.";
   const plain = {
     deep_dive: {
-      disclaimer: "Placeholder only — not a real forecast model.",
-      sections: [{ id: "mix", title: "Mix", panels: [{ kind: "table", title: "Mix" }] }],
+      disclaimer: label,
+      sections: [{
+        id: "forecast",
+        title: "Revenue and earnings forecast",
+        panels: [{
+          id: "forecast",
+          kind: "forecast-band",
+          title: "Revenue and earnings forecast",
+          forecast: { disclaimer: label, segments: [] },
+        }],
+      }],
     },
   };
-  const moved = renderTrendDisclaimer(plain, fakeDocument(false));
-  assert.equal(byClass(moved, "stock-section-title").length, 0);
-  assert.match(moved.children[0].textContent, /not a real forecast model/);
+  assert.equal(renderTrendDisclaimer(plain, fakeDocument(false)), null);
+  const research = renderDeepDive(plain, fakeDocument(false));
+  const banners = byClass(research, "deep-dive-banner");
+  assert.equal(banners.length, 1);
+  assert.equal(banners[0].textContent, label);
+  const block = byClass(research, "deep-dive-forecast-block")[0];
+  assert.equal(block.children[0], banners[0]);
+  assert.equal(classNames(block.children[1]).includes("deep-dive-panel"), true);
+  assert.equal(byClass(research, "deep-dive-note").some((node) => node.textContent === label), false);
   assert.equal(renderTrendDisclaimer({}, fakeDocument(false)), null);
   assert.doesNotMatch(source, /TSLA|Tesla|SPCX/);
 });
@@ -499,8 +518,8 @@ test("the forecast notice sits under the scoreboard title on Overview, not in Re
 test("rendered deep dive shows pending review, empty copy, and a placeholder forecast", () => {
   const view = renderDeepDive(sample, fakeDocument(false));
   const text = textOf(view);
-  assert.equal(byClass(view, "deep-dive-banner").length, 0);
-  assert.doesNotMatch(text, /Figures appear when a source has been collected/);
+  assert.equal(byClass(view, "deep-dive-banner").length, 1);
+  assert.equal(byClass(view, "deep-dive-banner")[0].textContent, sample.deep_dive.disclaimer);
   assert.match(text, /Not yet disclosed/);
   assert.match(text, /Pending review/);
   assert.match(text, /Low confidence/);
@@ -508,7 +527,9 @@ test("rendered deep dive shows pending review, empty copy, and a placeholder for
   assert.match(text, /Not a real model/);
   assert.match(text, /Not a forecast model/);
   assert.match(text, /No licensed consensus source is configured/);
-  assert.match(text, /Site locations are not collected/);
+  assert.equal(byClass(view, "deep-dive-map").length, 0);
+  assert.doesNotMatch(text, /Site locations are not collected/);
+  assert.doesNotMatch(text, /Chargers/);
   assert.match(text, /Not yet collected/);
   assert.match(text, /Narratives may be redacted/);
   assert.equal(byClass(view, "review-badge").length > 0, true);
@@ -845,6 +866,112 @@ test("axis labels put the quarter above the year and month names on monthly char
   assert.deepEqual(monthText, ["Dec", "Jan", "Feb"]);
   assert.deepEqual(monthYears, ["2025", "2026"]);
   assert.equal(monthText.includes("2026-01"), false);
+});
+
+test("research maps render only when a place has a reported value", () => {
+  assert.equal(mapDataPoints({ markers: [{ place: "Austin", reported: false, value: 4 }] }).length, 0);
+  assert.equal(mapDataPoints({ markers: [] }).length, 0);
+  assert.equal(mapDataPoints({ markers: [{ place: "Austin", reported: true, value: 12 }] }).length, 1);
+  const view = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "maps",
+        title: "Maps",
+        panels: [
+          { id: "fsd", title: "FSD by region", map: "world", markers: [] },
+          { id: "chargers", title: "Chargers", kind: "map-sites", map: "sites", markers: [{ place: "Texas", reported: false, value: null }] },
+          { id: "markets", title: "Markets", map: "world", markers: [{ place: "Norway", value: null }] },
+          {
+            id: "storage",
+            title: "Storage deployments",
+            map: "world",
+            kpis: [{ label: "Deployed", value: 3, unit: "GWh" }],
+            markers: [],
+          },
+          {
+            id: "fleet",
+            title: "Robotaxi fleet",
+            map: "us",
+            markers: [{ place: "Austin", reported: true, value: 12 }],
+          },
+        ],
+      }],
+    },
+  }, fakeDocument(false));
+  const text = textOf(view);
+  assert.equal(byClass(view, "deep-dive-map").length, 1);
+  assert.doesNotMatch(text, /FSD by region|Site locations are not collected|No places have been disclosed/);
+  assert.doesNotMatch(text, /Chargers/);
+  assert.match(text, /Storage deployments/);
+  assert.match(text, /Deployed/);
+  assert.match(text, /Robotaxi fleet/);
+  assert.equal(byClass(view, "deep-dive-map-wrap").length, 1);
+  assert.doesNotMatch(source, /TSLA|Tesla|NVDA|SPCX|ARKK/);
+});
+
+test("the NHTSA chart starts at Jan 2024 and uses month labels that fit the width", () => {
+  assert.equal(nhtsaMonthLabel("2024-01"), "Jan '24");
+  assert.equal(nhtsaMonthLabel("2026-12"), "Dec '26");
+  const series = [
+    {
+      source_kind: "nhtsa_odi",
+      label: "Recalls",
+      role: "bar",
+      points: [
+        { period: "2022-06", value: 1, reported: true },
+        { period: "2024-01", value: 2, reported: true },
+        { period: "2024-02", value: 3, reported: true },
+      ],
+    },
+    {
+      label: "Complaints",
+      role: "bar",
+      points: [{ period: "2023-12", value: 4, reported: true }, { period: "2024-06", value: 5, reported: true }],
+    },
+  ];
+  assert.deepEqual(nhtsaPeriods(series), ["2024-01", "2024-02", "2024-06"]);
+  assert.deepEqual(nhtsaPeriods([{ points: [{ period: "2025-03", value: 1, reported: true }] }]), ["2025-03"]);
+  const months = [];
+  for (let index = 0; index < 30; index += 1) {
+    const year = 2024 + Math.floor(index / 12);
+    const month = String((index % 12) + 1).padStart(2, "0");
+    months.push(`${year}-${month}`);
+  }
+  const wide = layoutNhtsaAxis(months, 568 / months.length);
+  const narrow = layoutNhtsaAxis(months, 280 / months.length);
+  assert.equal(wide.rotate, false);
+  assert.equal(wide.ticks[0].primary, "Jan '24");
+  assert.ok(narrow.rotate);
+  assert.ok(narrow.ticks.length < months.length);
+  assert.ok(narrow.ticks.length <= wide.ticks.length);
+  const gap = (plan) => {
+    const indexes = plan.ticks.map((tick) => months.indexOf(tick.period));
+    return indexes.slice(1).map((index, position) => index - indexes[position]);
+  };
+  assert.ok(gap(narrow).every((item) => item >= narrow.step));
+  assert.ok(gap(wide).every((item) => item >= wide.step));
+  const view = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "records",
+        title: "Public vehicle records",
+        panels: [{
+          id: "nhtsa-odi",
+          title: "NHTSA recalls, complaints, and investigations",
+          cadence: "monthly",
+          series,
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  const labels = nodesWithClass(view, "deep-dive-axis", { excluded: "deep-dive-axis-year" }).map((node) => node.textContent);
+  assert.ok(labels.includes("Jan '24"));
+  assert.equal(labels.some((label) => /2022|2023|2022-06|2023-12/.test(label)), false);
+  assert.ok(byClass(view, "deep-dive-axis-month").length > 0);
+  assert.match(styles, /\.deep-dive-axis-month\s*\{[^}]*font-size:\s*8px/);
+  assert.doesNotMatch(source, /TSLA|Tesla|NVDA|SPCX/);
 });
 
 test("an estimate stays beside the reported figure and a stored headline waits for the actual", () => {
