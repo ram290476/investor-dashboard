@@ -153,7 +153,7 @@ Rules:
 
 ## Panel design
 
-The mockups follow the current theme (`--page #0b0e13`, `--surface #12161d`, IBM Plex, green `#48c79b`, red `#f07a7a`, blue `#7db4ff`, amber `#f2b24e`). The tab row matches a company page that is not a fund: Overview, Analysis, Research, Fundamentals, KPIs. A fund also has a Fund tab after Analysis.
+The mockups follow the current theme (`--page #0b0e13`, `--surface #12161d`, IBM Plex, green `#48c79b`, red `#f07a7a`, blue `#7db4ff`, amber `#f2b24e`). The tab row matches a company page that is not a fund: Overview, Analysis, Research, Fundamentals, KPIs. A fund also has a Fund tab after Analysis and does not show Fundamentals or KPIs.
 
 Each segment section:
 
