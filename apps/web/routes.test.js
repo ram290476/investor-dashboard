@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canonicalStockTab, legacyMainSection, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { ANALYSIS_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab, legacyMainSection, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 
 test("dashboard and Cognito callback paths resolve to the dashboard", () => {
   assert.deepEqual(routeFromPath("/"), { page: "dashboard" });
@@ -43,15 +43,34 @@ test("stock pages open from a hash or a /stock path for any watchlist ticker", (
   );
 });
 
-test("Overview keeps the trends id and Technical keeps the overview id", () => {
-  assert.equal(canonicalStockTab("trends"), "trends");
-  assert.equal(canonicalStockTab("overview"), "overview");
-  assert.equal(parseStockTab("#stock/TSLA/trends"), "trends");
-  assert.equal(parseStockTab("#stock/TSLA/overview"), "overview");
+test("legacy tab ids open Overview or Analysis", () => {
+  assert.equal(OVERVIEW_TAB_ID, "summary");
+  assert.equal(ANALYSIS_TAB_ID, "analysis");
+  assert.equal(canonicalStockTab("trends"), "summary");
+  assert.equal(parseStockTab("#stock/TSLA/trends"), "summary");
   assert.equal(parseStockPanel("#stock/TSLA/trends/price"), "price");
+  assert.equal(stockTabHash("TSLA", "trends"), "#stock/TSLA/summary");
+  assert.equal(stockTabHash("TSLA", "summary"), "#stock/TSLA/summary");
+  assert.equal(canonicalStockTab("overview"), "analysis");
+  assert.equal(parseStockTab("#stock/TSLA/overview"), "analysis");
   assert.equal(parseStockPanel("#stock/TSLA/overview/technical"), "technical");
-  assert.equal(stockTabHash("TSLA", "trends"), "#stock/TSLA/trends");
-  assert.equal(stockTabHash("TSLA", "overview"), "#stock/TSLA");
+  assert.equal(parseStockPanel("#stock/TSLA/overview/quarterly-notes"), "quarterly-notes");
+  assert.equal(stockTabHash("TSLA", "overview"), "#stock/TSLA/analysis");
+  assert.equal(canonicalStockTab("technical"), "analysis");
+  assert.equal(parseStockTab("#stock/TSLA/technical"), "analysis");
+  assert.equal(parseStockPanel("#stock/TSLA/technical"), "");
+  assert.equal(parseStockPanel("#stock/TSLA/technical/quarterly-notes"), "quarterly-notes");
+  assert.equal(stockTabHash("TSLA", "technical"), "#stock/TSLA/analysis");
+  assert.equal(stockTabHash("TSLA", "analysis"), "#stock/TSLA/analysis");
+  assert.equal(parseStockTab("#stock/TSLA"), "");
+  assert.equal(stockTabHash("TSLA", ""), "#stock/TSLA");
+  assert.equal(canonicalStockTab("deep-dive"), "research");
+  assert.equal(parseStockTab("#stock/TSLA/deep-dive"), "research");
+  assert.equal(legacyMainSection("#technical"), "technical");
+  assert.equal(redirectStockHash("#technical", "tsla"), "#stock/TSLA/summary/technical");
+  assert.equal(redirectStockHash("#technical-summary", "tsla"), "#stock/TSLA/summary/technical");
+  assert.equal(parseStockTab("#stock/TSLA/summary/technical"), "summary");
+  assert.equal(parseStockPanel("#stock/TSLA/summary/technical"), "technical");
 });
 
 test("a deep-dive bookmark hash stays on that company's route", () => {
@@ -90,25 +109,31 @@ test("company tab hashes stay on that company's route and restore the section", 
   assert.equal(parseStockPanel("#stock/MSFT/deep-dive/mix"), "");
   assert.equal(parseStockPanel("#stock/MSFT/research/mix"), "");
   assert.equal(parseStockHash("#stock/NVDA/nope"), null);
-  assert.equal(stockTabHash("abcd", "overview"), "#stock/ABCD");
-  assert.equal(stockTabHash("abcd", "trends"), "#stock/ABCD/trends");
+  assert.equal(stockTabHash("abcd", "overview"), "#stock/ABCD/analysis");
+  assert.equal(stockTabHash("abcd", "technical"), "#stock/ABCD/analysis");
+  assert.equal(stockTabHash("abcd", "trends"), "#stock/ABCD/summary");
+  assert.equal(stockTabHash("abcd", "summary"), "#stock/ABCD/summary");
   assert.equal(stockTabHash("abcd", "kpis"), "#stock/ABCD/kpis");
   assert.equal(stockTabHash("abcd", "deep-dive"), "#stock/ABCD/research");
   assert.equal(stockTabHash("abcd", "research"), "#stock/ABCD/research");
-  assert.equal(stockTabHash("abcd", "calls"), "#stock/ABCD/overview/quarterly-notes");
+  assert.equal(stockTabHash("abcd", "calls"), "#stock/ABCD/analysis/quarterly-notes");
   assert.equal(stockTabHash("abcd", "admin"), "#stock/ABCD/admin");
   assert.equal(parseStockTab("#stock/NVDA/admin"), "admin");
   assert.equal(parseStockPanel("#stock/NVDA/admin/metrics"), "metrics");
   assert.equal(parseStockHash("#stock/tsla/admin"), "TSLA");
   assert.equal(stockPanelHash("abcd", "admin", "metrics"), "#stock/ABCD/admin/metrics");
-  assert.equal(stockPanelHash("abcd", "overview", "price"), "#stock/ABCD/overview/price");
-  assert.equal(stockPanelHash("abcd", "trends", "news"), "#stock/ABCD/trends/news");
-  assert.equal(stockPanelHash("abcd", "calls", "notes"), "#stock/ABCD/overview/quarterly-notes");
+  assert.equal(stockPanelHash("abcd", "overview", "price"), "#stock/ABCD/analysis/price");
+  assert.equal(stockPanelHash("abcd", "technical", "quarterly-notes"), "#stock/ABCD/analysis/quarterly-notes");
+  assert.equal(stockPanelHash("abcd", "trends", "news"), "#stock/ABCD/summary/news");
+  assert.equal(stockPanelHash("abcd", "summary", "news"), "#stock/ABCD/summary/news");
+  assert.equal(stockPanelHash("abcd", "calls", "notes"), "#stock/ABCD/analysis/quarterly-notes");
   assert.equal(stockPanelHash("abcd", "deep-dive", "forecast"), "#stock/ABCD/research/forecast");
   assert.equal(stockPanelHash("abcd", "research", "forecast"), "#stock/ABCD/research/forecast");
   assert.equal(stockPanelHash("abcd", "kpis", "../x"), "#stock/ABCD/kpis");
-  assert.equal(parseStockTab("#stock/NVDA/trends/price"), "trends");
+  assert.equal(parseStockTab("#stock/NVDA/trends/price"), "summary");
   assert.equal(parseStockPanel("#stock/NVDA/trends/price"), "price");
+  assert.equal(parseStockTab("#stock/NVDA/overview/quarterly-notes"), "analysis");
+  assert.equal(parseStockTab("#stock/NVDA/technical"), "analysis");
   assert.equal(parseStockPanel("#stock/NVDA/calls/notes"), "");
   assert.deepEqual(routeFromLocation("/", "#stock/BRK.B/fundamentals/revenue"), { page: "stock", ticker: "BRK.B" });
 });
@@ -119,11 +144,13 @@ test("legacy main-page and calls hashes redirect to the company tab that replace
   assert.equal(legacyMainSection("#mobile-panel-chart"), "price");
   assert.equal(legacyMainSection("#settings"), "");
   assert.equal(legacyMainSection("#stock/NVDA"), "");
-  assert.equal(redirectStockHash("#news", "nvda"), "#stock/NVDA/trends/news");
-  assert.equal(redirectStockHash("#filings", "brk.b"), "#stock/BRK.B/trends/filings");
-  assert.equal(redirectStockHash("#stock/nvda/calls"), "#stock/NVDA/overview/quarterly-notes");
-  assert.equal(redirectStockHash("#stock/NVDA/calls/transcripts"), "#stock/NVDA/overview/quarterly-notes");
+  assert.equal(redirectStockHash("#news", "nvda"), "#stock/NVDA/summary/news");
+  assert.equal(redirectStockHash("#filings", "brk.b"), "#stock/BRK.B/summary/filings");
+  assert.equal(redirectStockHash("#stock/nvda/calls"), "#stock/NVDA/analysis/quarterly-notes");
+  assert.equal(redirectStockHash("#stock/NVDA/calls/transcripts"), "#stock/NVDA/analysis/quarterly-notes");
   assert.equal(redirectStockHash("#stock/NVDA/trends/price", "NVDA"), "");
+  assert.equal(redirectStockHash("#stock/NVDA/overview", "NVDA"), "");
+  assert.equal(redirectStockHash("#stock/NVDA/technical", "NVDA"), "");
   assert.equal(redirectStockHash("#settings/theme", "NVDA"), "");
   assert.equal(redirectStockHash("#news", ""), "");
 });

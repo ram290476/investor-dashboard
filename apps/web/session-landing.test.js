@@ -13,24 +13,32 @@ function accessToken(claims) {
 }
 
 test("the first load of a session lands on Overview and rewrites a deep link", () => {
-  for (const hashTab of ["overview", "fundamentals", "kpis", "deep-dive", "admin", ""]) {
+  for (const hashTab of ["overview", "technical", "trends", "summary", "analysis", "fundamentals", "kpis", "deep-dive", "admin", ""]) {
     const landing = sessionStockLanding({ sessionStarted: false, hashTab, routePage: "stock" });
-    assert.equal(landing.tab, "trends");
+    assert.equal(landing.tab, "summary");
     assert.equal(landing.markSession, true);
     assert.equal(landing.rewriteLanding, true);
   }
   const dashboard = sessionStockLanding({ sessionStarted: false, hashTab: "", routePage: "dashboard" });
-  assert.deepEqual(dashboard, { tab: "trends", markSession: true, rewriteLanding: true });
+  assert.deepEqual(dashboard, { tab: "summary", markSession: true, rewriteLanding: true });
 });
 
 test("a later load in the same session keeps the tab in the URL", () => {
-  const technical = sessionStockLanding({ sessionStarted: true, hashTab: "overview", routePage: "stock" });
-  assert.deepEqual(technical, { tab: "overview", markSession: false, rewriteLanding: false });
+  const fromOverview = sessionStockLanding({ sessionStarted: true, hashTab: "overview", routePage: "stock" });
+  assert.deepEqual(fromOverview, { tab: "analysis", markSession: false, rewriteLanding: false });
+  const fromTechnical = sessionStockLanding({ sessionStarted: true, hashTab: "technical", routePage: "stock" });
+  assert.deepEqual(fromTechnical, { tab: "analysis", markSession: false, rewriteLanding: false });
+  const analysis = sessionStockLanding({ sessionStarted: true, hashTab: "analysis", routePage: "stock" });
+  assert.equal(analysis.tab, "analysis");
+  const fromTrends = sessionStockLanding({ sessionStarted: true, hashTab: "trends", routePage: "stock" });
+  assert.deepEqual(fromTrends, { tab: "summary", markSession: false, rewriteLanding: false });
+  const overview = sessionStockLanding({ sessionStarted: true, hashTab: "summary", routePage: "stock" });
+  assert.equal(overview.tab, "summary");
   const bare = sessionStockLanding({ sessionStarted: true, hashTab: "", routePage: "stock" });
-  assert.equal(bare.tab, "overview");
+  assert.equal(bare.tab, "analysis");
   assert.equal(bare.rewriteLanding, false);
   const home = sessionStockLanding({ sessionStarted: true, hashTab: "", routePage: "dashboard" });
-  assert.equal(home.tab, "trends");
+  assert.equal(home.tab, "summary");
   assert.equal(home.rewriteLanding, false);
   const saved = sessionStockLanding({ sessionStarted: true, hashTab: "deep-dive", routePage: "stock" });
   assert.equal(saved.tab, "research");

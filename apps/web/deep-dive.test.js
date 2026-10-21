@@ -458,19 +458,23 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(trendTone(0, true), "flat");
   assert.equal(STOCK_TABS.length, 4);
   assert.equal(stockTabs(null).length, 4);
-  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["trends", "overview", "research", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["summary", "analysis", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(sample).map((tab) => tab.id), ["summary", "analysis", "research", "fundamentals", "kpis"]);
   assert.equal(stockTabs(sample).find((tab) => tab.id === "research").label, "Research");
+  assert.equal(stockTabs(sample).find((tab) => tab.id === "analysis").label, "Analysis");
   assert.equal(stockTabs({ deep_dive: { title: "Deep dive", sections: sample.deep_dive.sections } }).find((tab) => tab.id === "research").label, "Research");
   assert.equal(stockTabs(sample).some((tab) => tab.id === "admin"), false);
-  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(sample)), "overview");
+  assert.equal(nextStockTab("summary", "ArrowRight", stockTabs(sample)), "analysis");
+  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(sample)), "analysis");
+  assert.equal(nextStockTab("analysis", "ArrowRight", stockTabs(sample)), "research");
   assert.equal(nextStockTab("overview", "ArrowRight", stockTabs(sample)), "research");
+  assert.equal(nextStockTab("technical", "ArrowRight", stockTabs(sample)), "research");
   assert.equal(nextStockTab("research", "ArrowRight", stockTabs(sample)), "fundamentals");
   assert.equal(nextStockTab("deep-dive", "ArrowRight", stockTabs(sample)), "fundamentals");
   assert.equal(nextStockTab("fundamentals", "ArrowLeft", stockTabs(sample)), "research");
-  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "trends");
-  assert.equal(nextStockTab("overview", "End", stockTabs(sample)), "kpis");
-  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "trends");
+  assert.equal(nextStockTab("kpis", "ArrowRight", stockTabs(sample)), "summary");
+  assert.equal(nextStockTab("analysis", "End", stockTabs(sample)), "kpis");
+  assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "summary");
 });
 
 test("the forecast notice sits under the scoreboard title on Overview, not in Research", () => {

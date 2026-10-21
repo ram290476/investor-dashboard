@@ -3,13 +3,13 @@
 // Pending review. Chart cards do not repeat that status. Text is plain.
 import { periodQuote } from "./chart-period.js";
 import { catalystDateLabel } from "./roadmap.js";
-import { canonicalStockTab } from "./routes.js";
+import { ANALYSIS_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab } from "./routes.js";
 
 export const LONG_PRESS_MS = 550;
 
 export const STOCK_TABS = [
-  { id: "trends", label: "Overview" },
-  { id: "overview", label: "Technical" },
+  { id: OVERVIEW_TAB_ID, label: "Overview" },
+  { id: ANALYSIS_TAB_ID, label: "Analysis" },
   { id: "fundamentals", label: "Fundamentals" },
   { id: "kpis", label: "KPIs" },
 ];
@@ -17,7 +17,7 @@ export const STOCK_TABS = [
 // Last tab, and only for a signed-in admin. The demo account is never an admin.
 export const ADMIN_STOCK_TAB = { id: "admin", label: "Admin" };
 
-const STOCK_TAB_ORDER = ["trends", "overview", "research", "fundamentals", "kpis"];
+const STOCK_TAB_ORDER = [OVERVIEW_TAB_ID, ANALYSIS_TAB_ID, "research", "fundamentals", "kpis"];
 
 // Last resort only: companyName() uses the API company_name / SEC entity name first.
 // SPCX has no SEC entity name, so it keeps a display name here.
@@ -183,8 +183,9 @@ export function companyDescription(payload, tickerData) {
 }
 
 /**
- * Company tabs, in order. Technical follows Overview. Research sits between Technical and Fundamentals, and only when sections exist.
- * Overview keeps the id `trends`. Technical keeps the id `overview`, which #281 already used for that tab.
+ * Company tabs, in order. Analysis follows Overview. Research sits between Analysis and Fundamentals, and only when sections exist.
+ * Overview uses the id `summary`. Analysis uses the id `analysis`.
+ * Saved `trends` opens Overview. Saved `overview` and `technical` open Analysis. Saved `deep-dive` opens Research.
  * The label is always Research. `deep_dive.title` stays in the company document and is not shown.
  * Admin is last, and only when options.admin is true (a signed-in admin, never the demo account).
  */
@@ -204,19 +205,19 @@ export function stockTabs(payload, options = {}) {
 /**
  * Tab a company hash may open.
  * Admin is refused unless that tab is in the visible list, so a non-admin URL cannot open it.
- * A bare company hash is Technical. An unknown tab keeps the current one when it is still visible.
+ * A bare company hash is Analysis. An unknown tab keeps the current one when it is still visible.
  */
-export function visibleStockTab(hashTab, tabs, current = "overview") {
+export function visibleStockTab(hashTab, tabs, current = ANALYSIS_TAB_ID) {
   const ids = (Array.isArray(tabs) ? tabs : [])
     .map((tab) => (typeof tab === "string" ? tab : tab?.id))
     .filter(Boolean);
   const requested = canonicalStockTab(hashTab);
-  if (requested === "admin" && !ids.includes("admin")) return "overview";
+  if (requested === "admin" && !ids.includes("admin")) return ANALYSIS_TAB_ID;
   if (requested && ids.includes(requested)) return requested;
-  if (!requested) return "overview";
+  if (!requested) return ANALYSIS_TAB_ID;
   const kept = canonicalStockTab(current);
   if (kept && ids.includes(kept)) return kept;
-  return "overview";
+  return ANALYSIS_TAB_ID;
 }
 
 export function nextStockTab(current, key, tabs = STOCK_TABS) {

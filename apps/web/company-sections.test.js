@@ -246,7 +246,7 @@ test("the section strip is visible on load and tracks the section in view", () =
   assert.equal(strip.getAttribute("aria-hidden"), undefined);
   const notesChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "quarterly-notes");
   assert.equal(notesChip.getAttribute("tabindex"), undefined);
-  assert.equal(notesChip.href, "#stock/EXMPL/overview/quarterly-notes");
+  assert.equal(notesChip.href, "#stock/EXMPL/analysis/quarterly-notes");
   const notes = page.children.find((child) => child.dataset.companySection === "quarterly-notes");
   observers[0].callback([{ target: notes, isIntersecting: true, intersectionRatio: 0.8 }]);
   assert.equal(notesChip.getAttribute("aria-current"), "location");

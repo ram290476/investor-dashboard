@@ -1,6 +1,6 @@
 // Sticky Sections strip for company tabs. Admin keeps its section tiles.
 // No ticker names. The strip is the section jump list.
-import { stockPanelHash } from "./routes.js";
+import { ANALYSIS_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab, stockPanelHash } from "./routes.js";
 
 export const TREND_SECTIONS = [
   { id: "price", title: "Price", icon: "price" },
@@ -58,7 +58,8 @@ function metricBookmarks(metrics, icon, fallbackId, fallbackTitle) {
 
 /** Jump targets for the active company tab. Research keeps its own section list. */
 export function companyBookmarks(tab, context = {}) {
-  if (tab === "trends") {
+  const id = canonicalStockTab(tab);
+  if (id === OVERVIEW_TAB_ID) {
     const present = new Set(context.present?.length ? context.present : TREND_SECTIONS.map((item) => item.id));
     return TREND_SECTIONS.filter((item) => present.has(item.id)).map((item) => ({
       id: item.id,
@@ -77,7 +78,7 @@ export function companyBookmarks(tab, context = {}) {
       icon: "metrics",
     }];
   }
-  if (tab !== "overview") return [];
+  if (id !== ANALYSIS_TAB_ID) return [];
   return [
     {
       id: "technical",
@@ -286,7 +287,7 @@ export function renderCompanyBookmarks(bookmarks, doc = document, options = {}) 
 function tabMatches(node, tab) {
   if (!tab) return true;
   const owner = owningTab(node);
-  return !owner || owner === tab;
+  return !owner || canonicalStockTab(owner) === canonicalStockTab(tab);
 }
 
 function findCompanySection(node, sectionId, tab = "") {

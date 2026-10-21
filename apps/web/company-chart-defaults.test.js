@@ -20,6 +20,17 @@ test("company page chart starts with every toggle off, including Volume and cata
   api.setActiveCatalysts(["earnings"]);
   assert.deepEqual(session.catalystCategories, ["earnings"], "dashboard catalysts untouched");
   assert.deepEqual(api.chartSettingsView({}, "MSFT").lanes, [], "a new company resets to all off");
+  session.companyChart = null;
+  for (const tab of ["summary", "trends"]) {
+    session.stockTab = tab;
+    assert.deepEqual(api.chartSettingsView({}, "AMZN").lanes, ["volume", "short_interest", "macro", "options"], `${tab} keeps the saved chart`);
+  }
+  for (const tab of ["analysis", "overview", "technical"]) {
+    session.stockTab = tab;
+    session.companyChart = null;
+    assert.deepEqual(api.chartSettingsView({}, "AMZN").lanes, [], `${tab} starts with toggles off`);
+  }
+  session.stockTab = "";
   route.page = "dashboard";
   assert.deepEqual(api.chartSettingsView({}, "AMZN").lanes, ["volume", "short_interest", "macro", "options"],
     "dashboard and research keep saved settings");

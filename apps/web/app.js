@@ -16,7 +16,7 @@ import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAm
 import { applyTheme, overlayColor } from "./theme.js";
 import { clearRefreshToken, createAuthClient, performAuthorizedRequest } from "./auth-session.js";
 import { createSafeStorage } from "./safe-storage.js";
-import { canonicalStockTab, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { ANALYSIS_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
   catalystDateLabel, catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
@@ -165,7 +165,7 @@ const session = {
   fundRetry: {},
   fundUi: {},
   stockPageError: {},
-  stockTab: "trends",
+  stockTab: OVERVIEW_TAB_ID,
   scrolledStockSection: "",
   metricReview: readStoredMetricReview(),
   metricReviewError: "",
@@ -721,8 +721,10 @@ function renderFundSummary(ticker) {
 // pages keep their saved per-ticker settings and catalyst choices untouched.
 function companyChartState(ticker = session.selected) {
   if (session.route?.page !== "stock") return null;
-  // Overview (id trends) keeps the saved dashboard chart. Technical (id overview) starts with every toggle off.
-  if (session.stockTab && session.stockTab !== "overview") return null;
+  // Overview keeps the saved dashboard chart. Analysis starts with every toggle off.
+  // Legacy ids stay here: trends is Overview; overview and technical are Analysis.
+  const chartTab = session.stockTab;
+  if (chartTab && chartTab !== "analysis" && chartTab !== "overview" && chartTab !== "technical") return null;
   if (!session.companyChart || session.companyChart.ticker !== ticker) {
     session.companyChart = { ticker, overlays: [], lanes: [], catalysts: [] };
   }
@@ -3819,7 +3821,7 @@ function renderTechnicalSummary(ticker, history) {
   const view = technicalSummaryView(technicalSummaryFor(ticker));
   const panel = node("section", "panel technical-summary company-section-target");
   panel.id = "stock-panel-technical";
-  panel.dataset.stockPanel = "overview";
+  panel.dataset.stockPanel = ANALYSIS_TAB_ID;
   panel.dataset.companySection = "technical";
   panel.dataset.technicalSummary = view.example ? "example" : "live";
   const header = node("div", "panel-header");
@@ -3939,7 +3941,6 @@ function renderStockPage(restoreDrawer = null) {
   appendStatusAlerts(dashboardBanner(session));
 
   const heading = node("section", "panel stock-heading");
-  heading.dataset.stockPanel = "overview";
   const copy = node("div", "stock-heading-copy");
   const title = node("h2", "", companyName(session.selected, payload, tickerData));
   title.id = "stock-title";
@@ -3958,13 +3959,14 @@ function renderStockPage(restoreDrawer = null) {
   const pageTabs = stockTabs(payload, { admin: metricAdmin });
   const hashSection = parseStockSection(location.hash);
   session.stockTab = canonicalStockTab(session.stockTab);
-  // A stock hash names the tab. `#stock/<T>` and `#stock/<T>/overview` are Technical.
+  // A stock hash names the tab. A later bare `#stock/<T>`, `#stock/<T>/overview`, and
+  // `#stock/<T>/technical` are Analysis. `#stock/<T>/trends` and `#stock/<T>/summary` are Overview.
   // Admin is refused unless this caller is an admin, including when the hash asks for it.
   // A Research hash waits until that tab exists in the payload. `deep-dive` is the old id.
   if (parseStockHash(location.hash) === session.selected) {
     const hashTab = parseStockTab(location.hash);
     if (hashTab === "admin" && !metricAdmin) {
-      const fallback = stockTabHash(session.selected, "overview");
+      const fallback = stockTabHash(session.selected, ANALYSIS_TAB_ID);
       if (fallback && location.hash !== fallback) {
         // `history` in this function is the price series. The session history is on window.
         window.history.replaceState(window.history.state, "", `${location.pathname}${location.search}${fallback}`);
@@ -3972,12 +3974,15 @@ function renderStockPage(restoreDrawer = null) {
     }
     session.stockTab = visibleStockTab(hashTab, pageTabs, session.stockTab);
   } else if (hashSection && pageTabs.some((item) => item.id === "research")) session.stockTab = "research";
-  else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = "overview";
+  else if (!pageTabs.some((item) => item.id === session.stockTab)) session.stockTab = ANALYSIS_TAB_ID;
   const page = node("main", "stock-page");
   page.dataset.stockTab = session.stockTab;
   if (hasDeepDive(payload)) page.dataset.hasDeepDive = "true";
   const companyLabel = companyName(session.selected, payload, tickerData);
-  const tabTitle = session.stockTab === "research" ? "Research" : session.stockTab === "trends" ? "Overview" : "";
+  const tabTitle = session.stockTab === "research" ? "Research"
+    : session.stockTab === OVERVIEW_TAB_ID ? "Overview"
+    : session.stockTab === ANALYSIS_TAB_ID ? "Analysis"
+    : "";
   page.setAttribute("aria-label", tabTitle ? `${session.selected} ${tabTitle}` : `${session.selected} company page`);
   document.title = tabTitle ? `${companyLabel} · ${tabTitle} · Investor Dashboard` : "Investor Dashboard";
 
@@ -3994,7 +3999,7 @@ function renderStockPage(restoreDrawer = null) {
 
   const trends = renderTrendsLayout(tickerData, chartData, chartDataState, payload);
   const present = String(trends.dataset.presentSections || "").split(",").filter(Boolean);
-  // Funds (#223): Fund holdings follows the Technical Summary on Technical. The same tabs stay
+  // Funds (#223): Fund holdings follows the Technical Summary on Analysis. The same tabs stay
   // available. Operating companies never get the fund panel or its fetch.
   const fundExtras = [];
   const fund = isFund(tickerData);
@@ -4043,7 +4048,7 @@ function renderStockPage(restoreDrawer = null) {
     tab.id = `stock-tab-${item.id}`;
     tab.dataset.stockTab = item.id;
     tab.setAttribute("role", "tab");
-    const controls = item.id === "overview" ? "stock-panel-technical"
+    const controls = item.id === ANALYSIS_TAB_ID ? "stock-panel-technical"
       : item.id === "admin" ? "stock-panel-metrics"
       : `stock-panel-${item.id}`;
     tab.setAttribute("aria-controls", controls);
@@ -4165,7 +4170,7 @@ function renderResearchPage() {
 
 function tagTrendSection(element, id) {
   if (!element) return null;
-  element.dataset.stockPanel = "trends";
+  element.dataset.stockPanel = OVERVIEW_TAB_ID;
   element.dataset.companySection = id;
   element.id = `trends-panel-${id}`;
   element.classList.add("company-section-target");
@@ -4179,9 +4184,9 @@ function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
     present.push(id);
   };
   const layout = node("div", "trends-layout dashboard-grid");
-  layout.dataset.stockPanel = "trends";
+  layout.dataset.stockPanel = OVERVIEW_TAB_ID;
   layout.dataset.mobileView = "all";
-  layout.id = "stock-panel-trends";
+  layout.id = `stock-panel-${OVERVIEW_TAB_ID}`;
   layout.setAttribute("aria-label", `${session.selected} Overview`);
   const primary = node("div", "primary-column");
   const notice = renderTrendDisclaimer(payload, document);
@@ -4233,7 +4238,7 @@ function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
   primary.append(renderPanelToolbar("more"));
   layout.append(primary, side);
   const footer = node("footer", "dashboard-footer");
-  footer.dataset.stockPanel = "trends";
+  footer.dataset.stockPanel = OVERVIEW_TAB_ID;
   footer.append(node("span", "", "Information for research; not investment advice."));
   footer.append(node("span", "", snapshotLabel(session.dashboard?.generated_at)));
   layout.append(footer);
@@ -4244,7 +4249,7 @@ function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
 function renderQuarterlyNotes(guidance) {
   const notes = quarterlyNoteEntries(guidance);
   const block = node("section", "panel stock-section company-section-target");
-  block.dataset.stockPanel = "overview";
+  block.dataset.stockPanel = ANALYSIS_TAB_ID;
   block.dataset.companySection = "quarterly-notes";
   block.id = "stock-panel-quarterly-notes";
   block.append(node("h3", "stock-section-title", "Quarterly notes"));
@@ -4335,13 +4340,13 @@ function applySessionStockLanding() {
 function openTrendsLanding() {
   if (session.route.page !== "dashboard") return false;
   const ticker = fallbackSelection(session.prefs, session.selected);
-  if (!ticker || !stockTabHash(ticker, "trends")) return false;
+  if (!ticker || !stockTabHash(ticker, OVERVIEW_TAB_ID)) return false;
   session.dashboardSelection = ticker;
   session.selected = ticker;
-  session.stockTab = "trends";
+  session.stockTab = OVERVIEW_TAB_ID;
   session.route = { page: "stock", ticker };
   if (!parseSettingsHash(location.hash)) {
-    history.replaceState(history.state, "", `/${stockTabHash(ticker, "trends")}`);
+    history.replaceState(history.state, "", `/${stockTabHash(ticker, OVERVIEW_TAB_ID)}`);
   }
   return true;
 }
@@ -4361,7 +4366,7 @@ function renderNotFoundPage() {
 
 function selectStockTab(id) {
   id = canonicalStockTab(id);
-  if (id === "admin" && !canApproveMetrics(session.accessToken, session.email)) id = "overview";
+  if (id === "admin" && !canApproveMetrics(session.accessToken, session.email)) id = ANALYSIS_TAB_ID;
   session.stockTab = id;
   session.scrolledStockSection = "";
   const hash = stockTabHash(session.selected, id);
@@ -4411,8 +4416,8 @@ function scheduleStockSectionScroll() {
 
 function navigateToStock(ticker, options = {}) {
   const keepTab = options.keepTab === true && session.route.page === "stock";
-  let tab = canonicalStockTab(keepTab && session.stockTab ? session.stockTab : "overview");
-  if (tab === "admin" && !canApproveMetrics(session.accessToken, session.email)) tab = "overview";
+  let tab = canonicalStockTab(keepTab && session.stockTab ? session.stockTab : ANALYSIS_TAB_ID);
+  if (tab === "admin" && !canApproveMetrics(session.accessToken, session.email)) tab = ANALYSIS_TAB_ID;
   const section = keepTab
     ? (tab === "research" ? parseStockSection(location.hash) : parseStockPanel(location.hash))
     : "";
@@ -4425,7 +4430,7 @@ function navigateToStock(ticker, options = {}) {
   history.pushState(history.state, "", `/${hash}`);
   session.route = routeFromLocation(location.pathname, hash);
   session.selected = symbol;
-  session.stockTab = parseStockTab(hash) || "overview";
+  session.stockTab = parseStockTab(hash) || ANALYSIS_TAB_ID;
   session.scrolledStockSection = "";
   session.companyChart = null;
   renderDashboard();
@@ -4437,9 +4442,9 @@ function navigateToStock(ticker, options = {}) {
 function navigateToDashboard(ticker = session.dashboardSelection || session.selected) {
   session.dashboardSelection = fallbackSelection(session.prefs, ticker);
   session.selected = session.dashboardSelection;
-  session.stockTab = "trends";
+  session.stockTab = OVERVIEW_TAB_ID;
   session.scrolledStockSection = "";
-  const hash = stockTabHash(session.selected, "trends");
+  const hash = stockTabHash(session.selected, OVERVIEW_TAB_ID);
   session.route = hash ? { page: "stock", ticker: session.selected } : { page: "dashboard" };
   history.pushState(history.state, "", hash ? `/${hash}` : "/");
   renderDashboard();

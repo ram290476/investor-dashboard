@@ -4154,8 +4154,16 @@ a.catalyst-edgar-link:hover {
   display: none;
 }
 
+.stock-page[data-stock-tab="summary"] [data-stock-panel="summary"],
+.stock-page[data-stock-tab="summary"] [data-stock-panel="trends"],
+.stock-page[data-stock-tab="trends"] [data-stock-panel="summary"],
 .stock-page[data-stock-tab="trends"] [data-stock-panel="trends"],
+.stock-page[data-stock-tab="analysis"] [data-stock-panel="analysis"],
+.stock-page[data-stock-tab="analysis"] [data-stock-panel="overview"],
 .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
+.stock-page[data-stock-tab="overview"] [data-stock-panel="analysis"],
+.stock-page[data-stock-tab="technical"] [data-stock-panel="analysis"],
+.stock-page[data-stock-tab="technical"] [data-stock-panel="overview"],
 .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
 .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
 .stock-page[data-stock-tab="research"] [data-stock-panel="research"],
@@ -4164,6 +4172,9 @@ a.catalyst-edgar-link:hover {
   display: block;
 }
 
+.stock-page[data-stock-tab="summary"] .trends-layout[data-stock-panel="summary"],
+.stock-page[data-stock-tab="summary"] .trends-layout[data-stock-panel="trends"],
+.stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="summary"],
 .stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="trends"] {
   display: grid;
 }
@@ -4224,8 +4235,16 @@ a.catalyst-edgar-link:hover {
     display: none;
   }
 
+  .stock-page[data-stock-tab="summary"] [data-stock-panel="summary"],
+  .stock-page[data-stock-tab="summary"] [data-stock-panel="trends"],
+  .stock-page[data-stock-tab="trends"] [data-stock-panel="summary"],
   .stock-page[data-stock-tab="trends"] [data-stock-panel="trends"],
+  .stock-page[data-stock-tab="analysis"] [data-stock-panel="analysis"],
+  .stock-page[data-stock-tab="analysis"] [data-stock-panel="overview"],
   .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
+  .stock-page[data-stock-tab="overview"] [data-stock-panel="analysis"],
+  .stock-page[data-stock-tab="technical"] [data-stock-panel="analysis"],
+  .stock-page[data-stock-tab="technical"] [data-stock-panel="overview"],
   .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
   .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
   .stock-page[data-stock-tab="research"] [data-stock-panel="research"],
@@ -4234,6 +4253,9 @@ a.catalyst-edgar-link:hover {
     display: block;
   }
 
+  .stock-page[data-stock-tab="summary"] .trends-layout[data-stock-panel="summary"],
+  .stock-page[data-stock-tab="summary"] .trends-layout[data-stock-panel="trends"],
+  .stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="summary"],
   .stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="trends"] {
     display: grid;
   }
