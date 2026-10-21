@@ -158,6 +158,46 @@ test("company metrics move to the Admin tab and stay pending review", () => {
   assert.match(styles, /\.stock-page\[data-stock-tab="admin"\] \.company-metrics\s*\{[^}]*display:\s*grid/);
 });
 
+test("admin metric review actions sit in a compact column left of the name", () => {
+  const metrics = app.slice(app.indexOf("function renderCompanyMetrics"), app.indexOf("function appendMetricGroups"));
+  const line = metrics.slice(metrics.indexOf("const line ="));
+  const actions = line.indexOf('node("div", "metric-review-actions")');
+  const actionsAppend = line.indexOf("row.append(actions)");
+  const name = line.indexOf('node("span", "stock-metric-row-name"');
+  const nameAppend = line.indexOf("main.append(name)");
+  const mainAppend = line.indexOf("row.append(main)");
+  assert.ok(actions > 0 && actionsAppend > actions, "actions cell is built before it is appended");
+  assert.ok(nameAppend > name && mainAppend > nameAppend, "the name stays inside the main cell");
+  assert.ok(actionsAppend < mainAppend, "the action column is appended before the metric name");
+  assert.match(line, /actions\.append\(button\)/);
+  assert.doesNotMatch(line, /row\.append\(button\)/);
+  assert.match(line, /submitMetricReview\(card\.id, next\)/);
+  assert.match(line, /dataset\.metricAction = card\.pending \? "approve" : "undo"/);
+  assert.match(line, /`Approve \$\{card\.name\}`/);
+  assert.match(line, /`Undo approval of \$\{card\.name\}`/);
+  const rowRule = styles.match(/\.stock-metric-row\s*\{[^}]*\}/);
+  assert.ok(rowRule);
+  assert.match(rowRule[0], /display:\s*grid/);
+  assert.match(rowRule[0], /grid-template-columns:\s*max-content minmax\(0, 1fr\)/);
+  assert.doesNotMatch(rowRule[0], /flex-wrap|margin-left:\s*auto/);
+  const action = styles.match(/\.metric-review-action\s*\{[^}]*\}/);
+  assert.ok(action);
+  assert.match(action[0], /margin-left:\s*0/);
+  assert.match(action[0], /margin-block:\s*0/);
+  assert.match(action[0], /min-width:\s*4\.5rem/);
+  assert.match(action[0], /height:\s*24px/);
+  assert.match(action[0], /min-height:\s*24px/);
+  assert.doesNotMatch(action[0], /margin-left:\s*auto/);
+  assert.match(styles, /\.metric-review-actions\s*\{[^}]*display:\s*flex/);
+  assert.match(styles, /\.metric-review-actions\s*\{[^}]*gap:\s*4px/);
+  assert.match(styles, /\.stock-metric-row-main\s*\{[^}]*grid-column:\s*2/);
+  assert.match(styles, /\.stock-metric-row-main\s*\{[^}]*min-width:\s*0/);
+  assert.match(styles, /\.metric-review-action::after\s*\{[^}]*content:\s*none/);
+  const phone = styles.slice(styles.indexOf(".stock-page [data-stock-panel]"), styles.indexOf("/* Data refresh"));
+  assert.match(phone, /@media \(max-width: 640px\)[\s\S]*\.stock-metric-row\s*\{[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\)/);
+  assert.match(phone, /@media \(max-width: 640px\)[\s\S]*\.metric-review-action\s*\{[^}]*min-height:\s*28px/);
+});
+
 test("company section chips scroll to the section and write the tab hash", () => {
   const bookmarks = companyBookmarks("kpis", {
     operating: [
@@ -246,7 +286,7 @@ test("the section strip is visible on load and tracks the section in view", () =
   assert.equal(byClass(view, "section-strip-chip").some((chip) => chip.dataset.sectionId === "quarterly-notes"), false);
   const technicalChip = byClass(view, "section-strip-chip").find((chip) => chip.dataset.sectionId === "technical");
   assert.equal(technicalChip.getAttribute("tabindex"), undefined);
-  assert.equal(technicalChip.href, "#stock/EXMPL/overview/technical");
+  assert.equal(technicalChip.href, "#stock/EXMPL/analysis/technical");
   const technical = page.children.find((child) => child.dataset.companySection === "technical");
   observers[0].callback([{ target: technical, isIntersecting: true, intersectionRatio: 0.8 }]);
   assert.equal(technicalChip.getAttribute("aria-current"), "location");
@@ -258,10 +298,10 @@ test("the section strip is visible on load and tracks the section in view", () =
   assert.equal(technicalBookmark.headline, undefined);
 });
 
-test("the company page renders the sticky section strip for every tab except deep dive", () => {
+test("the company page renders the sticky section strip for every tab except Research", () => {
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   assert.match(page, /renderCompanyBookmarks\(companyBookmarks/);
-  assert.match(page, /session\.stockTab !== "deep-dive"/);
+  assert.match(page, /session\.stockTab !== "research"/);
   assert.match(page, /parseStockTab\(location\.hash\)/);
   assert.match(page, /parseStockPanel\(location\.hash\)/);
   assert.match(app, /revealCompanySection\(root, panel, session\.stockTab\)/);

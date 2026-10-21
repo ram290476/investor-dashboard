@@ -46,12 +46,21 @@ test("every page renders the one shared chart panel (#203)", () => {
   assert.doesNotMatch(stock, /page\.append\(\s*chart,/);
 });
 
-test("the shared panel keeps the price and period and nothing below them", () => {
+test("Overview keeps the full chart and Fundamentals and KPIs return after the quote", () => {
   const panel = slice("function renderPricePanel", "function renderContracts");
   assert.match(panel, /renderPeriodChips\(/);
   assert.match(panel, /renderTrend\(/);
   assert.match(panel, /options\.companyLink && stockHash/);
-  assert.doesNotMatch(panel, /renderOverlayControls\(|renderChartLanes\(|renderLaneControls\(|catalyst-filters|attachSharedCrosshair\(|chart-legend|drawChart\(/);
+  assert.match(panel, /options\.stockPanel === "fundamentals" \|\| options\.stockPanel === "kpis"/);
+  assert.match(panel, /if \(quoteOnly\) return panel;/);
+  const chart = panel.slice(panel.indexOf("if (quoteOnly) return panel;"));
+  for (const piece of [/renderOverlayControls\(/, /renderChartLanes\(/, /renderLaneControls\(/,
+    /catalyst-filters/, /attachSharedCrosshair\(/, /chart-legend/, /drawChart\(/]) {
+    assert.match(chart, piece);
+  }
+  assert.doesNotMatch(panel.slice(0, panel.indexOf("if (quoteOnly) return panel;")), /drawChart\(|catalyst-filters/);
   assert.doesNotMatch(panel, /session\.route\.page/);
-  assert.match(panel, /panel\.append\(overview\);\n {2}return panel;/);
+  const stock = slice("function renderStockPage", "function renderResearchPage");
+  assert.doesNotMatch(stock, /page\.append\(\s*chart,/);
+  assert.match(stock, /renderTechnicalSummary\(session\.selected, history\)/);
 });

@@ -78,7 +78,7 @@ test("company panel is generic for any watchlist ticker", () => {
   assert.match(app, /Federal awards · TTM obligations/);
 });
 
-test("Trends on the company page includes Filings & events, and research keeps its panel", () => {
+test("Overview on the company page includes Filings & events, and research keeps its panel", () => {
   const stock = slice("function renderStockPage", "function renderResearchPage");
   assert.match(stock, /renderTrendsLayout\(/);
   const trends = slice("function renderTrendsLayout", "function appendStatusAlerts");

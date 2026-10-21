@@ -15,22 +15,58 @@ function accessToken(claims) {
   return `e.${payload}.s`;
 }
 
-test("company tabs are Trends, Technical, Deep dive, Fundamentals, and KPIs", () => {
-  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
-  assert.deepEqual(stockTabs(deepDive).map((tab) => tab.label), ["Trends", "Technical", "Deep dive", "Fundamentals", "KPIs"]);
-  assert.equal(stockTabs(deepDive).some((tab) => tab.label === "Overview"), false);
-  assert.equal(stockTabs({ deep_dive: { sections: [] } }).some((tab) => tab.id === "deep-dive"), false);
+test("company tabs are Overview, Analysis, Research, Fundamentals, and KPIs", () => {
+  assert.deepEqual(stockTabs(null).map((tab) => tab.id), ["summary", "analysis", "fundamentals", "kpis"]);
+  assert.deepEqual(stockTabs(deepDive).map((tab) => tab.label), ["Overview", "Analysis", "Research", "Fundamentals", "KPIs"]);
+  assert.equal(stockTabs(deepDive).find((tab) => tab.id === "summary").label, "Overview");
+  assert.equal(stockTabs(deepDive).find((tab) => tab.id === "analysis").label, "Analysis");
+  assert.equal(visibleStockTab("summary", stockTabs(deepDive), "analysis"), "summary");
+  assert.equal(visibleStockTab("trends", stockTabs(deepDive), "analysis"), "summary");
+  assert.equal(visibleStockTab("analysis", stockTabs(deepDive), "summary"), "analysis");
+  assert.equal(visibleStockTab("overview", stockTabs(deepDive), "summary"), "analysis");
+  assert.equal(visibleStockTab("technical", stockTabs(deepDive), "summary"), "analysis");
+  assert.equal(visibleStockTab("deep-dive", stockTabs(deepDive), "summary"), "research");
+  assert.equal(stockTabs(deepDive).some((tab) => tab.label === "Deep dive"), false);
+  assert.equal(stockTabs(deepDive).some((tab) => tab.label === "Technical"), false);
+  assert.equal(stockTabs({ deep_dive: { sections: [] } }).some((tab) => tab.id === "research"), false);
   assert.equal(stockTabs(null).some((tab) => tab.id === "calls"), false);
   assert.equal(stockTabs(deepDive).some((tab) => tab.id === "admin"), false);
+  assert.equal(stockTabs(deepDive).some((tab) => tab.id === "fund"), false);
+  assert.equal(stockTabs(null, { fund: false }).some((tab) => tab.id === "fund"), false);
+  const fundTabs = stockTabs(deepDive, { fund: true });
+  assert.deepEqual(fundTabs.map((tab) => tab.id), ["summary", "analysis", "fund", "research", "fundamentals", "kpis"]);
+  assert.equal(fundTabs.find((tab) => tab.id === "fund").label, "Fund");
+  assert.deepEqual(stockTabs(null, { fund: true }).map((tab) => tab.id), ["summary", "analysis", "fund", "fundamentals", "kpis"]);
+  assert.equal(visibleStockTab("fund", stockTabs(null), "summary"), "analysis");
+  assert.equal(visibleStockTab("fund", fundTabs, "summary"), "fund");
+  assert.equal(nextStockTab("analysis", "ArrowRight", fundTabs), "fund");
+  assert.equal(nextStockTab("fund", "ArrowRight", fundTabs), "research");
+  assert.equal(nextStockTab("fund", "ArrowLeft", stockTabs(null, { fund: true })), "analysis");
+  const fundRow = stockTabs(deepDive, { fund: true, admin: true });
+  assert.deepEqual(fundRow.map((tab) => tab.label), ["Overview", "Analysis", "Fund", "Research", "Fundamentals", "KPIs", "Admin"]);
+  assert.deepEqual(fundRow.map((tab) => tab.id), ["summary", "analysis", "fund", "research", "fundamentals", "kpis", "admin"]);
+  assert.equal(fundRow.findIndex((tab) => tab.id === "fund"), fundRow.findIndex((tab) => tab.id === "analysis") + 1);
+  assert.equal(fundRow.at(-1).id, "admin");
+  const stockRow = stockTabs(deepDive, { admin: true });
+  assert.deepEqual(stockRow.map((tab) => tab.label), ["Overview", "Analysis", "Research", "Fundamentals", "KPIs", "Admin"]);
+  assert.equal(stockRow.some((tab) => tab.id === "fund"), false);
+  assert.equal(nextStockTab("analysis", "ArrowRight", fundRow), "fund");
+  assert.equal(nextStockTab("fund", "ArrowRight", fundRow), "research");
+  assert.equal(nextStockTab("kpis", "ArrowRight", fundRow), "admin");
+  assert.equal(nextStockTab("analysis", "ArrowRight", stockRow), "research");
+  assert.equal(nextStockTab("kpis", "ArrowRight", stockRow), "admin");
   const tabs = stockTabs(deepDive);
-  assert.equal(nextStockTab("trends", "ArrowRight", tabs), "overview");
-  assert.equal(nextStockTab("overview", "ArrowRight", tabs), "deep-dive");
+  assert.equal(nextStockTab("summary", "ArrowRight", tabs), "analysis");
+  assert.equal(nextStockTab("trends", "ArrowRight", tabs), "analysis");
+  assert.equal(nextStockTab("analysis", "ArrowRight", tabs), "research");
+  assert.equal(nextStockTab("overview", "ArrowRight", tabs), "research");
+  assert.equal(nextStockTab("technical", "ArrowRight", tabs), "research");
   assert.equal(nextStockTab("deep-dive", "ArrowRight", tabs), "fundamentals");
-  assert.equal(nextStockTab("fundamentals", "ArrowLeft", tabs), "deep-dive");
-  assert.equal(nextStockTab("kpis", "ArrowRight", tabs), "trends");
-  assert.equal(nextStockTab("kpis", "Home", tabs), "trends");
-  assert.equal(nextStockTab("overview", "End", tabs), "kpis");
-  assert.equal(nextStockTab("trends", "ArrowRight", stockTabs(null)), "overview");
+  assert.equal(nextStockTab("fundamentals", "ArrowLeft", tabs), "research");
+  assert.equal(nextStockTab("kpis", "ArrowRight", tabs), "summary");
+  assert.equal(nextStockTab("kpis", "Home", tabs), "summary");
+  assert.equal(nextStockTab("analysis", "End", tabs), "kpis");
+  assert.equal(nextStockTab("summary", "ArrowRight", stockTabs(null)), "analysis");
 });
 
 test("Admin is last, only for a signed-in admin, and a non-admin hash cannot open it", () => {
@@ -39,52 +75,59 @@ test("Admin is last, only for a signed-in admin, and a non-admin hash cannot ope
   assert.equal(canApproveMetrics(demoToken, demo), false);
   const hidden = stockTabs(deepDive, { admin: canApproveMetrics(demoToken, demo) });
   assert.equal(hidden.some((tab) => tab.id === "admin"), false);
-  assert.equal(visibleStockTab("admin", hidden, "trends"), "overview");
-  assert.equal(visibleStockTab("admin", hidden, "kpis"), "overview");
-  assert.equal(visibleStockTab("admin", stockTabs(null), "overview"), "overview");
+  assert.equal(visibleStockTab("admin", hidden, "summary"), "analysis");
+  assert.equal(visibleStockTab("admin", hidden, "kpis"), "analysis");
+  assert.equal(visibleStockTab("admin", stockTabs(null), "analysis"), "analysis");
 
   const owner = "owner@example.com";
   const ownerToken = accessToken({ "cognito:groups": ["admin"], email: owner, username: owner });
   assert.equal(canApproveMetrics(ownerToken, owner), true);
   const tabs = stockTabs(deepDive, { admin: canApproveMetrics(ownerToken, owner) });
-  assert.deepEqual(tabs.map((tab) => tab.id), ["trends", "overview", "deep-dive", "fundamentals", "kpis", "admin"]);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["summary", "analysis", "research", "fundamentals", "kpis", "admin"]);
   assert.equal(tabs.at(-1).label, "Admin");
   assert.equal(nextStockTab("kpis", "ArrowRight", tabs), "admin");
-  assert.equal(nextStockTab("admin", "ArrowRight", tabs), "trends");
+  assert.equal(nextStockTab("admin", "ArrowRight", tabs), "summary");
   assert.equal(nextStockTab("admin", "ArrowLeft", tabs), "kpis");
-  assert.equal(nextStockTab("overview", "End", tabs), "admin");
-  assert.equal(nextStockTab("admin", "Home", tabs), "trends");
-  assert.equal(visibleStockTab("admin", tabs, "overview"), "admin");
-  assert.equal(visibleStockTab("", tabs, "admin"), "overview");
-  assert.equal(stockTabs({ deep_dive: { sections: [] } }, { admin: true }).some((tab) => tab.id === "deep-dive"), false);
+  assert.equal(nextStockTab("analysis", "End", tabs), "admin");
+  assert.equal(nextStockTab("admin", "Home", tabs), "summary");
+  assert.equal(visibleStockTab("admin", tabs, "analysis"), "admin");
+  assert.equal(visibleStockTab("", tabs, "admin"), "analysis");
+  assert.equal(stockTabs({ deep_dive: { sections: [] } }, { admin: true }).some((tab) => tab.id === "research"), false);
+  assert.equal(visibleStockTab("deep-dive", tabs, "overview"), "research");
+  assert.equal(visibleStockTab("research", tabs, "overview"), "research");
 
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
-  assert.match(page, /stockTabs\(payload, \{ admin: metricAdmin \}\)/);
+  assert.match(page, /const fundTicker = isFund\(tickerData\)/);
+  assert.match(page, /stockTabs\(payload, \{ admin: metricAdmin, fund: fundTicker \}\)/);
+  assert.doesNotMatch(page, /ARKK|ARKF|ARKVX|AGIQ|XOVR|SPCX/);
   assert.match(page, /const metricAdmin = canApproveMetrics\(session\.accessToken, session\.email\)/);
   assert.match(page, /visibleStockTab\(hashTab, pageTabs, session\.stockTab\)/);
   assert.match(page, /hashTab === "admin" && !metricAdmin/);
-  assert.match(page, /stockTabHash\(session\.selected, "overview"\)/);
+  assert.match(page, /hashTab === FUND_TAB_ID && tickerData && !fundTicker/);
+  assert.match(page, /stockTabHash\(session\.selected, ANALYSIS_TAB_ID\)/);
   assert.match(page, /window\.history\.replaceState\(window\.history\.state/);
   assert.doesNotMatch(page, /Back to dashboard/);
   assert.doesNotMatch(page, /stock-dashboard-link/);
   assert.match(page, /pageTabs\.forEach/);
   assert.match(page, /nextStockTab\(item\.id, event\.key, pageTabs\)/);
   assert.match(page, /tab\.tabIndex = item\.id === session\.stockTab \? 0 : -1/);
-  assert.match(app, /if \(id === "admin" && !canApproveMetrics\(session\.accessToken, session\.email\)\) id = "overview"/);
-  assert.match(app, /if \(tab === "admin" && !canApproveMetrics\(session\.accessToken, session\.email\)\) tab = "overview"/);
+  assert.match(app, /if \(id === "admin" && !canApproveMetrics\(session\.accessToken, session\.email\)\) id = ANALYSIS_TAB_ID/);
+  assert.match(app, /if \(tab === "admin" && !canApproveMetrics\(session\.accessToken, session\.email\)\) tab = ANALYSIS_TAB_ID/);
 });
 
-test("overview bookmarks are the Technical Summary only", () => {
-  const tile = companyBookmarks("overview", {
-    guidance: [{ latestPeriod: "2026Q2", text: "Raised the outlook.", sourceUrl: "https://example.com/latest" }],
-  });
-  assert.deepEqual(tile.map((item) => item.id), ["technical"]);
-  assert.equal(tile.some((item) => item.id === "quarterly-notes"), false);
+test("Analysis bookmarks are the Technical Summary for saved overview and technical ids", () => {
+  const guidance = [{ latestPeriod: "2026Q2", text: "Raised the outlook.", sourceUrl: "https://example.com/latest" }];
+  for (const tab of ["overview", "technical", "analysis"]) {
+    const tile = companyBookmarks(tab, { guidance });
+    assert.deepEqual(tile.map((item) => item.id), ["technical"]);
+    assert.equal(tile.some((item) => item.id === "quarterly-notes"), false);
+  }
 });
 
-test("Trends tiles follow the sections that are actually on the page", () => {
+test("Overview tiles follow the sections that are actually on the page", () => {
   const present = ["price", "news", "filings"];
-  const tiles = companyBookmarks("trends", { present, history: [{ close: 4 }, { close: 5 }] });
+  const tiles = companyBookmarks("summary", { present, history: [{ close: 4 }, { close: 5 }] });
+  assert.deepEqual(companyBookmarks("trends", { present }).map((item) => item.id), present);
   assert.deepEqual(tiles.map((item) => item.id), present);
   assert.equal(tiles[0].anchorId, "trends-panel-price");
   assert.equal(tiles[0].title, "Price");
@@ -94,14 +137,15 @@ test("Trends tiles follow the sections that are actually on the page", () => {
   assert.equal(companyBookmarks("trends", {}).length, TREND_SECTIONS.length);
 });
 
-test("old main-page hashes and Calls land on Trends or Overview", () => {
-  assert.equal(redirectStockHash("#chart", "spy"), "#stock/SPY/trends/price");
-  assert.equal(redirectStockHash("#calendar", "qqq"), "#stock/QQQ/trends/catalyst-calendar");
-  assert.equal(redirectStockHash("#stock/dia/calls/notes"), "#stock/DIA");
-  assert.equal(redirectStockHash("#stock/DIA/overview/quarterly-notes"), "#stock/DIA");
+test("old main-page hashes land on Overview, and Calls or quarterly notes land on Analysis", () => {
+  assert.equal(redirectStockHash("#chart", "spy"), "#stock/SPY/summary/price");
+  assert.equal(redirectStockHash("#calendar", "qqq"), "#stock/QQQ/summary/catalyst-calendar");
+  assert.equal(redirectStockHash("#stock/dia/calls/notes"), "#stock/DIA/analysis");
+  assert.equal(redirectStockHash("#stock/DIA/overview/quarterly-notes"), "#stock/DIA/analysis");
+  assert.equal(redirectStockHash("#stock/DIA/technical/quarterly-notes"), "#stock/DIA/analysis");
 });
 
-test("the company page renders former main-page panels on Trends and keeps the tab on ticker switch", () => {
+test("the company page renders former main-page panels on Overview and keeps the tab on ticker switch", () => {
   const trends = app.slice(app.indexOf("function renderTrendsLayout"), app.indexOf("function appendStatusAlerts"));
   for (const piece of [
     'renderChartPanel("dashboard", session.selected)',
@@ -126,6 +170,6 @@ test("the company page renders former main-page panels on Trends and keeps the t
   const navigate = app.slice(app.indexOf("function navigateToStock"), app.indexOf("function navigateToDashboard"));
   assert.match(navigate, /keepTab/);
   assert.match(navigate, /session\.companyChart = null/);
-  assert.match(app, /stockTabHash\(ticker, "trends"\)/);
+  assert.match(app, /stockTabHash\(ticker, OVERVIEW_TAB_ID\)/);
   assert.doesNotMatch(page, /callsBlock|data-stock-panel = "calls"/);
 });

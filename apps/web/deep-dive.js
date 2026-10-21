@@ -1,4 +1,4 @@
-// Deep dive panels for /#stock/<ticker>. The layout comes from payload.deep_dive.
+// Research panels for /#stock/<ticker>. The layout comes from payload.deep_dive.
 // Nothing here names a ticker. Missing numbers stay empty; they are never drawn as zero
 // and example figures are never substituted.
 import { GEO } from "./geo.js";
@@ -22,8 +22,8 @@ function scoreboardSection(sections) {
 }
 
 /**
- * Placeholder notice for the Trends tab. It sits under the scoreboard title when
- * the payload has one, and it is not drawn inside the Deep dive tab.
+ * Placeholder notice for the Overview tab. It sits under the scoreboard title when
+ * the payload has one, and it is not drawn inside the Research tab.
  */
 export function renderTrendDisclaimer(payload, doc = document) {
   if (!hasDeepDive(payload)) return null;
@@ -208,10 +208,10 @@ function valueAt(series, period) {
 export function renderDeepDive(payload, doc = document, options = {}) {
   const dive = payload?.deep_dive;
   const root = el(doc, "div", "deep-dive");
-  root.dataset.stockPanel = "deep-dive";
-  root.id = "stock-panel-deep-dive";
+  root.dataset.stockPanel = "research";
+  root.id = "stock-panel-research";
   if (!hasDeepDive(payload)) {
-    root.append(el(doc, "p", "data-state", "No deep dive is configured for this company."));
+    root.append(el(doc, "p", "data-state", "No research is configured for this company."));
     return root;
   }
 
@@ -255,7 +255,7 @@ export function renderDeepDive(payload, doc = document, options = {}) {
 
 function renderSectionNav(sections, ticker, root, doc, options) {
   const strip = el(doc, "nav", "section-strip section-strip-docked is-visible");
-  strip.setAttribute("aria-label", "Sections");
+  strip.setAttribute("aria-label", "Research sections");
   const track = el(doc, "div", "section-strip-track");
   for (const section of sections || []) {
     const full = String(section.title || section.id || "").replace(/\s+/g, " ").trim();

@@ -3865,16 +3865,34 @@ a.catalyst-edgar-link:hover {
 }
 
 .stock-metric-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
   color: var(--text);
   font-size: 14px;
 }
 
+.metric-review-actions {
+  display: flex;
+  grid-column: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 4.5rem;
+}
+
+.stock-metric-row-main {
+  display: flex;
+  grid-column: 2;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
 .stock-metric-row-name {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .metric-status {
@@ -3884,7 +3902,21 @@ a.catalyst-edgar-link:hover {
 }
 
 .metric-review-action {
-  margin-left: auto;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 4.5rem;
+  margin-left: 0;
+  margin-block: 0;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.metric-review-action::after {
+  content: none;
 }
 
 .metric-review-action:disabled {
@@ -4154,15 +4186,28 @@ a.catalyst-edgar-link:hover {
   display: none;
 }
 
+.stock-page[data-stock-tab="summary"] [data-stock-panel="summary"],
+.stock-page[data-stock-tab="summary"] [data-stock-panel="trends"],
+.stock-page[data-stock-tab="trends"] [data-stock-panel="summary"],
 .stock-page[data-stock-tab="trends"] [data-stock-panel="trends"],
+.stock-page[data-stock-tab="analysis"] [data-stock-panel="analysis"],
+.stock-page[data-stock-tab="analysis"] [data-stock-panel="overview"],
 .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
+.stock-page[data-stock-tab="overview"] [data-stock-panel="analysis"],
+.stock-page[data-stock-tab="technical"] [data-stock-panel="analysis"],
+.stock-page[data-stock-tab="technical"] [data-stock-panel="overview"],
+.stock-page[data-stock-tab="fund"] [data-stock-panel="fund"],
 .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
 .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
+.stock-page[data-stock-tab="research"] [data-stock-panel="research"],
 .stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"],
 .stock-page[data-stock-tab="admin"] [data-stock-panel="admin"] {
   display: block;
 }
 
+.stock-page[data-stock-tab="summary"] .trends-layout[data-stock-panel="summary"],
+.stock-page[data-stock-tab="summary"] .trends-layout[data-stock-panel="trends"],
+.stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="summary"],
 .stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="trends"] {
   display: grid;
 }
@@ -4171,6 +4216,7 @@ a.catalyst-edgar-link:hover {
   display: grid;
 }
 
+.stock-page[data-stock-tab="research"] .deep-dive,
 .stock-page[data-stock-tab="deep-dive"] .deep-dive {
   display: grid;
 }
@@ -4222,15 +4268,28 @@ a.catalyst-edgar-link:hover {
     display: none;
   }
 
+  .stock-page[data-stock-tab="summary"] [data-stock-panel="summary"],
+  .stock-page[data-stock-tab="summary"] [data-stock-panel="trends"],
+  .stock-page[data-stock-tab="trends"] [data-stock-panel="summary"],
   .stock-page[data-stock-tab="trends"] [data-stock-panel="trends"],
+  .stock-page[data-stock-tab="analysis"] [data-stock-panel="analysis"],
+  .stock-page[data-stock-tab="analysis"] [data-stock-panel="overview"],
   .stock-page[data-stock-tab="overview"] [data-stock-panel="overview"],
+  .stock-page[data-stock-tab="overview"] [data-stock-panel="analysis"],
+  .stock-page[data-stock-tab="technical"] [data-stock-panel="analysis"],
+  .stock-page[data-stock-tab="technical"] [data-stock-panel="overview"],
+  .stock-page[data-stock-tab="fund"] [data-stock-panel="fund"],
   .stock-page[data-stock-tab="kpis"] [data-stock-panel="kpis"],
   .stock-page[data-stock-tab="fundamentals"] [data-stock-panel="fundamentals"],
+  .stock-page[data-stock-tab="research"] [data-stock-panel="research"],
   .stock-page[data-stock-tab="deep-dive"] [data-stock-panel="deep-dive"],
   .stock-page[data-stock-tab="admin"] [data-stock-panel="admin"] {
     display: block;
   }
 
+  .stock-page[data-stock-tab="summary"] .trends-layout[data-stock-panel="summary"],
+  .stock-page[data-stock-tab="summary"] .trends-layout[data-stock-panel="trends"],
+  .stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="summary"],
   .stock-page[data-stock-tab="trends"] .trends-layout[data-stock-panel="trends"] {
     display: grid;
   }
@@ -4245,6 +4304,23 @@ a.catalyst-edgar-link:hover {
 
   .stock-page[data-stock-tab="admin"] .company-metrics {
     display: grid;
+  }
+
+  .stock-metric-row {
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 6px;
+  }
+
+  .metric-review-actions {
+    min-width: 4.25rem;
+    gap: 4px;
+  }
+
+  .metric-review-action {
+    min-width: 4.25rem;
+    height: 28px;
+    min-height: 28px;
+    padding: 0 6px;
   }
 
   .section-strip-chip {
@@ -5095,8 +5171,9 @@ a.catalyst-edgar-link:hover {
   }
 }
 
-/* Deep dive is a company-page tab. The tab row itself is always visible.
-   data-has-deep-dive marks a page whose payload included deep_dive sections. */
+/* Research is a company-page tab. The tab row itself is always visible.
+   data-has-deep-dive marks a page whose payload included deep_dive sections.
+   data-stock-tab="deep-dive" remains so an old saved tab id still shows the panel. */
 
 .deep-dive {
   display: grid;
@@ -5105,7 +5182,7 @@ a.catalyst-edgar-link:hover {
   max-width: 100%;
 }
 
-/* Charts and tables fit the panel. The Deep dive section strip wraps instead of
+/* Charts and tables fit the panel. The Research section strip wraps instead of
    scrolling sideways. The ticker bar can scroll at any width. */
 .deep-dive > *,
 .deep-dive-section,
@@ -5672,6 +5749,7 @@ a.catalyst-edgar-link:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .stock-page[data-stock-tab="research"] .deep-dive,
   .stock-page[data-stock-tab="deep-dive"] .deep-dive {
     display: grid;
   }
@@ -5692,6 +5770,7 @@ a.catalyst-edgar-link:hover {
 }
 
 @media (max-width: 480px) {
+  .stock-page[data-stock-tab="research"] .section-strip,
   .stock-page[data-stock-tab="deep-dive"] .section-strip {
     top: 98px;
   }

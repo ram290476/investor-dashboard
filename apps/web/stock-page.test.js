@@ -329,14 +329,19 @@ test("review mode shows or hides operating, guidance, and CapEx panels together"
 });
 
 test("stock tabs move by keyboard and calls stay unlicensed", () => {
-  assert.equal(nextStockTab("trends", "ArrowRight"), "overview");
+  assert.equal(nextStockTab("summary", "ArrowRight"), "analysis");
+  assert.equal(nextStockTab("trends", "ArrowRight"), "analysis");
+  assert.equal(nextStockTab("analysis", "ArrowRight"), "fundamentals");
   assert.equal(nextStockTab("overview", "ArrowRight"), "fundamentals");
+  assert.equal(nextStockTab("technical", "ArrowRight"), "fundamentals");
   assert.equal(nextStockTab("fundamentals", "ArrowRight"), "kpis");
-  assert.equal(nextStockTab("trends", "End"), "kpis");
-  assert.equal(nextStockTab("kpis", "ArrowRight"), "trends");
-  assert.equal(nextStockTab("kpis", "Home"), "trends");
-  assert.deepEqual(STOCK_TABS.map((tab) => tab.id), ["trends", "overview", "fundamentals", "kpis"]);
-  assert.deepEqual(STOCK_TABS.map((tab) => tab.label), ["Trends", "Technical", "Fundamentals", "KPIs"]);
+  assert.equal(nextStockTab("summary", "End"), "kpis");
+  assert.equal(nextStockTab("kpis", "ArrowRight"), "summary");
+  assert.equal(nextStockTab("kpis", "Home"), "summary");
+  assert.deepEqual(STOCK_TABS.map((tab) => tab.id), ["summary", "analysis", "fundamentals", "kpis"]);
+  assert.deepEqual(STOCK_TABS.map((tab) => tab.label), ["Overview", "Analysis", "Fundamentals", "KPIs"]);
+  assert.equal(STOCK_TABS.find((tab) => tab.id === "summary").label, "Overview");
+  assert.equal(STOCK_TABS.find((tab) => tab.id === "analysis").label, "Analysis");
   assert.equal(STOCK_TABS.length, 4);
   assert.match(callsCopy().transcripts, /not collected/);
   const gap = fillQuarterGaps([

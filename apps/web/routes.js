@@ -2,10 +2,39 @@ const TICKER = /^[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
 const SECTION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$/;
 // Calls stays in the matcher so old bookmarks can be redirected. It is not a tab.
 // Admin is a real tab for signed-in admins. The page refuses it for everyone else.
-const STOCK_TABS = "trends|overview|fundamentals|kpis|deep-dive|calls|admin";
-const LIVE_TABS = ["trends", "overview", "fundamentals", "kpis", "deep-dive", "admin"];
+// Legacy tab ids stay in the matcher. canonicalStockTab maps them on read.
+// `summary` is Overview (formerly trends). `analysis` is Analysis (formerly Technical).
+export const OVERVIEW_TAB_ID = "summary";
+export const ANALYSIS_TAB_ID = "analysis";
+export const FUND_TAB_ID = "fund";
+export const RESEARCH_TAB_ID = "research";
+const LEGACY_RESEARCH_TAB = "deep-dive";
+const LEGACY_STOCK_TABS = Object.freeze({
+  trends: OVERVIEW_TAB_ID,
+  overview: ANALYSIS_TAB_ID,
+  technical: ANALYSIS_TAB_ID,
+  [LEGACY_RESEARCH_TAB]: RESEARCH_TAB_ID,
+});
+const STOCK_TABS = "summary|analysis|trends|overview|technical|fundamentals|kpis|research|deep-dive|calls|admin|fund";
+const LIVE_TABS = [OVERVIEW_TAB_ID, ANALYSIS_TAB_ID, FUND_TAB_ID, "fundamentals", "kpis", RESEARCH_TAB_ID, "admin"];
 
-// Bare hashes the main page used for its panels. Each one lands on the Trends section.
+/**
+ * Live tab id for a saved tab id or hash segment.
+ * `trends` is Overview. `overview` (pre-#281) and `technical` are Analysis.
+ * `deep-dive` is Research. A bare company hash has no tab id; callers map that separately.
+ */
+export function canonicalStockTab(tab) {
+  const id = String(tab || "").trim();
+  return LEGACY_STOCK_TABS[id] || id;
+}
+
+function isResearchTab(tab) {
+  const id = String(tab || "").trim();
+  return id === RESEARCH_TAB_ID || id === LEGACY_RESEARCH_TAB;
+}
+
+// Bare hashes the main page used for its panels. Each one lands on Overview (id `summary`).
+// `#technical` is that old section bookmark, not the Analysis tab. `#stock/<T>/technical` is Analysis.
 export const MAIN_PAGE_SECTIONS = Object.freeze({
   chart: "price",
   price: "price",
@@ -53,19 +82,19 @@ export function parseStockHash(hash) {
 
 /** Company tab in `#stock/<T>/<tab>`, or "" when the hash is only the company route. */
 export function parseStockTab(hash) {
-  return stockMatch(hash)?.[2] || "";
+  return canonicalStockTab(stockMatch(hash)?.[2] || "");
 }
 
-/** Bookmark id in `#stock/<T>/deep-dive/<section>`, or "" for a company-tab hash. */
+/** Bookmark id in `#stock/<T>/research/<section>`, or "" for a company-tab hash. */
 export function parseStockSection(hash) {
   const match = stockMatch(hash);
-  return match?.[2] === "deep-dive" ? (match[3] || "") : "";
+  return isResearchTab(match?.[2]) ? (match[3] || "") : "";
 }
 
-/** Bookmark id in `#stock/<T>/<tab>/<section>` for Trends, Overview, Fundamentals, KPIs, and Admin. */
+/** Bookmark id in `#stock/<T>/<tab>/<section>` for Overview, Analysis, Fund, Fundamentals, KPIs, and Admin. */
 export function parseStockPanel(hash) {
   const match = stockMatch(hash);
-  if (!match?.[2] || match[2] === "deep-dive" || match[2] === "calls") return "";
+  if (!match?.[2] || isResearchTab(match[2]) || match[2] === "calls") return "";
   return match[3] || "";
 }
 
@@ -80,17 +109,19 @@ export function legacyMainSection(hash) {
 
 /**
  * Replacement hash for a legacy Calls, quarterly-notes, or main-page bookmark.
- * "" when the hash should be left alone. Calls and quarterly notes land on Overview.
- * A bare main-page hash needs the selected ticker.
+ * "" when the hash should be left alone. Calls and a removed quarterly-notes bookmark land on Analysis.
+ * A bare main-page hash needs the selected ticker. Legacy tab hashes are left in the address bar.
  */
 export function redirectStockHash(hash, ticker = "") {
   const match = stockMatch(hash);
-  if (match?.[2] === "calls" || (match?.[2] === "overview" && match?.[3] === "quarterly-notes")) {
-    return stockTabHash(match[1], "overview");
+  const tab = match?.[2] || "";
+  const section = match?.[3] || "";
+  if (tab === "calls" || (section === "quarterly-notes" && !isResearchTab(tab))) {
+    return stockTabHash(match[1], ANALYSIS_TAB_ID);
   }
-  const section = legacyMainSection(hash);
-  if (!section) return "";
-  return stockPanelHash(ticker, "trends", section) || "";
+  const sectionId = legacyMainSection(hash);
+  if (!sectionId) return "";
+  return stockPanelHash(ticker, OVERVIEW_TAB_ID, sectionId) || "";
 }
 
 export function stockHash(ticker, sectionId = "") {
@@ -98,31 +129,30 @@ export function stockHash(ticker, sectionId = "") {
   if (!TICKER.test(symbol)) return null;
   const section = String(sectionId || "").trim();
   if (!section || !SECTION_ID.test(section)) return `#stock/${symbol}`;
-  return `#stock/${symbol}/deep-dive/${section}`;
+  return `#stock/${symbol}/${RESEARCH_TAB_ID}/${section}`;
 }
 
-/** `#stock/<T>` for Overview, `#stock/<T>/<tab>` for Trends and the other company tabs. */
+/** `#stock/<T>/<tab>` for a live tab. A bare `#stock/<T>` is the legacy Analysis hash. */
 export function stockTabHash(ticker, tab = "") {
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;
-  const id = String(tab || "").trim();
-  if (id === "calls") return `#stock/${symbol}`;
-  if (!id || id === "overview" || !LIVE_TABS.includes(id)) return `#stock/${symbol}`;
+  const id = canonicalStockTab(tab);
+  if (id === "calls") return `#stock/${symbol}/${ANALYSIS_TAB_ID}`;
+  if (!id || !LIVE_TABS.includes(id)) return `#stock/${symbol}`;
   return `#stock/${symbol}/${id}`;
 }
 
-/** Section bookmark on a company tab. Deep dive bookmarks keep `stockHash`. */
+/** Section bookmark on a company tab. Research bookmarks keep `stockHash`. */
 export function stockPanelHash(ticker, tab, sectionId = "") {
-  const id = String(tab || "overview").trim();
-  if (id === "deep-dive") return stockHash(ticker, sectionId);
+  const id = canonicalStockTab(tab || ANALYSIS_TAB_ID);
+  if (id === RESEARCH_TAB_ID) return stockHash(ticker, sectionId);
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;
-  if (id === "calls") return `#stock/${symbol}`;
+  if (id === "calls") return stockTabHash(symbol, ANALYSIS_TAB_ID);
   const section = String(sectionId || "").trim();
   if (!section || !SECTION_ID.test(section)) return stockTabHash(symbol, id);
-  const prefix = id === "overview" ? "overview" : id;
-  if (!LIVE_TABS.includes(prefix)) return `#stock/${symbol}`;
-  return `#stock/${symbol}/${prefix}/${section}`;
+  if (!LIVE_TABS.includes(id)) return `#stock/${symbol}`;
+  return `#stock/${symbol}/${id}/${section}`;
 }
 
 export function routeFromPath(pathname) {

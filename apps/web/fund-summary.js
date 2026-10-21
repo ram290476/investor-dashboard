@@ -2,6 +2,7 @@
 // Data: GET /fund/<T> -> managers[].summary_13f (built from SEC 13F-HR, previous quarter and
 // SEC-derived issuer sectors by the backend). No tickers, sectors or managers are hard-coded.
 import { formatDate, formatPct, formatUsd } from "./fund-holdings.js";
+import { FUND_TAB_ID } from "./routes.js";
 
 export const TOP_NAMES = 10;
 export const CHANGE_ROWS = 5;
@@ -90,7 +91,7 @@ export function renderFundSummaryPanels(fundDoc, loadState, document = globalThi
   if (!managers.length) {
     if (!(fundDoc?.managers || []).length) return [];
     const panel = el(document, "section", "panel fund-summary");
-    panel.dataset.stockPanel = "overview";
+    panel.dataset.stockPanel = FUND_TAB_ID;
     const header = el(document, "div", "panel-header");
     header.append(el(document, "h2", "", "Fund summary"));
     panel.append(header, el(document, "p", "data-state fsum-empty", EMPTY_SUMMARY_COPY));
@@ -100,7 +101,7 @@ export function renderFundSummaryPanels(fundDoc, loadState, document = globalThi
     const summary = manager.summary_13f;
     const panel = el(document, "section", "panel fund-summary");
     panel.id = `stock-panel-fund-summary-${manager.cik}`;
-    panel.dataset.stockPanel = "overview";
+    panel.dataset.stockPanel = FUND_TAB_ID;
     const header = el(document, "div", "panel-header");
     const titleBlock = el(document, "div");
     titleBlock.append(el(document, "h2", "", `Fund summary · ${manager.name || "Fund manager"}`));

@@ -1,12 +1,12 @@
-# Plan: Deep dive for every watchlist ticker
+# Plan: Research for every watchlist ticker
 
 Planning only. No production collector, UI, or admin changes. Figures below are samples pulled from EDGAR on 20 Oct 2026 with `User-Agent: InvestorDashboard research@example.com`. They stay proposed until a reviewer approves a catalog entry. This pass did not add an API key.
 
 Static mockups, in the dashboard's Industrial Dark theme, are in [`mockups/`](mockups/). Screenshots are in [`screenshots/`](screenshots/). The series behind the charts are in [`samples.json`](samples.json).
 
-## What Deep dive is today
+## What Research is today
 
-Deep dive is a company-page tab. It renders only when `payload.deep_dive.sections` is non-empty. Packaged catalogs with a `deep_dive` block are TSLA and SPCX. NVDA has metrics and no deep dive. Every other ticker gets generic GAAP rows only.
+Research is a company-page tab (formerly labeled Deep dive). It renders only when `payload.deep_dive.sections` is non-empty. Packaged catalogs with a `deep_dive` block are TSLA and SPCX. NVDA has metrics and no research sections. Every other ticker gets generic GAAP rows only. The catalog field stays `deep_dive`.
 
 Collectors are already source-keyed. `deep_dive.py` and `deep_dive_sources.py` do not name a ticker. The catalog supplies the reporting entity, Launch Library filter, CelesTrak prefix, news terms, and XBRL member map. Collected values stay proposed.
 
@@ -153,7 +153,7 @@ Rules:
 
 ## Panel design
 
-The mockups follow the current theme (`--page #0b0e13`, `--surface #12161d`, IBM Plex, green `#48c79b`, red `#f07a7a`, blue `#7db4ff`, amber `#f2b24e`). The tab row matches the company page: Overview, Trends, Deep dive, Fundamentals, KPIs.
+The mockups follow the current theme (`--page #0b0e13`, `--surface #12161d`, IBM Plex, green `#48c79b`, red `#f07a7a`, blue `#7db4ff`, amber `#f2b24e`). The tab row matches a company page that is not a fund: Overview, Analysis, Research, Fundamentals, KPIs. A fund also has a Fund tab after Analysis.
 
 Each segment section:
 

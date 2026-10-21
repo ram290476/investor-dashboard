@@ -1,3 +1,5 @@
+import { FUND_TAB_ID } from "./routes.js";
+
 /**
  * Fund holdings panel (#223) for the company page.
  *
@@ -187,7 +189,7 @@ function el(doc, tag, className, text) {
 export function renderFundHoldingsPanel(state, document = globalThis.document) {
   const panel = el(document, "section", "panel fund-holdings");
   panel.id = "stock-panel-fund";
-  panel.dataset.stockPanel = "overview";
+  panel.dataset.stockPanel = FUND_TAB_ID;
   const ui = state.ui || (state.ui = defaultUiState());
 
   const draw = (focus) => {
