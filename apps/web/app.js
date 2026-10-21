@@ -16,7 +16,7 @@ import { CHART_PLOT, barStamp, chartTicks, chartYearLabels, fiscalAxis, formatAm
 import { applyTheme, overlayColor } from "./theme.js";
 import { clearRefreshToken, createAuthClient, performAuthorizedRequest } from "./auth-session.js";
 import { createSafeStorage } from "./safe-storage.js";
-import { ANALYSIS_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { ANALYSIS_TAB_ID, FUND_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeStateForLocation, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 import {
   CATALYST_CATEGORIES, NEWS_ROW_LIMIT, calendarPanelModel, calendarSummary, catalystCategoriesInWindow,
   catalystDateLabel, catalystRowView, catalystRows, edgarCompanyUrl, edgarIndexUrl, filingPanelModel, filingsEmptyMessage,
@@ -3961,16 +3961,19 @@ function renderStockPage(restoreDrawer = null) {
   root.append(heading);
 
   const metricAdmin = canApproveMetrics(session.accessToken, session.email);
-  const pageTabs = stockTabs(payload, { admin: metricAdmin });
+  const fundTicker = isFund(tickerData);
+  const pageTabs = stockTabs(payload, { admin: metricAdmin, fund: fundTicker });
   const hashSection = parseStockSection(location.hash);
   session.stockTab = canonicalStockTab(session.stockTab);
   // A stock hash names the tab. A later bare `#stock/<T>`, `#stock/<T>/overview`, and
   // `#stock/<T>/technical` are Analysis. `#stock/<T>/trends` and `#stock/<T>/summary` are Overview.
   // Admin is refused unless this caller is an admin, including when the hash asks for it.
+  // Fund is refused unless this ticker's dashboard record is a fund, including when the hash asks for it.
   // A Research hash waits until that tab exists in the payload. `deep-dive` is the old id.
   if (parseStockHash(location.hash) === session.selected) {
     const hashTab = parseStockTab(location.hash);
-    if (hashTab === "admin" && !metricAdmin) {
+    const refused = (hashTab === "admin" && !metricAdmin) || (hashTab === FUND_TAB_ID && tickerData && !fundTicker);
+    if (refused) {
       const fallback = stockTabHash(session.selected, ANALYSIS_TAB_ID);
       if (fallback && location.hash !== fallback) {
         // `history` in this function is the price series. The session history is on window.
@@ -3987,6 +3990,7 @@ function renderStockPage(restoreDrawer = null) {
   const tabTitle = session.stockTab === "research" ? "Research"
     : session.stockTab === OVERVIEW_TAB_ID ? "Overview"
     : session.stockTab === ANALYSIS_TAB_ID ? "Analysis"
+    : session.stockTab === FUND_TAB_ID ? "Fund"
     : "";
   page.setAttribute("aria-label", tabTitle ? `${session.selected} ${tabTitle}` : `${session.selected} company page`);
   document.title = tabTitle ? `${companyLabel} · ${tabTitle} · Investor Dashboard` : "Investor Dashboard";
@@ -4004,10 +4008,10 @@ function renderStockPage(restoreDrawer = null) {
 
   const trends = renderTrendsLayout(tickerData, chartData, chartDataState, payload);
   const present = String(trends.dataset.presentSections || "").split(",").filter(Boolean);
-  // Funds (#223): Fund holdings follows the Technical Summary on Analysis. The same tabs stay
-  // available. Operating companies never get the fund panel or its fetch.
+  // Funds (#223): holdings and the fund summary render on the Fund tab. The same isFund check
+  // decides the tab and the fetch. Operating companies never get the panel or its request.
   const fundExtras = [];
-  const fund = isFund(tickerData);
+  const fund = fundTicker;
   if (fund) {
     loadFundHoldings(session.selected);
     page.dataset.instrumentKind = "fund";
@@ -4336,6 +4340,7 @@ function renderNotFoundPage() {
 function selectStockTab(id) {
   id = canonicalStockTab(id);
   if (id === "admin" && !canApproveMetrics(session.accessToken, session.email)) id = ANALYSIS_TAB_ID;
+  if (id === FUND_TAB_ID && !isFund(selectedData())) id = ANALYSIS_TAB_ID;
   session.stockTab = id;
   session.scrolledStockSection = "";
   const hash = stockTabHash(session.selected, id);
@@ -4387,6 +4392,7 @@ function navigateToStock(ticker, options = {}) {
   const keepTab = options.keepTab === true && session.route.page === "stock";
   let tab = canonicalStockTab(keepTab && session.stockTab ? session.stockTab : ANALYSIS_TAB_ID);
   if (tab === "admin" && !canApproveMetrics(session.accessToken, session.email)) tab = ANALYSIS_TAB_ID;
+  if (tab === FUND_TAB_ID && !isFund(session.dashboard?.tickers?.[ticker])) tab = ANALYSIS_TAB_ID;
   const section = keepTab
     ? (tab === "research" ? parseStockSection(location.hash) : parseStockPanel(location.hash))
     : "";

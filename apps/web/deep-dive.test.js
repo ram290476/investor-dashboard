@@ -535,7 +535,7 @@ test("deep dive sources name no ticker and ship no example observations", () => 
   assert.doesNotMatch(deepStyles, /#[0-9a-fA-F]{3,8}/);
   assert.match(deepStyles, /var\(--surface\)/);
   assert.match(deepStyles, /data-has-deep-dive/);
-  assert.match(app, /stockTabs\(payload, \{ admin: metricAdmin \}\)/);
+  assert.match(app, /stockTabs\(payload, \{ admin: metricAdmin, fund: fundTicker \}\)/);
   assert.match(app, /renderDeepDive\(payload/);
   assert.match(app, /openDeepDiveBookmark/);
   assert.match(app, /revealDeepDiveSection\(/);

@@ -3,7 +3,7 @@
 // Pending review. Chart cards do not repeat that status. Text is plain.
 import { periodQuote } from "./chart-period.js";
 import { catalystDateLabel } from "./roadmap.js";
-import { ANALYSIS_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab } from "./routes.js";
+import { ANALYSIS_TAB_ID, FUND_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab } from "./routes.js";
 
 export const LONG_PRESS_MS = 550;
 
@@ -17,7 +17,7 @@ export const STOCK_TABS = [
 // Last tab, and only for a signed-in admin. The demo account is never an admin.
 export const ADMIN_STOCK_TAB = { id: "admin", label: "Admin" };
 
-const STOCK_TAB_ORDER = [OVERVIEW_TAB_ID, ANALYSIS_TAB_ID, "research", "fundamentals", "kpis"];
+const STOCK_TAB_ORDER = [OVERVIEW_TAB_ID, ANALYSIS_TAB_ID, FUND_TAB_ID, "research", "fundamentals", "kpis"];
 
 // Last resort only: companyName() uses the API company_name / SEC entity name first.
 // SPCX has no SEC entity name, so it keeps a display name here.
@@ -183,8 +183,12 @@ export function companyDescription(payload, tickerData) {
 }
 
 /**
- * Company tabs, in order. Analysis follows Overview. Research sits between Analysis and Fundamentals, and only when sections exist.
- * Overview uses the id `summary`. Analysis uses the id `analysis`.
+ * Company tabs, in order. Analysis follows Overview.
+ * Fund follows Analysis, and only when options.fund is true. That flag is the existing isFund check
+ * on the dashboard snapshot. Overview and Analysis stay the first two tabs on every ticker, so the
+ * landing chart and the technical read do not move. Fund is next because its panels are the
+ * fund-specific read that used to sit on Analysis. Research follows Fund, and only when sections exist.
+ * Overview uses the id `summary`. Analysis uses the id `analysis`. Fund uses the id `fund`.
  * Saved `trends` opens Overview. Saved `overview` and `technical` open Analysis. Saved `deep-dive` opens Research.
  * The label is always Research. `deep_dive.title` stays in the company document and is not shown.
  * Admin is last, and only when options.admin is true (a signed-in admin, never the demo account).
@@ -194,9 +198,10 @@ export function stockTabs(payload, options = {}) {
   const research = Array.isArray(sections) && sections.length
     ? { id: "research", label: "Research" }
     : null;
+  const fund = options.fund === true ? { id: FUND_TAB_ID, label: "Fund" } : null;
   const byId = new Map(STOCK_TABS.map((tab) => [tab.id, tab]));
   const tabs = STOCK_TAB_ORDER
-    .map((id) => (id === "research" ? research : byId.get(id)))
+    .map((id) => (id === "research" ? research : id === FUND_TAB_ID ? fund : byId.get(id)))
     .filter(Boolean);
   if (options.admin === true) tabs.push({ ...ADMIN_STOCK_TAB });
   return tabs;
@@ -212,7 +217,9 @@ export function visibleStockTab(hashTab, tabs, current = ANALYSIS_TAB_ID) {
     .map((tab) => (typeof tab === "string" ? tab : tab?.id))
     .filter(Boolean);
   const requested = canonicalStockTab(hashTab);
-  if (requested === "admin" && !ids.includes("admin")) return ANALYSIS_TAB_ID;
+  if ((requested === "admin" && !ids.includes("admin")) || (requested === FUND_TAB_ID && !ids.includes(FUND_TAB_ID))) {
+    return ANALYSIS_TAB_ID;
+  }
   if (requested && ids.includes(requested)) return requested;
   if (!requested) return ANALYSIS_TAB_ID;
   const kept = canonicalStockTab(current);

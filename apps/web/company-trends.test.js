@@ -31,6 +31,17 @@ test("company tabs are Overview, Analysis, Research, Fundamentals, and KPIs", ()
   assert.equal(stockTabs({ deep_dive: { sections: [] } }).some((tab) => tab.id === "research"), false);
   assert.equal(stockTabs(null).some((tab) => tab.id === "calls"), false);
   assert.equal(stockTabs(deepDive).some((tab) => tab.id === "admin"), false);
+  assert.equal(stockTabs(deepDive).some((tab) => tab.id === "fund"), false);
+  assert.equal(stockTabs(null, { fund: false }).some((tab) => tab.id === "fund"), false);
+  const fundTabs = stockTabs(deepDive, { fund: true });
+  assert.deepEqual(fundTabs.map((tab) => tab.id), ["summary", "analysis", "fund", "research", "fundamentals", "kpis"]);
+  assert.equal(fundTabs.find((tab) => tab.id === "fund").label, "Fund");
+  assert.deepEqual(stockTabs(null, { fund: true }).map((tab) => tab.id), ["summary", "analysis", "fund", "fundamentals", "kpis"]);
+  assert.equal(visibleStockTab("fund", stockTabs(null), "summary"), "analysis");
+  assert.equal(visibleStockTab("fund", fundTabs, "summary"), "fund");
+  assert.equal(nextStockTab("analysis", "ArrowRight", fundTabs), "fund");
+  assert.equal(nextStockTab("fund", "ArrowRight", fundTabs), "research");
+  assert.equal(nextStockTab("fund", "ArrowLeft", stockTabs(null, { fund: true })), "analysis");
   const tabs = stockTabs(deepDive);
   assert.equal(nextStockTab("summary", "ArrowRight", tabs), "analysis");
   assert.equal(nextStockTab("trends", "ArrowRight", tabs), "analysis");
@@ -73,10 +84,13 @@ test("Admin is last, only for a signed-in admin, and a non-admin hash cannot ope
   assert.equal(visibleStockTab("research", tabs, "overview"), "research");
 
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
-  assert.match(page, /stockTabs\(payload, \{ admin: metricAdmin \}\)/);
+  assert.match(page, /const fundTicker = isFund\(tickerData\)/);
+  assert.match(page, /stockTabs\(payload, \{ admin: metricAdmin, fund: fundTicker \}\)/);
+  assert.doesNotMatch(page, /ARKK|ARKF|ARKVX|AGIQ|XOVR|SPCX/);
   assert.match(page, /const metricAdmin = canApproveMetrics\(session\.accessToken, session\.email\)/);
   assert.match(page, /visibleStockTab\(hashTab, pageTabs, session\.stockTab\)/);
   assert.match(page, /hashTab === "admin" && !metricAdmin/);
+  assert.match(page, /hashTab === FUND_TAB_ID && tickerData && !fundTicker/);
   assert.match(page, /stockTabHash\(session\.selected, ANALYSIS_TAB_ID\)/);
   assert.match(page, /window\.history\.replaceState\(window\.history\.state/);
   assert.doesNotMatch(page, /Back to dashboard/);

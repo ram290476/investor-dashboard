@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ANALYSIS_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab, legacyMainSection, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
+import { ANALYSIS_TAB_ID, FUND_TAB_ID, OVERVIEW_TAB_ID, canonicalStockTab, legacyMainSection, parseStockHash, parseStockPanel, parseStockSection, parseStockTab, redirectStockHash, routeFromLocation, routeFromPath, routeStateForLocation, routeStateForPath, stockHash, stockPanelHash, stockTabHash, tickerResearchPath } from "./routes.js";
 
 test("dashboard and Cognito callback paths resolve to the dashboard", () => {
   assert.deepEqual(routeFromPath("/"), { page: "dashboard" });
@@ -46,6 +46,7 @@ test("stock pages open from a hash or a /stock path for any watchlist ticker", (
 test("legacy tab ids open Overview or Analysis", () => {
   assert.equal(OVERVIEW_TAB_ID, "summary");
   assert.equal(ANALYSIS_TAB_ID, "analysis");
+  assert.equal(FUND_TAB_ID, "fund");
   assert.equal(canonicalStockTab("trends"), "summary");
   assert.equal(parseStockTab("#stock/TSLA/trends"), "summary");
   assert.equal(parseStockPanel("#stock/TSLA/trends/price"), "price");
@@ -118,6 +119,10 @@ test("company tab hashes stay on that company's route and restore the section", 
   assert.equal(stockTabHash("abcd", "research"), "#stock/ABCD/research");
   assert.equal(stockTabHash("abcd", "calls"), "#stock/ABCD/analysis");
   assert.equal(stockTabHash("abcd", "admin"), "#stock/ABCD/admin");
+  assert.equal(stockTabHash("arkk", "fund"), "#stock/ARKK/fund");
+  assert.equal(parseStockTab("#stock/ARKK/fund"), "fund");
+  assert.equal(parseStockTab("#stock/TSLA/fundamentals"), "fundamentals");
+  assert.equal(canonicalStockTab("fund"), "fund");
   assert.equal(parseStockTab("#stock/NVDA/admin"), "admin");
   assert.equal(parseStockPanel("#stock/NVDA/admin/metrics"), "metrics");
   assert.equal(parseStockHash("#stock/tsla/admin"), "TSLA");

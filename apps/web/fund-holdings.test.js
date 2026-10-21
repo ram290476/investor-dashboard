@@ -118,17 +118,30 @@ test("the company page shows the panel only for funds and fetches GET /fund/<T> 
   assert.match(loader, /notBefore: Date\.now\(\) \+ fundRetryDelayMs\(attempts\)/);
   assert.match(app, /apiGet\(`fund\/\$\{encodeURIComponent\(ticker\)\}`\)/);
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
-  const gate = page.indexOf("const fund = isFund(tickerData)");
+  const gate = page.indexOf("const fund = fundTicker");
   assert.ok(gate > 0 && page.indexOf("loadFundHoldings(session.selected)") > gate);
-  // Fund holdings follows the Technical Summary. The other company tabs stay on the page.
+  assert.match(page, /const fundTicker = isFund\(tickerData\)/);
+  assert.match(page, /stockTabs\(payload, \{ admin: metricAdmin, fund: fundTicker \}\)/);
+  assert.doesNotMatch(page, /ARKK|ARKF|ARKVX|AGIQ|XOVR|SPCX/);
+  // Holdings and the summary stay in the page, and the Fund tab is the only place they show.
   const fundBranch = page.slice(gate, page.indexOf("page.append(", gate));
   assert.match(fundBranch, /page\.dataset\.instrumentKind = "fund"/);
   assert.match(fundBranch, /renderFundPanel\(session\.selected, classificationNote\(tickerData\)\)/);
+  assert.match(fundBranch, /renderFundSummary\(session\.selected\)/);
   assert.doesNotMatch(fundBranch, /page\.dataset\.stockTab = "overview"/);
   assert.doesNotMatch(fundBranch, /return;/);
   const appended = page.slice(page.indexOf("page.append(", gate));
   assert.match(appended, /renderTechnicalSummary\(session\.selected, history\),\s+\.\.\.fundExtras/);
   assert.match(appended, /section\("kpis"/);
+  const holdings = await readFile(new URL("./fund-holdings.js", import.meta.url), "utf8");
+  assert.match(holdings, /dataset\.stockPanel = FUND_TAB_ID/);
+  assert.doesNotMatch(holdings, /dataset\.stockPanel = ANALYSIS_TAB_ID/);
+  const summary = await readFile(new URL("./fund-summary.js", import.meta.url), "utf8");
+  assert.match(summary, /dataset\.stockPanel = FUND_TAB_ID/);
+  assert.doesNotMatch(summary, /ANALYSIS_TAB_ID/);
+  const phone = css.slice(css.indexOf(".stock-page [data-stock-panel]"), css.indexOf("/* Data refresh"));
+  assert.match(phone, /\.stock-page\[data-stock-tab="fund"\] \[data-stock-panel="fund"\]/);
+  assert.match(phone, /@media \(max-width: 640px\)[\s\S]*\.stock-page\[data-stock-tab="fund"\] \[data-stock-panel="fund"\]/);
   const panelCss = css.slice(css.indexOf("Fund holdings panel (issue 223)"));
   assert.doesNotMatch(panelCss, /#[0-9a-fA-F]{3,8}\b/);
   assert.match(panelCss, /@media \(max-width: 640px\)/);

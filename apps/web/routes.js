@@ -6,6 +6,7 @@ const SECTION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$/;
 // `summary` is Overview (formerly trends). `analysis` is Analysis (formerly Technical).
 export const OVERVIEW_TAB_ID = "summary";
 export const ANALYSIS_TAB_ID = "analysis";
+export const FUND_TAB_ID = "fund";
 export const RESEARCH_TAB_ID = "research";
 const LEGACY_RESEARCH_TAB = "deep-dive";
 const LEGACY_STOCK_TABS = Object.freeze({
@@ -14,8 +15,8 @@ const LEGACY_STOCK_TABS = Object.freeze({
   technical: ANALYSIS_TAB_ID,
   [LEGACY_RESEARCH_TAB]: RESEARCH_TAB_ID,
 });
-const STOCK_TABS = "summary|analysis|trends|overview|technical|fundamentals|kpis|research|deep-dive|calls|admin";
-const LIVE_TABS = [OVERVIEW_TAB_ID, ANALYSIS_TAB_ID, "fundamentals", "kpis", RESEARCH_TAB_ID, "admin"];
+const STOCK_TABS = "summary|analysis|trends|overview|technical|fundamentals|kpis|research|deep-dive|calls|admin|fund";
+const LIVE_TABS = [OVERVIEW_TAB_ID, ANALYSIS_TAB_ID, FUND_TAB_ID, "fundamentals", "kpis", RESEARCH_TAB_ID, "admin"];
 
 /**
  * Live tab id for a saved tab id or hash segment.
@@ -90,7 +91,7 @@ export function parseStockSection(hash) {
   return isResearchTab(match?.[2]) ? (match[3] || "") : "";
 }
 
-/** Bookmark id in `#stock/<T>/<tab>/<section>` for Overview, Analysis, Fundamentals, KPIs, and Admin. */
+/** Bookmark id in `#stock/<T>/<tab>/<section>` for Overview, Analysis, Fund, Fundamentals, KPIs, and Admin. */
 export function parseStockPanel(hash) {
   const match = stockMatch(hash);
   if (!match?.[2] || isResearchTab(match[2]) || match[2] === "calls") return "";
