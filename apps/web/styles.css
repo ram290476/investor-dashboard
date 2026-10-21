@@ -3865,16 +3865,34 @@ a.catalyst-edgar-link:hover {
 }
 
 .stock-metric-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
   color: var(--text);
   font-size: 14px;
 }
 
+.metric-review-actions {
+  display: flex;
+  grid-column: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 4.5rem;
+}
+
+.stock-metric-row-main {
+  display: flex;
+  grid-column: 2;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
 .stock-metric-row-name {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .metric-status {
@@ -3884,7 +3902,21 @@ a.catalyst-edgar-link:hover {
 }
 
 .metric-review-action {
-  margin-left: auto;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 4.5rem;
+  margin-left: 0;
+  margin-block: 0;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.metric-review-action::after {
+  content: none;
 }
 
 .metric-review-action:disabled {
@@ -4270,6 +4302,23 @@ a.catalyst-edgar-link:hover {
 
   .stock-page[data-stock-tab="admin"] .company-metrics {
     display: grid;
+  }
+
+  .stock-metric-row {
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 6px;
+  }
+
+  .metric-review-actions {
+    min-width: 4.25rem;
+    gap: 4px;
+  }
+
+  .metric-review-action {
+    min-width: 4.25rem;
+    height: 28px;
+    min-height: 28px;
+    padding: 0 6px;
   }
 
   .section-strip-chip {

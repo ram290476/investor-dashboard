@@ -3730,24 +3730,30 @@ function renderCompanyMetrics(panels, pageState) {
   const line = (card) => {
     const row = node("div", "stock-metric-row");
     row.dataset.metricId = card.id;
+    if (admin) {
+      const actions = node("div", "metric-review-actions");
+      if (!card.unavailable) {
+        const next = card.pending ? "approved" : "proposed";
+        const button = node("button", "overlay-chip panel-action metric-review-action", card.pending ? "Approve" : "Undo");
+        button.type = "button";
+        button.dataset.metricAction = card.pending ? "approve" : "undo";
+        button.disabled = Boolean(session.metricSave);
+        button.setAttribute("aria-busy", String(Boolean(session.metricSave)));
+        if (session.metricSave) button.textContent = "Saving";
+        button.setAttribute("aria-label", card.pending ? `Approve ${card.name}` : `Undo approval of ${card.name}`);
+        button.addEventListener("click", () => submitMetricReview(card.id, next));
+        actions.append(button);
+      }
+      row.append(actions);
+    }
     const copy = companyMetricLine(card);
+    const main = node("div", "stock-metric-row-main");
     const name = node("span", "stock-metric-row-name", copy.text);
     if (copy.title) name.title = copy.title;
-    row.append(name);
-    if (card.pending) row.append(renderReviewBadge());
-    else row.append(node("span", "metric-status", "Approved"));
-    if (admin && !card.unavailable) {
-      const next = card.pending ? "approved" : "proposed";
-      const button = node("button", "overlay-chip panel-action metric-review-action", card.pending ? "Approve" : "Undo");
-      button.type = "button";
-      button.dataset.metricAction = card.pending ? "approve" : "undo";
-      button.disabled = Boolean(session.metricSave);
-      button.setAttribute("aria-busy", String(Boolean(session.metricSave)));
-      if (session.metricSave) button.textContent = "Saving";
-      button.setAttribute("aria-label", card.pending ? `Approve ${card.name}` : `Undo approval of ${card.name}`);
-      button.addEventListener("click", () => submitMetricReview(card.id, next));
-      row.append(button);
-    }
+    main.append(name);
+    if (card.pending) main.append(renderReviewBadge());
+    else main.append(node("span", "metric-status", "Approved"));
+    row.append(main);
     return row;
   };
   if (!approved.length) block.append(node("p", "data-state", "No approved company metrics."));

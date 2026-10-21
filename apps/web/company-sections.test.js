@@ -158,6 +158,46 @@ test("company metrics move to the Admin tab and stay pending review", () => {
   assert.match(styles, /\.stock-page\[data-stock-tab="admin"\] \.company-metrics\s*\{[^}]*display:\s*grid/);
 });
 
+test("admin metric review actions sit in a compact column left of the name", () => {
+  const metrics = app.slice(app.indexOf("function renderCompanyMetrics"), app.indexOf("function appendMetricGroups"));
+  const line = metrics.slice(metrics.indexOf("const line ="));
+  const actions = line.indexOf('node("div", "metric-review-actions")');
+  const actionsAppend = line.indexOf("row.append(actions)");
+  const name = line.indexOf('node("span", "stock-metric-row-name"');
+  const nameAppend = line.indexOf("main.append(name)");
+  const mainAppend = line.indexOf("row.append(main)");
+  assert.ok(actions > 0 && actionsAppend > actions, "actions cell is built before it is appended");
+  assert.ok(nameAppend > name && mainAppend > nameAppend, "the name stays inside the main cell");
+  assert.ok(actionsAppend < mainAppend, "the action column is appended before the metric name");
+  assert.match(line, /actions\.append\(button\)/);
+  assert.doesNotMatch(line, /row\.append\(button\)/);
+  assert.match(line, /submitMetricReview\(card\.id, next\)/);
+  assert.match(line, /dataset\.metricAction = card\.pending \? "approve" : "undo"/);
+  assert.match(line, /`Approve \$\{card\.name\}`/);
+  assert.match(line, /`Undo approval of \$\{card\.name\}`/);
+  const rowRule = styles.match(/\.stock-metric-row\s*\{[^}]*\}/);
+  assert.ok(rowRule);
+  assert.match(rowRule[0], /display:\s*grid/);
+  assert.match(rowRule[0], /grid-template-columns:\s*max-content minmax\(0, 1fr\)/);
+  assert.doesNotMatch(rowRule[0], /flex-wrap|margin-left:\s*auto/);
+  const action = styles.match(/\.metric-review-action\s*\{[^}]*\}/);
+  assert.ok(action);
+  assert.match(action[0], /margin-left:\s*0/);
+  assert.match(action[0], /margin-block:\s*0/);
+  assert.match(action[0], /min-width:\s*4\.5rem/);
+  assert.match(action[0], /height:\s*24px/);
+  assert.match(action[0], /min-height:\s*24px/);
+  assert.doesNotMatch(action[0], /margin-left:\s*auto/);
+  assert.match(styles, /\.metric-review-actions\s*\{[^}]*display:\s*flex/);
+  assert.match(styles, /\.metric-review-actions\s*\{[^}]*gap:\s*4px/);
+  assert.match(styles, /\.stock-metric-row-main\s*\{[^}]*grid-column:\s*2/);
+  assert.match(styles, /\.stock-metric-row-main\s*\{[^}]*min-width:\s*0/);
+  assert.match(styles, /\.metric-review-action::after\s*\{[^}]*content:\s*none/);
+  const phone = styles.slice(styles.indexOf(".stock-page [data-stock-panel]"), styles.indexOf("/* Data refresh"));
+  assert.match(phone, /@media \(max-width: 640px\)[\s\S]*\.stock-metric-row\s*\{[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\)/);
+  assert.match(phone, /@media \(max-width: 640px\)[\s\S]*\.metric-review-action\s*\{[^}]*min-height:\s*28px/);
+});
+
 test("company section chips scroll to the section and write the tab hash", () => {
   const bookmarks = companyBookmarks("kpis", {
     operating: [
