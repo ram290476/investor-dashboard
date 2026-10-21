@@ -107,16 +107,20 @@ export function legacyMainSection(hash) {
 }
 
 /**
- * Replacement hash for a legacy Calls or main-page bookmark.
- * "" when the hash should be left alone. Calls always lands on Analysis quarterly notes.
+ * Replacement hash for a legacy Calls, quarterly-notes, or main-page bookmark.
+ * "" when the hash should be left alone. Calls and a removed quarterly-notes bookmark land on Analysis.
  * A bare main-page hash needs the selected ticker. Legacy tab hashes are left in the address bar.
  */
 export function redirectStockHash(hash, ticker = "") {
   const match = stockMatch(hash);
-  if (match?.[2] === "calls") return stockPanelHash(match[1], ANALYSIS_TAB_ID, "quarterly-notes");
-  const section = legacyMainSection(hash);
-  if (!section) return "";
-  return stockPanelHash(ticker, OVERVIEW_TAB_ID, section) || "";
+  const tab = match?.[2] || "";
+  const section = match?.[3] || "";
+  if (tab === "calls" || (section === "quarterly-notes" && !isResearchTab(tab))) {
+    return stockTabHash(match[1], ANALYSIS_TAB_ID);
+  }
+  const sectionId = legacyMainSection(hash);
+  if (!sectionId) return "";
+  return stockPanelHash(ticker, OVERVIEW_TAB_ID, sectionId) || "";
 }
 
 export function stockHash(ticker, sectionId = "") {
@@ -132,7 +136,7 @@ export function stockTabHash(ticker, tab = "") {
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;
   const id = canonicalStockTab(tab);
-  if (id === "calls") return stockPanelHash(symbol, ANALYSIS_TAB_ID, "quarterly-notes");
+  if (id === "calls") return `#stock/${symbol}/${ANALYSIS_TAB_ID}`;
   if (!id || !LIVE_TABS.includes(id)) return `#stock/${symbol}`;
   return `#stock/${symbol}/${id}`;
 }
@@ -143,7 +147,7 @@ export function stockPanelHash(ticker, tab, sectionId = "") {
   if (id === RESEARCH_TAB_ID) return stockHash(ticker, sectionId);
   const symbol = String(ticker || "").trim().toUpperCase();
   if (!TICKER.test(symbol)) return null;
-  if (id === "calls") return stockPanelHash(symbol, ANALYSIS_TAB_ID, "quarterly-notes");
+  if (id === "calls") return stockTabHash(symbol, ANALYSIS_TAB_ID);
   const section = String(sectionId || "").trim();
   if (!section || !SECTION_ID.test(section)) return stockTabHash(symbol, id);
   if (!LIVE_TABS.includes(id)) return `#stock/${symbol}`;

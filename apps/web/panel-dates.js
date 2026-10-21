@@ -91,9 +91,9 @@ export function companyMetricLine(card) {
   return { text: `${card?.name || ""} · ${value}${suffix}`, title: period.title || "" };
 }
 
-/** Every user-visible string a company metric card, list row, or call-note card would show. */
+/** Every user-visible string a company metric card or list row would show. */
 export function renderedMetricPanelText(panels) {
-  const lines = ["Company metrics", "Operating KPIs", "Fundamentals", "Quarterly notes"];
+  const lines = ["Company metrics", "Operating KPIs", "Fundamentals"];
   const cards = [...(panels?.operating || []), ...(panels?.fundamentals || []), ...(panels?.guidance || [])];
   cards.forEach((card) => {
     lines.push(card.name || "", card.detailName || "");

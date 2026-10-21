@@ -514,7 +514,7 @@ test("company page order: Technical Summary, then quote headers on KPIs and Fund
   assert.match(page, /quoteFor\("kpis"\)/);
   assert.match(page, /quoteFor\("fundamentals"\)/);
   assert.doesNotMatch(page, /renderChartPanel\("company", session\.selected\)/);
-  const order = ["renderTechnicalSummary(session.selected, history)", 'quoteFor("kpis")', 'section("kpis"', 'quoteFor("fundamentals")', 'section(\n      "fundamentals"', "renderCompanyMetrics(charts, pageState)", "renderQuarterlyNotes(charts.guidance)"]
+  const order = ["renderTechnicalSummary(session.selected, history)", 'quoteFor("kpis")', 'section("kpis"', 'quoteFor("fundamentals")', 'section(\n      "fundamentals"', "renderCompanyMetrics(charts, pageState)"]
     .map((piece) => page.indexOf(piece, page.indexOf("page.append(")));
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), order.join(","));
   assert.ok(page.indexOf("root.append(heading)") < page.indexOf("root.append(page)"));

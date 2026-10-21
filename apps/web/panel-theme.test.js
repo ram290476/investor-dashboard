@@ -125,13 +125,13 @@ test("chart cards omit review badges and the review toggle sits above Operating 
   const appended = page.slice(page.indexOf("page.append("));
   const metricsAt = appended.indexOf("renderCompanyMetrics(charts, pageState)");
   const kpisAt = appended.indexOf('section("kpis", "Operating KPIs", charts.operating');
-  const notesAt = appended.indexOf("renderQuarterlyNotes(charts.guidance)");
   assert.match(page, /stockPanels\(payload, chartData, \{ \.\.\.periodOptions, review \}\)/);
   assert.doesNotMatch(page, /review: "all"/);
   assert.match(page, /charts\.fundamentals/);
-  assert.match(page, /charts\.guidance/);
-  assert.ok(kpisAt > 0 && metricsAt > kpisAt && notesAt > metricsAt);
-  assert.match(app, /No quarterly notes yet/);
+  assert.doesNotMatch(page, /charts\.guidance|renderQuarterlyNotes|quarterly-notes|Quarterly notes|No quarterly notes yet/);
+  assert.doesNotMatch(app, /No quarterly notes yet|renderQuarterlyNotes|quarterly-notes/);
+  assert.doesNotMatch(styles, /\.quarterly-note/);
+  assert.ok(kpisAt > 0 && metricsAt > kpisAt);
   assert.doesNotMatch(page, /callsBlock/);
   const phone = styles.slice(styles.indexOf(".stock-page [data-stock-panel]"), styles.indexOf("/* Data refresh"));
   assert.match(phone, /\.stock-page\[data-stock-tab="admin"\] \.company-metrics\s*\{[^}]*display:\s*grid/);

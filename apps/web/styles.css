@@ -5321,31 +5321,6 @@ a.catalyst-edgar-link:hover {
   outline-offset: 2px;
 }
 
-.quarterly-note {
-  display: grid;
-  gap: 4px;
-  padding: 10px 0;
-  border-top: 1px solid var(--line);
-}
-
-.quarterly-note-quarter {
-  margin: 0;
-  color: var(--text);
-  font-size: 14px;
-}
-
-.quarterly-note-date,
-.quarterly-note-points {
-  margin: 0;
-  color: var(--secondary);
-  font-size: 13px;
-}
-
-.quarterly-note-source {
-  color: var(--amber);
-  font-size: 13px;
-}
-
 .trends-layout > .dashboard-footer {
   grid-column: 1 / -1;
 }

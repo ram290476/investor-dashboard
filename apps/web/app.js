@@ -44,7 +44,6 @@ import {
   metricsForReview,
   LONG_PRESS_MS,
   nextStockTab,
-  quarterlyNoteEntries,
   stockPanels,
   stockTabs,
   visibleStockTab,
@@ -4023,7 +4022,6 @@ function renderStockPage(restoreDrawer = null) {
       "No company fundamentals are in this snapshot.",
     ),
     renderCompanyMetrics(charts, pageState),
-    renderQuarterlyNotes(charts.guidance),
   );
   page.prepend(trends);
 
@@ -4076,7 +4074,6 @@ function renderStockPage(restoreDrawer = null) {
       technical: technicalSummaryView(technicalSummaryFor(session.selected)),
       operating: charts.operating,
       fundamentals: charts.fundamentals,
-      guidance: charts.guidance,
       present,
     }), document, {
       ticker: session.selected,
@@ -4244,40 +4241,6 @@ function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
   layout.append(footer);
   layout.dataset.presentSections = [...new Set(present)].join(",");
   return layout;
-}
-
-function renderQuarterlyNotes(guidance) {
-  const notes = quarterlyNoteEntries(guidance);
-  const block = node("section", "panel stock-section company-section-target");
-  block.dataset.stockPanel = ANALYSIS_TAB_ID;
-  block.dataset.companySection = "quarterly-notes";
-  block.id = "stock-panel-quarterly-notes";
-  block.append(node("h3", "stock-section-title", "Quarterly notes"));
-  if (!notes.length) {
-    block.append(node("p", "data-state", "No quarterly notes yet"));
-    return block;
-  }
-  notes.forEach((note) => {
-    const article = node("article", "quarterly-note");
-    if (note.quarter) article.append(node("h4", "quarterly-note-quarter", note.quarter));
-    const dated = formatConsumerDate(note.date) || readablePanelText(note.date);
-    if (dated) article.append(node("p", "quarterly-note-date", dated));
-    if (note.points.length) {
-      const list = node("ul", "quarterly-note-points");
-      note.points.forEach((point) => list.append(node("li", "", point)));
-      article.append(list);
-    }
-    if (note.sourceUrl) {
-      const link = node("a", "quarterly-note-source", note.sourceTitle || "Source");
-      link.href = note.sourceUrl;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      article.append(link);
-    }
-    if (note.pending) article.append(node("span", "review-badge", "Pending review"));
-    block.append(article);
-  });
-  return block;
 }
 
 function appendStatusAlerts(errorMessage) {

@@ -116,7 +116,7 @@ test("company tab hashes stay on that company's route and restore the section", 
   assert.equal(stockTabHash("abcd", "kpis"), "#stock/ABCD/kpis");
   assert.equal(stockTabHash("abcd", "deep-dive"), "#stock/ABCD/research");
   assert.equal(stockTabHash("abcd", "research"), "#stock/ABCD/research");
-  assert.equal(stockTabHash("abcd", "calls"), "#stock/ABCD/analysis/quarterly-notes");
+  assert.equal(stockTabHash("abcd", "calls"), "#stock/ABCD/analysis");
   assert.equal(stockTabHash("abcd", "admin"), "#stock/ABCD/admin");
   assert.equal(parseStockTab("#stock/NVDA/admin"), "admin");
   assert.equal(parseStockPanel("#stock/NVDA/admin/metrics"), "metrics");
@@ -126,7 +126,7 @@ test("company tab hashes stay on that company's route and restore the section", 
   assert.equal(stockPanelHash("abcd", "technical", "quarterly-notes"), "#stock/ABCD/analysis/quarterly-notes");
   assert.equal(stockPanelHash("abcd", "trends", "news"), "#stock/ABCD/summary/news");
   assert.equal(stockPanelHash("abcd", "summary", "news"), "#stock/ABCD/summary/news");
-  assert.equal(stockPanelHash("abcd", "calls", "notes"), "#stock/ABCD/analysis/quarterly-notes");
+  assert.equal(stockPanelHash("abcd", "calls", "notes"), "#stock/ABCD/analysis");
   assert.equal(stockPanelHash("abcd", "deep-dive", "forecast"), "#stock/ABCD/research/forecast");
   assert.equal(stockPanelHash("abcd", "research", "forecast"), "#stock/ABCD/research/forecast");
   assert.equal(stockPanelHash("abcd", "kpis", "../x"), "#stock/ABCD/kpis");
@@ -146,8 +146,10 @@ test("legacy main-page and calls hashes redirect to the company tab that replace
   assert.equal(legacyMainSection("#stock/NVDA"), "");
   assert.equal(redirectStockHash("#news", "nvda"), "#stock/NVDA/summary/news");
   assert.equal(redirectStockHash("#filings", "brk.b"), "#stock/BRK.B/summary/filings");
-  assert.equal(redirectStockHash("#stock/nvda/calls"), "#stock/NVDA/analysis/quarterly-notes");
-  assert.equal(redirectStockHash("#stock/NVDA/calls/transcripts"), "#stock/NVDA/analysis/quarterly-notes");
+  assert.equal(redirectStockHash("#stock/nvda/calls"), "#stock/NVDA/analysis");
+  assert.equal(redirectStockHash("#stock/NVDA/calls/transcripts"), "#stock/NVDA/analysis");
+  assert.equal(redirectStockHash("#stock/NVDA/overview/quarterly-notes"), "#stock/NVDA/analysis");
+  assert.equal(redirectStockHash("#stock/NVDA/technical/quarterly-notes"), "#stock/NVDA/analysis");
   assert.equal(redirectStockHash("#stock/NVDA/trends/price", "NVDA"), "");
   assert.equal(redirectStockHash("#stock/NVDA/overview", "NVDA"), "");
   assert.equal(redirectStockHash("#stock/NVDA/technical", "NVDA"), "");
