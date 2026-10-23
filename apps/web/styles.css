@@ -5106,14 +5106,28 @@ a.catalyst-edgar-link:hover {
 }
 
 .ffa-row.is-selected td {
-  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--blue);
+  font-weight: 600;
+}
+
+.ffa-row[aria-selected="true"] td {
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--blue);
+  font-weight: 600;
+}
+
+.ffa-row.is-selected td + td,
+.ffa-row[aria-selected="true"] td + td {
+  box-shadow: none;
 }
 
 .ffa-type-fund {
   color: var(--blue);
 }
 
-.ffa-type-none {
+.ffa-type-none,
+.ffa-type-loading {
   color: var(--muted);
 }
 
@@ -5883,6 +5897,43 @@ a.catalyst-edgar-link:hover {
   width: 100%;
   min-width: 0;
   max-width: 100%;
+}
+
+.analysis-fund-note {
+  padding: 14px 16px;
+}
+
+.analysis-fund-note-copy {
+  margin: 0;
+  color: var(--secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.analysis-fund-tab {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--blue);
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.analysis-fund-tab:hover {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text);
+}
+
+.analysis-fund-tab:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 .yearly-fundamentals,
