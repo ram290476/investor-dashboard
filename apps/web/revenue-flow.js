@@ -771,6 +771,59 @@ function el(doc, tag, className, text) {
   return node;
 }
 
+function addOption(doc, select, value, label, selected) {
+  const option = el(doc, "option", "", label);
+  option.value = value;
+  option.selected = selected;
+  option.setAttribute("value", value);
+  if (selected) option.setAttribute("selected", "");
+  select.append(option);
+  if (selected) select.value = value;
+  return option;
+}
+
+function periodDropdowns(doc, model, options) {
+  const selector = el(doc, "div", "flow-selector");
+  selector.setAttribute("role", "group");
+  selector.setAttribute("aria-label", "Fiscal period");
+
+  const yearField = el(doc, "label", "flow-field");
+  yearField.append(el(doc, "span", "flow-field-label", "Year"));
+  const yearSelect = el(doc, "select", "flow-select");
+  yearSelect.dataset.control = "year";
+  yearSelect.setAttribute("data-control", "year");
+  for (const period of model.periods) {
+    const label = `FY${period.year}${period.estimate ? "E" : ""}`;
+    addOption(doc, yearSelect, String(period.year), label, model.selection.year === period.year);
+  }
+  yearSelect.addEventListener("change", () => {
+    const year = Number(yearSelect.value);
+    const period = model.periods.find((item) => item.year === year);
+    const quarter = period?.quarters.includes(model.selection.quarter) ? model.selection.quarter : null;
+    options.onSelect?.(year, quarter);
+  });
+  yearField.append(yearSelect);
+
+  const quarterField = el(doc, "label", "flow-field");
+  quarterField.append(el(doc, "span", "flow-field-label", "Quarter"));
+  const quarterSelect = el(doc, "select", "flow-select");
+  quarterSelect.dataset.control = "quarter";
+  quarterSelect.setAttribute("data-control", "quarter");
+  const current = model.periods.find((period) => period.year === model.selection.year);
+  addOption(doc, quarterSelect, "year", "Full Year", model.selection.quarter == null);
+  for (const quarter of current?.quarters || []) {
+    addOption(doc, quarterSelect, String(quarter), `Q${quarter}`, model.selection.quarter === quarter);
+  }
+  quarterSelect.addEventListener("change", () => {
+    const raw = quarterSelect.value;
+    const quarter = raw === "year" ? null : Number(raw);
+    options.onSelect?.(model.selection.year, Number.isInteger(quarter) ? quarter : null);
+  });
+  quarterField.append(quarterSelect);
+  selector.append(yearField, quarterField);
+  return selector;
+}
+
 function svg(doc, tag, attrs) {
   const node = doc.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -810,42 +863,7 @@ export function renderRevenueFlow(model, doc = document, options = {}) {
   if (model.pending) header.append(el(doc, "span", "review-badge", "Pending review"));
   panel.append(header);
 
-  if (model.periods.length) {
-    const selector = el(doc, "div", "flow-selector");
-    selector.setAttribute("role", "group");
-    selector.setAttribute("aria-label", "Fiscal period");
-    const years = el(doc, "div", "flow-years");
-    for (const period of model.periods) {
-      const button = el(doc, "button", "flow-period", `FY${period.year}${period.estimate ? "E" : ""}`);
-      button.type = "button";
-      button.dataset.year = String(period.year);
-      button.dataset.quarter = "year";
-      const selected = model.selection.year === period.year;
-      button.setAttribute("aria-pressed", String(selected));
-      button.addEventListener("click", () => options.onSelect?.(period.year, null));
-      years.append(button);
-    }
-    const quarters = el(doc, "div", "flow-quarters");
-    const current = model.periods.find((period) => period.year === model.selection.year);
-    const full = el(doc, "button", "flow-period", "Full year");
-    full.type = "button";
-    full.dataset.year = String(model.selection.year ?? "");
-    full.dataset.quarter = "year";
-    full.setAttribute("aria-pressed", String(model.selection.quarter == null));
-    full.addEventListener("click", () => options.onSelect?.(model.selection.year, null));
-    quarters.append(full);
-    for (const quarter of current?.quarters || []) {
-      const button = el(doc, "button", "flow-period", `Q${quarter}`);
-      button.type = "button";
-      button.dataset.year = String(model.selection.year);
-      button.dataset.quarter = String(quarter);
-      button.setAttribute("aria-pressed", String(model.selection.quarter === quarter));
-      button.addEventListener("click", () => options.onSelect?.(model.selection.year, quarter));
-      quarters.append(button);
-    }
-    selector.append(years, quarters);
-    panel.append(selector);
-  }
+  if (model.periods.length) panel.append(periodDropdowns(doc, model, options));
 
   if (model.empty) {
     panel.append(el(doc, "p", "flow-empty", "No income-statement lines are on file for this period."));

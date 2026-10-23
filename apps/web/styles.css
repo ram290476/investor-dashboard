@@ -5999,33 +5999,37 @@ a.catalyst-edgar-link:hover {
 }
 
 .flow-selector {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 12rem));
   gap: 8px 12px;
-  padding: 0 16px 10px;
+  justify-content: start;
+  padding: 0 16px 12px;
 }
 
-.flow-years,
-.flow-quarters {
+.flow-field {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
-.flow-period {
-  min-height: 32px;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--secondary);
-  cursor: pointer;
+.flow-field-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.flow-period[aria-pressed="true"] {
-  border-color: var(--control-line);
+.flow-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--control-line);
+  border-radius: 9px;
   background: var(--surface-raised);
   color: var(--text);
+  cursor: pointer;
 }
 
 .flow-chart {

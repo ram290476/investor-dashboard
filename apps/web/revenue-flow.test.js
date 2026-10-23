@@ -83,6 +83,23 @@ function byAttr(node, key, value) {
   return found;
 }
 
+function periodControls(view) {
+  const year = byAttr(view, "control", "year")[0];
+  const quarter = byAttr(view, "control", "quarter")[0];
+  const optionsOf = (select) => (select?.children || []).filter((item) => item.tagName === "OPTION").map((option) => ({
+    value: option.value,
+    label: option.textContent,
+    selected: Boolean(option.selected),
+  }));
+  return { year, quarter, yearOptions: optionsOf(year), quarterOptions: optionsOf(quarter) };
+}
+
+function choose(select, value) {
+  select.value = value;
+  for (const option of select.children || []) option.selected = option.value === value;
+  select.listeners.change[0]();
+}
+
 const full = {
   metrics: [
     year("revenue_gaap", "Revenue", 25),
@@ -172,8 +189,12 @@ test("the flow uses every reported line and balances with Other", () => {
     if (item.getAttribute?.("data-curve")) paths.push(item);
   });
   assert.ok(paths.some((path) => path.getAttribute("data-curve") === "strong" && path.getAttribute("d").includes("C")));
-  assert.ok(byAttr(view, "quarter", "year").length >= 2);
-  assert.equal(byAttr(view, "quarter", "1").length, 1);
+  const picker = periodControls(view);
+  assert.deepEqual(picker.yearOptions.map((item) => item.value), ["2025"]);
+  assert.equal(picker.yearOptions.find((item) => item.selected).label, "FY2025");
+  assert.deepEqual(picker.quarterOptions.map((item) => item.label), ["Full Year", "Q1", "Q2", "Q3", "Q4"]);
+  assert.equal(picker.quarterOptions.find((item) => item.selected).value, "year");
+  assert.doesNotMatch(source, /flow-period/);
 });
 
 test("a quarter compares with the same quarter last year and can return to the year", () => {
@@ -213,18 +234,15 @@ test("a quarter compares with the same quarter last year and can return to the y
   const view = renderRevenueFlow(quarter, fakeDocument(), {
     onSelect(year, quarterId) { picked = [year, quarterId]; },
   });
-  const fullYear = [];
-  walk(view, (item) => {
-    if (item.textContent === "Full year") fullYear.push(item);
-  });
-  fullYear[0].listeners.click[0]();
+  const picker = periodControls(view);
+  assert.deepEqual(picker.quarterOptions.map((item) => item.label), ["Full Year", "Q1", "Q2"]);
+  assert.equal(picker.quarterOptions.find((item) => item.selected).label, "Q1");
+  choose(picker.quarter, "year");
   assert.deepEqual(picked, [2025, null]);
-  const q2 = [];
-  walk(view, (item) => {
-    if (item.textContent === "Q2") q2.push(item);
-  });
-  q2[0].listeners.click[0]();
+  choose(picker.quarter, "2");
   assert.deepEqual(picked, [2025, 2]);
+  choose(picker.year, "2024");
+  assert.deepEqual(picked, [2024, 1]);
 });
 
 test("missing lines are omitted and gross profit is not invented", () => {
@@ -246,6 +264,68 @@ test("missing lines are omitted and gross profit is not invented", () => {
   assert.equal(model.nodes.find((node) => node.id === "other:revenue").value, 60);
 });
 
+test("year and quarter dropdowns list only periods with data", () => {
+  const payload = {
+    metrics: [
+      metric("revenue_gaap", "Revenue", "USD", {
+        "2024Q1": 8,
+        "2025Q1": 10, "2025Q2": 10, "2025Q3": 10, "2025Q4": 10,
+        "2026Q1": 11, "2026Q3": 14,
+      }),
+      metric("net_income_gaap", "Net income", "USD", {
+        "2025Q3": 2,
+        "2026Q3": 3,
+      }),
+    ],
+  };
+  const latest = revenueFlowModel("ACME", payload, null, {});
+  assert.equal(latest.selection.year, 2026);
+  assert.equal(latest.selection.quarter, null);
+  assert.equal(latest.header, "ACME FY2026");
+  assert.equal(latest.nodes.find((node) => node.id === "revenue").value, 25);
+  assert.match(latest.nodes.find((node) => node.id === "revenue").changeText, /▲25%/);
+  assert.match(latest.subtitle, /Q1, Q3 FY2026 actual/);
+  assert.match(latest.subtitle, /Q1, Q3 FY2025/);
+
+  const quarter = revenueFlowModel("ACME", payload, null, { year: 2026, quarter: 3 });
+  assert.equal(quarter.header, "ACME FY2026 Q3");
+  assert.equal(quarter.nodes.find((node) => node.id === "revenue").value, 14);
+  assert.match(quarter.nodes.find((node) => node.id === "revenue").changeText, /▲40%/);
+  assert.match(quarter.nodes.find((node) => node.id === "net_income_gaap").changeText, /▲50%/);
+  assert.match(quarter.subtitle, /Q3 FY2026 actual · changes vs\. Q3 FY2025/);
+
+  const missing = revenueFlowModel("ACME", payload, null, { year: 2026, quarter: 2 });
+  assert.equal(missing.selection.quarter, null);
+  assert.equal(missing.nodes.find((node) => node.id === "revenue").value, 25);
+  const dropped = revenueFlowModel("ACME", payload, null, { year: 2024, quarter: 3 });
+  assert.deepEqual(dropped.selection, { year: 2024, quarter: null });
+  assert.equal(dropped.nodes.find((node) => node.id === "revenue").value, 8);
+
+  let picked = null;
+  const view = renderRevenueFlow(latest, fakeDocument(), {
+    onSelect(year, quarterId) { picked = [year, quarterId]; },
+  });
+  const picker = periodControls(view);
+  assert.deepEqual(picker.yearOptions.map((item) => item.label), ["FY2024", "FY2025", "FY2026"]);
+  assert.equal(picker.yearOptions.find((item) => item.selected).value, "2026");
+  assert.deepEqual(picker.quarterOptions.map((item) => item.label), ["Full Year", "Q1", "Q3"]);
+  assert.equal(picker.quarterOptions.find((item) => item.selected).label, "Full Year");
+  choose(picker.quarter, "3");
+  assert.deepEqual(picked, [2026, 3]);
+
+  const quarterView = renderRevenueFlow(quarter, fakeDocument(), {
+    onSelect(year, quarterId) { picked = [year, quarterId]; },
+  });
+  const quarterPicker = periodControls(quarterView);
+  assert.equal(quarterPicker.quarterOptions.find((item) => item.selected).label, "Q3");
+  choose(quarterPicker.year, "2025");
+  assert.deepEqual(picked, [2025, 3]);
+  choose(quarterPicker.year, "2024");
+  assert.deepEqual(picked, [2024, null]);
+  choose(quarterPicker.quarter, "year");
+  assert.deepEqual(picked, [2026, null]);
+});
+
 test("no income-statement periods leave an empty state", () => {
   const model = revenueFlowModel("DELTA", { metrics: [] }, null, {});
   assert.equal(model.empty, true);
@@ -256,5 +336,6 @@ test("no income-statement periods leave an empty state", () => {
     if (item.textContent) text.push(item.textContent);
   });
   assert.match(text.join(" "), /No income-statement/);
-  assert.equal(text.some((item) => item === "Q1"), false);
+  assert.equal(periodControls(view).year, undefined);
+  assert.equal(text.some((item) => item === "Q1" || item === "Full Year"), false);
 });
