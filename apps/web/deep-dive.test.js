@@ -12,6 +12,8 @@ import {
   mapDataPoints,
   MIN_DATA_POINTS,
   plottableMapPoints,
+  plottableSeriesPoints,
+  REGULATOR_MIN_DATA_POINTS,
   RESEARCH_FALLBACK,
   showsResearchFallback,
   nhtsaMonthLabel,
@@ -1107,6 +1109,157 @@ test("world maps and sparse panels share the four-point threshold", () => {
   };
   assert.equal(showsResearchFallback(kept), false);
   assert.equal(byClass(renderDeepDive(kept, fakeDocument(false)), "deep-dive-fallback").length, 0);
+});
+
+function chartPoint(period, value, reported = true) {
+  return { period, value, reported };
+}
+
+function regulatorPanel(points) {
+  return {
+    id: "public-regulator",
+    kind: "trend-bars",
+    title: "Regulator records",
+    width: "wide",
+    cadence: "monthly",
+    kpis: [{ label: "Permits held", value: null, empty_label: "Not yet disclosed" }],
+    series: [{ label: "Permits held", role: "bar", points }],
+  };
+}
+
+test("regulator records stay hidden under two plottable points", () => {
+  assert.equal(REGULATOR_MIN_DATA_POINTS, 2);
+  assert.match(source, /export const REGULATOR_MIN_DATA_POINTS = 2/);
+  assert.match(source, /plottableSeriesPoints\(panel\)\.length < REGULATOR_MIN_DATA_POINTS/);
+  assert.doesNotMatch(source, /TSLA|Tesla|NVDA|SPCX|AAPL/);
+
+  const blank = regulatorPanel([
+    { period: "2026-08", value: null, reported: false },
+    { period: "2026-09", value: "", reported: true },
+  ]);
+  const one = regulatorPanel([chartPoint("2026-10", 4)]);
+  const two = regulatorPanel([chartPoint("2026-09", 3), chartPoint("2026-10", 4)]);
+  const unplotted = regulatorPanel([
+    chartPoint("2026-10", 4),
+    { period: "", value: 9, reported: true },
+    { period: "2026-11", value: "pending", reported: true },
+    { period: "2026-12", value: 8, reported: false },
+  ]);
+  assert.equal(plottableSeriesPoints(blank).length, 0);
+  assert.equal(plottableSeriesPoints(one).length, 1);
+  assert.equal(plottableSeriesPoints(two).length, 2);
+  assert.equal(plottableSeriesPoints(unplotted).length, 1);
+  assert.equal(plottableSeriesPoints({
+    series: [{ points: [chartPoint("2026-10", 2)] }],
+    modes: [{ series: [{ points: [chartPoint("2026-11", 5)] }] }],
+  }).length, 2);
+
+  const hidden = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "robotaxi",
+        title: "Robotaxi & autonomy",
+        panels: [
+          { id: "fleet", title: "Fleet", kpis: [{ label: "Fleet", value: 40, unit: "count" }] },
+          one,
+        ],
+      }],
+    },
+  }, fakeDocument(false));
+  assert.match(textOf(hidden), /Fleet/);
+  assert.doesNotMatch(textOf(hidden), /Regulator records/);
+  assert.equal(byClass(hidden, "deep-dive-chart").length, 0);
+  assert.deepEqual(byClass(hidden, "section-strip-label").map((node) => node.textContent), ["Robotaxi"]);
+  assert.equal(byClass(hidden, "deep-dive-fallback").length, 0);
+
+  const dropped = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [
+        {
+          id: "records",
+          title: "Public vehicle records",
+          panels: [blank],
+        },
+        {
+          id: "fleet",
+          title: "Fleet",
+          panels: [{ id: "fleet", title: "Fleet", series: reportedSeries(1) }],
+        },
+      ],
+    },
+  }, fakeDocument(false));
+  assert.doesNotMatch(textOf(dropped), /Regulator records/);
+  assert.deepEqual(byClass(dropped, "section-strip-label").map((node) => node.textContent), ["Fleet"]);
+
+  const shown = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "records",
+        title: "Public vehicle records",
+        panels: [two],
+      }],
+    },
+  }, fakeDocument(false));
+  assert.match(textOf(shown), /Regulator records/);
+  assert.equal(byClass(shown, "deep-dive-chart").length, 1);
+  assert.deepEqual(byClass(shown, "section-strip-label").map((node) => node.textContent), ["Vehicle records"]);
+  assert.equal(byClass(shown, "deep-dive-fallback").length, 0);
+
+  const onlyEmpty = {
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{ id: "records", title: "Public vehicle records", panels: [one] }],
+    },
+  };
+  assert.equal(showsResearchFallback(onlyEmpty), true);
+  const fallback = renderDeepDive(onlyEmpty, fakeDocument(false));
+  assert.equal(byClass(fallback, "deep-dive-fallback").length, 1);
+  assert.equal(byClass(fallback, "deep-dive-fallback")[0].textContent, RESEARCH_FALLBACK);
+  assert.equal(byClass(fallback, "section-strip-chip").length, 0);
+  assert.doesNotMatch(textOf(fallback), /Regulator records/);
+
+  const withSparse = {
+    deep_dive: {
+      title: "Deep dive",
+      sections: [
+        {
+          id: "energy",
+          title: "Commercial energy",
+          panels: [{ id: "energy-deployments", title: "Storage deployments", map: "world", markers: [] }],
+        },
+        {
+          id: "semi",
+          title: "Vehicle program",
+          panels: [{ id: "semi-production", title: "Semi production", series: reportedSeries(1) }],
+        },
+        { id: "records", title: "Public vehicle records", panels: [unplotted] },
+      ],
+    },
+  };
+  assert.equal(showsResearchFallback(withSparse), true);
+  const sparseFallback = renderDeepDive(withSparse, fakeDocument(false));
+  assert.equal(byClass(sparseFallback, "deep-dive-fallback")[0].textContent, RESEARCH_FALLBACK);
+  assert.equal(byClass(sparseFallback, "section-strip-chip").length, 0);
+
+  const credits = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "credits",
+        title: "Credits",
+        panels: [{
+          id: "credits",
+          title: "Regulatory credits",
+          series: reportedSeries(1),
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  assert.match(textOf(credits), /Regulatory credits/);
+  assert.equal(byClass(credits, "deep-dive-fallback").length, 0);
 });
 
 test("the NHTSA chart starts at Jan 2024 and uses month labels that fit the width", () => {
