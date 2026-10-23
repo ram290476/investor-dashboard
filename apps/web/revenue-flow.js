@@ -876,6 +876,7 @@ export function renderRevenueFlow(model, doc = document, options = {}) {
   const figure = svg(doc, "svg", {
     class: "flow-chart",
     viewBox: `0 0 ${layout.width} ${layout.height}`,
+    preserveAspectRatio: "xMidYMid meet",
     role: "img",
     "aria-label": model.header,
   });

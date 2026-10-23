@@ -7,6 +7,7 @@ import { renderYearlyFundamentals, yearlyCell, yearlyFundamentalsModel } from ".
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 const modelSource = await readFile(new URL("./yearly-fundamentals.js", import.meta.url), "utf8");
 const statementSource = await readFile(new URL("./statement-model.js", import.meta.url), "utf8");
+const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
 
 function metric(id, name, unit, values, extra = {}) {
   return {
@@ -215,4 +216,19 @@ test("the Analysis tab mounts both panels and funds get neither", () => {
   assert.match(page, /fund: fundTicker/);
   assert.doesNotMatch(mount, /TSLA|SPCX|NVDA|AAPL/);
   assert.match(app, /Yearly Fundamentals/);
+  assert.match(mount, /wrap\.append\(mountRevenueFlow\(ticker, payload, chartData\), yearly\)/);
+  const stack = styles.match(/\.analysis-fundamentals\[data-stock-panel="analysis"\]\s*\{[^}]*\}/)[0];
+  assert.match(stack, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.doesNotMatch(stack, /minmax\(320px/);
+  assert.doesNotMatch(styles, /@media[^{]+\{[^@]*\.analysis-fundamentals[^{]*grid-template-columns/s);
+  assert.doesNotMatch(styles, /@media[^{]+\{[^@]*\.yearly-scroll[^{]*overflow/s);
+  const scroll = styles.match(/\.yearly-scroll\s*\{[^}]*\}/)[0];
+  assert.match(scroll, /overflow-x:\s*auto/);
+  const label = styles.match(/\.yearly-table \.yearly-label\s*\{[^}]*\}/)[0];
+  assert.match(label, /position:\s*sticky/);
+  assert.match(label, /left:\s*0/);
+  const chart = styles.match(/\.flow-chart\s*\{[^}]*\}/)[0];
+  assert.match(chart, /width:\s*100%/);
+  assert.match(chart, /max-width:\s*100%/);
+  assert.doesNotMatch(chart, /min-width:\s*720px/);
 });

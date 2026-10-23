@@ -3926,7 +3926,7 @@ function renderTechnicalSummary(ticker, history) {
   return panel;
 }
 
-// Yearly Fundamentals and Revenue Flow sit on Analysis for operating companies.
+// Revenue Flow, then Yearly Fundamentals, sit full width under Technical Summary.
 // A fund snapshot does not get either panel. The selector keeps the chosen period
 // for this ticker until the page is rebuilt.
 function mountRevenueFlow(ticker, payload, chartData) {
@@ -3954,7 +3954,7 @@ function renderAnalysisFundamentals(ticker, payload, chartData, fund) {
   yearly.id = "stock-panel-yearly";
   yearly.dataset.companySection = "yearly";
   yearly.classList.add("company-section-target");
-  wrap.append(yearly, mountRevenueFlow(ticker, payload, chartData));
+  wrap.append(mountRevenueFlow(ticker, payload, chartData), yearly);
   return wrap;
 }
 

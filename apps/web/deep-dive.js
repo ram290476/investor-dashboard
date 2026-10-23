@@ -299,6 +299,16 @@ export function renderDeepDive(payload, doc = document, options = {}) {
   const visibleSections = orderedDeepDiveSections(dive.sections).filter((section) => (
     (section?.panels || []).some(panelShown)
   ));
+  if (!visibleSections.length) {
+    const fallback = showsResearchFallback(payload);
+    root.append(el(
+      doc,
+      "p",
+      fallback ? "deep-dive-fallback" : "data-state",
+      fallback ? RESEARCH_FALLBACK : "Not yet disclosed",
+    ));
+    return root;
+  }
   const nav = renderSectionNav(visibleSections, ticker, root, doc, options);
   root.append(nav);
 
@@ -338,6 +348,11 @@ export function renderDeepDive(payload, doc = document, options = {}) {
   return root;
 }
 
+/** Reported points required before a world map, or a sparse panel, is shown. */
+export const MIN_DATA_POINTS = 4;
+
+export const RESEARCH_FALLBACK = "No deployment data available";
+
 /** A marker counts when a place has a reported number. Empty and undisclosed maps do not. */
 export function mapDataPoints(panel) {
   return (panel?.markers || []).filter((marker) => {
@@ -347,6 +362,52 @@ export function mapDataPoints(panel) {
     const value = Number(marker.value);
     return marker.value != null && marker.value !== "" && Number.isFinite(value);
   });
+}
+
+/** Reported markers whose place resolves on this panel's map. */
+export function plottableMapPoints(panel) {
+  const kind = panel?.map === "world" ? "world" : (panel?.map === "us" || panel?.map === "sites" ? "us" : "");
+  const points = mapDataPoints(panel);
+  if (!kind) return points;
+  return points.filter((marker) => anchor(kind, marker.place));
+}
+
+function panelLabel(panel) {
+  return `${panel?.id || ""} ${panel?.title || ""}`.toLowerCase().replace(/[_-]+/g, " ");
+}
+
+/** Semi production and Optimus are hidden as whole panels below MIN_DATA_POINTS. */
+function isSparsePanel(panel) {
+  const label = panelLabel(panel);
+  return label.includes("semi production") || /(^|[^a-z])optimus([^a-z]|$)/.test(label);
+}
+
+function isDeploymentMap(panel) {
+  if (panel?.map !== "world") return false;
+  const label = panelLabel(panel);
+  return label.includes("storage") || label.includes("deploy");
+}
+
+/** Distinct reported periods, plus milestones that actually have a date or state. */
+function panelDataPoints(panel) {
+  const periods = new Set();
+  const seriesList = [...(panel?.series || [])];
+  for (const mode of panel?.modes || []) seriesList.push(...(mode?.series || []));
+  for (const series of seriesList) {
+    reportedPoints(series).forEach((point, index) => {
+      const period = String(point?.period || "").trim();
+      periods.add(period || `${series?.metric_id || series?.label || "series"}:${index}`);
+    });
+  }
+  let milestones = 0;
+  for (const milestone of panel?.milestones || []) {
+    if (milestone?.reported) milestones += 1;
+  }
+  return periods.size + milestones;
+}
+
+function worldMapShown(panel) {
+  return panel?.map === "world" && plottableMapPoints(panel).length >= MIN_DATA_POINTS;
 }
 
 function nonMapContent(panel) {
@@ -363,9 +424,19 @@ function nonMapContent(panel) {
 
 function panelShown(panel) {
   if (!panel || typeof panel !== "object") return false;
+  if (isSparsePanel(panel) && panelDataPoints(panel) < MIN_DATA_POINTS) return false;
   if (panel.kind === "forecast-band" || panel.kind === "stacked-area" || panel.kind === "headline-card") return true;
   if (panel.map && !mapDataPoints(panel).length && !nonMapContent(panel)) return false;
   return true;
+}
+
+/** Research would render nothing because every sparse panel and deployment map is under the threshold. */
+export function showsResearchFallback(payload) {
+  if (!hasDeepDive(payload)) return false;
+  const sections = orderedDeepDiveSections(payload.deep_dive.sections);
+  const visible = sections.some((section) => (section?.panels || []).some(panelShown));
+  if (visible) return false;
+  return sections.some((section) => (section?.panels || []).some((panel) => isSparsePanel(panel) || isDeploymentMap(panel)));
 }
 
 function sectionStripFade(doc, side) {
@@ -555,7 +626,10 @@ function renderPanel(panel, doc, claimForecastLabel) {
     else if (panel.kpis?.length) body.append(renderKpis(panel.kpis, doc));
     if (panel.modes?.length) body.append(renderModes(panel, doc));
     else if (panel.series?.length) body.append(renderChart(panel.series, doc, { axis: isNhtsaChart(panel) ? "nhtsa" : "" }));
-    if (panel.map && mapDataPoints(panel).length) body.append(renderMap(panel, doc));
+    if (panel.map === "world") {
+      const listed = (panel.markers || []).some((marker) => String(marker?.place || "").trim());
+      if (worldMapShown(panel) || listed) body.append(renderMap(panel, doc, { drawMap: worldMapShown(panel) }));
+    } else if (panel.map && mapDataPoints(panel).length) body.append(renderMap(panel, doc));
     if (panel.multiples?.length) body.append(renderMultiples(panel.multiples, doc));
     if (panel.milestones?.length) body.append(renderMilestones(panel.milestones, doc));
     if (panel.table) body.append(renderTable(panel.table, doc, panel.empty_label));
@@ -969,50 +1043,53 @@ function anchor(mapName, place) {
   return key ? book[key] : null;
 }
 
-function renderMap(panel, doc) {
+function renderMap(panel, doc, options = {}) {
+  const drawMap = options.drawMap !== false;
   const kind = panel.map === "world" ? "world" : "us";
   const spec = kind === "world" ? GEO.world : GEO.us;
-  const svg = svgEl(doc, "svg", {
-    class: "deep-dive-map",
-    viewBox: `0 0 ${spec.w} ${spec.h}`,
-    role: "img",
-  });
-  svg.append(svgEl(doc, "title", {}, kind === "world" ? "World map" : "United States map"));
-  if (kind === "world") {
-    for (const path of spec.countries) {
-      svg.append(svgEl(doc, "path", { d: path, class: "deep-dive-land" }));
-    }
-  } else {
-    svg.append(svgEl(doc, "path", { d: spec.states, class: "deep-dive-land" }));
-    if (spec.mesh) svg.append(svgEl(doc, "path", { d: spec.mesh, class: "deep-dive-mesh" }));
-  }
+  const wrap = el(doc, "div", "deep-dive-map-wrap");
   const markers = panel.markers || [];
   let placed = 0;
-  for (const marker of markers) {
-    const point = anchor(kind, marker.place);
-    if (!point) continue;
-    placed += 1;
-    const radius = marker.reported ? Math.max(4, Math.min(18, Math.sqrt(Math.abs(Number(marker.value) || 0)) )) : 4;
-    const dot = svgEl(doc, "circle", {
-      cx: point[0],
-      cy: point[1],
-      r: radius.toFixed(1),
-      class: marker.estimate ? "deep-dive-bubble deep-dive-bubble-estimate" : (marker.reported ? "deep-dive-bubble" : "deep-dive-bubble-empty"),
+  if (drawMap) {
+    const svg = svgEl(doc, "svg", {
+      class: "deep-dive-map",
+      viewBox: `0 0 ${spec.w} ${spec.h}`,
+      role: "img",
     });
-    const label = marker.reported
-      ? `${marker.place}: ${formatDeepValue(marker.value, "")}`
-      : `${marker.place}: not yet disclosed`;
-    dot.append(svgEl(doc, "title", {}, label));
-    svg.append(dot);
+    svg.append(svgEl(doc, "title", {}, kind === "world" ? "World map" : "United States map"));
+    if (kind === "world") {
+      for (const path of spec.countries) {
+        svg.append(svgEl(doc, "path", { d: path, class: "deep-dive-land" }));
+      }
+    } else {
+      svg.append(svgEl(doc, "path", { d: spec.states, class: "deep-dive-land" }));
+      if (spec.mesh) svg.append(svgEl(doc, "path", { d: spec.mesh, class: "deep-dive-mesh" }));
+    }
+    for (const marker of markers) {
+      const point = anchor(kind, marker.place);
+      if (!point) continue;
+      placed += 1;
+      const radius = marker.reported ? Math.max(4, Math.min(18, Math.sqrt(Math.abs(Number(marker.value) || 0)) )) : 4;
+      const dot = svgEl(doc, "circle", {
+        cx: point[0],
+        cy: point[1],
+        r: radius.toFixed(1),
+        class: marker.estimate ? "deep-dive-bubble deep-dive-bubble-estimate" : (marker.reported ? "deep-dive-bubble" : "deep-dive-bubble-empty"),
+      });
+      const label = marker.reported
+        ? `${marker.place}: ${formatDeepValue(marker.value, "")}`
+        : `${marker.place}: not yet disclosed`;
+      dot.append(svgEl(doc, "title", {}, label));
+      svg.append(dot);
+    }
+    wrap.append(svg);
   }
-  const wrap = el(doc, "div", "deep-dive-map-wrap");
-  wrap.append(svg);
-  if (!markers.length) {
+  if (drawMap && !markers.length) {
     const note = panel.map === "sites"
       ? "Site locations are not collected. No map service or API key is configured."
       : "No places have been disclosed yet.";
     wrap.append(el(doc, "p", "deep-dive-empty", note));
-  } else if (!placed) {
+  } else if (drawMap && markers.length && !placed) {
     wrap.append(el(doc, "p", "deep-dive-note", "Places are listed in the table. They are outside this map's anchors."));
   }
   const listed = markers.filter((marker) => marker.place);

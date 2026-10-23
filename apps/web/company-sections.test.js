@@ -107,8 +107,8 @@ test("overview tiles stay name-only jump targets", () => {
     fundamentals: [],
     guidance: [{ latestPeriod: "2026Q3", text: "Raised the outlook." }],
   });
-  assert.deepEqual(bookmarks.map((item) => item.id), ["technical", "yearly", "revenue-flow"]);
-  assert.deepEqual(bookmarks.map((item) => item.title), ["Technical Summary", "Yearly Fundamentals", "Revenue Flow"]);
+  assert.deepEqual(bookmarks.map((item) => item.id), ["technical", "revenue-flow", "yearly"]);
+  assert.deepEqual(bookmarks.map((item) => item.title), ["Technical Summary", "Revenue Flow", "Yearly Fundamentals"]);
   assert.equal(bookmarks.some((item) => item.id === "metrics"), false);
   assert.equal(bookmarks.every((item) => item.headline == null), true);
 });
