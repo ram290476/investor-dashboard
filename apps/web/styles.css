@@ -5857,3 +5857,290 @@ a.catalyst-edgar-link:hover {
     scroll-margin-top: 360px;
   }
 }
+
+/* Analysis: Yearly Fundamentals and Revenue Flow. Colors stay on theme tokens. */
+.stock-page[data-stock-tab="analysis"] .analysis-fundamentals[data-stock-panel="analysis"],
+.stock-page[data-stock-tab="overview"] .analysis-fundamentals[data-stock-panel="analysis"],
+.stock-page[data-stock-tab="technical"] .analysis-fundamentals[data-stock-panel="analysis"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1.2fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.yearly-fundamentals,
+.revenue-flow {
+  min-width: 0;
+  background: var(--page);
+  color: var(--text);
+}
+
+.yearly-heading,
+.flow-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  padding: 14px 16px 8px;
+}
+
+.yearly-ticker,
+.flow-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 28px;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.yearly-subtitle,
+.flow-subtitle,
+.yearly-note,
+.flow-footnote,
+.yearly-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.yearly-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.yearly-empty,
+.flow-empty {
+  margin: 0;
+  padding: 4px 16px 12px;
+  color: var(--muted);
+}
+
+.yearly-scroll,
+.flow-scroll {
+  overflow: auto;
+  padding: 0 8px 8px;
+}
+
+.yearly-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.yearly-table th,
+.yearly-table td {
+  padding: 7px 12px;
+  border-top: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.yearly-table .yearly-label {
+  text-align: left;
+  color: var(--secondary);
+  font-weight: 500;
+}
+
+.yearly-year {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.yearly-row:nth-child(even) {
+  background: var(--surface);
+}
+
+.yearly-row.is-total,
+.yearly-row.is-profit {
+  background: var(--surface-raised);
+  font-weight: 750;
+}
+
+.yearly-row.is-total .yearly-label,
+.yearly-row.is-profit .yearly-label,
+.yearly-row.is-total td,
+.yearly-row.is-profit td {
+  color: var(--text);
+}
+
+.yearly-row.is-pe,
+.yearly-row.is-pe .yearly-label,
+.yearly-row.is-pe td {
+  color: var(--amber);
+  font-weight: 650;
+}
+
+.yearly-row.is-price {
+  background: color-mix(in srgb, var(--green) 16%, var(--page));
+}
+
+.yearly-row.is-price .yearly-label,
+.yearly-row.is-price td {
+  color: var(--green);
+  font-weight: 760;
+}
+
+.yearly-row.is-price td {
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.yearly-note,
+.flow-footnote {
+  padding: 4px 16px 14px;
+}
+
+.flow-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 0 16px 10px;
+}
+
+.flow-years,
+.flow-quarters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.flow-period {
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--secondary);
+  cursor: pointer;
+}
+
+.flow-period[aria-pressed="true"] {
+  border-color: var(--control-line);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.flow-chart {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+  font-family: inherit;
+}
+
+.flow-revenue-bar {
+  fill: color-mix(in srgb, var(--muted) 70%, var(--surface));
+}
+
+.flow-link {
+  stroke: none;
+}
+
+.flow-link-grey {
+  fill: color-mix(in srgb, var(--muted) 62%, transparent);
+}
+
+.flow-link-green {
+  fill: color-mix(in srgb, var(--green) 72%, transparent);
+}
+
+.flow-link-red {
+  fill: color-mix(in srgb, var(--red) 70%, transparent);
+}
+
+.flow-link-muted {
+  fill: color-mix(in srgb, var(--line) 80%, var(--muted));
+}
+
+.flow-name,
+.flow-margin {
+  fill: var(--secondary);
+  font-size: 12px;
+}
+
+.flow-amount {
+  fill: var(--text);
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.flow-amount-green {
+  fill: var(--green);
+}
+
+.flow-amount-red {
+  fill: var(--red);
+}
+
+.flow-change {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.flow-change.is-up,
+.flow-margin.is-up {
+  fill: var(--green);
+  color: var(--green);
+}
+
+.flow-change.is-down,
+.flow-margin.is-down {
+  fill: var(--red);
+  color: var(--red);
+}
+
+.flow-change.is-flat,
+.flow-margin.is-flat {
+  fill: var(--muted);
+  color: var(--muted);
+}
+
+.flow-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 4px 16px 8px;
+}
+
+.flow-card {
+  min-width: 140px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.flow-card-label {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.flow-card-value {
+  margin: 0;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 750;
+}
+
+@media (max-width: 1100px) {
+  .stock-page[data-stock-tab="analysis"] .analysis-fundamentals[data-stock-panel="analysis"],
+  .stock-page[data-stock-tab="overview"] .analysis-fundamentals[data-stock-panel="analysis"],
+  .stock-page[data-stock-tab="technical"] .analysis-fundamentals[data-stock-panel="analysis"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .yearly-ticker,
+  .flow-title {
+    font-size: 22px;
+  }
+}

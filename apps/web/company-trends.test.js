@@ -130,7 +130,8 @@ test("Analysis bookmarks are the Technical Summary for saved overview and techni
   const guidance = [{ latestPeriod: "2026Q2", text: "Raised the outlook.", sourceUrl: "https://example.com/latest" }];
   for (const tab of ["overview", "technical", "analysis"]) {
     const tile = companyBookmarks(tab, { guidance });
-    assert.deepEqual(tile.map((item) => item.id), ["technical"]);
+    assert.deepEqual(tile.map((item) => item.id), ["technical", "yearly", "revenue-flow"]);
+    assert.deepEqual(companyBookmarks(tab, { guidance, fund: true }).map((item) => item.id), ["technical"]);
     assert.equal(tile.some((item) => item.id === "quarterly-notes"), false);
   }
 });
