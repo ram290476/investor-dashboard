@@ -6197,9 +6197,9 @@ a.catalyst-edgar-link:hover {
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
-  border-color: #1c1c1c;
-  background: #000;
-  color: #fff;
+  border-color: rgb(28, 28, 28);
+  background: rgb(0, 0, 0);
+  color: rgb(255, 255, 255);
   box-shadow: none;
 }
 
@@ -6223,7 +6223,7 @@ a.catalyst-edgar-link:hover {
 }
 
 .revenue-flow .flow-ticker {
-  color: #fff;
+  color: rgb(255, 255, 255);
   font-size: 34px;
   font-weight: 800;
   letter-spacing: 0.01em;
@@ -6231,7 +6231,7 @@ a.catalyst-edgar-link:hover {
 }
 
 .revenue-flow .flow-when {
-  color: #c4c4c4;
+  color: rgb(196, 196, 196);
   font-size: 22px;
   font-weight: 500;
   letter-spacing: 0;
@@ -6240,7 +6240,7 @@ a.catalyst-edgar-link:hover {
 
 .revenue-flow .flow-subtitle {
   margin-top: 6px;
-  color: #8d8d8d;
+  color: rgb(141, 141, 141);
   font-size: 13px;
 }
 
@@ -6251,14 +6251,14 @@ a.catalyst-edgar-link:hover {
 }
 
 .revenue-flow .flow-field-label {
-  color: #8d8d8d;
+  color: rgb(141, 141, 141);
 }
 
 .revenue-flow .flow-select {
   min-height: 36px;
-  border-color: #2a2a2a;
-  background: #161616;
-  color: #fff;
+  border-color: rgb(42, 42, 42);
+  background: rgb(22, 22, 22);
+  color: rgb(255, 255, 255);
 }
 
 .revenue-flow .flow-scroll {
@@ -6274,7 +6274,7 @@ a.catalyst-edgar-link:hover {
 }
 
 .revenue-flow .flow-name {
-  fill: #fff;
+  fill: rgb(255, 255, 255);
   font-size: 13px;
   font-weight: 700;
 }
@@ -6285,66 +6285,66 @@ a.catalyst-edgar-link:hover {
 }
 
 .revenue-flow .flow-amount-grey {
-  fill: #b5b5b5;
+  fill: rgb(181, 181, 181);
 }
 
 .revenue-flow .flow-amount-green {
-  fill: #3ddc84;
+  fill: rgb(61, 220, 132);
 }
 
 .revenue-flow .flow-amount-red {
-  fill: #ff5a5a;
+  fill: rgb(255, 90, 90);
 }
 
 .revenue-flow .flow-amount-muted {
-  fill: #9a9a9a;
+  fill: rgb(154, 154, 154);
 }
 
 .revenue-flow .flow-margin,
 .revenue-flow .flow-note {
-  fill: #9a9a9a;
+  fill: rgb(154, 154, 154);
   font-size: 12px;
 }
 
 .revenue-flow .flow-change.is-up,
 .revenue-flow .flow-margin.is-up {
-  fill: #3ddc84;
-  color: #3ddc84;
+  fill: rgb(61, 220, 132);
+  color: rgb(61, 220, 132);
 }
 
 .revenue-flow .flow-change.is-down,
 .revenue-flow .flow-margin.is-down {
-  fill: #ff5a5a;
-  color: #ff5a5a;
+  fill: rgb(255, 90, 90);
+  color: rgb(255, 90, 90);
 }
 
 .revenue-flow .flow-change.is-flat,
 .revenue-flow .flow-change.is-none,
 .revenue-flow .flow-margin.is-flat,
 .revenue-flow .flow-margin.is-none {
-  fill: #8d8d8d;
-  color: #8d8d8d;
+  fill: rgb(141, 141, 141);
+  color: rgb(141, 141, 141);
 }
 
 .revenue-flow .flow-bar-grey {
-  fill: #9a9a9a;
+  fill: rgb(154, 154, 154);
 }
 
 .revenue-flow .flow-bar-green {
-  fill: #1f9d55;
+  fill: rgb(31, 157, 85);
 }
 
 .revenue-flow .flow-bar-red {
-  fill: #e23b3b;
+  fill: rgb(226, 59, 59);
 }
 
 .revenue-flow .flow-bar-red.is-cap,
 .revenue-flow .flow-bar.is-cap {
-  fill: #ff2a2a;
+  fill: rgb(255, 42, 42);
 }
 
 .revenue-flow .flow-bar-muted {
-  fill: #6e6e6e;
+  fill: rgb(110, 110, 110);
 }
 
 .revenue-flow .flow-link-grey {
@@ -6379,18 +6379,18 @@ a.catalyst-edgar-link:hover {
 
 .revenue-flow .flow-card {
   min-width: 168px;
-  border-color: #2a2a2a;
-  background: #111;
+  border-color: rgb(42, 42, 42);
+  background: rgb(17, 17, 17);
 }
 
 .revenue-flow .flow-card-label {
-  color: #9a9a9a;
+  color: rgb(154, 154, 154);
   font-size: 12px;
   font-weight: 600;
 }
 
 .revenue-flow .flow-card-value {
-  color: #fff;
+  color: rgb(255, 255, 255);
   font-size: 28px;
   font-weight: 750;
 }
@@ -6401,7 +6401,7 @@ a.catalyst-edgar-link:hover {
   max-width: 340px;
   margin: 0;
   padding: 0;
-  color: #8d8d8d;
+  color: rgb(141, 141, 141);
   font-size: 11px;
   text-align: right;
 }
