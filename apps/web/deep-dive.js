@@ -351,6 +351,9 @@ export function renderDeepDive(payload, doc = document, options = {}) {
 /** Reported points required before a world map, or a sparse panel, is shown. */
 export const MIN_DATA_POINTS = 4;
 
+/** Reported chart points required before the Regulator records panel is shown. */
+export const REGULATOR_MIN_DATA_POINTS = 2;
+
 export const RESEARCH_FALLBACK = "No deployment data available";
 
 /** A marker counts when a place has a reported number. Empty and undisclosed maps do not. */
@@ -382,6 +385,12 @@ function isSparsePanel(panel) {
   return label.includes("semi production") || /(^|[^a-z])optimus([^a-z]|$)/.test(label);
 }
 
+/** Regulator records is hidden as a whole panel below REGULATOR_MIN_DATA_POINTS. */
+function isRegulatorRecordsPanel(panel) {
+  const label = panelLabel(panel);
+  return label.includes("regulator record");
+}
+
 function isDeploymentMap(panel) {
   if (panel?.map !== "world") return false;
   const label = panelLabel(panel);
@@ -406,6 +415,24 @@ function panelDataPoints(panel) {
   return periods.size + milestones;
 }
 
+/**
+ * Series values the chart can draw. A point counts when it is reported, has a
+ * period, and has a finite number. Unreported, blank, and non-finite points do not.
+ */
+export function plottableSeriesPoints(panel) {
+  const seriesList = [...(panel?.series || [])];
+  for (const mode of panel?.modes || []) seriesList.push(...(mode?.series || []));
+  const points = [];
+  for (const series of seriesList) {
+    for (const point of reportedPoints(series)) {
+      if (!String(point?.period || "").trim()) continue;
+      if (!Number.isFinite(Number(point.value))) continue;
+      points.push(point);
+    }
+  }
+  return points;
+}
+
 function worldMapShown(panel) {
   return panel?.map === "world" && plottableMapPoints(panel).length >= MIN_DATA_POINTS;
 }
@@ -425,18 +452,21 @@ function nonMapContent(panel) {
 function panelShown(panel) {
   if (!panel || typeof panel !== "object") return false;
   if (isSparsePanel(panel) && panelDataPoints(panel) < MIN_DATA_POINTS) return false;
+  if (isRegulatorRecordsPanel(panel) && plottableSeriesPoints(panel).length < REGULATOR_MIN_DATA_POINTS) return false;
   if (panel.kind === "forecast-band" || panel.kind === "stacked-area" || panel.kind === "headline-card") return true;
   if (panel.map && !mapDataPoints(panel).length && !nonMapContent(panel)) return false;
   return true;
 }
 
-/** Research would render nothing because every sparse panel and deployment map is under the threshold. */
+/** Research would render nothing because every gated panel is under its threshold. */
 export function showsResearchFallback(payload) {
   if (!hasDeepDive(payload)) return false;
   const sections = orderedDeepDiveSections(payload.deep_dive.sections);
   const visible = sections.some((section) => (section?.panels || []).some(panelShown));
   if (visible) return false;
-  return sections.some((section) => (section?.panels || []).some((panel) => isSparsePanel(panel) || isDeploymentMap(panel)));
+  return sections.some((section) => (section?.panels || []).some((panel) => (
+    isSparsePanel(panel) || isDeploymentMap(panel) || isRegulatorRecordsPanel(panel)
+  )));
 }
 
 function sectionStripFade(doc, side) {
