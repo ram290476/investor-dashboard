@@ -131,7 +131,8 @@ test("the company page shows the panel only for funds and fetches GET /fund/<T> 
   assert.doesNotMatch(fundBranch, /page\.dataset\.stockTab = "overview"/);
   assert.doesNotMatch(fundBranch, /return;/);
   const appended = page.slice(page.indexOf("page.append(", gate));
-  assert.match(appended, /renderTechnicalSummary\(session\.selected, history\),\s+\.\.\.fundExtras/);
+  assert.match(page, /renderAnalysisFundamentals\(session\.selected, payload, chartData, fundTicker\)/);
+  assert.match(appended, /renderTechnicalSummary\(session\.selected, history\),[\s\S]*\.\.\.fundExtras/);
   assert.match(appended, /section\("kpis"/);
   const holdings = await readFile(new URL("./fund-holdings.js", import.meta.url), "utf8");
   assert.match(holdings, /dataset\.stockPanel = FUND_TAB_ID/);

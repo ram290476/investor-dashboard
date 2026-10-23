@@ -103,6 +103,9 @@ jobs:
           node --check apps/web/market-status.js
           node --check apps/web/market-correlation.js
           node --check apps/web/technical-summary.js
+          node --check apps/web/statement-model.js
+          node --check apps/web/yearly-fundamentals.js
+          node --check apps/web/revenue-flow.js
           node --check apps/web/fund-holdings.js
           node --check apps/web/fund-summary.js
           node --check apps/web/fund-flag-admin.js

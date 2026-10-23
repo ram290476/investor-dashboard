@@ -78,7 +78,7 @@ export function companyBookmarks(tab, context = {}) {
     }];
   }
   if (id !== ANALYSIS_TAB_ID) return [];
-  return [
+  const bookmarks = [
     {
       id: "technical",
       title: "Technical Summary",
@@ -86,6 +86,22 @@ export function companyBookmarks(tab, context = {}) {
       icon: "technical",
     },
   ];
+  if (context.fund === true) return bookmarks;
+  bookmarks.push(
+    {
+      id: "yearly",
+      title: "Yearly Fundamentals",
+      anchorId: "stock-panel-yearly",
+      icon: "fundamentals",
+    },
+    {
+      id: "revenue-flow",
+      title: "Revenue Flow",
+      anchorId: "stock-panel-revenue-flow",
+      icon: "fundamentals",
+    },
+  );
+  return bookmarks;
 }
 
 function el(doc, tag, className, text) {
