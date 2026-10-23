@@ -368,10 +368,18 @@ function panelShown(panel) {
   return true;
 }
 
+function sectionStripFade(doc, side) {
+  const name = side === "end" ? "section-strip-fade section-strip-fade-end" : "section-strip-fade section-strip-fade-start";
+  const node = el(doc, "span", name);
+  node.setAttribute("aria-hidden", "true");
+  return node;
+}
+
 function renderSectionNav(sections, ticker, root, doc, options) {
   const strip = el(doc, "nav", "section-strip section-strip-docked is-visible");
   strip.setAttribute("aria-label", "Research sections");
   const track = el(doc, "div", "section-strip-track");
+  track.append(sectionStripFade(doc, "start"));
   for (const section of sections || []) {
     const full = String(section.title || section.id || "").replace(/\s+/g, " ").trim();
     const chip = el(doc, "a", "section-strip-chip");
@@ -384,6 +392,7 @@ function renderSectionNav(sections, ticker, root, doc, options) {
     bindSectionLink(chip, section, ticker, root, doc, options);
     track.append(chip);
   }
+  track.append(sectionStripFade(doc, "end"));
   strip.append(track);
   return strip;
 }

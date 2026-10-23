@@ -5182,8 +5182,9 @@ a.catalyst-edgar-link:hover {
   max-width: 100%;
 }
 
-/* Charts and tables fit the panel. The Research section strip wraps instead of
-   scrolling sideways. The ticker bar can scroll at any width. */
+/* Charts and tables fit the panel. The section strip is not clipped here:
+   overflow on the sticky bar (or an ancestor) breaks the pin and forces the
+   chips to wrap. The track below is the only horizontal scroller. */
 .deep-dive > *,
 .deep-dive-section,
 .deep-dive-grid > *,
@@ -5200,9 +5201,7 @@ a.catalyst-edgar-link:hover {
 .deep-dive-panel,
 .deep-dive-chart-wrap,
 .deep-dive-map-wrap,
-.deep-dive-forecast,
-.section-strip,
-.section-strip-track {
+.deep-dive-forecast {
   overflow-x: clip;
 }
 
@@ -5281,14 +5280,20 @@ a.catalyst-edgar-link:hover {
   white-space: nowrap;
 }
 
+/* One section bar under every company tab, with the same rules at every width.
+   The strip stays sticky and overflow:visible. The track is a full-width single
+   row: chips are min-width:0 and nowrap so they scroll sideways instead of
+   wrapping into a tall pill. Edge fades appear only while the row overflows. */
 .section-strip {
   position: sticky;
   top: 52px;
   z-index: 5;
+  width: 100%;
   height: 0;
   margin: 0;
   min-width: 0;
   max-width: 100%;
+  overflow: visible;
 }
 
 .section-strip-track {
@@ -5297,11 +5302,14 @@ a.catalyst-edgar-link:hover {
   left: 0;
   right: 0;
   display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
   min-width: 0;
   max-width: 100%;
-  flex-wrap: wrap;
-  overflow-x: clip;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -5309,7 +5317,15 @@ a.catalyst-edgar-link:hover {
   box-shadow: 0 8px 24px color-mix(in srgb, var(--page) 55%, transparent);
   opacity: 0;
   pointer-events: none;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  container-type: scroll-state;
+  container-name: section-strip;
+}
+
+.section-strip-track::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .section-strip.is-visible .section-strip-track {
@@ -5322,16 +5338,67 @@ a.catalyst-edgar-link:hover {
 }
 
 .section-strip.section-strip-docked .section-strip-track {
-  position: static;
+  position: relative;
   opacity: 1;
   pointer-events: auto;
 }
 
+.section-strip-fade {
+  position: sticky;
+  flex: 0 0 18px;
+  width: 18px;
+  align-self: stretch;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+}
+
+.section-strip-fade::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+}
+
+.section-strip-fade-start {
+  left: 0;
+  margin-right: -18px;
+}
+
+.section-strip-fade-start::before {
+  left: 0;
+  background: linear-gradient(to right, color-mix(in srgb, var(--surface) 94%, transparent), transparent);
+}
+
+.section-strip-fade-end {
+  right: 0;
+  margin-left: -18px;
+}
+
+.section-strip-fade-end::before {
+  right: 0;
+  background: linear-gradient(to left, color-mix(in srgb, var(--surface) 94%, transparent), transparent);
+}
+
+@container section-strip scroll-state(scrollable: left) {
+  .section-strip-fade-start {
+    opacity: 1;
+  }
+}
+
+@container section-strip scroll-state(scrollable: right) {
+  .section-strip-fade-end {
+    opacity: 1;
+  }
+}
+
 .section-strip-chip {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  max-width: 100%;
+  min-width: 0;
+  max-width: none;
   min-height: 28px;
   padding: 4px 10px;
   border-radius: 999px;
@@ -5340,24 +5407,20 @@ a.catalyst-edgar-link:hover {
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  white-space: nowrap;
 }
 
-/* Same pattern as the company tabs: chips wrap onto extra rows and the bar
-   never scrolls sideways. A chip wider than the bar ellipsizes; the title
-   attribute is the full catalog label. */
+/* Research uses the same row. Short labels stay on one line; the full catalog
+   title remains on the chip's title attribute. */
 .deep-dive .section-strip-chip {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
+  max-width: none;
+  overflow: visible;
 }
 
 .deep-dive .section-strip-label {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
