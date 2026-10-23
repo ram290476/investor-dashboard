@@ -89,15 +89,15 @@ export function companyBookmarks(tab, context = {}) {
   if (context.fund === true) return bookmarks;
   bookmarks.push(
     {
-      id: "yearly",
-      title: "Yearly Fundamentals",
-      anchorId: "stock-panel-yearly",
-      icon: "fundamentals",
-    },
-    {
       id: "revenue-flow",
       title: "Revenue Flow",
       anchorId: "stock-panel-revenue-flow",
+      icon: "fundamentals",
+    },
+    {
+      id: "yearly",
+      title: "Yearly Fundamentals",
+      anchorId: "stock-panel-yearly",
       icon: "fundamentals",
     },
   );

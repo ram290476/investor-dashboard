@@ -10,6 +10,10 @@ import {
   hasDeepDive,
   layoutNhtsaAxis,
   mapDataPoints,
+  MIN_DATA_POINTS,
+  plottableMapPoints,
+  RESEARCH_FALLBACK,
+  showsResearchFallback,
   nhtsaMonthLabel,
   nhtsaPeriods,
   orderedDeepDiveSections,
@@ -666,7 +670,7 @@ test("deep dive section chips abbreviate catalog titles and keep the full label 
       sections: [...titles].map((title, index) => ({
         id: `section-${index}`,
         title,
-        panels: [{ id: `panel-${index}`, kind: "note", title }],
+        panels: [{ id: `panel-${index}`, kind: "note", title, series: reportedSeries(MIN_DATA_POINTS) }],
       })),
     },
   }, fakeDocument(false), { ticker: "exmpl" });
@@ -921,6 +925,188 @@ test("research maps render only when a place has a reported value", () => {
   assert.match(text, /Robotaxi fleet/);
   assert.equal(byClass(view, "deep-dive-map-wrap").length, 1);
   assert.doesNotMatch(source, /TSLA|Tesla|NVDA|SPCX|ARKK/);
+});
+
+function reportedSeries(count) {
+  return [{
+    label: "Reported",
+    role: "bar",
+    points: Array.from({ length: count }, (_item, index) => ({
+      period: `${2020 + index}Q1`,
+      value: index + 1,
+      reported: true,
+    })),
+  }];
+}
+
+function countryMarkers(names) {
+  return names.map((place, index) => ({ place, reported: true, value: index + 1 }));
+}
+
+test("world maps and sparse panels share the four-point threshold", () => {
+  assert.equal(MIN_DATA_POINTS, 4);
+  assert.equal(RESEARCH_FALLBACK, "No deployment data available");
+  assert.equal(plottableMapPoints({ map: "world", markers: [{ place: "Austin", reported: true, value: 2 }] }).length, 0);
+  assert.equal(plottableMapPoints({ map: "world", markers: countryMarkers(["China", "Germany", "Japan"]) }).length, 3);
+  assert.equal(plottableMapPoints({ map: "us", markers: [{ place: "Austin", reported: true, value: 12 }] }).length, 1);
+  assert.match(source, /export const MIN_DATA_POINTS = 4/);
+  assert.match(source, /plottableMapPoints\(panel\)\.length >= MIN_DATA_POINTS/);
+  assert.match(source, /panelDataPoints\(panel\) < MIN_DATA_POINTS/);
+  assert.doesNotMatch(source, /TSLA|Tesla|NVDA|SPCX|AAPL/);
+  const fallbackRule = styles.match(/\.deep-dive-fallback\s*\{[^}]*\}/)[0];
+  assert.match(fallbackRule, /background:\s*var\(--surface\)/);
+  assert.match(fallbackRule, /color:\s*var\(--secondary\)/);
+  assert.match(fallbackRule, /border:\s*1px solid var\(--line\)/);
+  assert.doesNotMatch(fallbackRule, /#[0-9a-fA-F]{3,8}/);
+
+  const sparse = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [
+        {
+          id: "energy",
+          title: "Commercial energy",
+          panels: [{
+            id: "energy-deployments",
+            title: "Storage deployments",
+            map: "world",
+            kpis: [{ label: "Deployed", value: 3, unit: "GWh" }],
+            series: reportedSeries(6),
+            markers: countryMarkers(["China", "Germany", "Japan"]),
+          }],
+        },
+        {
+          id: "semi",
+          title: "Vehicle program",
+          panels: [
+            { id: "semi-orders", title: "Orders", series: reportedSeries(2) },
+            { id: "semi-production", title: "Semi production", series: reportedSeries(3) },
+          ],
+        },
+        {
+          id: "optimus",
+          title: "Optimus",
+          panels: [{
+            id: "optimus",
+            title: "Optimus",
+            kpis: [{ label: "Optimus", value: 1 }],
+            milestones: [
+              { id: "gen-2", label: "Gen 2", reported: true },
+              { id: "gen-3", label: "Gen 3", reported: false },
+            ],
+          }],
+        },
+        {
+          id: "starlink",
+          title: "Constellation",
+          panels: [{
+            id: "starlink",
+            title: "Production and deployments",
+            map: "world",
+            series: reportedSeries(1),
+            markers: countryMarkers(["Australia"]),
+          }],
+        },
+      ],
+    },
+  }, fakeDocument(false));
+  const sparseText = textOf(sparse);
+  assert.equal(byClass(sparse, "deep-dive-map").length, 0);
+  assert.match(sparseText, /Storage deployments/);
+  assert.match(sparseText, /Deployed/);
+  assert.match(sparseText, /China/);
+  assert.match(sparseText, /Orders/);
+  assert.doesNotMatch(sparseText, /Semi production/);
+  assert.doesNotMatch(sparseText, /Optimus/);
+  assert.match(sparseText, /Production and deployments/);
+  const chips = byClass(sparse, "section-strip-label").map((node) => node.textContent);
+  assert.deepEqual(chips, ["Comm. energy", "Vehicle program", "Constellation"]);
+  assert.equal(byClass(sparse, "deep-dive-fallback").length, 0);
+
+  const shown = renderDeepDive({
+    deep_dive: {
+      title: "Deep dive",
+      sections: [
+        {
+          id: "energy",
+          title: "Commercial energy",
+          panels: [{
+            id: "energy-deployments",
+            title: "Storage deployments",
+            map: "world",
+            markers: countryMarkers(["China", "Germany", "Japan", "Australia"]),
+          }],
+        },
+        {
+          id: "semi",
+          title: "Vehicle program",
+          panels: [{ id: "semi-production", title: "Semi production", series: reportedSeries(4) }],
+        },
+        {
+          id: "optimus",
+          title: "Optimus",
+          panels: [{
+            id: "optimus",
+            title: "Optimus",
+            milestones: [
+              { id: "a", label: "A", reported: true },
+              { id: "b", label: "B", reported: true },
+              { id: "c", label: "C", reported: true },
+              { id: "d", label: "D", reported: true },
+            ],
+          }],
+        },
+      ],
+    },
+  }, fakeDocument(false));
+  assert.equal(byClass(shown, "deep-dive-map").length, 1);
+  assert.match(textOf(shown), /Semi production/);
+  assert.match(textOf(shown), /Optimus/);
+  assert.deepEqual(byClass(shown, "section-strip-label").map((node) => node.textContent), [
+    "Comm. energy",
+    "Vehicle program",
+    "Optimus",
+  ]);
+
+  const emptyPayload = {
+    deep_dive: {
+      title: "Deep dive",
+      sections: [
+        {
+          id: "energy",
+          title: "Commercial energy",
+          panels: [{ id: "energy-deployments", title: "Storage deployments", map: "world", markers: [] }],
+        },
+        {
+          id: "semi",
+          title: "Vehicle program",
+          panels: [{ id: "semi-production", title: "Semi production", series: reportedSeries(1) }],
+        },
+        {
+          id: "optimus",
+          title: "Optimus",
+          panels: [{ id: "optimus", title: "Optimus", series: [] }],
+        },
+      ],
+    },
+  };
+  assert.equal(showsResearchFallback(emptyPayload), true);
+  const empty = renderDeepDive(emptyPayload, fakeDocument(false));
+  assert.equal(byClass(empty, "deep-dive-fallback").length, 1);
+  assert.equal(byClass(empty, "deep-dive-fallback")[0].textContent, RESEARCH_FALLBACK);
+  assert.equal(byClass(empty, "section-strip-chip").length, 0);
+  assert.equal(byClass(empty, "deep-dive-map").length, 0);
+  const kept = {
+    deep_dive: {
+      ...emptyPayload.deep_dive,
+      sections: [
+        ...emptyPayload.deep_dive.sections,
+        { id: "bars", title: "Bars", panels: [{ id: "bars", title: "Bars", series: reportedSeries(1) }] },
+      ],
+    },
+  };
+  assert.equal(showsResearchFallback(kept), false);
+  assert.equal(byClass(renderDeepDive(kept, fakeDocument(false)), "deep-dive-fallback").length, 0);
 });
 
 test("the NHTSA chart starts at Jan 2024 and uses month labels that fit the width", () => {

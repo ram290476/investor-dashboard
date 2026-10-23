@@ -5650,6 +5650,19 @@ a.catalyst-edgar-link:hover {
   line-height: 1.45;
 }
 
+.deep-dive-fallback {
+  margin: 0;
+  padding: 28px 20px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: 0 12px 30px var(--shadow-panel);
+  color: var(--secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .deep-dive-source {
   padding: 7px 14px;
   border-top: 1px solid var(--line);
@@ -5858,20 +5871,25 @@ a.catalyst-edgar-link:hover {
   }
 }
 
-/* Analysis: Yearly Fundamentals and Revenue Flow. Colors stay on theme tokens. */
+/* Analysis: Technical Summary, then Revenue Flow, then Yearly Fundamentals.
+   One column at every width. The chart scales; the grid scrolls inside itself. */
 .stock-page[data-stock-tab="analysis"] .analysis-fundamentals[data-stock-panel="analysis"],
 .stock-page[data-stock-tab="overview"] .analysis-fundamentals[data-stock-panel="analysis"],
 .stock-page[data-stock-tab="technical"] .analysis-fundamentals[data-stock-panel="analysis"] {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 1.2fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
 }
 
 .yearly-fundamentals,
 .revenue-flow {
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
   background: var(--page);
   color: var(--text);
 }
@@ -5920,28 +5938,45 @@ a.catalyst-edgar-link:hover {
   color: var(--muted);
 }
 
-.yearly-scroll,
+/* The chart scales with the panel. The grid is the only horizontal scroller,
+   at every width, so the metric column can stay pinned without a breakpoint. */
 .flow-scroll {
-  overflow: auto;
+  overflow: visible;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 8px 8px;
+}
+
+.yearly-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: 0;
+  max-width: 100%;
   padding: 0 8px 8px;
 }
 
 .yearly-table {
-  width: 100%;
-  min-width: 640px;
-  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .yearly-table th,
 .yearly-table td {
   padding: 7px 12px;
-  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   text-align: right;
   white-space: nowrap;
 }
 
 .yearly-table .yearly-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--page);
+  box-shadow: 1px 0 0 var(--line);
   text-align: left;
   color: var(--secondary);
   font-weight: 500;
@@ -5958,6 +5993,10 @@ a.catalyst-edgar-link:hover {
   background: var(--surface);
 }
 
+.yearly-row:nth-child(even) .yearly-label {
+  background: var(--surface);
+}
+
 .yearly-row.is-total,
 .yearly-row.is-profit {
   background: var(--surface-raised);
@@ -5969,6 +6008,11 @@ a.catalyst-edgar-link:hover {
 .yearly-row.is-total td,
 .yearly-row.is-profit td {
   color: var(--text);
+}
+
+.yearly-row.is-total .yearly-label,
+.yearly-row.is-profit .yearly-label {
+  background: var(--surface-raised);
 }
 
 .yearly-row.is-pe,
@@ -5986,6 +6030,10 @@ a.catalyst-edgar-link:hover {
 .yearly-row.is-price td {
   color: var(--green);
   font-weight: 760;
+}
+
+.yearly-row.is-price .yearly-label {
+  background: color-mix(in srgb, var(--green) 16%, var(--page));
 }
 
 .yearly-row.is-price td {
@@ -6035,7 +6083,7 @@ a.catalyst-edgar-link:hover {
 .flow-chart {
   display: block;
   width: 100%;
-  min-width: 720px;
+  max-width: 100%;
   height: auto;
   font-family: inherit;
 }
@@ -6137,12 +6185,6 @@ a.catalyst-edgar-link:hover {
 }
 
 @media (max-width: 1100px) {
-  .stock-page[data-stock-tab="analysis"] .analysis-fundamentals[data-stock-panel="analysis"],
-  .stock-page[data-stock-tab="overview"] .analysis-fundamentals[data-stock-panel="analysis"],
-  .stock-page[data-stock-tab="technical"] .analysis-fundamentals[data-stock-panel="analysis"] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .yearly-ticker,
   .flow-title {
     font-size: 22px;
