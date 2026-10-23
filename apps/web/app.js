@@ -69,7 +69,7 @@ import { renderYearlyFundamentals, yearlyFundamentalsModel } from "./yearly-fund
 import { renderRevenueFlow, revenueFlowModel } from "./revenue-flow.js";
 import { classificationNote, fundRetryDelayMs, isFund, renderFundHoldingsPanel } from "./fund-holdings.js";
 import { renderFundSummaryPanels } from "./fund-summary.js";
-import { resetOutcome } from "./fund-flag-admin.js";
+import { adminFundFlagRow, resetOutcome } from "./fund-flag-admin.js";
 import { clockDelay, headerDate, marketLabel } from "./market-status.js";
 import {
   CHART_LANES,
@@ -3927,8 +3927,8 @@ function renderTechnicalSummary(ticker, history) {
 }
 
 // Revenue Flow, then Yearly Fundamentals, sit full width under Technical Summary.
-// A fund snapshot does not get either panel. The selector keeps the chosen period
-// for this ticker until the page is rebuilt.
+// A fund snapshot gets a short note instead of either panel. The selector keeps the
+// chosen period for this ticker until the page is rebuilt.
 function mountRevenueFlow(ticker, payload, chartData) {
   const selection = session.revenueFlowSelection[ticker] || {};
   const model = revenueFlowModel(ticker, payload, chartData, selection);
@@ -3946,7 +3946,20 @@ function mountRevenueFlow(ticker, payload, chartData) {
 }
 
 function renderAnalysisFundamentals(ticker, payload, chartData, fund) {
-  if (fund) return null;
+  if (fund) {
+    const noteText = "Fundamentals and revenue flow aren't available for funds; see the Fund tab.";
+    const label = "Fund tab";
+    const splitAt = noteText.indexOf(label);
+    const note = node("section", "panel analysis-fund-note");
+    note.dataset.stockPanel = ANALYSIS_TAB_ID;
+    note.id = "stock-panel-analysis-fundamentals";
+    const copy = node("p", "analysis-fund-note-copy");
+    copy.append(document.createTextNode(noteText.slice(0, splitAt)));
+    copy.append(action(label, "analysis-fund-tab", () => selectStockTab(FUND_TAB_ID)));
+    copy.append(document.createTextNode(noteText.slice(splitAt + label.length)));
+    note.append(copy);
+    return note;
+  }
   const wrap = node("div", "analysis-fundamentals");
   wrap.dataset.stockPanel = ANALYSIS_TAB_ID;
   wrap.id = "stock-panel-analysis-fundamentals";
@@ -4716,9 +4729,9 @@ const settings = createAccountSettings({
   browserTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   // Admin tab (#223): same admin check as the metric Approve buttons; never the demo account.
   isAdmin: () => canApproveMetrics(session.accessToken, session.email),
-  fundFlagRows: () => (session.prefs?.tickers || []).map((ticker) => ({
-    ticker, is_fund: session.dashboard?.tickers?.[ticker]?.is_fund,
-  })),
+  fundFlagRows: () => (session.prefs?.tickers || []).map((ticker) => (
+    adminFundFlagRow(ticker, session.dashboard?.tickers?.[ticker], session.dashboardState)
+  )),
   resetFundFlag: async (ticker) => {
     try {
       await apiPost(`admin/fund-flag/${encodeURIComponent(ticker)}/reset`, "Resetting the fund flag");

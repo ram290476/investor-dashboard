@@ -3,7 +3,7 @@
 // Data refresh is its own larger pop-up. Changes autosave through PUT /prefs.
 
 import { PERIODS, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
-import { renderFundFlagAdmin, resetConfirmText } from "./fund-flag-admin.js";
+import { paintFundFlagOutcome, renderFundFlagAdmin, resetConfirmText, selectFundFlagRow } from "./fund-flag-admin.js";
 import { sparkline } from "./sparkline.js";
 import { DEFAULT_THEME, THEMES, themeProperties } from "./theme.js";
 import {
@@ -417,31 +417,38 @@ export function createAccountSettings(ctx) {
     }
   }
 
+  function fundFlagSection() {
+    return panel?.querySelector(".fund-flag-admin") || null;
+  }
+
   function renderAdminTab() {
     return renderFundFlagAdmin({ rows: ctx.fundFlagRows?.() || [], ...fundFlag }, document, {
       onSelect: (ticker) => {
         fundFlag.selected = ticker;
-        renderPanel();
       },
       onReset: resetFundFlag,
     });
   }
 
+  // Selection and reset patch the live rows. Replacing the settings panel would
+  // rebuild the table and drop both scroll positions.
   async function resetFundFlag(ticker) {
     if (fundFlag.outcomes[ticker]?.state === "saving") return;
     fundFlag.selected = ticker;
+    const section = fundFlagSection();
+    selectFundFlagRow(section, ticker, fundFlag.outcomes[ticker]);
     if (!isAdmin()) {
       fundFlag.outcomes[ticker] = { state: "forbidden" };
-      renderPanel();
+      paintFundFlagOutcome(section, ticker, fundFlag.outcomes[ticker]);
       return;
     }
     const ask = ctx.confirm || ((message) => globalThis.confirm?.(message));
     if (!ask(resetConfirmText(ticker))) return;
     fundFlag.outcomes[ticker] = { state: "saving" };
-    renderPanel();
+    paintFundFlagOutcome(section, ticker, fundFlag.outcomes[ticker]);
     fundFlag.outcomes[ticker] = await ctx.resetFundFlag(ticker);
     if (fundFlag.outcomes[ticker].state === "forbidden") announce("Only an admin can reset the fund flag.");
-    renderPanel();
+    paintFundFlagOutcome(section, ticker, fundFlag.outcomes[ticker]);
   }
 
   function renderTabError() {

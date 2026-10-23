@@ -210,10 +210,12 @@ test("the table keeps the latest six fiscal years", () => {
   assert.deepEqual(model.years.map((year) => year.year), [2021, 2022, 2023, 2024, 2025, 2026]);
 });
 
-test("the Analysis tab mounts both panels and funds get neither", () => {
+test("the Analysis tab mounts both panels and funds get a note", () => {
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   const mount = app.slice(app.indexOf("function renderAnalysisFundamentals"), app.indexOf("function renderStockPage"));
-  assert.match(mount, /if \(fund\) return null/);
+  assert.match(mount, /Fundamentals and revenue flow aren't available for funds; see the Fund tab\./);
+  assert.match(mount, /selectStockTab\(FUND_TAB_ID\)/);
+  assert.doesNotMatch(mount, /if \(fund\) return null/);
   assert.match(page, /renderAnalysisFundamentals\(session\.selected, payload, chartData, fundTicker\)/);
   assert.match(page, /fund: fundTicker/);
   assert.doesNotMatch(mount, /TSLA|SPCX|NVDA|AAPL/);
