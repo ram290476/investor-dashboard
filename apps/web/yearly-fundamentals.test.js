@@ -93,6 +93,8 @@ test("classification follows the line, not a ticker list", () => {
   assert.equal(classifyMetric({ metric_id: "income_tax", display_name: "Income tax", unit: "USD" }), "tax");
   assert.equal(classifyMetric({ metric_id: "net_income_gaap", display_name: "Net income", unit: "USD" }), "net_profit");
   assert.equal(classifyMetric({ metric_id: "adjusted_ebitda", display_name: "Adjusted EBITDA", unit: "USD" }), "ebitda");
+  assert.equal(classifyMetric({ metric_id: "automotive_leasing", display_name: "Automotive leasing", unit: "USD" }), "segment_revenue");
+  assert.equal(classifyMetric({ metric_id: "vehicles_operating_lease", display_name: "Vehicles in operating lease", unit: "vehicles", category: "operating" }), "segment_other");
   assert.equal(classifyMetric({ metric_id: "automotive_gross_profit", display_name: "Segment gross profit", unit: "USD" }), "");
   assert.doesNotMatch(`${modelSource}\n${statementSource}`, /TSLA|SPCX|NVDA|AAPL/);
 });

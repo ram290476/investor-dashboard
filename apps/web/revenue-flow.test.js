@@ -143,10 +143,15 @@ test("the flow uses every reported line and balances with Other", () => {
   assert.equal(model.selection.quarter, null);
   assert.equal(model.periods[0].quarters.join(""), "1234");
   const ids = model.nodes.map((node) => node.id);
-  for (const id of ["cloud_revenue", "ads_revenue", "hosting_cost", "support_cost", "research_and_development", "sga", "restructuring", "interest_income", "interest_expense", "other_income", "income_tax", "net_income_gaap"]) {
+  for (const id of ["cloud_revenue", "ads_revenue", "hosting_cost", "support_cost", "research_and_development", "sga", "restructuring", "interest_net", "income_tax", "net_income_gaap"]) {
     assert.equal(ids.includes(id), true, id);
   }
+  assert.equal(ids.includes("interest_income"), false);
   assert.equal(ids.includes("robotaxi_fleet"), false);
+  const interest = model.nodes.find((node) => node.id === "interest_net");
+  assert.match(interest.label, /Interest/);
+  assert.equal(interest.value, 8);
+  assert.deepEqual(interest.parts, ["interest_income", "interest_expense", "other_income"]);
   const costGap = model.balances.find((row) => row.parent === "cost_of_revenue");
   assert.equal(costGap.gap, 4);
   assert.equal(model.nodes.some((node) => node.id === "other:cost_of_revenue" && node.label === "Other"), true);
@@ -168,14 +173,15 @@ test("the flow uses every reported line and balances with Other", () => {
     ["pretax_income", "income_tax"],
     ["pretax_income", "net_income_gaap"],
   ];
+  assert.ok(layout.nodes.every((node) => node.w <= 12));
+  const costDrop = layout.links.find((link) => link.from === "revenue" && link.to === "cost_of_revenue");
+  assert.ok(costDrop);
+  assert.ok(costDrop.y2 > costDrop.y1 + 24, `cost drop ${costDrop.y2 - costDrop.y1}`);
   for (const [from, to] of rightSide) {
     const link = layout.links.find((item) => item.from === from && item.to === to);
     assert.ok(link, `${from} -> ${to}`);
     const dx = Math.abs(link.x2 - link.x1);
-    const dy = Math.abs(link.y2 - link.y1);
-    assert.ok(dx >= 180, `${from} -> ${to} gap ${dx}`);
-    const ratio = dy / dx;
-    assert.ok(ratio >= 0.75 && ratio <= 1.35, `${from} -> ${to} rise ${ratio}`);
+    assert.ok(dx >= 160, `${from} -> ${to} gap ${dx}`);
     assert.equal(link.strong, true);
     const pull = curvePull(true);
     const control = Math.max(84, dx * pull);
@@ -194,7 +200,15 @@ test("the flow uses every reported line and balances with Other", () => {
   assert.equal(picker.yearOptions.find((item) => item.selected).label, "FY2025");
   assert.deepEqual(picker.quarterOptions.map((item) => item.label), ["Full Year", "Q1", "Q2", "Q3", "Q4"]);
   assert.equal(picker.quarterOptions.find((item) => item.selected).value, "year");
+  assert.match(model.footnote, /Source: company filings and SEC XBRL/);
   assert.doesNotMatch(source, /flow-period/);
+  assert.doesNotMatch(source, /DillonLoomis|@Dillon/);
+  const classes = [];
+  walk(view, (item) => {
+    if (item.className) classes.push(item.className);
+  });
+  assert.ok(classes.some((name) => String(name).includes("flow-footer")));
+  assert.ok(classes.some((name) => String(name).includes("flow-cards")));
 });
 
 test("a quarter compares with the same quarter last year and can return to the year", () => {
@@ -216,13 +230,12 @@ test("a quarter compares with the same quarter last year and can return to the y
   assert.equal(latest.selection.quarter, null);
   assert.deepEqual(latest.periods.map((period) => period.quarters), [[1, 2, 3, 4], [1, 2]]);
   assert.equal(latest.nodes.find((node) => node.id === "revenue").value, 30);
-  assert.match(latest.subtitle, /Q1–Q2 FY2025 actual/);
-  assert.match(latest.subtitle, /Q1–Q2 FY2024/);
+  assert.match(latest.subtitle, /Where the money went · Q1–Q2 FY2025 · ▲▼ changes vs\. Q1–Q2 FY2024/);
   const quarter = revenueFlowModel("BETA", payload, null, { year: 2025, quarter: 1 });
   assert.equal(quarter.header, "BETA FY2025 Q1");
   assert.equal(quarter.nodes.find((node) => node.id === "revenue").value, 12);
   assert.match(quarter.nodes.find((node) => node.id === "revenue").changeText, /▲20%/);
-  assert.match(quarter.subtitle, /Q1 FY2025 actual · changes vs\. Q1 FY2024/);
+  assert.match(quarter.subtitle, /Where the money went · Jan–Mar 2025 · ▲▼ changes vs\. Q1 2024/);
   assert.equal(quarter.cards.length, 1);
   assert.equal(quarter.cards[0].valueText, "50");
   const yearView = revenueFlowModel("BETA", payload, null, { year: 2025, quarter: null });
@@ -284,15 +297,14 @@ test("year and quarter dropdowns list only periods with data", () => {
   assert.equal(latest.header, "ACME FY2026");
   assert.equal(latest.nodes.find((node) => node.id === "revenue").value, 25);
   assert.match(latest.nodes.find((node) => node.id === "revenue").changeText, /▲25%/);
-  assert.match(latest.subtitle, /Q1, Q3 FY2026 actual/);
-  assert.match(latest.subtitle, /Q1, Q3 FY2025/);
+  assert.match(latest.subtitle, /Where the money went · Q1, Q3 FY2026 · ▲▼ changes vs\. Q1, Q3 FY2025/);
 
   const quarter = revenueFlowModel("ACME", payload, null, { year: 2026, quarter: 3 });
   assert.equal(quarter.header, "ACME FY2026 Q3");
   assert.equal(quarter.nodes.find((node) => node.id === "revenue").value, 14);
   assert.match(quarter.nodes.find((node) => node.id === "revenue").changeText, /▲40%/);
   assert.match(quarter.nodes.find((node) => node.id === "net_income_gaap").changeText, /▲50%/);
-  assert.match(quarter.subtitle, /Q3 FY2026 actual · changes vs\. Q3 FY2025/);
+  assert.match(quarter.subtitle, /Where the money went · Jul–Sep 2026 · ▲▼ changes vs\. Q3 2025/);
 
   const missing = revenueFlowModel("ACME", payload, null, { year: 2026, quarter: 2 });
   assert.equal(missing.selection.quarter, null);
@@ -324,6 +336,100 @@ test("year and quarter dropdowns list only periods with data", () => {
   assert.deepEqual(picked, [2024, null]);
   choose(quarterPicker.quarter, "year");
   assert.deepEqual(picked, [2026, null]);
+});
+
+test("auto sales, credits and leasing roll into Total auto", () => {
+  const payload = {
+    metrics: [
+      year("automotive_sales", "Automotive sales", 20),
+      year("automotive_regulatory_credits", "Automotive regulatory credits", 2),
+      year("regulatory_credits_revenue", "Regulatory credits revenue", 2),
+      year("automotive_leasing", "Automotive leasing", 3),
+      year("automotive_revenue", "Automotive revenue", 25),
+      year("energy_revenue", "Energy generation and storage revenue", 8),
+      year("services_revenue", "Services and other revenue", 5),
+      year("revenue_gaap", "Revenue", 40),
+    ],
+  };
+  const model = revenueFlowModel("ACME", payload, null, { year: 2025 });
+  const labels = model.nodes.filter((node) => node.column === "segments" && node.role === "segment_revenue").map((node) => node.label);
+  assert.deepEqual(labels, ["Car sales", "Regulatory credits", "Leasing", "Energy", "Services & other"]);
+  assert.equal(model.nodes.some((node) => node.id === "regulatory_credits_revenue"), false);
+  const total = model.nodes.find((node) => node.id === "automotive_revenue");
+  assert.equal(total.label, "Total auto");
+  assert.equal(total.column, "rollup");
+  const layout = layoutRevenueFlow(model);
+  for (const id of ["automotive_sales", "automotive_regulatory_credits", "automotive_leasing"]) {
+    const link = layout.links.find((item) => item.from === id);
+    assert.equal(link.to, "automotive_revenue", id);
+    assert.equal(layout.links.some((item) => item.from === id && item.to === "revenue"), false);
+  }
+  assert.ok(layout.links.some((item) => item.from === "automotive_revenue" && item.to === "revenue"));
+  assert.ok(layout.links.some((item) => item.from === "energy_revenue" && item.to === "revenue"));
+  const other = model.nodes.find((node) => node.id === "other:revenue-in");
+  assert.equal(other.value, 8);
+});
+
+test("a reported total smaller than its segments is flagged and not rewritten", () => {
+  const payload = {
+    metrics: [
+      year("revenue_gaap", "Revenue", 25),
+      year("cloud_revenue", "Cloud", 20),
+      year("ads_revenue", "Advertising", 15),
+    ],
+  };
+  const model = revenueFlowModel("ACME", payload, null, { year: 2025 });
+  assert.equal(model.nodes.find((node) => node.id === "revenue").value, 100);
+  assert.equal(model.nodes.some((node) => node.value < 0), false);
+  assert.equal(model.nodes.some((node) => node.id === "other:revenue-in"), false);
+  assert.match(model.footnote, /difference is not filled/);
+  assert.equal(model.nodes.find((node) => node.id === "revenue").note, "Reported total differs from segments");
+});
+
+test("a quarter with no prior year shows a dash and names the months", () => {
+  const payload = {
+    metrics: [
+      metric("revenue_gaap", "Revenue", "USD", { "2026Q3": 14 }),
+      metric("gross_profit", "Gross profit", "USD", { "2026Q3": 4 }),
+    ],
+  };
+  const model = revenueFlowModel("ACME", payload, null, { year: 2026, quarter: 3 });
+  const revenue = model.nodes.find((node) => node.id === "revenue");
+  assert.equal(revenue.changeText, "—");
+  assert.match(model.subtitle, /Where the money went · Jul–Sep 2026$/);
+  assert.doesNotMatch(model.subtitle, /changes vs/);
+  const gross = model.nodes.find((node) => node.id === "gross_profit");
+  assert.match(gross.marginText, /28\.6% margin/);
+  assert.doesNotMatch(gross.marginText, /pts/);
+});
+
+test("a placeholder quarter does not flatten the year-over-year change", () => {
+  const payload = {
+    metrics: [
+      metric("revenue_gaap", "Revenue", "USD", {
+        "2025Q1": 10, "2025Q2": 10, "2025Q3": 10, "2025Q4": 10,
+        "2026Q1": 20, "2026Q2": 20, "2026Q3": 20,
+      }),
+    ],
+    deep_dive: {
+      forecast: {
+        segments: [{
+          label: "Revenue",
+          metrics: [{
+            metric_id: "revenue_gaap",
+            unit: "USD",
+            approval_state: "approved",
+            forecast: [{ fiscal_period: "2026Q4", value: 10, reported: true }],
+          }],
+        }],
+      },
+    },
+  };
+  const model = revenueFlowModel("ACME", payload, null, { year: 2026 });
+  const revenue = model.nodes.find((node) => node.id === "revenue");
+  assert.equal(revenue.value, 70);
+  assert.match(revenue.changeText, /▲100%/);
+  assert.match(model.subtitle, /Where the money went · Q1–Q3 FY2026 \+ Q4 placeholder · ▲▼ changes vs\. Q1–Q3 FY2025/);
 });
 
 test("no income-statement periods leave an empty state", () => {

@@ -6190,3 +6190,240 @@ a.catalyst-edgar-link:hover {
     font-size: 22px;
   }
 }
+
+/* Revenue flow matches the black sankey reference. Yearly fundamentals keep the page theme. */
+.panel.revenue-flow {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-color: #1c1c1c;
+  background: #000;
+  color: #fff;
+  box-shadow: none;
+}
+
+.revenue-flow .flow-heading {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 28px;
+}
+
+.revenue-flow .flow-copy {
+  min-width: 0;
+}
+
+.revenue-flow .flow-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  background: transparent;
+  letter-spacing: 0;
+}
+
+.revenue-flow .flow-ticker {
+  color: #fff;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.revenue-flow .flow-when {
+  color: #c4c4c4;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.revenue-flow .flow-subtitle {
+  margin-top: 6px;
+  color: #8d8d8d;
+  font-size: 13px;
+}
+
+.revenue-flow .flow-selector {
+  flex: 0 0 auto;
+  padding: 0;
+  grid-template-columns: repeat(2, minmax(7.5rem, 10.5rem));
+}
+
+.revenue-flow .flow-field-label {
+  color: #8d8d8d;
+}
+
+.revenue-flow .flow-select {
+  min-height: 36px;
+  border-color: #2a2a2a;
+  background: #161616;
+  color: #fff;
+}
+
+.revenue-flow .flow-scroll {
+  overflow-x: auto;
+  padding: 4px 12px 8px;
+}
+
+.revenue-flow .flow-chart {
+  width: auto;
+  max-width: none;
+  min-width: 100%;
+  height: auto;
+}
+
+.revenue-flow .flow-name {
+  fill: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.revenue-flow .flow-amount {
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.revenue-flow .flow-amount-grey {
+  fill: #b5b5b5;
+}
+
+.revenue-flow .flow-amount-green {
+  fill: #3ddc84;
+}
+
+.revenue-flow .flow-amount-red {
+  fill: #ff5a5a;
+}
+
+.revenue-flow .flow-amount-muted {
+  fill: #9a9a9a;
+}
+
+.revenue-flow .flow-margin,
+.revenue-flow .flow-note {
+  fill: #9a9a9a;
+  font-size: 12px;
+}
+
+.revenue-flow .flow-change.is-up,
+.revenue-flow .flow-margin.is-up {
+  fill: #3ddc84;
+  color: #3ddc84;
+}
+
+.revenue-flow .flow-change.is-down,
+.revenue-flow .flow-margin.is-down {
+  fill: #ff5a5a;
+  color: #ff5a5a;
+}
+
+.revenue-flow .flow-change.is-flat,
+.revenue-flow .flow-change.is-none,
+.revenue-flow .flow-margin.is-flat,
+.revenue-flow .flow-margin.is-none {
+  fill: #8d8d8d;
+  color: #8d8d8d;
+}
+
+.revenue-flow .flow-bar-grey {
+  fill: #9a9a9a;
+}
+
+.revenue-flow .flow-bar-green {
+  fill: #1f9d55;
+}
+
+.revenue-flow .flow-bar-red {
+  fill: #e23b3b;
+}
+
+.revenue-flow .flow-bar-red.is-cap,
+.revenue-flow .flow-bar.is-cap {
+  fill: #ff2a2a;
+}
+
+.revenue-flow .flow-bar-muted {
+  fill: #6e6e6e;
+}
+
+.revenue-flow .flow-link-grey {
+  fill: rgba(176, 176, 176, 0.38);
+}
+
+.revenue-flow .flow-link-green {
+  fill: rgba(18, 110, 62, 0.72);
+}
+
+.revenue-flow .flow-link-red {
+  fill: rgba(120, 24, 24, 0.78);
+}
+
+.revenue-flow .flow-link-muted {
+  fill: rgba(110, 110, 110, 0.45);
+}
+
+.revenue-flow .flow-footer {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: 12px 16px;
+  padding: 8px 16px 16px;
+}
+
+.revenue-flow .flow-cards {
+  grid-column: 2;
+  justify-content: center;
+  padding: 0;
+}
+
+.revenue-flow .flow-card {
+  min-width: 168px;
+  border-color: #2a2a2a;
+  background: #111;
+}
+
+.revenue-flow .flow-card-label {
+  color: #9a9a9a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.revenue-flow .flow-card-value {
+  color: #fff;
+  font-size: 28px;
+  font-weight: 750;
+}
+
+.revenue-flow .flow-footnote {
+  grid-column: 3;
+  justify-self: end;
+  max-width: 340px;
+  margin: 0;
+  padding: 0;
+  color: #8d8d8d;
+  font-size: 11px;
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .revenue-flow .flow-ticker {
+    font-size: 28px;
+  }
+
+  .revenue-flow .flow-when {
+    font-size: 18px;
+  }
+
+  .revenue-flow .flow-footer {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .revenue-flow .flow-cards,
+  .revenue-flow .flow-footnote {
+    grid-column: 1;
+    justify-self: center;
+    text-align: center;
+  }
+}

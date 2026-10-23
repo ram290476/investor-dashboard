@@ -129,6 +129,7 @@ export function classifyMetric(metric) {
   if (/^revenue_gaap$|^total_revenues?$|^revenue$/.test(id) || name === "revenue" || name === "total revenue" || name === "total revenues") return "revenue";
   if (/regulatory.?credit/.test(blob) && (usd || !unit)) return "segment_revenue";
   if (/revenue|sales/.test(blob) && !/cost|gross|deferred|margin/.test(blob) && (usd || !unit || metric.category === "fundamentals")) return "segment_revenue";
+  if (/(^|_)leasing$/.test(id) && (usd || !unit) && !/count|vehicle|liabilit|expense|receivable/.test(blob)) return "segment_revenue";
   if (/deliver/.test(blob)) return "deliveries";
   if (/produc/.test(blob) && !/capacity/.test(blob)) return "production";
   if (metric.category === "operating") return "segment_other";
@@ -197,12 +198,16 @@ function addPoint(metric, fiscalPeriod, value, flags) {
     estimate: Boolean(flags.estimate),
     pending: Boolean(flags.pending || metric.pending),
     source: flags.source || metric.source || "",
+    periodEnd: String(flags.periodEnd || ""),
   });
 }
 
 function addSeriesPoint(metric, point, flags) {
   if (!point || point.reported === false) return;
-  addPoint(metric, point.fiscal_period || point.period, point.value, flags);
+  addPoint(metric, point.fiscal_period || point.period, point.value, {
+    ...flags,
+    periodEnd: point.period_end || point.periodEnd || flags.periodEnd || "",
+  });
 }
 
 function takeSingletons(metrics) {
@@ -354,6 +359,7 @@ export function periodSlice(metric, year, quarter) {
       pending: Boolean(chosen.pending),
       quarters: [chosen.quarter],
       estimatedQuarters: chosen.estimate ? [chosen.quarter] : [],
+      periodEnd: chosen.periodEnd || "",
     };
   }
   return {
@@ -362,6 +368,7 @@ export function periodSlice(metric, year, quarter) {
     pending: ordered.some((point) => point.pending),
     quarters: ordered.map((point) => point.quarter),
     estimatedQuarters: ordered.filter((point) => point.estimate).map((point) => point.quarter),
+    periodEnd: ordered.at(-1)?.periodEnd || "",
   };
 }
 
@@ -381,6 +388,7 @@ export function alignedValue(metric, year, quarters) {
     pending: points.some((point) => point.pending),
     quarters: quarters.slice(),
     estimatedQuarters: points.filter((point) => point.estimate).map((point) => point.quarter),
+    periodEnd: points.at(-1)?.periodEnd || "",
   };
 }
 
