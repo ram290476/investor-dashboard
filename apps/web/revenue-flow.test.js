@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { curvePull, layoutRevenueFlow, renderRevenueFlow, resolveSelection, revenueFlowModel, ribbonPath } from "./revenue-flow.js";
+import { curvePull, flowTextWidth, layoutRevenueFlow, renderRevenueFlow, resolveSelection, revenueFlowModel, ribbonPath } from "./revenue-flow.js";
 
 const source = await readFile(new URL("./revenue-flow.js", import.meta.url), "utf8");
+const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
 
 function metric(id, name, unit, values, extra = {}) {
   return {
@@ -159,7 +160,7 @@ test("the flow uses every reported line and balances with Other", () => {
   assert.equal(revenueBalance.gap, 0);
   assert.equal(model.nodes.some((node) => node.id === "other:revenue"), false);
   assert.equal(model.cards.map((card) => card.label).sort().join(","), "Deliveries,Production");
-  const layout = layoutRevenueFlow(model);
+  const layout = layoutRevenueFlow(model, { width: 2400 });
   const strong = layout.links.filter((link) => link.strong);
   assert.ok(strong.length >= 4);
   assert.ok(strong.every((link) => link.d.includes(" C ")));
@@ -430,6 +431,89 @@ test("a placeholder quarter does not flatten the year-over-year change", () => {
   assert.equal(revenue.value, 70);
   assert.match(revenue.changeText, /▲100%/);
   assert.match(model.subtitle, /Where the money went · Q1–Q3 FY2026 \+ Q4 placeholder · ▲▼ changes vs\. Q1–Q3 FY2025/);
+});
+
+function fitsContainer(model, width) {
+  const layout = layoutRevenueFlow(model, { width });
+  assert.ok(layout.width <= width, `layout ${layout.width} > ${width}`);
+  assert.equal(layout.width, width);
+  for (const node of layout.nodes) {
+    assert.ok(node.x >= -0.1, node.id);
+    assert.ok(node.x + node.w <= layout.width + 0.1, `${node.id} right ${node.x + node.w}`);
+    for (const row of node.rows) {
+      const text = row.change ? `${row.text} ${row.change}` : row.text;
+      assert.ok(flowTextWidth(text, row.font) <= node.budget + 0.5, `${node.label} “${text}”`);
+    }
+    for (const line of node.noteLines || []) {
+      assert.ok(flowTextWidth(line, 12) <= node.budget + 0.5, line);
+    }
+  }
+  for (const link of layout.links) {
+    assert.ok(link.x1 >= -0.1 && link.x2 >= -0.1, `${link.from}->${link.to}`);
+    assert.ok(link.x1 <= layout.width + 0.1 && link.x2 <= layout.width + 0.1, `${link.from}->${link.to}`);
+  }
+  return layout;
+}
+
+test("the chart width stays inside the panel for the year and a quarter", () => {
+  const year = revenueFlowModel("ACME", full, null, {});
+  const quarter = revenueFlowModel("ACME", full, null, { year: 2025, quarter: 1 });
+  for (const width of [1024, 1280, 1440]) {
+    fitsContainer(year, width);
+    fitsContainer(quarter, width);
+  }
+  const view = renderRevenueFlow(year, fakeDocument(), { width: 1280 });
+  let chart = null;
+  walk(view, (item) => {
+    if (String(item.className || "").split(/\s+/).includes("flow-chart")) chart = item;
+  });
+  assert.equal(chart.getAttribute("width"), "100%");
+  const boxWidth = Number(chart.getAttribute("viewBox").split(/\s+/)[2]);
+  assert.ok(boxWidth <= 1280);
+  const sankey = styles.slice(styles.indexOf("/* Revenue flow matches"));
+  assert.doesNotMatch(sankey, /#[0-9a-fA-F]{3,8}\b/);
+  const scroll = sankey.match(/\.revenue-flow \.flow-scroll\s*\{[^}]*\}/)[0];
+  assert.match(scroll, /overflow:\s*hidden/);
+  assert.doesNotMatch(scroll, /overflow-x:\s*auto/);
+  const chartRule = sankey.match(/\.revenue-flow \.flow-chart\s*\{[^}]*\}/)[0];
+  assert.match(chartRule, /width:\s*100%/);
+  assert.match(chartRule, /max-width:\s*100%/);
+  assert.match(chartRule, /min-width:\s*0/);
+  const name = sankey.match(/\.revenue-flow \.flow-name\s*\{[^}]*\}/)[0];
+  const amount = sankey.match(/\.revenue-flow \.flow-amount\s*\{[^}]*\}/)[0];
+  const cardLabel = sankey.match(/\.revenue-flow \.flow-card-label\s*\{[^}]*\}/)[0];
+  const cardValue = sankey.match(/\.revenue-flow \.flow-card-value\s*\{[^}]*\}/)[0];
+  const cardChange = sankey.match(/\.revenue-flow \.flow-card-value \.flow-change\s*\{[^}]*\}/)[0];
+  for (const rule of [name, amount, cardLabel, cardValue, cardChange]) {
+    const size = Number(rule.match(/font-size:\s*(\d+(?:\.\d+)?)px/)[1]);
+    assert.ok(size >= 12, rule);
+  }
+  assert.ok(Number(cardValue.match(/font-size:\s*(\d+)/)[1]) < 28);
+});
+
+test("source notes sit in a keyboard-reachable tooltip instead of the footer line", () => {
+  const model = revenueFlowModel("ACME", full, null, {});
+  const view = renderRevenueFlow(model, fakeDocument(), { width: 1024 });
+  let tip = null;
+  let button = null;
+  const footnotes = [];
+  walk(view, (item) => {
+    if (item.getAttribute?.("role") === "tooltip") tip = item;
+    if (String(item.className || "").split(/\s+/).includes("flow-source-button")) button = item;
+    if (String(item.className || "").split(/\s+/).includes("flow-footnote")) footnotes.push(item);
+  });
+  assert.equal(footnotes.length, 0);
+  assert.match(tip.textContent, /Source: company filings and SEC XBRL/);
+  assert.equal(button.tagName, "BUTTON");
+  assert.equal(button.getAttribute("type"), "button");
+  assert.equal(button.getAttribute("aria-describedby"), tip.getAttribute("id"));
+  assert.equal(button.getAttribute("aria-label"), "Source notes");
+  let nodeTitle = "";
+  walk(view, (item) => {
+    if (item.tagName === "TITLE" && /Gross profit/.test(item.textContent || "")) nodeTitle = item.textContent;
+  });
+  assert.match(nodeTitle, /Gross profit/);
+  assert.match(nodeTitle, /margin/);
 });
 
 test("no income-statement periods leave an empty state", () => {
