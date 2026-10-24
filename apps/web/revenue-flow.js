@@ -20,9 +20,8 @@ import {
   formatScaled,
   isExpenseRole,
   periodSlice,
-  quartersWithData,
   signedBridge,
-  yearsWithData,
+  yearsWithData
 } from "./statement-model.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -39,15 +38,70 @@ const MARGIN_ROLES = new Set(["gross_profit", "operating_profit", "net_profit"])
 const TOTAL_COST_IDS = new Set(["cost_of_revenue", "cost_of_sales", "cogs", "cost_of_goods_sold"]);
 const TOTAL_COST_NAMES = new Set(["cost of revenue", "cost of sales", "cost of goods sold"]);
 
+function newestQuarter(periods, key) {
+  let best = null;
+  for (const period of periods || []) {
+    for (const quarter of period?.[key] || []) {
+      const number = Number(quarter);
+      if (!Number.isInteger(number) || number < 1 || number > 4) continue;
+      if (!best || period.year > best.year || (period.year === best.year && number > best.quarter)) {
+        best = { year: period.year, quarter: number };
+      }
+    }
+  }
+  return best;
+}
+
+/** Latest quarter that has reported flow data. Estimate-only quarters are the fallback. */
+export function latestDataQuarter(periods) {
+  return newestQuarter(periods, "activeQuarters") || newestQuarter(periods, "quarters");
+}
+
+/**
+ * An explicit year stays on that year (full year when the quarter is absent or
+ * not in the data). No year means the latest quarter this ticker actually has,
+ * so a later estimate-only year is not the default.
+ */
 export function resolveSelection(periods, selection = {}) {
   if (!periods?.length) return { year: null, quarter: null };
-  const wanted = Number(selection.year);
-  const period = periods.find((item) => item.year === wanted) || periods.at(-1);
-  const quarter = Number(selection.quarter);
-  if (!Number.isInteger(quarter) || quarter < 1 || !period.quarters.includes(quarter)) {
+  const choice = selection && typeof selection === "object" ? selection : {};
+  const explicitYear = Object.prototype.hasOwnProperty.call(choice, "year")
+    && choice.year != null && choice.year !== "";
+  const wanted = Number(choice.year);
+  const period = periods.find((item) => item.year === wanted);
+  if (explicitYear && period) {
+    const quarter = Number(choice.quarter);
+    if (Number.isInteger(quarter) && quarter >= 1 && period.quarters.includes(quarter)) {
+      return { year: period.year, quarter };
+    }
     return { year: period.year, quarter: null };
   }
-  return { year: period.year, quarter };
+  const active = latestDataQuarter(periods);
+  if (active) return active;
+  const last = [...periods].reverse().find((item) => item.quarters?.length) || periods.at(-1);
+  return { year: last?.year ?? null, quarter: null };
+}
+
+function periodsFromFlows(flows) {
+  return yearsWithData(flows, 40).map((year) => {
+    const quarters = new Set();
+    const active = new Set();
+    let estimate = false;
+    for (const metric of flows || []) {
+      for (const point of metric.points || []) {
+        if (point.year !== year || !Number.isInteger(point.quarter)) continue;
+        quarters.add(point.quarter);
+        if (point.estimate) estimate = true;
+        else active.add(point.quarter);
+      }
+    }
+    return {
+      year,
+      quarters: [...quarters].sort((a, b) => a - b),
+      activeQuarters: [...active].sort((a, b) => a - b),
+      estimate,
+    };
+  });
 }
 
 function remainder(parent, parts) {
@@ -1179,11 +1233,7 @@ export function revenueFlowModel(ticker, payload, chartData, selection = {}) {
   const statement = collectStatement(payload, chartData);
   statement.ticker = String(ticker || payload?.ticker || "").toUpperCase();
   const flows = flowMetrics(statement);
-  const periods = yearsWithData(flows, 40).map((year) => ({
-    year,
-    quarters: quartersWithData(flows, year),
-    estimate: flows.some((metric) => metric.points.some((point) => point.year === year && point.estimate)),
-  }));
+  const periods = periodsFromFlows(flows);
   const resolved = resolveSelection(periods, selection);
   const flow = resolved.year == null ? {
     year: null,

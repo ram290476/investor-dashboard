@@ -11,30 +11,7 @@ export function hasDeepDive(payload) {
   return Array.isArray(payload?.deep_dive?.sections) && payload.deep_dive.sections.length > 0;
 }
 
-function scoreboardSection(sections) {
-  const list = Array.isArray(sections) ? sections : [];
-  return list.find((item) => {
-    if (!item || typeof item !== "object") return false;
-    if (item.id === "scoreboard") return true;
-    if (/scoreboard/i.test(String(item.title || ""))) return true;
-    return (item.panels || []).some((panel) => panel?.kind === "scoreboard");
-  }) || null;
-}
-
-/**
- * Scoreboard title for the Overview tab. The placeholder forecast label is not
- * drawn here. It sits once, above the forecast panel, on the Research tab.
- */
-export function renderTrendDisclaimer(payload, doc = document) {
-  if (!hasDeepDive(payload)) return null;
-  const section = scoreboardSection(payload.deep_dive.sections);
-  if (!section?.title) return null;
-  const block = el(doc, "div", "trend-scoreboard-notice");
-  block.append(el(doc, "h3", "stock-section-title", section.title));
-  return block;
-}
-
-/** Label moved off the scoreboard. The wording stays the serving disclaimer. */
+/** The wording stays the serving disclaimer, above the Research forecast panel. */
 export function forecastDisclaimerText(dive) {
   return String(dive?.disclaimer || "").trim()
     || "Figures appear when a source has been collected. Pending review values stay labeled. Empty series are not zero.";

@@ -20,7 +20,6 @@ import {
   nhtsaPeriods,
   orderedDeepDiveSections,
   renderDeepDive,
-  renderTrendDisclaimer,
   revealDeepDiveSection,
   shortSectionLabel,
   trendTone,
@@ -487,11 +486,7 @@ test("deep dive helpers stay ticker-agnostic and label empty or placeholder valu
   assert.equal(nextStockTab("kpis", "Home", stockTabs(sample)), "summary");
 });
 
-test("the forecast label sits once above the Research forecast panel, not under the scoreboard", () => {
-  const notice = renderTrendDisclaimer(sample, fakeDocument(false));
-  assert.equal(byClass(notice, "stock-section-title")[0].textContent, "Scoreboard");
-  assert.equal(byClass(notice, "deep-dive-banner").length, 0);
-  assert.doesNotMatch(textOf(notice), /Pending values stay labeled/);
+test("the forecast label sits once above the Research forecast panel", () => {
   const label = "Placeholder only — not a real forecast model.";
   const plain = {
     deep_dive: {
@@ -508,7 +503,6 @@ test("the forecast label sits once above the Research forecast panel, not under 
       }],
     },
   };
-  assert.equal(renderTrendDisclaimer(plain, fakeDocument(false)), null);
   const research = renderDeepDive(plain, fakeDocument(false));
   const banners = byClass(research, "deep-dive-banner");
   assert.equal(banners.length, 1);
@@ -517,7 +511,8 @@ test("the forecast label sits once above the Research forecast panel, not under 
   assert.equal(block.children[0], banners[0]);
   assert.equal(classNames(block.children[1]).includes("deep-dive-panel"), true);
   assert.equal(byClass(research, "deep-dive-note").some((node) => node.textContent === label), false);
-  assert.equal(renderTrendDisclaimer({}, fakeDocument(false)), null);
+  assert.equal(byClass(renderDeepDive(sample, fakeDocument(false)), "trend-scoreboard-notice").length, 0);
+  assert.doesNotMatch(source, /renderTrendDisclaimer|trend-scoreboard-notice/);
   assert.doesNotMatch(source, /TSLA|Tesla|SPCX/);
 });
 
