@@ -529,15 +529,6 @@ a {
   border-bottom: 0;
 }
 
-.trend-scoreboard-notice {
-  display: grid;
-  gap: 8px;
-}
-
-.trend-scoreboard-notice .stock-section-title {
-  margin: 0;
-}
-
 .overview-quote {
   min-width: 0;
   flex: 1 1 auto;
@@ -6552,4 +6543,33 @@ a.catalyst-edgar-link:hover {
   .revenue-flow .flow-source {
     margin-left: 0;
   }
+}
+
+.overview-side-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 8px;
+}
+
+.trends-layout > .primary-column {
+  min-width: 0;
+}
+
+.trends-layout .side-column-toggle {
+  min-height: 32px;
+}
+
+.trends-layout.dashboard-grid[data-side-collapsed="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.trends-layout.dashboard-grid[data-side-collapsed="true"] > .side-column {
+  display: none;
+}
+
+.trends-layout .price-chart,
+.trends-layout .lane-chart {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
 }

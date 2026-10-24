@@ -48,7 +48,13 @@ import {
   stockTabs,
   visibleStockTab,
 } from "./stock-page.js";
-import { hasDeepDive, renderDeepDive, renderTrendDisclaimer, revealDeepDiveSection } from "./deep-dive.js";
+import { hasDeepDive, renderDeepDive, revealDeepDiveSection } from "./deep-dive.js";
+import {
+  applyOverviewSideColumn,
+  readOverviewSideCollapsed,
+  resizeOverviewCharts,
+  writeOverviewSideCollapsed,
+} from "./overview-side.js";
 import { companyBookmarks, renderCompanyBookmarks, revealCompanySection, sectionSlug } from "./company-sections.js";
 import { curveView, fomcView, policyPathView, sparklinePath } from "./rates-panel.js";
 import {
@@ -4244,7 +4250,7 @@ function tagTrendSection(element, id) {
   return element;
 }
 
-function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
+function renderTrendsLayout(tickerData, chartData, chartDataState) {
   const present = [];
   const mark = (element, id) => {
     if (!tagTrendSection(element, id)) return;
@@ -4256,8 +4262,6 @@ function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
   layout.id = `stock-panel-${OVERVIEW_TAB_ID}`;
   layout.setAttribute("aria-label", `${session.selected} Overview`);
   const primary = node("div", "primary-column");
-  const notice = renderTrendDisclaimer(payload, document);
-  if (notice) primary.append(notice);
   const chart = renderChartPanel("dashboard", session.selected);
   chart.querySelector("[data-company-page]")?.remove();
   mark(chart, "price");
@@ -4287,7 +4291,24 @@ function renderTrendsLayout(tickerData, chartData, chartDataState, payload) {
     primary.append(contracts);
   }
   const side = node("aside", "side-column");
+  side.id = "overview-side-column";
   side.setAttribute("aria-label", "Macro drivers, news and filings");
+  const sideToggle = node("button", "overlay-chip side-column-toggle");
+  sideToggle.dataset.sideToggle = "macro";
+  const syncSide = (collapsed) => {
+    applyOverviewSideColumn(layout, side, sideToggle, collapsed);
+    resizeOverviewCharts(layout, window);
+  };
+  syncSide(readOverviewSideCollapsed(localPrefs));
+  sideToggle.addEventListener("click", () => {
+    const collapsed = layout.dataset.sideCollapsed !== "true";
+    writeOverviewSideCollapsed(localPrefs, collapsed);
+    syncSide(collapsed);
+    sideToggle.focus({ preventScroll: true });
+  });
+  const toggleRow = node("div", "overview-side-toggle-row");
+  toggleRow.append(sideToggle);
+  primary.prepend(toggleRow);
   const news = renderNews(tickerData), filings = renderFilings(tickerData);
   if (news) news.dataset.mobilePanel = "more";
   if (filings) filings.dataset.mobilePanel = "more";

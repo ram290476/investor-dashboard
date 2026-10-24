@@ -175,7 +175,7 @@ test("the company page renders former main-page panels on Overview and keeps the
   assert.match(trends, /dataset\.mobileView = "all"/);
   const page = app.slice(app.indexOf("function renderStockPage"), app.indexOf("function renderResearchPage"));
   assert.match(page, /renderTrendsLayout\(tickerData, chartData, chartDataState, payload\)/);
-  assert.match(app, /renderTrendDisclaimer\(payload, document\)/);
+  assert.doesNotMatch(app, /renderTrendDisclaimer/);
   assert.match(page, /page\.prepend\(trends\)/);
   assert.doesNotMatch(app, /renderQuarterlyNotes|quarterly-notes|No quarterly notes yet|Quarterly notes/);
   assert.match(app, /navigateToStock\(ticker, \{ keepTab: true \}\)/);

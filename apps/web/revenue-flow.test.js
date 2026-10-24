@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { curvePull, flowTextWidth, layoutRevenueFlow, renderRevenueFlow, resolveSelection, revenueFlowModel, ribbonPath } from "./revenue-flow.js";
+import { curvePull, flowTextWidth, latestDataQuarter, layoutRevenueFlow, renderRevenueFlow, resolveSelection, revenueFlowModel, ribbonPath } from "./revenue-flow.js";
 
 const source = await readFile(new URL("./revenue-flow.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
@@ -139,7 +139,7 @@ test("right-side ribbons are cubic beziers with a long horizontal pull", () => {
 });
 
 test("the flow uses every reported line and balances with Other", () => {
-  const model = revenueFlowModel("ACME", full, null, {});
+  const model = revenueFlowModel("ACME", full, null, { year: 2025 });
   assert.equal(model.selection.year, 2025);
   assert.equal(model.selection.quarter, null);
   assert.equal(model.periods[0].quarters.join(""), "1234");
@@ -225,7 +225,7 @@ test("a quarter compares with the same quarter last year and can return to the y
       metric("total_deliveries", "Deliveries", "vehicles", { "2025Q1": 50 }, { category: "operating" }),
     ],
   };
-  const latest = revenueFlowModel("BETA", payload, null, {});
+  const latest = revenueFlowModel("BETA", payload, null, { year: 2025 });
   assert.equal(latest.ticker, "BETA");
   assert.equal(latest.selection.year, 2025);
   assert.equal(latest.selection.quarter, null);
@@ -243,7 +243,7 @@ test("a quarter compares with the same quarter last year and can return to the y
   assert.equal(yearView.selection.quarter, null);
   const skipped = revenueFlowModel("BETA", payload, null, { year: 2025, quarter: 4 });
   assert.equal(skipped.selection.quarter, null);
-  assert.equal(resolveSelection(latest.periods, {}).year, 2025);
+  assert.deepEqual(resolveSelection(latest.periods, {}), { year: 2025, quarter: 2 });
   let picked = null;
   const view = renderRevenueFlow(quarter, fakeDocument(), {
     onSelect(year, quarterId) { picked = [year, quarterId]; },
@@ -292,7 +292,7 @@ test("year and quarter dropdowns list only periods with data", () => {
       }),
     ],
   };
-  const latest = revenueFlowModel("ACME", payload, null, {});
+  const latest = revenueFlowModel("ACME", payload, null, { year: 2026 });
   assert.equal(latest.selection.year, 2026);
   assert.equal(latest.selection.quarter, null);
   assert.equal(latest.header, "ACME FY2026");
@@ -456,7 +456,7 @@ function fitsContainer(model, width) {
 }
 
 test("the chart width stays inside the panel for the year and a quarter", () => {
-  const year = revenueFlowModel("ACME", full, null, {});
+  const year = revenueFlowModel("ACME", full, null, { year: 2025 });
   const quarter = revenueFlowModel("ACME", full, null, { year: 2025, quarter: 1 });
   for (const width of [1024, 1280, 1440]) {
     fitsContainer(year, width);
@@ -514,6 +514,81 @@ test("source notes sit in a keyboard-reachable tooltip instead of the footer lin
   });
   assert.match(nodeTitle, /Gross profit/);
   assert.match(nodeTitle, /margin/);
+});
+
+test("an empty selection uses the latest reported quarter for that ticker", () => {
+  const withForecast = (periods, forecast) => ({
+    metrics: [metric("revenue_gaap", "Revenue", "USD", periods)],
+    deep_dive: {
+      forecast: {
+        segments: [{
+          label: "Revenue",
+          metrics: [{
+            metric_id: "revenue_gaap",
+            unit: "USD",
+            approval_state: "approved",
+            forecast,
+          }],
+        }],
+      },
+    },
+  });
+  const first = revenueFlowModel("ACME", withForecast({
+    "2026Q1": 10, "2026Q2": 11, "2026Q3": 12,
+  }, [
+    { fiscal_period: "2027Q1", value: 13, reported: true },
+  ]), null, {});
+  assert.deepEqual(first.periods.at(-1).activeQuarters, []);
+  assert.deepEqual(first.periods.at(-1).quarters, [1]);
+  assert.deepEqual(first.selection, { year: 2026, quarter: 3 });
+  assert.equal(first.header, "ACME FY2026 Q3");
+  assert.equal(first.nodes.find((node) => node.id === "revenue").value, 12);
+  const firstView = renderRevenueFlow(first, fakeDocument(), {});
+  const firstPicker = periodControls(firstView);
+  assert.equal(firstPicker.yearOptions.find((item) => item.selected).value, "2026");
+  assert.equal(firstPicker.quarterOptions.find((item) => item.selected).label, "Q3");
+
+  const second = revenueFlowModel("BETA", withForecast({
+    "2025Q4": 8, "2027Q2": 9,
+  }, [
+    { fiscal_period: "2028Q1", value: 10, reported: true },
+  ]), null, {});
+  assert.deepEqual(second.selection, { year: 2027, quarter: 2 });
+  assert.deepEqual(latestDataQuarter(second.periods), { year: 2027, quarter: 2 });
+  assert.notDeepEqual(first.selection, second.selection);
+
+  const fullYear = revenueFlowModel("ACME", withForecast({ "2026Q3": 12 }, []), null, { year: 2026, quarter: null });
+  assert.deepEqual(fullYear.selection, { year: 2026, quarter: null });
+  const missingQuarter = revenueFlowModel("BETA", withForecast({ "2027Q2": 9 }, []), null, { year: 2027, quarter: 4 });
+  assert.deepEqual(missingQuarter.selection, { year: 2027, quarter: null });
+  const staleYear = revenueFlowModel("BETA", withForecast({ "2027Q2": 9 }, []), null, { year: 2030, quarter: 1 });
+  assert.deepEqual(staleYear.selection, { year: 2027, quarter: 2 });
+
+  const estimatesOnly = revenueFlowModel("GAMMA", {
+    metrics: [],
+    deep_dive: {
+      forecast: {
+        segments: [{
+          label: "Revenue",
+          metrics: [{
+            metric_id: "revenue_gaap",
+            display_name: "Revenue",
+            unit: "USD",
+            approval_state: "approved",
+            forecast: [{ fiscal_period: "2027Q1", value: 5, reported: true }],
+          }],
+        }],
+      },
+    },
+  }, null, {});
+  assert.deepEqual(estimatesOnly.selection, { year: 2027, quarter: 1 });
+  assert.equal(estimatesOnly.empty, false);
+
+  const none = revenueFlowModel("DELTA", { metrics: [] }, null, {});
+  assert.deepEqual(none.selection, { year: null, quarter: null });
+  assert.equal(latestDataQuarter([]), null);
+  assert.deepEqual(resolveSelection(null, {}), { year: null, quarter: null });
+  assert.doesNotMatch(source, /TSLA|SPCX|NVDA|AAPL/);
 });
 
 test("no income-statement periods leave an empty state", () => {
