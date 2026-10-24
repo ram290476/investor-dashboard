@@ -27,7 +27,7 @@ import {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const BAR_W = 8;
-const COLUMN_PITCH = 228;
+const DEFAULT_FLOW_WIDTH = 1200;
 const BALANCE_RATIO = 0.005;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const COLUMNS = ["segments", "rollup", "revenue", "split", "costDetail", "operate", "opexDetail", "bridge", "result"];
@@ -814,7 +814,7 @@ function buildFlow(statement, selection) {
 export function ribbonPath(x1, y1, x2, y2, thickness1, thickness2, strong) {
   const width = Math.abs(x2 - x1);
   const pull = strong ? 0.9 : 0.38;
-  const dx = Math.max(strong ? 84 : 28, width * pull);
+  const dx = Math.min(width, Math.max(strong ? 84 : 28, width * pull));
   const direction = x2 >= x1 ? 1 : -1;
   const c1 = x1 + direction * dx;
   const c2 = x2 - direction * dx;
@@ -837,6 +837,146 @@ export function curvePull(strong) {
 function barHeight(value, scale) {
   const height = (Math.abs(value) / Math.abs(scale || value || 1)) * 188;
   return Math.max(16, Math.min(200, height));
+}
+
+export function flowTextWidth(text, fontPx) {
+  let width = 0;
+  for (const ch of String(text || "")) {
+    if (ch === " ") width += fontPx * 0.34;
+    else if ("ilIjt.,'`|".includes(ch)) width += fontPx * 0.32;
+    else if ("mwMW@%&".includes(ch)) width += fontPx * 0.92;
+    else if ("▲▼$".includes(ch)) width += fontPx * 0.72;
+    else width += fontPx * 0.62;
+  }
+  return width;
+}
+
+function ellipsis(text, budget, fontPx) {
+  const raw = String(text || "");
+  if (flowTextWidth(raw, fontPx) <= budget) return raw;
+  let cut = raw;
+  while (cut.length > 1 && flowTextWidth(`${cut}…`, fontPx) > budget) cut = cut.slice(0, -1).trimEnd();
+  return cut ? `${cut}…` : raw.slice(0, 1);
+}
+
+const SHORT_LABELS = [
+  [/^research & development$/i, "R&D"],
+  [/^sales & admin$/i, "SG&A"],
+  [/^regulatory credits$/i, "Credits"],
+  [/^operating expenses$/i, "OpEx"],
+  [/^operating profit$/i, "Op. profit"],
+  [/^interest & other, net$/i, "Int. & other"],
+  [/^interest, net$/i, "Interest"],
+  [/^services & other$/i, "Services"],
+  [/^cost of sales$/i, "COGS"],
+  [/^pre-tax income$/i, "Pre-tax"],
+  [/^taxes & other$/i, "Tax"],
+  [/^gross profit$/i, "Gross"],
+  [/^net profit$/i, "Net"],
+  [/^total auto$/i, "Auto"],
+  [/^car sales$/i, "Cars"],
+];
+
+function abbreviate(label) {
+  const text = String(label || "");
+  for (const [pattern, short] of SHORT_LABELS) {
+    if (pattern.test(text)) return short;
+  }
+  return text;
+}
+
+function wrapToWidth(text, budget, fontPx) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (flowTextWidth(next, fontPx) <= budget) {
+      current = next;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = flowTextWidth(word, fontPx) <= budget ? word : ellipsis(word, budget, fontPx);
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function fitName(label, budget) {
+  const text = String(label || "");
+  if (flowTextWidth(text, 13) <= budget) return [text];
+  const wrapped = nameLines(text);
+  if (wrapped.length > 1 && wrapped.every((line) => flowTextWidth(line, 13) <= budget)) return wrapped;
+  const short = abbreviate(text);
+  if (short !== text && flowTextWidth(short, 13) <= budget) return [short];
+  const lines = wrapped.length > 1 ? wrapped : [short];
+  return lines.map((line) => (flowTextWidth(line, 13) <= budget ? line : ellipsis(line, budget, 13)));
+}
+
+function fitMargin(text, budget) {
+  if (!text) return [];
+  if (flowTextWidth(text, 12) <= budget) return [text];
+  const arrow = text.search(/[▲▼]/);
+  if (arrow > 0) {
+    const left = text.slice(0, arrow).trim();
+    const right = text.slice(arrow).trim();
+    if (flowTextWidth(left, 12) <= budget && flowTextWidth(right, 12) <= budget) return [left, right];
+  }
+  const compact = text.replace(/\s*margin/i, "");
+  if (compact !== text && flowTextWidth(compact, 12) <= budget) return [compact];
+  return wrapToWidth(compact, budget, 12);
+}
+
+function fitRows(node, budget) {
+  const rows = [];
+  for (const line of fitName(node.label, budget)) rows.push({ kind: "name", text: line, font: 13, lh: 16 });
+  const valueW = flowTextWidth(node.valueText, 18);
+  const changeW = node.changeText ? flowTextWidth(node.changeText, 12) : 0;
+  if (node.changeText && valueW + 8 + changeW > budget) {
+    rows.push({ kind: "value", text: node.valueText, font: 18, lh: 20 });
+    rows.push({ kind: "change", text: ellipsis(node.changeText, budget, 12), font: 12, lh: 15 });
+  } else {
+    rows.push({ kind: "value", text: node.valueText, change: node.changeText || "", font: 18, lh: 20 });
+  }
+  for (const line of fitMargin(node.marginText, budget)) rows.push({ kind: "margin", text: line, font: 12, lh: 15 });
+  return rows;
+}
+
+function labelExtent(node) {
+  return (node.rows || []).reduce((sum, row) => sum + row.lh, 0) + 10;
+}
+
+function noteDepth(node) {
+  const lines = node.noteLines || [];
+  return lines.length ? lines.length * 14 + 8 : 0;
+}
+
+function columnGeometry(count, width) {
+  const safety = 8;
+  const gutter = 14;
+  const n = Math.max(1, count);
+  if (n === 1) {
+    return {
+      lefts: [Math.max(0, (width - BAR_W) / 2)],
+      budget: Math.max(8, width - safety * 2),
+      pitch: width,
+    };
+  }
+  const pitch = (width - safety * 2 + gutter) / n;
+  const budget = Math.min(Math.max(pitch - 2, 4), Math.max(8, pitch - gutter));
+  const inset = safety + budget / 2;
+  const lefts = Array.from({ length: n }, (_, index) => inset + index * pitch - BAR_W / 2);
+  return { lefts, budget, pitch };
+}
+
+function nodeTooltip(node) {
+  const lines = [node.label];
+  const value = [node.valueText, node.changeText].filter(Boolean).join(" ");
+  if (value) lines.push(value);
+  if (node.marginText) lines.push(node.marginText);
+  if (node.note) lines.push(node.note);
+  return lines.join("\n");
 }
 
 function stackBands(links, nodes, node, side) {
@@ -864,7 +1004,9 @@ function stackBands(links, nodes, node, side) {
   }
 }
 
-export function layoutRevenueFlow(flow) {
+export function layoutRevenueFlow(flow, options = {}) {
+  const requested = Number(options.width);
+  const frame = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_FLOW_WIDTH;
   const nodes = (flow.nodes || []).map((node) => ({ ...node, placed: false }));
   const links = (flow.links || []).map((link) => ({ ...link }));
   const byId = (id) => nodes.find((node) => node.id === id) || null;
@@ -876,7 +1018,13 @@ export function layoutRevenueFlow(flow) {
     node.h = barHeight(node.value, scale);
   }
   const columns = (flow.columns || []).filter((name) => nodes.some((node) => node.column === name));
-  const columnX = new Map(columns.map((name, index) => [name, 132 + index * COLUMN_PITCH]));
+  const geo = columnGeometry(Math.max(columns.length, 1), frame);
+  const columnX = new Map(columns.map((name, index) => [name, geo.lefts[index]]));
+  for (const node of nodes) {
+    node.budget = geo.budget;
+    node.rows = fitRows(node, geo.budget);
+    node.noteLines = node.note ? wrapToWidth(node.note, geo.budget, 12) : [];
+  }
 
   const sources = nodes.filter((node) => node.column === "segments").sort((a, b) => a.stack - b.stack);
   let cursor = 62;
@@ -972,16 +1120,18 @@ export function layoutRevenueFlow(flow) {
     const columnNodes = nodes.filter((node) => node.column === name).sort((a, b) => a.y - b.y);
     for (let index = 1; index < columnNodes.length; index += 1) {
       const previous = columnNodes[index - 1];
-      const needed = previous.y + previous.h + 72;
+      const needed = previous.y + previous.h + noteDepth(previous) + labelExtent(columnNodes[index]) + 4;
       if (columnNodes[index].y < needed) columnNodes[index].y = needed;
     }
   }
 
-  const labelTop = (node) => node.y - (node.marginText ? 58 : 42) - (nameLines(node.label).length - 1) * 15;
-  const minTop = Math.min(...nodes.map(labelTop), 16);
-  if (minTop < 14) {
-    const shift = 14 - minTop;
-    for (const node of nodes) node.y += shift;
+  if (nodes.length) {
+    const minTop = Math.min(...nodes.map((node) => node.y - labelExtent(node)));
+    if (minTop < 12) {
+      const shift = 12 - minTop;
+      for (const node of nodes) node.y += shift;
+    }
+    for (const node of nodes) node.x = Math.max(0, Math.min(node.x, frame - node.w));
   }
 
   for (const node of nodes) {
@@ -1003,8 +1153,10 @@ export function layoutRevenueFlow(flow) {
     link.y2 = y2;
     link.d = ribbonPath(x1, y1, x2, y2, link.t1 || thickness, link.t2 || thickness, link.strong);
   }
-  const width = Math.max(720, 180 + (columns.length ? (columns.length - 1) * COLUMN_PITCH + 280 : 720));
-  const height = Math.max(420, ...nodes.map((node) => node.y + node.h + 36));
+  const width = frame;
+  const height = nodes.length
+    ? Math.max(420, ...nodes.map((node) => node.y + node.h + noteDepth(node) + 28))
+    : 420;
   return { width, height, nodes, links };
 }
 
@@ -1138,52 +1290,148 @@ function svg(doc, tag, attrs) {
 
 function drawLabel(doc, parent, node) {
   const x = node.x + node.w / 2;
-  const lines = nameLines(node.label);
-  const nameBase = node.y - (node.marginText ? 42 : 26);
-  lines.forEach((line, index) => {
-    const name = svg(doc, "text", {
-      class: "flow-name",
+  const rows = node.rows || [];
+  let y = node.y - 8;
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    const text = svg(doc, "text", {
       x,
-      y: nameBase - (lines.length - 1 - index) * 15,
+      y,
       "text-anchor": "middle",
     });
-    name.textContent = line;
-    parent.append(name);
-  });
-  const value = svg(doc, "text", {
-    class: "flow-value-line",
-    x,
-    y: node.y - (node.marginText ? 24 : 8),
-    "text-anchor": "middle",
-  });
-  const amount = svg(doc, "tspan", { class: `flow-amount flow-amount-${node.tone}` });
-  amount.textContent = node.valueText;
-  value.append(amount);
-  if (node.changeText) {
-    const change = svg(doc, "tspan", { class: `flow-change is-${node.changeTone}`, dx: 6 });
-    change.textContent = node.changeText;
-    value.append(change);
+    if (row.kind === "name") {
+      text.setAttribute("class", "flow-name");
+      text.textContent = row.text;
+    } else if (row.kind === "margin") {
+      text.setAttribute("class", `flow-margin is-${node.marginTone}`);
+      text.textContent = row.text;
+    } else if (row.kind === "change") {
+      text.setAttribute("class", `flow-change is-${node.changeTone}`);
+      text.textContent = row.text;
+    } else {
+      text.setAttribute("class", "flow-value-line");
+      const amount = svg(doc, "tspan", { class: `flow-amount flow-amount-${node.tone}` });
+      amount.textContent = row.text;
+      text.append(amount);
+      if (row.change) {
+        const change = svg(doc, "tspan", { class: `flow-change is-${node.changeTone}`, dx: 6 });
+        change.textContent = row.change;
+        text.append(change);
+      }
+    }
+    parent.append(text);
+    y -= row.lh;
   }
-  parent.append(value);
-  if (node.marginText) {
-    const margin = svg(doc, "text", {
-      class: `flow-margin is-${node.marginTone}`,
-      x,
-      y: node.y - 8,
-      "text-anchor": "middle",
-    });
-    margin.textContent = node.marginText;
-    parent.append(margin);
-  }
-  if (node.note) {
+  let noteY = node.y + node.h + 14;
+  for (const line of node.noteLines || []) {
     const note = svg(doc, "text", {
       class: "flow-note",
       x,
-      y: node.y + node.h + 16,
+      y: noteY,
       "text-anchor": "middle",
     });
-    note.textContent = node.note;
+    note.textContent = line;
     parent.append(note);
+    noteY += 14;
+  }
+}
+
+let sourceTipId = 0;
+
+function sourceControl(doc, text) {
+  sourceTipId += 1;
+  const id = `flow-source-tip-${sourceTipId}`;
+  const wrap = el(doc, "div", "flow-source");
+  const button = el(doc, "button", "flow-source-button", "i");
+  button.setAttribute("type", "button");
+  button.setAttribute("aria-label", "Source notes");
+  button.setAttribute("aria-describedby", id);
+  const tip = el(doc, "span", "flow-source-tip", text || "");
+  tip.setAttribute("id", id);
+  tip.setAttribute("role", "tooltip");
+  wrap.append(button, tip);
+  return wrap;
+}
+
+function drawFlowChart(doc, model, width) {
+  const layout = layoutRevenueFlow(model, { width });
+  const figure = svg(doc, "svg", {
+    class: "flow-chart",
+    viewBox: `0 0 ${layout.width} ${layout.height}`,
+    width: "100%",
+    height: layout.height,
+    preserveAspectRatio: "xMinYMin meet",
+    role: "img",
+    "aria-label": model.header,
+  });
+  const labels = new Map(layout.nodes.map((node) => [node.id, node.label]));
+  for (const link of layout.links) {
+    if (!link.d) continue;
+    const path = svg(doc, "path", {
+      class: `flow-link flow-link-${link.tone}`,
+      d: link.d,
+      "data-curve": link.strong ? "strong" : "gentle",
+      "data-from": link.from,
+      "data-to": link.to,
+    });
+    const title = svg(doc, "title");
+    title.textContent = `${labels.get(link.from) || link.from} → ${labels.get(link.to) || link.to} · ${moneyText(link.value)}`;
+    path.append(title);
+    figure.append(path);
+  }
+  for (const node of layout.nodes) {
+    const group = svg(doc, "g", { class: "flow-node" });
+    const title = svg(doc, "title");
+    title.textContent = nodeTooltip(node);
+    group.append(title);
+    group.append(svg(doc, "rect", {
+      class: `flow-bar flow-bar-${node.tone}${node.cap ? " is-cap" : ""}`,
+      x: node.x,
+      y: node.y,
+      width: node.w,
+      height: node.h,
+      rx: 1,
+      "data-node": node.id,
+    }));
+    drawLabel(doc, group, node);
+    figure.append(group);
+  }
+  return figure;
+}
+
+function measureFlowWidth(scroll) {
+  if (!scroll || typeof scroll.clientWidth !== "number") return 0;
+  let pad = 0;
+  if (typeof getComputedStyle === "function") {
+    const style = getComputedStyle(scroll);
+    pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+  }
+  return Math.floor(scroll.clientWidth - pad);
+}
+
+function bindFlowResize(scroll, model, doc) {
+  if (typeof ResizeObserver !== "function" || typeof scroll.clientWidth !== "number") return;
+  const paint = () => {
+    const width = measureFlowWidth(scroll);
+    if (width < 280) return;
+    const previous = Number(scroll.dataset.flowWidth || 0);
+    if (Math.abs(previous - width) < 2) return;
+    scroll.dataset.flowWidth = String(width);
+    const next = drawFlowChart(doc, model, width);
+    const current = typeof scroll.querySelector === "function" ? scroll.querySelector(".flow-chart") : null;
+    if (current && typeof current.replaceWith === "function") current.replaceWith(next);
+    else scroll.append(next);
+  };
+  const observer = new ResizeObserver(() => {
+    if (scroll.isConnected === false) {
+      observer.disconnect();
+      return;
+    }
+    paint();
+  });
+  observer.observe(scroll);
+  if (typeof scroll.addEventListener === "function") {
+    scroll.addEventListener("flow-disconnect", () => observer.disconnect());
   }
 }
 
@@ -1204,45 +1452,16 @@ export function renderRevenueFlow(model, doc = document, options = {}) {
 
   if (model.empty) {
     panel.append(el(doc, "p", "flow-empty", "No income-statement lines are on file for this period."));
-    panel.append(el(doc, "p", "flow-footnote", model.footnote || ""));
+    panel.append(sourceControl(doc, model.footnote || ""));
     return panel;
   }
 
-  const layout = layoutRevenueFlow(model);
+  const requested = Number(options.width);
+  const initialWidth = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_FLOW_WIDTH;
   const scroll = el(doc, "div", "flow-scroll");
-  const figure = svg(doc, "svg", {
-    class: "flow-chart",
-    viewBox: `0 0 ${layout.width} ${layout.height}`,
-    width: layout.width,
-    height: layout.height,
-    preserveAspectRatio: "xMinYMin meet",
-    role: "img",
-    "aria-label": model.header,
-  });
-  for (const link of layout.links) {
-    if (!link.d) continue;
-    figure.append(svg(doc, "path", {
-      class: `flow-link flow-link-${link.tone}`,
-      d: link.d,
-      "data-curve": link.strong ? "strong" : "gentle",
-      "data-from": link.from,
-      "data-to": link.to,
-    }));
-  }
-  for (const node of layout.nodes) {
-    figure.append(svg(doc, "rect", {
-      class: `flow-bar flow-bar-${node.tone}${node.cap ? " is-cap" : ""}`,
-      x: node.x,
-      y: node.y,
-      width: node.w,
-      height: node.h,
-      rx: 1,
-      "data-node": node.id,
-    }));
-    drawLabel(doc, figure, node);
-  }
-  scroll.append(figure);
+  scroll.append(drawFlowChart(doc, model, initialWidth));
   panel.append(scroll);
+  bindFlowResize(scroll, model, doc);
 
   const footer = el(doc, "div", "flow-footer");
   if (model.cards.length) {
@@ -1259,7 +1478,7 @@ export function renderRevenueFlow(model, doc = document, options = {}) {
     }
     footer.append(cards);
   }
-  footer.append(el(doc, "p", "flow-footnote", model.footnote || ""));
+  footer.append(sourceControl(doc, model.footnote || ""));
   panel.append(footer);
   return panel;
 }

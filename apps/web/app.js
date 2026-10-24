@@ -3936,6 +3936,7 @@ function mountRevenueFlow(ticker, payload, chartData) {
     onSelect(year, quarter) {
       session.revenueFlowSelection[ticker] = { year, quarter };
       const next = mountRevenueFlow(ticker, payload, chartData);
+      panel.querySelector(".flow-scroll")?.dispatchEvent(new CustomEvent("flow-disconnect"));
       panel.replaceWith(next);
     },
   });
