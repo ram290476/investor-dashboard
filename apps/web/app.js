@@ -2481,12 +2481,13 @@ function renderCatalystRow(event, tickerData, { calendarId = false, link = false
   dot.setAttribute("aria-hidden", "true");
   const name = node("span", "catalyst-recent-name", view.name);
   name.title = view.name;
-  title.append(dot, node("span", "visually-hidden", label), name);
+  title.append(dot, node("span", "visually-hidden", label));
   if (news && view.publisher) {
-    const publisher = node("span", "catalyst-recent-publisher", view.publisher);
-    publisher.title = view.publisher;
-    title.append(publisher);
+    const source = node("span", "news-source-badge", view.publisher);
+    source.title = view.publisher;
+    title.append(source);
   }
+  title.append(name);
   const move = node("span", `catalyst-recent-move mono ${view.tone}`, view.trailingText);
   move.setAttribute("aria-label", view.trailingLabel);
   button.append(date, title);
