@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   NOT_STAMPED, TYPE_LOADING, adminFundFlagRow, flagRows, paintFundFlagOutcome, renderFundFlagAdmin,
-  resetConfirmText, resetOutcome, resetStatus, typeLabel,
+  resetConfirmText, resetOutcome, resetStatus, syncFundFlagTable, typeLabel,
 } from "./fund-flag-admin.js";
 import { canApproveMetrics } from "./settings-model.js";
 
@@ -165,6 +165,30 @@ test("reset updates the status and type cell in place and keeps the table scroll
   assert.equal(table.scrollTop, 22);
   assert.equal(wrap.scrollTop, 33);
   assert.equal(section.byClass("is-selected")[0], arkk);
+});
+
+test("syncFundFlagTable updates Type cells and leaves the table node and scroll alone", () => {
+  const section = renderFundFlagAdmin({ rows, selected: "TSLA", outcomes: {} }, document);
+  const table = section.byClass("fund-flag-table")[0];
+  const wrap = section.byClass("fund-flag-table-wrap")[0];
+  wrap.scrollTop = 48;
+  table.scrollTop = 12;
+  const ok = syncFundFlagTable(section, [
+    { ticker: "ARKK", is_fund: false },
+    { ticker: "TSLA", is_fund: true },
+    { ticker: "NEW", is_fund: true },
+  ], {});
+  assert.equal(ok, true);
+  assert.equal(section.byClass("fund-flag-table")[0], table);
+  assert.equal(wrap.scrollTop, 48);
+  assert.equal(table.scrollTop, 12);
+  const types = section.byClass("ffa-col-type").filter((node) => node.tagName === "td").map((node) => node.textContent);
+  assert.deepEqual(types, ["Stock", "Fund", "Fund"]);
+  assert.equal(section.byClass("is-selected")[0].dataset.ticker, "TSLA");
+  assert.equal(section.byClass("is-selected")[0].attrs["aria-selected"], "true");
+  assert.equal(syncFundFlagTable(section, [{ ticker: "ONLY" }], {}), false);
+  assert.equal(section.byClass("fund-flag-table")[0], table);
+  assert.equal(wrap.scrollTop, 48);
 });
 
 test("renderer: a table with Ticker and Type, a picker and the Reset button for the selection", () => {

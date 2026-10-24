@@ -1775,6 +1775,12 @@ body.modal-open {
   border-color: var(--amber);
 }
 
+.my-ticker.is-selected,
+.my-ticker[aria-selected="true"] {
+  background: color-mix(in srgb, var(--blue) 14%, var(--surface-raised));
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
 .my-ticker.dragging {
   opacity: 0.5;
 }
@@ -1982,10 +1988,12 @@ body.modal-open {
   white-space: nowrap;
 }
 
-.segment[aria-pressed="true"] {
+.segment[aria-pressed="true"],
+.segment.is-selected {
   border-color: var(--blue);
   background: var(--selected);
   color: var(--text);
+  font-weight: 600;
 }
 
 .settings-preview {
@@ -2030,9 +2038,11 @@ body.modal-open {
   background: var(--preview-bg);
 }
 
-.theme-choice[aria-pressed="true"] {
+.theme-choice[aria-pressed="true"],
+.theme-choice.is-selected {
   border-color: var(--blue);
   box-shadow: inset 0 0 0 1px var(--blue);
+  font-weight: 600;
 }
 
 input::placeholder {

@@ -3,7 +3,7 @@
 // Data refresh is its own larger pop-up. Changes autosave through PUT /prefs.
 
 import { PERIODS, isNumericValue, sessionReturn, validBars } from "./chart-period.js";
-import { paintFundFlagOutcome, renderFundFlagAdmin, resetConfirmText, selectFundFlagRow } from "./fund-flag-admin.js";
+import { paintFundFlagOutcome, renderFundFlagAdmin, resetConfirmText, selectFundFlagRow, syncFundFlagTable } from "./fund-flag-admin.js";
 import { sparkline } from "./sparkline.js";
 import { DEFAULT_THEME, THEMES, themeProperties } from "./theme.js";
 import {
@@ -106,6 +106,7 @@ export function createAccountSettings(ctx) {
   const isAdmin = () => Boolean(ctx.isAdmin?.());
   const visibleTabs = () => settingsTabs(isAdmin());
   const fundFlag = { selected: null, outcomes: {} };
+  let watchSelection = null;
 
   function announce(message) {
     if (!live) return;
@@ -128,7 +129,9 @@ export function createAccountSettings(ctx) {
     setSaveNote("Saving…");
     if (message) announce(message);
     ctx.onPrefsChange();
-    renderPanel();
+    // Patch the open tab. Rebuilding it on each click dropped scroll, focus
+    // and the visible selection (issue 303).
+    syncActivePanel();
     window.clearTimeout(timer);
     if (debounce) timer = window.setTimeout(flush, REORDER_DEBOUNCE_MS);
     else flush();
@@ -182,7 +185,7 @@ export function createAccountSettings(ctx) {
       ctx.onPrefsChange();
       if (isOpen()) {
         announce(tabError.message);
-        renderPanel();
+        syncActivePanel();
       } else {
         // The dialog closed before the save finished; say so on the page, with a way back.
         ctx.onSaveError(`Settings not saved: ${tabError.message}`, () => open(activeTab, "account"));
@@ -286,7 +289,8 @@ export function createAccountSettings(ctx) {
     panel.setAttribute("aria-labelledby", `settings-tab-${activeTab}`);
     if (tabId !== activeTabBefore) tabError = null;
     history.replaceState(history.state, "", settingsHash(activeTab));
-    renderPanel();
+    // A new tab starts at the top. Re-rendering the same tab keeps its scroll.
+    renderPanel({ keepPlace: activeTab === activeTabBefore });
     revealActiveTab();
   }
 
@@ -355,7 +359,9 @@ export function createAccountSettings(ctx) {
 
   function renderRefreshPanel() {
     if (!refreshPanel) return;
+    const place = capturePlace(refreshPanel);
     refreshPanel.replaceChildren(...renderRefreshTab());
+    restorePlace(refreshPanel, place);
   }
 
   function openSettings(tabId, from) {
@@ -401,20 +407,288 @@ export function createAccountSettings(ctx) {
     if (kind === "settings" || kind === "refresh") releaseModal(true);
   }
 
-  // Re-render the active tab and keep focus on the same control when it still exists.
-  function renderPanel() {
+  function byKey(root, key) {
+    if (!root || !key) return null;
+    return [...root.querySelectorAll("[data-key]")].find((node) => node.dataset.key === key) || null;
+  }
+
+  function focusWithoutScroll(node) {
+    if (!node || typeof node.focus !== "function") return;
+    try {
+      node.focus({ preventScroll: true });
+    } catch {
+      node.focus();
+    }
+  }
+
+  // Scroll positions are keyed by class so a rebuilt tree can be put back.
+  // The panel itself and inner boxes (the fund-flag list, the refresh table) both count.
+  function capturePlace(root) {
+    const boxes = [];
+    const walk = (node) => {
+      const top = Number(node.scrollTop) || 0;
+      const left = Number(node.scrollLeft) || 0;
+      if (top || left) {
+        boxes.push({
+          className: node === root ? "settings-panel" : String(node.className || ""),
+          id: node.id || "",
+          top,
+          left,
+        });
+      }
+      for (const child of node.children || []) walk(child);
+    };
+    walk(root);
+    const active = root.contains(document.activeElement) ? document.activeElement : null;
+    return {
+      boxes,
+      focusKey: active?.dataset?.key || "",
+      selectionStart: active && typeof active.selectionStart === "number" ? active.selectionStart : null,
+      selectionEnd: active && typeof active.selectionEnd === "number" ? active.selectionEnd : null,
+    };
+  }
+
+  function applyScroll(root, place) {
+    const buckets = new Map();
+    for (const box of place.boxes || []) {
+      const key = box.className || (box.id ? `#${box.id}` : "");
+      if (!key) continue;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(box);
+    }
+    const seen = new Map();
+    const walk = (node) => {
+      const key = node === root ? "settings-panel" : (String(node.className || "") || (node.id ? `#${node.id}` : ""));
+      const bucket = key ? buckets.get(key) : null;
+      if (bucket) {
+        const used = seen.get(key) || 0;
+        const box = bucket[used];
+        if (box) {
+          node.scrollTop = box.top;
+          node.scrollLeft = box.left;
+          seen.set(key, used + 1);
+        }
+      }
+      for (const child of node.children || []) walk(child);
+    };
+    walk(root);
+  }
+
+  function restorePlace(root, place) {
+    if (!root || !place) return;
+    applyScroll(root, place);
+    if (place.focusKey) {
+      const target = byKey(root, place.focusKey);
+      focusWithoutScroll(target && !target.disabled ? target : root);
+      if (target && place.selectionStart != null && typeof target.setSelectionRange === "function") {
+        try {
+          target.setSelectionRange(place.selectionStart, place.selectionEnd ?? place.selectionStart);
+        } catch {
+          // Number inputs and buttons have no selection range.
+        }
+      }
+    }
+    applyScroll(root, place);
+  }
+
+  // Full rebuild. Tab changes start at the top; every other rebuild puts scroll and focus back.
+  function renderPanel({ keepPlace = true } = {}) {
     if (!panel) return;
-    const focusKey = panel.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+    const place = keepPlace ? capturePlace(panel) : null;
     panel.replaceChildren();
     if (tabError) panel.append(renderTabError());
     if (activeTab === "tickers") panel.append(...renderTickersTab());
     if (activeTab === "theme") panel.append(...renderThemeTab());
     if (activeTab === "profile") panel.append(...renderProfileTab());
     if (activeTab === ADMIN_TAB.id && isAdmin()) panel.append(renderAdminTab());
-    if (focusKey) {
-      const target = panel.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
-      (target && !target.disabled ? target : panel).focus();
+    panel.dataset.activeTab = activeTab;
+    if (activeTab === "tickers") markWatchRow(watchSelection);
+    if (place) restorePlace(panel, place);
+  }
+
+  function pressGroup(group, key) {
+    if (!group) return;
+    for (const item of group.querySelectorAll("[data-key]")) {
+      const on = item.dataset.key === key;
+      item.setAttribute("aria-pressed", String(on));
+      item.classList.toggle("is-selected", on);
     }
+  }
+
+  function markWatchRow(ticker) {
+    const list = panel?.querySelector(".my-tickers");
+    if (!list) return;
+    for (const row of list.querySelectorAll(".my-ticker")) {
+      const on = Boolean(ticker) && row.dataset.ticker === ticker;
+      row.classList.toggle("is-selected", on);
+      if (on) row.setAttribute("aria-selected", "true");
+      else row.removeAttribute("aria-selected");
+    }
+  }
+
+  function paintTabError() {
+    if (!panel) return;
+    const existing = [...panel.children].find((child) => child.classList?.contains("settings-alert"));
+    if (!tabError) {
+      existing?.remove();
+      return;
+    }
+    existing?.remove();
+    panel.prepend(renderTabError());
+  }
+
+  // Keep the open tab's nodes. Dashboard redraws call this too, so a click that
+  // also re-renders the page cannot throw away scroll or the selected control.
+  function syncActivePanel() {
+    if (!panel) return;
+    if (panel.dataset.activeTab !== activeTab || panel.children.length === 0) {
+      renderPanel({ keepPlace: true });
+      return;
+    }
+    paintTabError();
+    if (activeTab === "tickers") syncTickers();
+    else if (activeTab === "theme") syncTheme();
+    else if (activeTab === "profile") syncProfile();
+    else if (activeTab === ADMIN_TAB.id && isAdmin()) syncAdmin();
+  }
+
+  function syncTheme() {
+    const display = session.prefs.display || {};
+    pressGroup(panel.querySelector(".theme-choices"), `theme-${display.theme ?? DEFAULT_THEME}`);
+    pressGroup(panel.querySelector('[aria-labelledby="palette-label"]'), `palette-${display.updown_palette}`);
+    const preview = panel.querySelector(".settings-preview");
+    if (preview) preview.dataset.palette = display.updown_palette || "";
+    pressGroup(panel.querySelector('[aria-labelledby="period-label"]'), `period-${display.chart_period || "1M"}`);
+  }
+
+  function syncProfile() {
+    const display = session.prefs.display || {};
+    const quickIds = TIME_ZONE_PICKS.map((pick) => pick.id);
+    const selected = quickIds.includes(display.time_zone) ? display.time_zone : "other";
+    const group = panel.querySelector('[aria-labelledby="zone-label"]');
+    pressGroup(group, `zone-${selected}`);
+    const other = byKey(group || panel, "zone-other");
+    if (other) other.textContent = quickIds.includes(display.time_zone) ? "Other…" : timeZoneLabel(display.time_zone);
+  }
+
+  function syncAdmin() {
+    const rows = ctx.fundFlagRows?.() || [];
+    if (!syncFundFlagTable(fundFlagSection(), rows, fundFlag.outcomes)) renderPanel({ keepPlace: true });
+  }
+
+  function syncAddForm() {
+    const full = session.prefs.tickers.length >= MAX_TICKERS;
+    const input = byKey(panel, "add-input");
+    const submit = byKey(panel, "add-submit");
+    const help = panel.querySelector("#settings-add-help");
+    if (input) {
+      if (input.value !== addDraft) input.value = addDraft;
+      input.disabled = full;
+      if (addError) input.setAttribute("aria-invalid", "true");
+      else input.removeAttribute("aria-invalid");
+    }
+    if (submit) submit.disabled = full;
+    if (help) {
+      const text = addError || helpText(full);
+      if (help.textContent !== text) help.textContent = text;
+      help.classList.toggle("error", Boolean(addError));
+    }
+  }
+
+  function refreshTickerRow(row, ticker, index) {
+    const prefs = session.prefs;
+    const pinned = prefs.pinned.includes(ticker);
+    const atLimit = !pinned && prefs.pinned.length >= MAX_PINNED;
+    row.classList.toggle("pinned", pinned);
+    const pin = byKey(row, `pin-${ticker}`);
+    if (pin) {
+      pin.textContent = pinned ? "★" : "☆";
+      pin.setAttribute("aria-pressed", String(pinned));
+      if (atLimit) {
+        pin.setAttribute("aria-disabled", "true");
+        pin.title = PIN_LIMIT_MESSAGE;
+        pin.setAttribute("aria-label", `Pin ${ticker}. ${PIN_LIMIT_MESSAGE}`);
+      } else {
+        pin.removeAttribute("aria-disabled");
+        pin.title = "";
+        pin.setAttribute("aria-label", pinned ? `Unpin ${ticker}` : `Pin ${ticker} to the front of the ticker bar`);
+      }
+    }
+    const name = row.querySelector(".row-name");
+    if (name) {
+      const tags = [...name.querySelectorAll(".row-tag")];
+      const pinnedTag = tags.find((tag) => !tag.classList.contains("loading"));
+      if (pinned && !pinnedTag) {
+        const tag = el("span", "row-tag", "Pinned");
+        const loadingTag = tags.find((tag) => tag.classList.contains("loading"));
+        if (loadingTag) name.insertBefore(tag, loadingTag);
+        else name.append(tag);
+      }
+      if (!pinned && pinnedTag) pinnedTag.remove();
+      const record = session.dashboard?.tickers?.[ticker];
+      const state = historyState(record, session.dashboardState === "ready");
+      const loading = tags.find((tag) => tag.classList.contains("loading"));
+      if (state === "loading" && !loading) name.append(el("span", "row-tag loading", "Loading history…"));
+      if (state !== "loading" && loading) loading.remove();
+    }
+    const record = session.dashboard?.tickers?.[ticker];
+    const history = record?.price_history || [];
+    const latest = validBars(history).at(-1);
+    const change = sessionReturn(validBars(history), 1);
+    const price = row.querySelector(".row-price");
+    if (price) price.textContent = latest ? ctx.formatPrice(ctx.displayPrice(latest)) : "—";
+    const day = row.querySelector(".row-change");
+    if (day) {
+      const tone = !isNumericValue(change) || Number(change) === 0 ? "neutral" : Number(change) > 0 ? "positive" : "negative";
+      day.className = `row-change mono ${tone}`;
+      day.textContent = latest ? `${ctx.formatPercent(change)} 1D` : "—";
+    }
+    const spark = row.querySelector(".spark") || row.querySelector(".spark-empty");
+    if (spark) spark.replaceWith(sparkline(history));
+    const up = byKey(row, `up-${ticker}`);
+    if (up) up.disabled = index === 0;
+    const down = byKey(row, `down-${ticker}`);
+    if (down) down.disabled = index === prefs.tickers.length - 1;
+    const handle = byKey(row, `handle-${ticker}`);
+    if (handle) {
+      handle.setAttribute("aria-label", `Reorder ${ticker}, position ${index + 1} of ${prefs.tickers.length}. Alt plus arrow keys move it.`);
+    }
+    const remove = byKey(row, `remove-${ticker}`);
+    if (remove) {
+      const allowed = canRemove(prefs);
+      remove.disabled = !allowed;
+      if (allowed) {
+        remove.title = "";
+        remove.setAttribute("aria-label", `Remove ${ticker} from the watchlist`);
+      } else {
+        remove.title = "Keep at least one ticker.";
+        remove.setAttribute("aria-label", `Remove ${ticker}. Keep at least one ticker.`);
+      }
+    }
+  }
+
+  function syncTickers() {
+    const list = panel.querySelector(".my-tickers");
+    const intro = panel.querySelector(".settings-intro h3");
+    if (!list || !intro) {
+      renderPanel({ keepPlace: true });
+      return;
+    }
+    const prefs = session.prefs;
+    const count = `${prefs.tickers.length} ticker${prefs.tickers.length === 1 ? "" : "s"}`;
+    intro.textContent = `Watchlist · ${count} · ${prefs.pinned.length} of ${MAX_PINNED} pinned`;
+    const existing = new Map([...list.querySelectorAll(".my-ticker")].map((row) => [row.dataset.ticker, row]));
+    prefs.tickers.forEach((ticker, index) => {
+      let row = existing.get(ticker);
+      if (row) {
+        refreshTickerRow(row, ticker, index);
+        existing.delete(ticker);
+      } else row = renderTickerRow(ticker, index);
+      list.append(row);
+    });
+    for (const row of existing.values()) row.remove();
+    markWatchRow(watchSelection);
+    syncAddForm();
   }
 
   function fundFlagSection() {
@@ -557,22 +831,26 @@ export function createAccountSettings(ctx) {
 
   function pinToggle(ticker) {
     const result = togglePin(session.prefs, ticker);
+    watchSelection = ticker;
     if (result.error) {
       announce(result.error);
       tabError = { message: result.error, tone: "notice" };
-      renderPanel();
+      paintTabError();
+      markWatchRow(ticker);
       return;
     }
+    tabError = null;
     commit(result.prefs, { message: result.pinned ? `${ticker} pinned.` : `${ticker} unpinned.` });
   }
 
   function move(ticker, delta, focusKey) {
     const result = moveTicker(session.prefs, ticker, delta);
     if (!result) return;
+    watchSelection = ticker;
     commit(result.prefs, { debounce: true, message: `${ticker} moved to position ${result.position} of ${result.total}.` });
     // The ▲ / ▼ that was pressed may now be disabled at the end of the list; keep focus on the row.
-    const target = panel.querySelector(`[data-key="${focusKey}"]`);
-    if (!target || target.disabled) panel.querySelector(`[data-key="handle-${ticker}"]`)?.focus();
+    const target = byKey(panel, focusKey);
+    if (!target || target.disabled) focusWithoutScroll(byKey(panel, `handle-${ticker}`));
   }
 
   function dropTicker(ticker, target, after) {
@@ -580,6 +858,7 @@ export function createAccountSettings(ctx) {
     const index = order.indexOf(target) + (after ? 1 : 0);
     order.splice(index, 0, ticker);
     if (order.join() === session.prefs.tickers.join()) return;
+    watchSelection = ticker;
     commit({ ...copyPrefs(session.prefs), tickers: order }, {
       debounce: true,
       message: `${ticker} moved to position ${order.indexOf(ticker) + 1} of ${order.length}.`,
@@ -589,11 +868,13 @@ export function createAccountSettings(ctx) {
   function removeWithUndo(ticker) {
     const result = removeTicker(session.prefs, ticker);
     if (result.error) return;
+    if (watchSelection === ticker) watchSelection = null;
     commit(result.prefs, { message: `${ticker} removed.` });
     showToast(`${ticker} removed from the watchlist.`, () => {
+      watchSelection = ticker;
       commit(restoreTicker(session.prefs, result.undo), { message: `${ticker} restored.` });
     });
-    panel.querySelector('[data-key="add-input"]')?.focus();
+    byKey(panel, "add-input")?.focus();
   }
 
   function showToast(message, onUndo) {
@@ -641,7 +922,7 @@ export function createAccountSettings(ctx) {
       addDraft = input.value;
       if (addError) {
         addError = "";
-        help.textContent = helpText(full);
+        help.textContent = helpText(session.prefs.tickers.length >= MAX_TICKERS);
         help.classList.remove("error");
         input.removeAttribute("aria-invalid");
       }
@@ -655,18 +936,21 @@ export function createAccountSettings(ctx) {
       const result = validateNewTicker(input.value, session.prefs);
       if (result.error) {
         addError = result.error;
-        renderPanel();
-        panel.querySelector('[data-key="add-input"]')?.focus();
+        help.textContent = result.error;
+        help.classList.add("error");
+        input.setAttribute("aria-invalid", "true");
+        input.focus();
         announce(result.error);
         return;
       }
       addDraft = "";
       addError = "";
+      watchSelection = result.ticker;
       commit(addTicker(session.prefs, result.ticker), {
         message: `${result.ticker} added. Its history will backfill automatically.`,
         added: result.ticker,
       });
-      panel.querySelector('[data-key="add-input"]')?.focus();
+      byKey(panel, "add-input")?.focus();
     });
     section.append(label, row, help);
     section.append(el("p", "settings-foot", "Adding a ticker starts its price, news and filings collectors on their next run."));
@@ -686,8 +970,9 @@ export function createAccountSettings(ctx) {
     group.setAttribute("role", "group");
     group.setAttribute("aria-labelledby", label.id);
     options.forEach((option) => {
-      const item = button(option.label, "segment", () => onPick(option.id), `${keyPrefix}-${option.id}`);
-      item.setAttribute("aria-pressed", String(option.id === current));
+      const on = option.id === current;
+      const item = button(option.label, on ? "segment is-selected" : "segment", () => onPick(option.id), `${keyPrefix}-${option.id}`);
+      item.setAttribute("aria-pressed", String(on));
       group.append(item);
     });
     wrap.append(label, group);
@@ -708,11 +993,13 @@ export function createAccountSettings(ctx) {
     choices.setAttribute("role", "group");
     choices.setAttribute("aria-label", "Application theme");
     THEMES.forEach((theme) => {
-      const choice = button(theme.label, "theme-choice", () => {
-        if (theme.id !== (display.theme ?? DEFAULT_THEME)) setDisplay({ theme: theme.id }, `${theme.label} saved.`);
+      const on = theme.id === (display.theme ?? DEFAULT_THEME);
+      const choice = button(theme.label, on ? "theme-choice is-selected" : "theme-choice", () => {
+        const current = session.prefs.display.theme ?? DEFAULT_THEME;
+        if (theme.id !== current) setDisplay({ theme: theme.id }, `${theme.label} saved.`);
       }, `theme-${theme.id}`);
       choice.dataset.themeChoice = theme.id;
-      choice.setAttribute("aria-pressed", String(theme.id === (display.theme ?? DEFAULT_THEME)));
+      choice.setAttribute("aria-pressed", String(on));
       const colors = themeProperties(theme.id, "theme");
       choice.style.setProperty("--preview-bg", colors["--surface"]);
       choice.style.setProperty("--preview-text", colors["--text"]);
@@ -724,7 +1011,7 @@ export function createAccountSettings(ctx) {
       "Up / down colors",
       PALETTES,
       display.updown_palette,
-      (id) => id !== display.updown_palette && setDisplay({ updown_palette: id }, "Up and down colors saved."),
+      (id) => id !== session.prefs.display.updown_palette && setDisplay({ updown_palette: id }, "Up and down colors saved."),
       "palette",
     );
     palette.append(el("p", "settings-hint", "Theme default uses the selected theme's direction colors. Other palettes override direction colors only. Blue / orange is easier to tell apart for red-green color blindness."));
@@ -739,7 +1026,7 @@ export function createAccountSettings(ctx) {
       "Default chart period",
       PERIODS.map((item) => ({ id: item.id, label: item.id })),
       display.chart_period || "1M",
-      (id) => id !== display.chart_period && setDisplay({ chart_period: id }, `Default chart period ${id} saved.`),
+      (id) => id !== session.prefs.display.chart_period && setDisplay({ chart_period: id }, `Default chart period ${id} saved.`),
       "period",
     );
     period.append(el("p", "settings-hint", "The chart opens on this period. Periods without enough history fall back to the longest one available."));
@@ -761,10 +1048,10 @@ export function createAccountSettings(ctx) {
       quickIds.includes(display.time_zone) ? display.time_zone : "other",
       (id) => {
         if (id === "other") {
-          panel.querySelector('[data-key="zone-input"]')?.focus();
+          byKey(panel, "zone-input")?.focus();
           return;
         }
-        if (id !== display.time_zone) setDisplay({ time_zone: id }, `Time zone set to ${timeZoneLabel(id)}.`);
+        if (id !== session.prefs.display.time_zone) setDisplay({ time_zone: id }, `Time zone set to ${timeZoneLabel(id)}.`);
       },
       "zone",
     );
@@ -804,11 +1091,12 @@ export function createAccountSettings(ctx) {
         input.setAttribute("aria-invalid", "true");
         return;
       }
+      input.value = "";
       setDisplay({ time_zone: match }, `Time zone set to ${match}.`);
     });
     const browserZone = ctx.browserTimeZone();
     const useBrowser = button(`Use my browser's time zone (${browserZone})`, "button-link", () => {
-      if (browserZone !== display.time_zone) setDisplay({ time_zone: browserZone }, `Time zone set to ${browserZone}.`);
+      if (browserZone !== session.prefs.display.time_zone) setDisplay({ time_zone: browserZone }, `Time zone set to ${browserZone}.`);
     }, "zone-browser");
     const row = el("div", "add-row");
     row.append(input, apply);
@@ -1035,7 +1323,7 @@ export function createAccountSettings(ctx) {
     renderAccountButton,
     // The dashboard re-rendered (new data); refresh prices and history chips in the open tab.
     refresh() {
-      if (openKind === "settings") renderPanel();
+      if (openKind === "settings") syncActivePanel();
       if (openKind === "refresh") renderRefreshPanel();
     },
     openFromHash() {
