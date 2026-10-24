@@ -110,6 +110,34 @@ export function selectFundFlagRow(section, ticker, outcome) {
   paintStatus(section, ticker, outcome);
 }
 
+/**
+ * Refresh Type cells from the latest rows without rebuilding the table.
+ * Returns false when the ticker set changed, so the caller can rebuild and
+ * restore scroll. A cleared stamp is left as paintFundFlagOutcome wrote it.
+ */
+export function syncFundFlagTable(section, sourceRows, outcomes = {}) {
+  if (!section) return false;
+  const rows = flagRows(sourceRows, outcomes);
+  const existing = [...section.querySelectorAll(".ffa-row")];
+  if (!rows.length && !existing.length) return true;
+  if (existing.length !== rows.length) return false;
+  for (let index = 0; index < rows.length; index += 1) {
+    if (existing[index].dataset.ticker !== rows[index].ticker) return false;
+  }
+  for (const row of rows) {
+    const tr = existing.find((item) => item.dataset.ticker === row.ticker);
+    const type = tr?.querySelector(".ffa-col-type");
+    if (!type) return false;
+    const cleared = outcomes[row.ticker]?.state === "done" || outcomes[row.ticker]?.state === "missing";
+    if (cleared) continue;
+    type.textContent = row.type;
+    type.className = `ffa-col-type ffa-type-${typeTone(row)}`;
+    const radio = tr.querySelector('input[type="radio"]');
+    if (radio) radio.setAttribute("aria-label", `${row.ticker}, ${row.type}`);
+  }
+  return true;
+}
+
 /** Status line and, once a reset clears the stamp, that row's Type cell. The table stays. */
 export function paintFundFlagOutcome(section, ticker, outcome) {
   if (!section || !ticker) return;
