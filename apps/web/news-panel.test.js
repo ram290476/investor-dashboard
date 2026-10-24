@@ -10,7 +10,7 @@ function slice(start, end) {
   return app.slice(app.indexOf(start), app.indexOf(end));
 }
 
-test("news rows reuse the catalyst row with a sentiment dot, one publisher, and no raw timestamps", () => {
+test("news rows reuse the catalyst row with a sentiment dot, one source badge, and no raw timestamps", () => {
   const row = slice("function renderCatalystRow", "function renderCatalystList");
   assert.match(row, /className = "catalyst-recent-row"/);
   assert.match(row, /catalyst-recent-row--news/);
@@ -19,10 +19,13 @@ test("news rows reuse the catalyst row with a sentiment dot, one publisher, and 
   assert.match(row, /var\(--\$\{view\.dotToken\}\)/);
   assert.match(row, /overlayColor\(category\.slot/);
   assert.match(row, /visually-hidden/);
-  assert.match(row, /catalyst-recent-publisher/);
+  assert.match(row, /news-source-badge/);
+  assert.match(row, /news-source-badge[\s\S]*title\.append\(name\)/);
   assert.match(row, /catalyst-recent-score/);
+  assert.match(row, /button\.append\(move\)/);
   assert.match(row, /target = "_blank"/);
-  assert.equal(row.split("catalyst-recent-publisher").length - 1, 1);
+  assert.equal(row.split("news-source-badge").length - 1, 1);
+  assert.doesNotMatch(row, /catalyst-recent-publisher/);
   const news = slice("function renderNewsHeadlineGroups", "function filingsSummary");
   assert.match(news, /variant: "news"/);
   assert.match(news, /\$\{group\.name\} · \$\{group\.rows\.length\}/);
@@ -43,8 +46,12 @@ test("news rows reuse the catalyst row with a sentiment dot, one publisher, and 
   const block = styles.slice(styles.indexOf("/* recent catalyst rows (#91)"), styles.indexOf("/* end recent catalyst rows (#91) */"));
   assert.match(block, /\.catalyst-recent-row--news\s*\{[^}]*grid-template-columns:\s*46px minmax\(0,\s*1fr\) 40px 62px/);
   assert.match(block, /max-width:\s*480px[\s\S]*40px minmax\(0,\s*1fr\) 38px 58px/);
-  assert.match(block, /\.catalyst-recent-publisher\s*\{[^}]*max-width:\s*84px/);
-  assert.match(block, /max-width:\s*480px[\s\S]*\.catalyst-recent-publisher\s*\{[^}]*max-width:\s*58px/);
+  assert.match(block, /\.news-source-badge\s*\{[^}]*max-width:\s*64px/);
+  assert.match(block, /\.news-source-badge\s*\{[^}]*font-size:\s*10px/);
+  assert.match(block, /max-width:\s*480px[\s\S]*\.news-source-badge\s*\{[^}]*max-width:\s*44px/);
+  assert.match(block, /\.catalyst-recent-row--news \.catalyst-recent-name\s*\{[^}]*white-space:\s*nowrap/);
+  assert.match(block, /\.catalyst-recent-row--news \.catalyst-recent-name\s*\{[^}]*text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(block, /catalyst-recent-publisher/);
   assert.match(block, /\.catalyst-recent-row[\s\S]*height:\s*28px/);
   assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}/);
 });
