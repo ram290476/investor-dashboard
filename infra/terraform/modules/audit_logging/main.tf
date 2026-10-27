@@ -518,9 +518,14 @@ resource "aws_iam_role_policy" "config_delivery" {
 # already in state makes this import a no-op. The resource carries no tags and
 # uses aws.untagged, so a later create (the role was removed after it was in
 # state, or it is created where the import does not apply) calls
-# CreateServiceLinkedRole and does not call TagRole. Description is not set:
-# the live role keeps AWS's description, and writing it would call iam:UpdateRole,
-# which this deploy role does not have on a service-linked role.
+# CreateServiceLinkedRole and does not call TagRole. Description is not set.
+# In AWS provider 6.67 only aws_service_name and custom_suffix are ForceNew;
+# description is an in-place iam:UpdateRole, which this deploy role cannot
+# call on a service-linked role. ignore_changes already drops that diff, so
+# matching the live description ("Service-linked role used by the AWS Config
+# recorder (Security Hub Config.1).") is not required for an in-place plan.
+# A tainted copy of this address is a replace for that reason alone; deploy.yml
+# untaints it before plan.
 import {
   to = aws_iam_service_linked_role.config
   id = "arn:aws:iam::308639168050:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
