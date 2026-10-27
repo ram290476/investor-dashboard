@@ -60,6 +60,29 @@ mock_provider "aws" {
   }
 }
 
+mock_provider "aws" {
+  alias = "untagged"
+
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_partition" {
+    defaults = { partition = "aws" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-west-1", name = "us-west-1" }
+  }
+  mock_data "aws_iam_policy_document" {
+    defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
+  }
+}
+
+# The root module imports AWSServiceRoleForConfig. Mock providers refuse that
+# import unless the test overrides the resource.
+override_resource {
+  target = module.audit_logging.aws_iam_service_linked_role.config
+}
+
 mock_provider "archive" {}
 
 variables {

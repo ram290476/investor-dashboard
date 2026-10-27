@@ -209,6 +209,9 @@ data "aws_iam_policy_document" "iam_for_stack" {
   }
 
   # IAM has no boundary condition for tagging; tags grant nothing in this stack.
+  # Do not add the Config service-linked role here. AWSServiceRoleForConfig is
+  # managed without tags (provider alias with no default_tags). Granting
+  # iam:TagRole on it would hide a TagRole call instead of removing it.
   statement {
     sid       = "TagProjectRoles"
     actions   = ["iam:TagRole", "iam:UntagRole"]

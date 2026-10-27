@@ -36,7 +36,8 @@ jobs:
             infra/terraform/scripts/plan-guard.sh \
             infra/terraform/scripts/check-self-policy.sh \
             infra/terraform/scripts/tag-deployed-image.sh \
-            infra/terraform/scripts/test-deploy-guards.sh
+            infra/terraform/scripts/test-deploy-guards.sh \
+            infra/terraform/tests/config_slr/assert-no-tags.sh
           bash infra/terraform/scripts/test-deploy-guards.sh
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -122,6 +123,9 @@ jobs:
           terraform validate
           terraform -chdir=tests/site_domain init -backend=false -input=false
           terraform -chdir=tests/site_domain test
+          terraform -chdir=tests/config_slr init -backend=false -input=false
+          terraform -chdir=tests/config_slr test
+          bash tests/config_slr/assert-no-tags.sh
 
       # Mock-provider plans of the root module on a fresh stack. They fail with
       # "Invalid count argument" if a count or for_each reads a value known only

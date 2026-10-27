@@ -48,6 +48,27 @@ expect_gate() {
   fi
 }
 
+expect_gate_text() {
+  local want="$1"
+  local file="$2"
+  local needle="$3"
+  local status err
+  set +e
+  err="$(bash ./check-plan-destroys.sh "${file}" 2>&1 >/dev/null)"
+  status=$?
+  set -e
+  if [[ "${status}" -ne "${want}" ]]; then
+    echo "gate ${file}: want exit ${want}, got ${status} (ALLOW_DESTROY=${ALLOW_DESTROY:-} MAX_DESTROY=${MAX_DESTROY:-})" >&2
+    printf '%s\n' "${err}" >&2
+    exit 1
+  fi
+  if ! grep -q -F -- "${needle}" <<< "${err}"; then
+    echo "gate ${file}: output missing '${needle}'" >&2
+    printf '%s\n' "${err}" >&2
+    exit 1
+  fi
+}
+
 roles_plan() {
   local count="$1"
   local dest="$2"
@@ -198,13 +219,14 @@ expect_gate 0 "${tmp}/data-source.json"
 
 roles_plan 10 "${tmp}/ten.json"
 roles_plan 11 "${tmp}/eleven.json"
-expect_gate 0 "${tmp}/ten.json"
+# Any delete is blocked. The old default limit of 10 let a single replace through.
+expect_gate 1 "${tmp}/ten.json"
 expect_gate 1 "${tmp}/eleven.json"
 
 echo '{}' > "${tmp}/empty-object.json"
 printf '%s\n' '{"resource_changes": null}' > "${tmp}/null-changes.json"
 expect_gate 0 "${tmp}/empty-object.json"
-expect_gate 0 "${tmp}/null-changes.json"
+expect_gate 1 "${tmp}/null-changes.json"
 
 printf '%s\n' '{"resource_changes": {"not": "a list"}}' > "${tmp}/bad-shape.json"
 printf '%s\n' '{' > "${tmp}/invalid.json"
@@ -231,14 +253,87 @@ ALLOW_DESTROY=true expect_gate 0 "${tmp}/eleven.json"
 ALLOW_DESTROY=1 expect_gate 1 testdata/plan-lambda-delete.json
 ALLOW_DESTROY=TRUE expect_gate 1 testdata/plan-lambda-delete.json
 ALLOW_DESTROY=false expect_gate 1 testdata/plan-lambda-delete.json
+ALLOW_DESTROY='' expect_gate 1 testdata/plan-lambda-delete.json
 ALLOW_DESTROY=true expect_gate 1 "${tmp}/invalid.json"
 unset ALLOW_DESTROY
 
+# MAX_DESTROY does not raise the zero-delete threshold. A non-integer still aborts.
 MAX_DESTROY=2 expect_gate 1 "${tmp}/ten.json"
-MAX_DESTROY=10 expect_gate 0 "${tmp}/ten.json"
+MAX_DESTROY=10 expect_gate 1 "${tmp}/ten.json"
 MAX_DESTROY=100 expect_gate 1 testdata/plan-lambda-delete.json
 MAX_DESTROY=08 expect_gate 1 "${tmp}/normal-deploy.json"
 unset MAX_DESTROY
+
+# Issue #323: the replace from deploy run 40567560827 must be blocked, and the
+# cases below are the fixtures that CI runs with this script.
+expect_gate_text 1 testdata/plan-ecr-lifecycle-replace.json \
+  "module.data_lake.aws_ecr_lifecycle_policy.jobs"
+ALLOW_DESTROY=false expect_gate_text 1 testdata/plan-ecr-lifecycle-replace.json \
+  "module.data_lake.aws_ecr_lifecycle_policy.jobs"
+expect_gate_text 1 testdata/plan-create-before-destroy.json 'module.x.aws_y.z["k"]'
+expect_gate_text 1 testdata/plan-single-delete.json "module.audit_logging.aws_iam_role.config"
+expect_gate 0 testdata/plan-create-update-noop.json
+expect_gate 0 testdata/plan-empty.json
+expect_gate 0 testdata/plan-forget.json
+ALLOW_DESTROY=true expect_gate_text 0 testdata/plan-ecr-lifecycle-replace.json "::warning::"
+ALLOW_DESTROY=true expect_gate_text 0 testdata/plan-ecr-lifecycle-replace.json \
+  "module.data_lake.aws_ecr_lifecycle_policy.jobs"
+ALLOW_DESTROY=1 expect_gate 1 testdata/plan-ecr-lifecycle-replace.json
+ALLOW_DESTROY=TRUE expect_gate 1 testdata/plan-ecr-lifecycle-replace.json
+ALLOW_DESTROY='' expect_gate 1 testdata/plan-ecr-lifecycle-replace.json
+unset ALLOW_DESTROY
+expect_gate 1 testdata/plan-malformed.json
+expect_gate 1 testdata/plan-actions-not-array.json
+expect_gate 1 testdata/plan-actions-missing.json
+expect_gate 1 testdata/plan-resource-changes-null.json
+ALLOW_DESTROY=true expect_gate 1 testdata/plan-malformed.json
+ALLOW_DESTROY=true expect_gate 1 testdata/plan-actions-not-array.json
+ALLOW_DESTROY=true expect_gate 1 testdata/plan-actions-missing.json
+ALLOW_DESTROY=true expect_gate 1 "${tmp}/missing-plan.json"
+unset ALLOW_DESTROY
+
+# A data source is ignored even when its actions are not an array.
+jq -n '{
+  resource_changes: [
+    {
+      address: "data.aws_caller_identity.current",
+      mode: "data",
+      type: "aws_caller_identity",
+      change: {actions: "not-an-array"}
+    }
+  ]
+}' > "${tmp}/data-bad-actions.json"
+expect_gate 0 "${tmp}/data-bad-actions.json"
+
+# A delete at the end of a large plan must still count. Piping the summary
+# into a command that closes early would SIGPIPE and can look like a pass.
+jq -n '{
+  format_version: "1.2",
+  resource_changes: (
+    [range(4000) | {
+      address: ("aws_s3_bucket.kept[" + tostring + "]"),
+      mode: "managed",
+      type: "aws_s3_bucket",
+      change: {actions: ["update"]}
+    }] + [{
+      address: "module.data_lake.aws_ecr_lifecycle_policy.jobs",
+      mode: "managed",
+      type: "aws_ecr_lifecycle_policy",
+      change: {actions: ["delete", "create"]}
+    }]
+  )
+}' > "${tmp}/large-plan-replace.json"
+expect_gate_text 1 "${tmp}/large-plan-replace.json" \
+  "module.data_lake.aws_ecr_lifecycle_policy.jobs"
+jq -n '{
+  resource_changes: [range(4000) | {
+    address: ("aws_s3_bucket.kept[" + tostring + "]"),
+    mode: "managed",
+    type: "aws_s3_bucket",
+    change: {actions: ["no-op"]}
+  }]
+}' > "${tmp}/large-plan-noop.json"
+expect_gate 0 "${tmp}/large-plan-noop.json"
 
 expect_self() {
   local want="$1"
@@ -381,5 +476,40 @@ awk '
     }
   }
 ' "${repo_root}/.github/workflows/deploy.yml"
+
+# Every terraform apply in deploy.yml, including bootstrap, must be the saved
+# plan that plan-guard.sh just checked in the same step. An ad-hoc apply -var
+# is rejected.
+deploy_file="${repo_root}/.github/workflows/deploy.yml"
+apply_lines=()
+while IFS= read -r line_no; do
+  apply_lines+=("${line_no}")
+done < <(grep -nE '^[[:space:]]*terraform apply' "${deploy_file}" | cut -d: -f1)
+if [[ "${#apply_lines[@]}" -lt 1 ]]; then
+  echo "deploy.yml has no terraform apply" >&2
+  exit 1
+fi
+guard_count="$(grep -cE '^[[:space:]]*bash scripts/plan-guard.sh' "${deploy_file}")"
+if [[ "${guard_count}" -ne "${#apply_lines[@]}" ]]; then
+  echo "deploy.yml has ${#apply_lines[@]} terraform apply commands and ${guard_count} plan-guard.sh calls" >&2
+  exit 1
+fi
+for line_no in "${apply_lines[@]}"; do
+  text="$(sed -n "${line_no}p" "${deploy_file}")"
+  if [[ ! "${text}" =~ ^[[:space:]]*terraform[[:space:]]+apply[[:space:]]+-input=false[[:space:]]+-auto-approve[[:space:]]+tfplan[[:space:]]*$ ]]; then
+    echo "terraform apply must be the guarded saved plan, got:${text}" >&2
+    exit 1
+  fi
+  header_line="$(awk -v n="${line_no}" 'NR < n && /^      - name: / { h = NR } END { print h + 0 }' "${deploy_file}")"
+  if [[ "${header_line}" -lt 1 ]]; then
+    echo "terraform apply at line ${line_no} is not inside a step" >&2
+    exit 1
+  fi
+  chunk="$(sed -n "${header_line},${line_no}p" "${deploy_file}")"
+  if ! grep -qE '^[[:space:]]*bash scripts/plan-guard.sh' <<< "${chunk}"; then
+    echo "terraform apply at line ${line_no} is not preceded by plan-guard.sh in the same step" >&2
+    exit 1
+  fi
+done
 
 echo "deploy guard fixtures passed"

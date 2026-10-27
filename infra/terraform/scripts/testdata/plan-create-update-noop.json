@@ -1,0 +1,37 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "module.jobs.aws_lambda_function.job[\"prices\"]",
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "change": {
+        "actions": ["update"]
+      }
+    },
+    {
+      "address": "module.data_lake.aws_ecr_lifecycle_policy.jobs",
+      "mode": "managed",
+      "type": "aws_ecr_lifecycle_policy",
+      "change": {
+        "actions": ["no-op"]
+      }
+    },
+    {
+      "address": "aws_s3_bucket.example",
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "change": {
+        "actions": ["create"]
+      }
+    },
+    {
+      "address": "data.aws_caller_identity.current",
+      "mode": "data",
+      "type": "aws_caller_identity",
+      "change": {
+        "actions": ["read"]
+      }
+    }
+  ]
+}

@@ -23,6 +23,17 @@ provider "aws" {
   }
 }
 
+# No default_tags. Used only by the Config service-linked role. Provider
+# default_tags become iam:TagRole, and the deploy role must not be granted
+# TagRole on AWSServiceRoleForConfig (it is not an invdash-* role). Every
+# other resource keeps the primary provider above, so its tags stay in place.
+provider "aws" {
+  alias  = "untagged"
+  region = var.region
+
+  use_fips_endpoint = var.use_fips_endpoint
+}
+
 # Disaster-recovery region for the replicated data lake and replica KMS key (CP-6, CP-9).
 provider "aws" {
   alias  = "dr"

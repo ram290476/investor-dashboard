@@ -116,7 +116,8 @@ jobs:
           # looks like a miss. Deploy 37496345092 and Deploy 38137774464 (f1f5af6) then
           # bootstrapped with an empty jobs image and destroyed the job resources.
           # A failed state list aborts. It is not an empty state and must not bootstrap.
-          # Bootstrap apply, when it runs, is the plan that plan-guard.sh already allowed.
+          # Bootstrap apply, when it runs, is the saved tfplan that plan-guard.sh
+          # already allowed. The guard blocks every delete and replace.
           state_file="$(mktemp)"
           trap 'rm -f "${state_file}"' EXIT
           if ! terraform state list > "${state_file}"; then
