@@ -256,15 +256,21 @@ them, which deleted the retained CloudWatch log events.
 If `terraform state list` fails, the deploy aborts. An empty list is the only signal for a
 first-time bootstrap. A failed list is not an empty state.
 
-Before either apply, `scripts/plan-guard.sh` runs `terraform plan -detailed-exitcode -out=tfplan`
-and `scripts/check-plan-destroys.sh` reads `terraform show -json`. The apply uses that saved
-plan. The gate aborts when the plan deletes or replaces more than 10 managed resources, or
-deletes or replaces any `aws_lambda_function` or `aws_cloudwatch_log_group`. A replacement
-counts because it deletes the existing object; replacing a log group drops its events. A plan
-that cannot be parsed aborts too. The only waiver is a manual dispatch from `main` while
-the `production` environment variable `DEPLOY_ALLOW_DESTROY` is exactly `true`. Set that
-variable, dispatch **Deploy production**, then unset it. A `workflow_run` deploy ignores the
-variable. The waiver applies only after the plan JSON parses.
+Before either apply, including the first-time bootstrap apply, `scripts/plan-guard.sh` runs
+`terraform plan -detailed-exitcode -out=tfplan` and `scripts/check-plan-destroys.sh` reads
+`terraform show -json` of that same file. The apply is `terraform apply tfplan`. It is never
+a second `apply -var`. The gate aborts when any managed resource change includes the action
+`delete`: a plain delete, or a replace in either order (`delete` then `create`, or
+`create` then `delete`). The threshold is zero for every resource type. Deploy run
+40567560827 replaced `aws_ecr_lifecycle_policy` because an older gate allowed up to 10
+deletes; `MAX_DESTROY` no longer raises that limit. A data source is ignored. An action of
+`forget` (a removed block that leaves the object in AWS) is not a delete. A plan that is
+missing, not valid JSON, or has a null or non-array `resource_changes` or `actions` aborts
+too, including when the waiver below is set. The only waiver is a manual dispatch from
+`main` while the `production` environment variable `DEPLOY_ALLOW_DESTROY` is exactly `true`.
+Set that variable, dispatch **Deploy production**, then unset it. A `workflow_run` deploy
+ignores the variable. The waiver applies only after the plan JSON parses, and the log lists
+each destroyed or replaced address.
 
 #### CloudWatch log groups
 
@@ -320,7 +326,11 @@ The workflow runs `terraform apply` for the whole stack, so the role is broad:
     `iam:PermissionsBoundary` condition supports requires the role to carry
     `invdash-workload-boundary`: CreateRole, DeleteRole, UpdateRole, UpdateRoleDescription,
     UpdateAssumeRolePolicy, Put/DeleteRolePolicy, Attach/DetachRolePolicy and
-    PutRolePermissionsBoundary. Only TagRole/UntagRole have no such key;
+    PutRolePermissionsBoundary. Only TagRole/UntagRole have no such key, and
+    those actions stay on `invdash-*` roles. The Config service-linked role
+    `AWSServiceRoleForConfig` is not in that set: it is imported and managed
+    with a provider alias that has no `default_tags`, so the deploy role is
+    not granted `iam:TagRole` on it;
   - attach only `AWS_ConfigRole` or `invdash-*` managed policies;
   - manage `invdash-*` managed policies, except the boundary itself;
   - pass `invdash-*` roles only to the services the stack uses (Lambda, Scheduler, Config, S3,

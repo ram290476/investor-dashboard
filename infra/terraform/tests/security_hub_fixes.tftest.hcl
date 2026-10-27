@@ -6,6 +6,8 @@
 #   module.audit_logging.aws_config_configuration_recorder.this.role_arn
 #   module.audit_logging.aws_config_configuration_recorder.this.name
 #   module.audit_logging.aws_iam_service_linked_role.config
+#   module.audit_logging.config_service_linked_role_arn
+#   module.audit_logging.config_service_linked_role_tags
 #   module.data_lake.jobs_lifecycle_policy
 #   module.security_services.aws_default_security_group.default.ingress
 #   module.security_services.aws_default_security_group.default.egress
@@ -74,6 +76,36 @@ mock_provider "aws" {
   }
 }
 
+# No default_tags. The Config service-linked role is the only resource on this alias.
+mock_provider "aws" {
+  alias = "untagged"
+
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_partition" {
+    defaults = { partition = "aws" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-west-1", name = "us-west-1" }
+  }
+  mock_data "aws_iam_policy_document" {
+    defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
+  }
+}
+
+# Mock providers cannot import. This stands in for the import of
+# AWSServiceRoleForConfig and pins the computed ARN to the recorder literal
+# (mock account 123456789012). Tags are not overridden: an empty tags value
+# has to come from the configuration.
+override_resource {
+  target = module.audit_logging.aws_iam_service_linked_role.config
+  values = {
+    arn = "arn:aws:iam::123456789012:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
+  }
+  override_during = plan
+}
+
 mock_provider "archive" {}
 
 variables {
@@ -102,6 +134,27 @@ run "security_hub_fixes" {
   assert {
     condition     = module.audit_logging.config_service_linked_role_service == "config.amazonaws.com"
     error_message = "The Config service-linked role must be created for config.amazonaws.com."
+  }
+
+  assert {
+    condition = (
+      module.audit_logging.config_recorder_role_arn
+      == module.audit_logging.config_service_linked_role_arn
+    )
+    error_message = "Config recorder role_arn must equal the service-linked role ARN."
+  }
+
+  assert {
+    condition     = !strcontains(module.audit_logging.config_recorder_role_arn, "${var.project}-config-recorder")
+    error_message = "Config recorder must not use the custom ${var.project}-config-recorder role."
+  }
+
+  assert {
+    condition = (
+      module.audit_logging.config_service_linked_role_tags == null
+      || module.audit_logging.config_service_linked_role_tags == {}
+    )
+    error_message = "The Config service-linked role must not set tags (provider default_tags would call iam:TagRole)."
   }
 
   assert {
@@ -182,6 +235,27 @@ run "security_hub_fixes_without_jobs_image" {
       "role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig",
     )
     error_message = "Config recorder must use AWSServiceRoleForConfig when jobs_image_uri is empty."
+  }
+
+  assert {
+    condition = (
+      module.audit_logging.config_recorder_role_arn
+      == module.audit_logging.config_service_linked_role_arn
+    )
+    error_message = "Empty jobs_image_uri must still point the recorder at the service-linked role."
+  }
+
+  assert {
+    condition     = strcontains(module.audit_logging.config_recorder_role_arn, "${var.project}-config-recorder") == false
+    error_message = "Empty jobs_image_uri must not use the custom ${var.project}-config-recorder role."
+  }
+
+  assert {
+    condition = (
+      module.audit_logging.config_service_linked_role_tags == null
+      || module.audit_logging.config_service_linked_role_tags == {}
+    )
+    error_message = "Empty jobs_image_uri must leave the service-linked role untagged."
   }
 
   assert {

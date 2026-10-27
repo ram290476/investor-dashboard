@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    aws = {
+      source                = "hashicorp/aws"
+      configuration_aliases = [aws.untagged]
+    }
+  }
+}
+
 variable "name" {
   type = string
 }
@@ -440,14 +449,15 @@ resource "aws_cloudtrail" "this" {
 # Security Hub's NIST 800-53 controls evaluate these records.
 # Only one recorder is allowed per region; import an existing one if present.
 #
-# Config.1 requires the recorder to use AWSServiceRoleForConfig. A read-only
-# iam get-role on 2026-10-27 showed that role does not exist in this account,
-# so it is created here (no import block: importing a missing role fails).
-# Delivery does not use the custom role's inline policy: the service-linked
-# role cannot take it. The config bucket policy already allows
-# config.amazonaws.com s3:GetBucketAcl, s3:ListBucket and s3:PutObject with
-# aws:SourceAccount, and the audit KMS key policy already allows that service
-# principal kms:GenerateDataKey and kms:Decrypt for the config bucket.
+# Config.1 requires the recorder to use AWSServiceRoleForConfig.
+# Deploy of PR #321 (run 40567560827) created that role in account
+# 308639168050 and then failed iam:TagRole, so the role is in AWS and not in
+# state. The import block below adopts it. Once the role is in state the
+# import is a no-op. Delivery does not use the custom role's inline policy:
+# the service-linked role cannot take it. The config bucket policy already
+# allows config.amazonaws.com s3:GetBucketAcl, s3:ListBucket and s3:PutObject
+# with aws:SourceAccount, and the audit KMS key policy already allows that
+# service principal kms:GenerateDataKey and kms:Decrypt for the config bucket.
 # ---------------------------------------------------------------------------
 data "aws_iam_policy_document" "config_trust" {
   statement {
@@ -503,9 +513,26 @@ resource "aws_iam_role_policy" "config_delivery" {
 # Fixed role name for config.amazonaws.com (no custom_suffix). role_arn below is
 # this same ARN as a literal so the recorder plan stays an in-place role_arn
 # update; depends_on still waits until the role exists.
+#
+# Import id is the role ARN in account 308639168050 (us-west-1). A role that is
+# already in state makes this import a no-op. The resource carries no tags and
+# uses aws.untagged, so a later create (the role was removed after it was in
+# state, or it is created where the import does not apply) calls
+# CreateServiceLinkedRole and does not call TagRole. Description is not set:
+# the live role keeps AWS's description, and writing it would call iam:UpdateRole,
+# which this deploy role does not have on a service-linked role.
+import {
+  to = aws_iam_service_linked_role.config
+  id = "arn:aws:iam::308639168050:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
+}
+
 resource "aws_iam_service_linked_role" "config" {
+  provider         = aws.untagged
   aws_service_name = "config.amazonaws.com"
-  description      = "Service-linked role used by the AWS Config recorder (Security Hub Config.1)."
+
+  lifecycle {
+    ignore_changes = [description, tags, tags_all]
+  }
 }
 
 resource "aws_config_configuration_recorder" "this" {
@@ -564,6 +591,18 @@ output "config_recorder_role_arn" {
 
 output "config_service_linked_role_service" {
   value = aws_iam_service_linked_role.config.aws_service_name
+}
+
+output "config_service_linked_role_arn" {
+  value = aws_iam_service_linked_role.config.arn
+}
+
+output "config_service_linked_role_tags" {
+  value = aws_iam_service_linked_role.config.tags
+}
+
+output "config_service_linked_role_tags_all" {
+  value = aws_iam_service_linked_role.config.tags_all
 }
 
 output "audit_bucket_name" {

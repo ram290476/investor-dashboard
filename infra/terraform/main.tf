@@ -41,6 +41,10 @@ module "data_lake" {
 # CloudTrail + AWS Config into a locked audit bucket (AU-2, AU-3, AU-9, AU-11, AU-12, CM-8).
 module "audit_logging" {
   source = "./modules/audit_logging"
+  providers = {
+    aws          = aws
+    aws.untagged = aws.untagged
+  }
 
   permissions_boundary_arn = module.workload_boundary.arn
 

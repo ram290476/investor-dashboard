@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Plan the current configuration and refuse an unsafe destroy set.
+# Plan the current configuration and refuse any delete or replace.
 #
 # Arguments are forwarded to `terraform plan` (for example -var=jobs_image_uri=...).
 # On success the saved plan is ./tfplan, or PLAN_OUT when that is set. Apply that

@@ -1,0 +1,13 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "module.data_lake.aws_ecr_lifecycle_policy.jobs",
+      "mode": "managed",
+      "type": "aws_ecr_lifecycle_policy",
+      "change": {
+        "actions": ["delete", "create"]
+      }
+    }
+  ]
+}
