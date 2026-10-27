@@ -197,6 +197,10 @@ jobs:
           # Apply the exact plan the destroy gate allowed. A second apply -var can differ.
           bash scripts/plan-guard.sh -var="jobs_image_uri=${JOBS_IMAGE_URI}"
           terraform apply -input=false -auto-approve tfplan
+          # Only reached when apply exits 0 (set -e). Tag the digest the Lambdas
+          # just switched to. A newer push that was not applied has no deployed-
+          # tag and can be expired. IMMUTABLE allows this new tag.
+          APPLY_SUCCEEDED=1 bash scripts/tag-deployed-image.sh "${ECR_REPOSITORY}" "${JOBS_IMAGE_URI##*:}"
           terraform output -json site_runtime_config > ../../apps/web/config.json
           echo "Published sign-in origin (custom domain when site_domain is set):"
           jq '{callbackUrl, logoutUrl}' ../../apps/web/config.json

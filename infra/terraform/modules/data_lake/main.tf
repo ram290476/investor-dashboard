@@ -449,19 +449,51 @@ resource "aws_ecr_repository" "jobs" {
   }
 }
 
+# An image matched by a higher-priority rule (lower rulePriority) cannot be
+# expired by a later rule. deployed- tags are added only after a successful
+# apply (scripts/tag-deployed-image.sh), so the live digest is one of the
+# newest deployed- images and is never aged out. The catch-all then expires
+# non-deployed builds beyond the newest three. Untagged images expire after
+# 3 days. This policy does not read jobs_image_uri, so a fresh stack with an
+# empty image still gets it. Old images already in the registry are removed
+# by this policy after deploy, not by hand.
 resource "aws_ecr_lifecycle_policy" "jobs" {
   repository = aws_ecr_repository.jobs.name
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the 10 newest images for rollback"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 10
-      }
-      action = { type = "expire" }
-    }]
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep the 3 newest deployed images for rollback"
+        selection = {
+          tagStatus     = "tagged"
+          tagPrefixList = ["deployed-"]
+          countType     = "imageCountMoreThan"
+          countNumber   = 3
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Expire untagged images more than 3 days after push"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 3
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 3
+        description  = "Keep only the 3 newest remaining images"
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 3
+        }
+        action = { type = "expire" }
+      },
+    ]
   })
 }
 
@@ -487,4 +519,9 @@ output "dlq_arn" {
 
 output "ecr_repository_url" {
   value = aws_ecr_repository.jobs.repository_url
+}
+
+# Passed through for tests/security_hub_fixes.tftest.hcl.
+output "jobs_lifecycle_policy" {
+  value = aws_ecr_lifecycle_policy.jobs.policy
 }

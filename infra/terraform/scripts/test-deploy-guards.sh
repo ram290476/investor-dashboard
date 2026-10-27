@@ -265,4 +265,121 @@ expect_self 0 "${tmp}/empty-object.json"
 expect_self 0 testdata/plan-lambda-delete.json
 expect_self 1 "${tmp}/invalid.json"
 
+# Tagging the live digest runs only after terraform apply exits 0.
+# The script refuses any other APPLY_SUCCEEDED value, and deploy.yml sets
+# APPLY_SUCCEEDED=1 on the same line, after the jobs apply, nowhere else.
+stub_bin="${tmp}/bin"
+mkdir -p "${stub_bin}"
+cat > "${stub_bin}/aws" << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${AWS_STUB_LOG}"
+if [[ "${1}" == "ecr" && "${2}" == "batch-get-image" ]]; then
+  printf '%s\n' '{"images":[{"imageManifest":"{\"schemaVersion\":2}"}]}'
+  exit 0
+fi
+if [[ "${1}" == "ecr" && "${2}" == "put-image" ]]; then
+  if [[ "${AWS_STUB_PUT_STATUS:-0}" != "0" ]]; then
+    echo "ImageAlreadyExistsException: tag exists" >&2
+    exit 1
+  fi
+  exit 0
+fi
+echo "unexpected aws invocation: $*" >&2
+exit 1
+EOF
+chmod +x "${stub_bin}/aws"
+
+aws_log="${tmp}/aws.log"
+: > "${aws_log}"
+
+expect_tag_refuse() {
+  local status
+  : > "${aws_log}"
+  set +e
+  env "$@" PATH="${stub_bin}:${PATH}" AWS_STUB_LOG="${aws_log}" \
+    bash ./tag-deployed-image.sh \
+    "123456789012.dkr.ecr.us-west-1.amazonaws.com/invdash/jobs" \
+    "abc123-1" >/dev/null 2>&1
+  status=$?
+  set -e
+  if [[ "${status}" -eq 0 ]]; then
+    echo "tag script should have refused: $*" >&2
+    exit 1
+  fi
+  if [[ -s "${aws_log}" ]]; then
+    echo "tag script called AWS before apply succeeded: $*" >&2
+    exit 1
+  fi
+}
+
+expect_tag_refuse
+expect_tag_refuse APPLY_SUCCEEDED=
+expect_tag_refuse APPLY_SUCCEEDED=0
+expect_tag_refuse APPLY_SUCCEEDED=true
+expect_tag_refuse APPLY_SUCCEEDED=yes
+
+: > "${aws_log}"
+APPLY_SUCCEEDED=1 AWS_STUB_LOG="${aws_log}" PATH="${stub_bin}:${PATH}" \
+  bash ./tag-deployed-image.sh \
+  "123456789012.dkr.ecr.us-west-1.amazonaws.com/invdash/jobs" \
+  "abc123-1" >/dev/null
+if ! grep -q -- '--repository-name invdash/jobs' "${aws_log}"; then
+  echo "tag script did not address invdash/jobs" >&2
+  exit 1
+fi
+if ! grep -q -- '--image-tag deployed-abc123-1' "${aws_log}"; then
+  echo "tag script did not add deployed-abc123-1" >&2
+  cat "${aws_log}" >&2
+  exit 1
+fi
+
+: > "${aws_log}"
+APPLY_SUCCEEDED=1 AWS_STUB_PUT_STATUS=1 AWS_STUB_LOG="${aws_log}" PATH="${stub_bin}:${PATH}" \
+  bash ./tag-deployed-image.sh \
+  "123456789012.dkr.ecr.us-west-1.amazonaws.com/invdash/jobs" \
+  "abc123-1" >/dev/null
+
+set +e
+APPLY_SUCCEEDED=1 PATH="${stub_bin}:${PATH}" AWS_STUB_LOG="${aws_log}" \
+  bash ./tag-deployed-image.sh >/dev/null 2>&1
+status=$?
+set -e
+if [[ "${status}" -eq 0 ]]; then
+  echo "tag script should reject a missing repository URL" >&2
+  exit 1
+fi
+
+# This file already cd'd into infra/terraform/scripts. $0 may be relative to
+# the caller's directory, so do not resolve it again from here.
+repo_root="$(cd ../../.. && pwd)"
+awk '
+  /^      - name: / {
+    in_jobs = index($0, "Deploy job functions") > 0
+    if (!in_jobs) {
+      jobs_applied = 0
+    }
+  }
+  in_jobs && /terraform apply -input=false -auto-approve tfplan/ {
+    jobs_applied = 1
+  }
+  /tag-deployed-image\.sh/ {
+    if (!in_jobs || !jobs_applied) {
+      print "tag-deployed-image.sh must run only after a successful apply in the job deploy step" > "/dev/stderr"
+      exit 1
+    }
+    if (index($0, "APPLY_SUCCEEDED=1") == 0) {
+      print "tag-deployed-image.sh must be invoked with APPLY_SUCCEEDED=1" > "/dev/stderr"
+      exit 1
+    }
+    count++
+  }
+  END {
+    if (count != 1) {
+      print "expected exactly one tag-deployed-image.sh invocation" > "/dev/stderr"
+      exit 1
+    }
+  }
+' "${repo_root}/.github/workflows/deploy.yml"
+
 echo "deploy guard fixtures passed"
