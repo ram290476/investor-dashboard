@@ -2574,6 +2574,15 @@
         "source_note": "Gross profit over reportable-segment revenue. Derived at serve time. Pending review."
       },
       {
+        "id": "operating-income",
+        "title": "Operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "hide_when_empty": true,
+        "metrics": ["operating_income"],
+        "source_note": "SEC companyfacts. Pending review."
+      },
+      {
         "id": "government-awards",
         "title": "Government obligations",
         "archetype": "public_records",
