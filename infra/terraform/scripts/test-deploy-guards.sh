@@ -512,4 +512,53 @@ for line_no in "${apply_lines[@]}"; do
   fi
 done
 
+# Deploy 40583860493 replaced the tainted Config service-linked role. Untaint
+# that exact address after init and before every plan-guard. No other address.
+slr_addr='module.audit_logging.aws_iam_service_linked_role.config'
+untaint_lines=()
+while IFS= read -r line_no; do
+  [[ -n "${line_no}" ]] && untaint_lines+=("${line_no}")
+done < <(grep -nE '^[[:space:]]*terraform untaint ' "${deploy_file}" || true)
+if [[ "${#untaint_lines[@]}" -ne 1 ]]; then
+  echo "deploy.yml must untaint exactly once, found ${#untaint_lines[@]}" >&2
+  exit 1
+fi
+untaint_line="${untaint_lines[0]%%:*}"
+untaint_text="$(sed -n "${untaint_line}p" "${deploy_file}")"
+if [[ ! "${untaint_text}" =~ ^[[:space:]]*terraform[[:space:]]+untaint[[:space:]]+\"\$\{slr_addr\}\"[[:space:]]*$ ]]; then
+  echo "terraform untaint must target only \${slr_addr}, got:${untaint_text}" >&2
+  exit 1
+fi
+if [[ "$(grep -cF "slr_addr=\"${slr_addr}\"" "${deploy_file}")" -ne 1 ]]; then
+  echo "slr_addr must be assigned once to ${slr_addr}" >&2
+  exit 1
+fi
+if [[ "$(grep -cF "${slr_addr}" "${deploy_file}")" -ne 1 ]]; then
+  echo "address ${slr_addr} must appear only in the slr_addr assignment" >&2
+  exit 1
+fi
+init_line="$(awk '/^[[:space:]]*terraform init / { print NR; exit }' "${deploy_file}")"
+first_guard="$(awk '/^[[:space:]]*bash scripts\/plan-guard\.sh/ { print NR; exit }' "${deploy_file}")"
+if [[ -z "${init_line}" || -z "${first_guard}" || "${untaint_line}" -le "${init_line}" || "${untaint_line}" -ge "${first_guard}" ]]; then
+  echo "untaint at ${untaint_line} must run after terraform init (${init_line}) and before plan-guard (${first_guard})" >&2
+  exit 1
+fi
+untaint_header="$(awk -v n="${untaint_line}" 'NR < n && /^      - name: / { h = NR } END { print h + 0 }' "${deploy_file}")"
+untaint_chunk="$(sed -n "${untaint_header},${untaint_line}p" "${deploy_file}")"
+dollar='$'
+show_marker="terraform state show -no-color \"${dollar}{slr_addr}\""
+tainted_marker="# ${dollar}{slr_addr}: (tainted)"
+if ! grep -qF "${show_marker}" <<< "${untaint_chunk}"; then
+  echo "untaint must be gated by terraform state show of slr_addr" >&2
+  exit 1
+fi
+if ! grep -qF "${tainted_marker}" <<< "${untaint_chunk}"; then
+  echo "untaint must run only when state show marks the address tainted" >&2
+  exit 1
+fi
+if ! grep -qF 'is not in state; skipping untaint.' "${deploy_file}"; then
+  echo "a missing address must skip untaint instead of failing the run" >&2
+  exit 1
+fi
+
 echo "deploy guard fixtures passed"

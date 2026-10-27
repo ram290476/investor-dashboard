@@ -272,6 +272,18 @@ Set that variable, dispatch **Deploy production**, then unset it. A `workflow_ru
 ignores the variable. The waiver applies only after the plan JSON parses, and the log lists
 each destroyed or replaced address.
 
+Deploy run 40583860493 planned a replace of
+`module.audit_logging.aws_iam_service_linked_role.config` because that address was
+tainted in remote state after the failed apply in 40567560827. Terraform replaces a
+tainted resource, so the zero-delete gate stopped the deploy. After `terraform init`
+and before either plan, the workflow runs `terraform state show` on that address
+only. When the show output marks it tainted, the workflow runs `terraform untaint`
+on that same address. If the address is missing from state, or it is present and
+not tainted, the step does nothing and the run continues. The role `description`
+is not ForceNew, so the configuration leaves it unset; `ignore_changes` on
+`description`, `tags`, and `tags_all` keeps the following plan from calling
+`iam:UpdateRole` or `iam:TagRole` on the service-linked role.
+
 #### CloudWatch log groups
 
 These log groups set `lifecycle { prevent_destroy = true }`:

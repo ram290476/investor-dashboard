@@ -119,10 +119,32 @@ jobs:
           # Bootstrap apply, when it runs, is the saved tfplan that plan-guard.sh
           # already allowed. The guard blocks every delete and replace.
           state_file="$(mktemp)"
-          trap 'rm -f "${state_file}"' EXIT
+          slr_show="$(mktemp)"
+          trap 'rm -f "${state_file}" "${slr_show}"' EXIT
           if ! terraform state list > "${state_file}"; then
             echo "::error::Could not list Terraform state; aborting deploy instead of bootstrapping with an empty jobs image."
             exit 1
+          fi
+          # Deploy 40583860493: this address was in state and tainted after the
+          # failed apply in 40567560827, so the plan replaced it and the destroy
+          # gate stopped the run. Untaint only this address, and only when
+          # `terraform state show` marks it tainted. Absent, or present and
+          # clean, is a no-op and does not fail the run. This runs after init
+          # and before either plan (bootstrap or jobs).
+          slr_addr="module.audit_logging.aws_iam_service_linked_role.config"
+          if grep -qx "${slr_addr}" "${state_file}"; then
+            if ! terraform state show -no-color "${slr_addr}" > "${slr_show}"; then
+              echo "::error::Could not show ${slr_addr}; aborting deploy."
+              exit 1
+            fi
+            if grep -F -x -q "# ${slr_addr}: (tainted)" "${slr_show}"; then
+              echo "Untainting ${slr_addr} so the plan does not replace it."
+              terraform untaint "${slr_addr}"
+            else
+              echo "${slr_addr} is in state and not tainted."
+            fi
+          else
+            echo "${slr_addr} is not in state; skipping untaint."
           fi
           decision="$(bash scripts/decide-bootstrap.sh "${state_file}")"
           case "${decision}" in
