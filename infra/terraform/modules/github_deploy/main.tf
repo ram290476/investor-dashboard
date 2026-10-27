@@ -83,6 +83,9 @@ locals {
   project_pol  = "arn:${local.partition}:iam::${local.account_id}:policy/${var.name}-*"
   self_role    = "arn:${local.partition}:iam::${local.account_id}:role/${local.role_name}"
   oidc_arn     = "arn:${local.partition}:iam::${local.account_id}:oidc-provider/${local.issuer}"
+  # Literal ARN of the imported Config service-linked role (account 308639168050).
+  # Not built from the caller account, so a plan in another account cannot widen it.
+  config_service_linked_role_arn = "arn:aws:iam::308639168050:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
 
   # GitHub sub claims for jobs in the deploy environment. Repositories created after
   # 2026-07-15 (this one) or opted in use the immutable-ID form; the name-only form is kept so a
@@ -102,6 +105,9 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 data "aws_iam_policy_document" "trust" {
+  # The immutable sub is repo:owner@id/repo@id:environment:name. CKV_AWS_358's
+  # repository regex only matches owner/repo, so it rejects that stricter form.
+  #checkov:skip=CKV_AWS_358:Immutable GitHub owner and repository IDs are an exact repository, not a wildcard sub
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
@@ -243,6 +249,23 @@ data "aws_iam_policy_document" "iam_for_stack" {
     }
   }
 
+  # PutConfigurationRecorder passes the recorder role to config.amazonaws.com.
+  # AWSServiceRoleForConfig is not an invdash-* role, so PassProjectRoles does
+  # not cover it (Deploy 40589041281). This role has no permissions boundary;
+  # invdash-workload-boundary applies only to invdash-* roles and is not changed.
+  # Applying this statement is an admin apply: NoSelfModification denies
+  # PutRolePolicy on this role.
+  statement {
+    sid       = "PassConfigServiceLinkedRole"
+    actions   = ["iam:PassRole"]
+    resources = [local.config_service_linked_role_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["config.amazonaws.com"]
+    }
+  }
+
   # No iam:CreateServiceLinkedRole statement here: PowerUserAccess already
   # allows it (it created the DynamoDB auto scaling service-linked role in
   # Deploy #229). Editing this document needs an admin apply, because
@@ -307,6 +330,14 @@ resource "aws_iam_role_policy" "iam_for_stack" {
 
 output "role_arn" {
   value = aws_iam_role.deploy.arn
+}
+
+output "iam_for_stack_policy" {
+  value = data.aws_iam_policy_document.iam_for_stack.json
+}
+
+output "deploy_role_permissions_boundary" {
+  value = aws_iam_role.deploy.permissions_boundary
 }
 
 output "oidc_provider_arn" {

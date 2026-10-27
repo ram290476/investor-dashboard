@@ -126,6 +126,8 @@ jobs:
           terraform -chdir=tests/config_slr init -backend=false -input=false
           terraform -chdir=tests/config_slr test
           bash tests/config_slr/assert-no-tags.sh
+          terraform -chdir=tests/deploy_passrole init -backend=false -input=false
+          terraform -chdir=tests/deploy_passrole test
 
       # Mock-provider plans of the root module on a fresh stack. They fail with
       # "Invalid count argument" if a count or for_each reads a value known only
