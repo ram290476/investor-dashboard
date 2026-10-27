@@ -224,6 +224,30 @@ resource "aws_ebs_encryption_by_default" "this" {
   enabled = true
 }
 
+# EC2.2: adopt the default VPC's default security group and remove every rule.
+# Look up the VPC with default = true (not a hard-coded id). A read-only
+# describe-network-interfaces on 2026-10-27 found no ENIs on
+# sg-0c1a882bceb196e9f, and the job Lambdas are not VPC-attached. This adopts
+# the existing group; it does not create or destroy the group itself.
+# Deleting the default VPC is a separate manual step. When that happens, remove
+# this resource and the data source in a follow-up.
+data "aws_vpc" "default" {
+  default = true
+}
+
+resource "aws_default_security_group" "default" {
+  vpc_id = data.aws_vpc.default.id
+
+  # No rules. Provider 6 models these as attributes; an empty list removes
+  # every ingress and egress permission on apply (EC2.2).
+  ingress = []
+  egress  = []
+
+  tags = {
+    Name = "${var.name}-default-locked"
+  }
+}
+
 # Applies only to IAM users; people should sign in through IAM Identity Center with MFA.
 resource "aws_iam_account_password_policy" "this" {
   #checkov:skip=CKV_AWS_9:NIST SP 800-63B and FedRAMP Rev 5 IA-5(1) drop forced periodic expiry; people sign in via Identity Center with MFA
@@ -238,4 +262,13 @@ resource "aws_iam_account_password_policy" "this" {
 
 output "guardduty_detector_id" {
   value = aws_guardduty_detector.this.id
+}
+
+# Passed through for tests/security_hub_fixes.tftest.hcl.
+output "default_security_group_ingress" {
+  value = aws_default_security_group.default.ingress
+}
+
+output "default_security_group_egress" {
+  value = aws_default_security_group.default.egress
 }

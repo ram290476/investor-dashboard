@@ -439,6 +439,15 @@ resource "aws_cloudtrail" "this" {
 # AWS Config: continuous inventory and configuration history (CM-2, CM-8, CA-7).
 # Security Hub's NIST 800-53 controls evaluate these records.
 # Only one recorder is allowed per region; import an existing one if present.
+#
+# Config.1 requires the recorder to use AWSServiceRoleForConfig. A read-only
+# iam get-role on 2026-10-27 showed that role does not exist in this account,
+# so it is created here (no import block: importing a missing role fails).
+# Delivery does not use the custom role's inline policy: the service-linked
+# role cannot take it. The config bucket policy already allows
+# config.amazonaws.com s3:GetBucketAcl, s3:ListBucket and s3:PutObject with
+# aws:SourceAccount, and the audit KMS key policy already allows that service
+# principal kms:GenerateDataKey and kms:Decrypt for the config bucket.
 # ---------------------------------------------------------------------------
 data "aws_iam_policy_document" "config_trust" {
   statement {
@@ -455,6 +464,9 @@ data "aws_iam_policy_document" "config_trust" {
   }
 }
 
+# Left in place so this change does not destroy a role. The recorder no longer
+# uses it. Remove it in a follow-up once recording with the service-linked role
+# is confirmed.
 resource "aws_iam_role" "config" {
   name                 = "${var.name}-config-recorder"
   assume_role_policy   = data.aws_iam_policy_document.config_trust.json
@@ -488,9 +500,17 @@ resource "aws_iam_role_policy" "config_delivery" {
   policy = data.aws_iam_policy_document.config_delivery.json
 }
 
+# Fixed role name for config.amazonaws.com (no custom_suffix). role_arn below is
+# this same ARN as a literal so the recorder plan stays an in-place role_arn
+# update; depends_on still waits until the role exists.
+resource "aws_iam_service_linked_role" "config" {
+  aws_service_name = "config.amazonaws.com"
+  description      = "Service-linked role used by the AWS Config recorder (Security Hub Config.1)."
+}
+
 resource "aws_config_configuration_recorder" "this" {
   name     = "${var.name}-recorder"
-  role_arn = aws_iam_role.config.arn
+  role_arn = "arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
 
   recording_group {
     all_supported                 = true
@@ -500,6 +520,8 @@ resource "aws_config_configuration_recorder" "this" {
   recording_mode {
     recording_frequency = "CONTINUOUS"
   }
+
+  depends_on = [aws_iam_service_linked_role.config]
 }
 
 resource "aws_config_delivery_channel" "this" {
@@ -528,6 +550,20 @@ resource "aws_config_configuration_recorder_status" "this" {
 # Lets other modules wait for Config recording without a module-wide depends_on.
 output "config_recorder_status_id" {
   value = aws_config_configuration_recorder_status.this.id
+}
+
+# Passed through for tests/security_hub_fixes.tftest.hcl. Terraform test can
+# read module outputs, not resources nested in a child module.
+output "config_recorder_name" {
+  value = aws_config_configuration_recorder.this.name
+}
+
+output "config_recorder_role_arn" {
+  value = aws_config_configuration_recorder.this.role_arn
+}
+
+output "config_service_linked_role_service" {
+  value = aws_iam_service_linked_role.config.aws_service_name
 }
 
 output "audit_bucket_name" {
