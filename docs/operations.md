@@ -323,7 +323,18 @@ accept a plan. Terraform still rejects the plan until the lifecycle block is rem
 CI assumes `invdash-terraform-deploy` and is explicitly denied `iam:PutRolePolicy` on that role
 (and on the OIDC provider / boundary). So changes to `module.github_deploy` — trust policy,
 `iam-for-this-stack` (including the `iam:PassRole` / `iam:PassedToService` allowlist), boundary
-attachments — **must be applied by an administrator** before CI can rely on them.
+attachments — **must be applied by an administrator** before CI can rely on them. The root
+module in `infra/terraform` is the stack that manages this policy
+(`module.github_deploy[0].aws_iam_role_policy.iam_for_stack`). The deploy workflow plans it
+and `scripts/check-self-policy.sh` stops the apply. An administrator applies only that
+resource, from `infra/terraform`, after `terraform init`:
+
+```bash
+terraform apply -target='module.github_deploy[0].aws_iam_role_policy.iam_for_stack'
+```
+
+That plan is an in-place update of the inline policy (0 to add, 1 to change, 0 to destroy).
+Then rerun the deploy. The deploy role has no permissions boundary to update.
 
 ### What the deploy role may do
 
@@ -347,6 +358,12 @@ The workflow runs `terraform apply` for the whole stack, so the role is broad:
   - manage `invdash-*` managed policies, except the boundary itself;
   - pass `invdash-*` roles only to the services the stack uses (Lambda, Scheduler, Config, S3,
     EventBridge, GuardDuty malware protection, Synthetics);
+  - pass exactly `arn:aws:iam::308639168050:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig`
+    to `config.amazonaws.com` (`iam:PassRole` with `iam:PassedToService`). That role is not
+    `invdash-*`, so the project-role statement does not cover it. Deploy run 40589041281
+    failed `PutConfigurationRecorder` without this grant. The deploy role has no permissions
+    boundary. `invdash-workload-boundary` is only on `invdash-*` roles and still allows
+    `iam:PassRole` only for `invdash-jobs-scheduler` to `scheduler.amazonaws.com`;
   - create the DynamoDB Application Auto Scaling service-linked role
     (`AWSServiceRoleForApplicationAutoScaling_DynamoDBTable`) the first time the prefs
     table registers a scalable target. PowerUserAccess cannot create that role;

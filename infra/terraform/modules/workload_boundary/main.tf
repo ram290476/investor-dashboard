@@ -3,7 +3,9 @@
 # boundary. Its job is to keep any role the deploy pipeline creates or edits below the deploy
 # role's own reach:
 #   - no IAM writes of any kind (only the reads AWS Config needs), and iam:PassRole only for
-#     handing <name>-jobs-scheduler to EventBridge Scheduler (M1's one-off schedules);
+#     handing <name>-jobs-scheduler to EventBridge Scheduler (M1's one-off schedules).
+#     This boundary is not attached to <name>-terraform-deploy. Passing
+#     AWSServiceRoleForConfig to Config is granted on that role's own policy.
 #   - no Organizations, Account, Identity Center or Identity Store writes;
 #   - no STS role assumption except the prefs API's session-tagged hop into <name>-prefs-access.
 # The explicit denies below repeat the most important of these, so widening the allow statements
@@ -140,4 +142,8 @@ resource "aws_iam_policy" "boundary" {
 
 output "arn" {
   value = aws_iam_policy.boundary.arn
+}
+
+output "policy_json" {
+  value = data.aws_iam_policy_document.boundary.json
 }
