@@ -1019,6 +1019,13 @@ def assemble_deep_dive(
             panels.append(_fill_panel(panel, metrics, estimates, catalog, forecast))
         if section.get("archetype"):
             panels.extend(_archetype_panels(section, metrics, catalog))
+        if section.get("hide_when_empty"):
+            for panel in panels:
+                if isinstance(panel, dict):
+                    panel["hide_when_empty"] = True
+            panels = [panel for panel in panels if _panel_has_value(panel)]
+            if not panels:
+                continue
         built = {
             "id": section.get("id"),
             "title": section.get("title"),
@@ -1501,6 +1508,22 @@ def _period_table(specs: list[dict], metrics: dict[str, dict], catalog: dict) ->
             cells.append(value)
         rows.append({"cells": cells})
     return {"columns": columns, "rows": rows}
+
+
+def _panel_has_value(panel: dict) -> bool:
+    """A headline with no reported number is not drawn. An explicit empty mix is unaffected."""
+    if not isinstance(panel, dict):
+        return False
+    for tile in panel.get("kpis") or []:
+        if isinstance(tile, dict) and tile.get("value") is not None:
+            return True
+    for series in panel.get("series") or []:
+        if not isinstance(series, dict):
+            continue
+        for point in series.get("points") or []:
+            if isinstance(point, dict) and point.get("reported") and point.get("value") is not None:
+                return True
+    return False
 
 
 def _panel_shell(section: dict, panel_id: str, kind: str, title: str, **extra) -> dict:

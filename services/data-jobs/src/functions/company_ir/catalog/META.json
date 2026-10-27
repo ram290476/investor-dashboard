@@ -140,6 +140,15 @@
           "operating_income_reality_labs"
         ],
         "source_note": "SEC FilingSummary segment report. Pending review."
+      },
+      {
+        "id": "operating-income",
+        "title": "Operating income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "hide_when_empty": true,
+        "metrics": ["operating_income"],
+        "source_note": "SEC companyfacts. Pending review."
       }
     ]
   }

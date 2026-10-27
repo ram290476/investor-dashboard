@@ -1475,3 +1475,109 @@ test("pattern detection stays inside the panel and the quarterly detail starts c
   assert.equal(patterns.length, 2);
   assert.ok(patterns.every((node) => node.parentElement.className.includes("deep-dive-tile")));
 });
+
+test("operating income card shows the headline, QoQ, and pattern label, and hides when empty", () => {
+  const filled = renderDeepDive({
+    ticker: "abcd",
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "operating-income",
+        title: "Operating income",
+        archetype: "growth_margin",
+        panels: [{
+          id: "operating-income-operating_income",
+          kind: "headline-card",
+          title: "Operating income",
+          hide_when_empty: true,
+          kpis: [{
+            metric_id: "operating_income",
+            label: "Operating income (loss)",
+            unit: "USD",
+            value: 718000000,
+            period: "2026Q3",
+            qoq: 0.804,
+            yoy: -0.558,
+            sparkline: [1624, 1409, 941, 398, 718],
+            approval_state: "proposed",
+            patterns: [{
+              kind: "inflection",
+              label: "Inflection to growth",
+              detail: "The change turned to growth after 3 periods of decline.",
+              detection: "pattern",
+              forecast: false,
+            }],
+          }],
+          series: [{
+            metric_id: "operating_income",
+            points: [
+              { period: "2026Q2", value: 398, reported: true },
+              { period: "2026Q3", value: 718, reported: true },
+            ],
+          }],
+          table: {
+            columns: [{ id: "period", label: "Period" }, { id: "operating_income", label: "Operating income" }],
+            rows: [{ cells: ["2026Q3", 718] }],
+          },
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  const page = textOf(filled);
+  assert.match(page, /718/);
+  assert.match(page, /QoQ/);
+  assert.match(page, /YoY/);
+  assert.match(page, /Pattern detection/);
+  assert.match(page, /Not a forecast/);
+  assert.match(page, /Inflection to growth/);
+  assert.match(page, /Pending review/);
+  const details = byClass(filled, "deep-dive-details")[0];
+  assert.equal(details.tagName, "DETAILS");
+  assert.equal(details.getAttribute("open"), undefined);
+  assert.equal(byClass(filled, "deep-dive-spark").length, 1);
+
+  const onePoint = renderDeepDive({
+    deep_dive: {
+      sections: [{
+        id: "operating-income",
+        title: "Operating income",
+        panels: [{
+          id: "one",
+          kind: "headline-card",
+          title: "Operating income",
+          hide_when_empty: true,
+          kpis: [{
+            label: "Operating income (loss)",
+            unit: "USD",
+            value: 100,
+            qoq: null,
+            yoy: null,
+            sparkline: [100],
+            approval_state: "proposed",
+          }],
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  assert.equal(byClass(onePoint, "deep-dive-spark").length, 0);
+  assert.doesNotMatch(textOf(onePoint), /QoQ|YoY/);
+
+  const hidden = renderDeepDive({
+    deep_dive: {
+      sections: [{
+        id: "operating-income",
+        title: "Operating income",
+        panels: [{
+          id: "empty",
+          kind: "headline-card",
+          title: "Operating income",
+          hide_when_empty: true,
+          kpis: [{ label: "Operating income (loss)", value: null, empty_label: "Not yet disclosed" }],
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  assert.equal(byClass(hidden, "deep-dive-panel").length, 0);
+  assert.equal(byClass(hidden, "deep-dive-section").length, 0);
+  assert.doesNotMatch(textOf(hidden), /Operating income/);
+});

@@ -428,6 +428,7 @@ function nonMapContent(panel) {
 
 function panelShown(panel) {
   if (!panel || typeof panel !== "object") return false;
+  if (panel.hide_when_empty && !hasVisibleData(panel)) return false;
   if (isSparsePanel(panel) && panelDataPoints(panel) < MIN_DATA_POINTS) return false;
   if (isRegulatorRecordsPanel(panel) && plottableSeriesPoints(panel).length < REGULATOR_MIN_DATA_POINTS) return false;
   if (panel.kind === "forecast-band" || panel.kind === "stacked-area" || panel.kind === "headline-card") return true;
@@ -818,8 +819,8 @@ function directionMark(doc, kind, change, inverse) {
 
 function sparkline(doc, values, scale) {
   const nums = values.map((value) => (value == null || value === "" ? null : Number(value)));
-  if (!nums.some((value) => value != null && !Number.isNaN(value))) return null;
   const finite = nums.filter((value) => value != null && !Number.isNaN(value));
+  if (finite.length < 2) return null;
   const min = scale && scale.min != null ? Number(scale.min) : Math.min(...finite);
   const max = scale && scale.max != null ? Number(scale.max) : Math.max(...finite);
   const span = max - min || 1;

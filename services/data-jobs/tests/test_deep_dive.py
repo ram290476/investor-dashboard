@@ -932,7 +932,7 @@ def test_regulator_record_sits_beside_the_estimate_and_catalog_order_holds():
     assert ids == [
         "scoreboard", "forecast", "robotaxi", "energy", "semi", "chargers", "fsd",
         "vehicles", "optimus", "factories", "energy-secondary", "public-records",
-        "revenue-mix", "growth-margin", "government-awards",
+        "revenue-mix", "growth-margin", "operating-income", "government-awards",
     ]
     source_ids = [item["id"] for item in catalog["deep_dive"]["sources"]]
     assert "av_regulator" in source_ids
@@ -1370,3 +1370,76 @@ def test_contract_rollup_becomes_a_proposed_series():
     assert tile["period"] == "FY2026Q1"
     assert tile["approved"] is False
     assert dd.shift_period("FY2026Q4", 1) == "FY2027Q1"
+
+
+def _income_rows(values: list[tuple[str, float]]) -> list[dict]:
+    return [
+        {
+            "metric_id": "operating_income",
+            "fiscal_period": period,
+            "value": value,
+            "unit": "USD",
+        }
+        for period, value in values
+    ]
+
+
+def test_hide_when_empty_omits_an_operating_income_card_without_points():
+    """A catalog section with no reported points is left out. It is not an empty card."""
+    catalog = ir.load_catalog("META")
+    assert ir.validate_catalog(catalog) == []
+    bare = dd.assemble_deep_dive(catalog, [])
+    assert "operating-income" not in [section["id"] for section in bare["sections"]]
+    one = dd.assemble_deep_dive(catalog, _income_rows([("2026Q3", 100.0)]))
+    section = next(item for item in one["sections"] if item["id"] == "operating-income")
+    tile = section["panels"][0]["kpis"][0]
+    assert tile["value"] == 100.0
+    assert tile["qoq"] is None
+    assert tile["yoy"] is None
+    assert tile["patterns"] == []
+    assert tile["approved"] is False
+    assert tile["approval_state"] == "proposed"
+    assert len(tile["sparkline"]) == 1
+
+
+def test_new_quarter_changes_operating_income_pattern_flags():
+    """Recorded quarters, no network. Flags describe the reported points and are not a forecast."""
+    import pattern_recognition as patterns
+
+    meta_before = [
+        ("2025Q2", 20441.0),
+        ("2025Q3", 20535.0),
+        ("2025Q4", 24745.0),
+        ("2026Q1", 22872.0),
+        ("2026Q2", 18775.0),
+    ]
+    meta_after = [*meta_before, ("2026Q3", 12988.0)]
+    tesla_before = [
+        ("2024Q3", 2717.0),
+        ("2024Q4", 1583.0),
+        ("2025Q1", 399.0),
+        ("2025Q2", 923.0),
+        ("2025Q3", 1624.0),
+        ("2025Q4", 1409.0),
+        ("2026Q1", 941.0),
+        ("2026Q2", 398.0),
+    ]
+    tesla_after = [*tesla_before, ("2026Q3", 718.0)]
+
+    def kinds(pairs: list[tuple[str, float]]) -> list[str]:
+        points = [{"period": period, "value": value, "reported": True} for period, value in pairs]
+        found = patterns.detect_patterns(points)
+        assert all(item["forecast"] is False and item["note"] == patterns.PATTERN_NOTE for item in found)
+        return [item["kind"] for item in found]
+
+    assert kinds(meta_before) == []
+    assert kinds(meta_after) == ["deceleration", "decline_streak"]
+    assert kinds(tesla_before) == ["deceleration", "decline_streak"]
+    assert kinds(tesla_after) == ["inflection"]
+    catalog = ir.load_catalog("TSLA")
+    document = dd.assemble_deep_dive(catalog, _income_rows(tesla_after))
+    section = next(item for item in document["sections"] if item["id"] == "operating-income")
+    tile = section["panels"][0]["kpis"][0]
+    assert tile["approved"] is False
+    assert [item["kind"] for item in tile["patterns"]] == ["inflection"]
+    assert tile["patterns"][0]["forecast"] is False
