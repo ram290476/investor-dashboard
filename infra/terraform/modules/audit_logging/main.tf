@@ -459,56 +459,6 @@ resource "aws_cloudtrail" "this" {
 # with aws:SourceAccount, and the audit KMS key policy already allows that
 # service principal kms:GenerateDataKey and kms:Decrypt for the config bucket.
 # ---------------------------------------------------------------------------
-data "aws_iam_policy_document" "config_trust" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["config.amazonaws.com"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [local.account_id]
-    }
-  }
-}
-
-# Left in place so this change does not destroy a role. The recorder no longer
-# uses it. Remove it in a follow-up once recording with the service-linked role
-# is confirmed.
-resource "aws_iam_role" "config" {
-  name                 = "${var.name}-config-recorder"
-  assume_role_policy   = data.aws_iam_policy_document.config_trust.json
-  permissions_boundary = var.permissions_boundary_arn
-}
-
-resource "aws_iam_role_policy_attachment" "config" {
-  role       = aws_iam_role.config.name
-  policy_arn = "arn:${local.partition}:iam::aws:policy/service-role/AWS_ConfigRole"
-}
-
-data "aws_iam_policy_document" "config_delivery" {
-  statement {
-    actions   = ["s3:GetBucketAcl", "s3:ListBucket"]
-    resources = [aws_s3_bucket.config.arn]
-  }
-  statement {
-    actions   = ["s3:PutObject"]
-    resources = [local.config_prefix_arn]
-  }
-  statement {
-    actions   = ["kms:GenerateDataKey", "kms:Decrypt"]
-    resources = [var.audit_key_arn]
-  }
-}
-
-# The name predates the separate config bucket; renaming would replace the policy for no benefit.
-resource "aws_iam_role_policy" "config_delivery" {
-  name   = "deliver-to-audit-bucket"
-  role   = aws_iam_role.config.id
-  policy = data.aws_iam_policy_document.config_delivery.json
-}
 
 # Fixed role name for config.amazonaws.com (no custom_suffix). role_arn below is
 # this same ARN as a literal so the recorder plan stays an in-place role_arn
@@ -567,7 +517,6 @@ resource "aws_config_delivery_channel" "this" {
 
   depends_on = [
     aws_config_configuration_recorder.this,
-    aws_iam_role_policy.config_delivery,
     aws_s3_bucket_policy.config,
     aws_s3_bucket_server_side_encryption_configuration.config,
   ]

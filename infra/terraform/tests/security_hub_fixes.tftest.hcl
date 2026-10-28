@@ -1,5 +1,7 @@
 # Security Hub fixes (#320): Config recorder service-linked role, ECR lifecycle
-# that keeps the live digest, and a default security group with no rules.
+# that keeps the live digest. The default VPC and its default security group
+# were deleted on 2026-10-28, and the legacy invdash-config-recorder role is
+# removed (#327).
 #
 # Terraform test can read module outputs, not resources nested in a child
 # module. The outputs below are those resource attributes:
@@ -9,8 +11,6 @@
 #   module.audit_logging.config_service_linked_role_arn
 #   module.audit_logging.config_service_linked_role_tags
 #   module.data_lake.jobs_lifecycle_policy
-#   module.security_services.aws_default_security_group.default.ingress
-#   module.security_services.aws_default_security_group.default.egress
 #
 # Run: terraform init -backend=false && terraform test
 
@@ -26,19 +26,6 @@ mock_provider "aws" {
   }
   mock_data "aws_iam_policy_document" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
-  }
-  mock_data "aws_vpc" {
-    defaults = { id = "vpc-0123456789abcdef0" }
-  }
-
-  # Computed ingress/egress are otherwise filled with generated values. An
-  # empty default matches a configuration that sets no rules. Blocks in the
-  # configuration still override this.
-  mock_resource "aws_default_security_group" {
-    defaults = {
-      ingress = []
-      egress  = []
-    }
   }
 }
 
@@ -211,12 +198,22 @@ run "security_hub_fixes" {
     error_message = "No deployed- rule may age images out with sinceImagePushed."
   }
 
+  # #327: the legacy custom recorder role and the default VPC/SG adoption are
+  # gone from configuration.
   assert {
     condition = (
-      length(module.security_services.default_security_group_ingress) == 0
-      && length(module.security_services.default_security_group_egress) == 0
+      !strcontains(file("${path.module}/modules/audit_logging/main.tf"), "config-recorder\"")
+      && !strcontains(file("${path.module}/modules/audit_logging/main.tf"), "resource \"aws_iam_role\" \"config\"")
     )
-    error_message = "The default security group must not allow ingress or egress."
+    error_message = "The legacy ${var.project}-config-recorder IAM role must not be declared."
+  }
+
+  assert {
+    condition = (
+      !strcontains(file("${path.module}/modules/security_services/main.tf"), "data \"aws_vpc\" \"default\"")
+      && !strcontains(file("${path.module}/modules/security_services/main.tf"), "resource \"aws_default_security_group\"")
+    )
+    error_message = "The default VPC lookup and aws_default_security_group must not be declared; the default VPC was deleted."
   }
 }
 
@@ -265,13 +262,5 @@ run "security_hub_fixes_without_jobs_image" {
       && try(rule.selection.countType, "") != "sinceImagePushed"
     ])
     error_message = "The deployed- lifecycle rule must still exist when jobs_image_uri is empty."
-  }
-
-  assert {
-    condition = (
-      length(module.security_services.default_security_group_ingress) == 0
-      && length(module.security_services.default_security_group_egress) == 0
-    )
-    error_message = "The default security group must stay closed when jobs_image_uri is empty."
   }
 }

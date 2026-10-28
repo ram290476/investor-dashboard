@@ -19,11 +19,6 @@ mock_provider "aws" {
   mock_data "aws_iam_policy_document" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
   }
-  # Default VPC lookup for aws_default_security_group. The id must be known at
-  # plan time; an apply-time-only id fails the same way deploy #199 did.
-  mock_data "aws_vpc" {
-    defaults = { id = "vpc-0123456789abcdef0" }
-  }
 }
 
 mock_provider "aws" {
