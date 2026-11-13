@@ -3,9 +3,12 @@ from datetime import UTC, datetime
 from news_sentiment import (
     JOB_ID,
     apply_sentiment,
+    article_key,
     canonical_url,
     catch_up_since,
+    changed_news_daily_partitions,
     curated_row,
+    daily_rows_unchanged,
     dedupe_articles,
     finnhub_skip_reason,
     finnhub_window,
@@ -13,6 +16,7 @@ from news_sentiment import (
     headline_relevance,
     label_for,
     lexicon_score,
+    merge_day_articles,
     next_av_ticker,
     parse_rss,
     rollup_daily,
@@ -274,3 +278,47 @@ def test_finnhub_403_is_skip_for_non_equity_but_failure_for_equity():
     assert finnhub_skip_reason(403, "FNDX", equities) == "finnhub_forbidden_non_equity"
     assert finnhub_skip_reason(403, "EQTY", equities) is None
     assert finnhub_skip_reason(200, "FNDX", equities) is None
+
+
+def _daily(ticker: str, day: str, mean: float, articles: int = 1) -> dict:
+    return {
+        "ticker": ticker,
+        "date": day,
+        "articles": articles,
+        "mean_sentiment": mean,
+        "weighted_sentiment": mean,
+        "bullish": 1 if mean > 0 else 0,
+        "bearish": 1 if mean < 0 else 0,
+    }
+
+
+def test_article_key_is_one_file_per_day_and_an_unchanged_day_is_not_rewritten():
+    assert article_key("2026-10-06") == "curated/news_articles/date=2026-10-06/articles.parquet"
+    assert "run" not in article_key("2026-10-06")
+    existing = [{"url_hash": "a", "title": "old"}]
+    assert merge_day_articles(existing, [{"url_hash": "a", "title": "again"}]) is None
+    merged = merge_day_articles(existing, [{"url_hash": "a"}, {"url_hash": "b", "title": "new"}])
+    assert [row["url_hash"] for row in merged] == ["a", "b"]
+
+
+def test_unchanged_news_daily_partition_is_skipped_and_a_changed_one_is_written():
+    stored = [
+        _daily("tsla", "2026-10-05", 0.0),
+        _daily("TSLA", "2026-10-06", 0.1),
+    ]
+    same = [
+        _daily("TSLA", "2026-10-06", 0.1000004),
+        _daily("TSLA", "2026-10-05", 0.0),
+    ]
+    assert daily_rows_unchanged(stored, same)
+    assert changed_news_daily_partitions(same, lambda key: stored) == []
+    changed = [_daily("TSLA", "2026-10-06", 0.4)]
+    writes = changed_news_daily_partitions(changed, lambda key: stored)
+    assert writes == [(
+        "curated/news_daily/ticker=TSLA/year=2026/news.parquet",
+        changed,
+    )]
+    new_year = [_daily("SPCX", "2025-01-02", -0.2)]
+    created = changed_news_daily_partitions(new_year, lambda key: [])
+    assert created[0][0] == "curated/news_daily/ticker=SPCX/year=2025/news.parquet"
+    assert changed_news_daily_partitions([], lambda key: stored) == []

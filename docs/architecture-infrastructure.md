@@ -338,11 +338,11 @@ Meeting the FedRAMP Moderate technical controls (NIST SP 800-53 Rev 5) raises th
 
 What changes from the base design:
 
-- **Security monitoring:** GuardDuty, Security Hub with the NIST 800-53 Rev 5 standard, Inspector, AWS Config, and CloudTrail data events with Insights.
+- **Security monitoring:** GuardDuty (detector and Lambda protection), Security Hub with the NIST 800-53 Rev 5 standard, Inspector, AWS Config, and CloudTrail management events plus write-only lake data events. CloudTrail Insights and GuardDuty S3 data-event protection are off.
 
 - **Encryption keys:** customer-managed KMS keys (data, audit, DR replica, and a small us-east-1 key for the CloudFront alarm topic) replace AWS-managed keys. This reverses the base design's "cost trap" choice, because SC-12 and SC-28 call for keys you control.
 
-- **Audit records:** kept 30 months; 12 months searchable plus 18 months cold. CloudTrail logs are in an Object-Locked bucket. AWS Config history is in a separate versioned bucket with the same key, delete-deny policy and retention, because AWS Config cannot deliver to a bucket with Object Lock default retention.
+- **Audit records:** kept 30 months. CloudTrail objects stay in Standard for 90 days, then Glacier until expiration, in an Object-Locked bucket. AWS Config history stays in a separate versioned bucket (Standard for 12 months, then Glacier) with the same key, delete-deny policy and retention, because AWS Config cannot deliver to a bucket with Object Lock default retention.
 
 - **Disaster recovery:** the data lake is replicated from us-west-1 to us-west-2.
 
@@ -366,9 +366,9 @@ Every signal carries the same run_id and source_id, so one job run can be follow
 | Metrics | 6 custom: FailedRuns, RowsWritten, StaleP1Sources, StaleSources, FreshP1Ratio, RateLimitHeadroomPct (one service dimension only) | CloudWatch | 15 months |
 | Traces | One X-Ray segment per job, one subsegment per source call | X-Ray (within free 100,000 traces) | 30 days |
 | External check | Synthetics canary every 15 min fetches health.json through CloudFront: HTTP 200, data under 90 min old in market hours, no stale P1 source | CloudWatch Synthetics | Artifacts 31 days |
-| API audit trail | All management events, lake object reads and writes, Lambda invocations; integrity-validated log files; Insights on unusual call or error rates | CloudTrail → Object-Locked S3 | 30 months |
+| API audit trail | All management events, lake object writes (not reads), Lambda invocations; integrity-validated log files. CloudTrail Insights is off | CloudTrail → Object-Locked S3 | 30 months (Standard 90 days, then Glacier) |
 | Configuration history | Every resource change, continuously | AWS Config → config bucket (versioned, KMS, delete-deny; no Object Lock, which Config does not support) | 30 months |
-| Threats and vulnerabilities | GuardDuty findings (incl. malware scans of raw/), Inspector CVEs, Security Hub NIST 800-53 control results | Security Hub | 90 days of findings |
+| Threats and vulnerabilities | GuardDuty findings (incl. malware scans of downloaded IR and fund-filing documents), Inspector CVEs, Security Hub NIST 800-53 control results | Security Hub | 90 days of findings |
 
 Alarms and EventBridge rules publish to two SNS topics: **ops** for reliability and **security** for incident response. `invdash-alert-notifier` subscribes to both, and to the CloudFront topic in us-east-1, and is the only publisher to the inboxes.
 
@@ -519,7 +519,7 @@ The table maps each relevant Moderate control to how it is met and where it is b
 | AU-2, AU-12 | Event logging | CloudTrail management, lake data and Lambda events; app logs | audit_logging, observability |
 | AU-3, AU-8 | Record content, time stamps | JSON schema: who, what, when (UTC), source, outcome, run_id | app/observability.py |
 | AU-5 | Response to logging failure | Alert on StopLogging, DeleteTrail, recorder stop, key disable | alerting |
-| AU-6 | Review and analysis | Security Hub, CloudTrail Insights, saved Logs Insights queries, weekly review | security_services, audit_logging, observability |
+| AU-6 | Review and analysis | Security Hub, saved Logs Insights queries, weekly review. CloudTrail Insights is off | security_services, audit_logging, observability |
 | AU-9, AU-9(4) | Protect audit records | Object Lock (CloudTrail); versioning and deny-delete/deny-unversion policy (Config); separate audit key; log-file validation | audit_logging, kms |
 | AU-11 | Retention | 400 days in CloudWatch; 30 months in S3 | audit_logging, observability |
 | CA-7 | Continuous monitoring | Security Hub NIST 800-53 Rev 5 standard over AWS Config data | security_services |
@@ -533,7 +533,7 @@ The table maps each relevant Moderate control to how it is met and where it is b
 | RA-5, SI-2 | Vulnerability scanning, flaw fixes | Inspector on image and functions; pip-audit and Checkov in CI | security_services, ci.yml |
 | SC-8 | Encryption in transit | TLS 1.2+ enforced on S3, SQS, SNS; CloudFront TLS 1.2 policy | data_lake, alerting, app |
 | SC-12, SC-13, SC-28 | Keys, FIPS crypto, encryption at rest | Customer-managed KMS keys rotated yearly; FIPS endpoints for app calls | kms, outputs |
-| SI-3 | Malicious code protection | GuardDuty Malware Protection scans downloads in raw/ | security_services |
+| SI-3 | Malicious code protection | GuardDuty Malware Protection scans downloaded documents in raw/company_ir/ and raw/fund_filings/ | security_services |
 | SI-4 | System monitoring | GuardDuty, alarms, external canary, AWS Health events | security_services, observability, alerting |
 | SI-7 | Integrity | CloudTrail digest validation; immutable image tags | audit_logging, data_lake |
 | SI-11 | Error handling | Dead-letter queue; errors logged by type without secrets | data_lake, app |
@@ -546,7 +546,7 @@ AWS list prices, us-east-1, checked 3 Oct 2026 · usage estimated from the data 
 
 The chart uses us-east-1 prices. In us-west-1 only S3 costs more (cents at this size); the us-east-1 alerts key adds \$1, giving \$22–36. The separate AWS Config bucket adds well under \$0.10 a month (a few MB of history a month at \$0.026/GB, with a bucket key keeping KMS requests negligible).
 
-Security Hub and Config costs scale with how often resources change, so batching deploys keeps them near the low end. Updated levers: hourly canary checks save ~\$2.50; turning off malware scanning saves ~\$1.10 but leaves an SI-3 gap. The \$40 budget alert gives headroom above the high estimate.
+Security Hub and Config costs scale with how often resources change, so batching deploys keeps them near the low end. Hourly canary checks save about \$2.50. Malware Protection for S3 is \$0.09/GB scanned plus \$0.215 per 1,000 objects evaluated after a small free tier; the plan covers downloaded IR and fund-filing documents only. The \$40 budget alert gives headroom above the high estimate.
 
 Price sources: [GuardDuty](https://aws.amazon.com/guardduty/pricing/), [Security Hub CSPM](https://aws.amazon.com/security-hub/cspm/pricing/), [Config](https://aws.amazon.com/config/pricing/), [Inspector](https://aws.amazon.com/inspector/pricing/), [KMS](https://aws.amazon.com/kms/pricing/), [CloudTrail](https://aws.amazon.com/cloudtrail/pricing/), [Synthetics](https://aws.amazon.com/blogs/aws/new-use-cloudwatch-synthetics-to-monitor-sites-api-endpoints-web-workflows-and-more/), [X-Ray](https://lumigo.io/learn/what-is-aws-x-ray/), [EventBridge](https://aws.amazon.com/eventbridge/pricing/), [Cognito](https://aws.amazon.com/cognito/pricing/).
 
@@ -558,8 +558,8 @@ The starter (investor-dashboard-infra.zip, AWS provider 6.x) deploys everything 
 |----|----|
 | kms | Data key (multi-Region, with a us-west-2 replica) and a separate audit key, rotated yearly |
 | data_lake | Lake bucket with versioning, KMS and TLS-only access, replicated to us-west-2; job dead-letter queue; ECR repo with immutable tags |
-| audit_logging | CloudTrail with data events, validation and Insights into an Object-Locked audit bucket; AWS Config into its own versioned config bucket |
-| security_services | GuardDuty with S3, Lambda and malware protection; Security Hub NIST 800-53 Rev 5; Inspector; Access Analyzer; account guardrails |
+| audit_logging | CloudTrail with write-only lake data events and validation into an Object-Locked audit bucket (Insights off; Glacier after 90 days); AWS Config into its own versioned config bucket |
+| security_services | GuardDuty detector and Lambda protection (S3 data-event protection off; malware scanning limited to downloaded documents); Security Hub NIST 800-53 Rev 5; Inspector; Access Analyzer; account guardrails |
 | alerting | Encrypted ops and security topics; 9 EventBridge rules, including API key changes; per-issue email and optional SMS caps on fixed Pacific clock windows |
 | us_east_1 | CloudFront 5xx alarm with its own encrypted topic and key; forwarding of IAM and root sign-in events to the primary region |
 | observability | Log groups, saved queries, alarms with SLO burn rates, 2 dashboards, canary, \$40 budget |

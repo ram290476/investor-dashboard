@@ -33,11 +33,14 @@ locals {
   partition  = data.aws_partition.current.partition
   region     = data.aws_region.current.region
   lake_arn   = "arn:${local.partition}:s3:::${var.lake_bucket_name}"
+  # Downloaded documents only. JSON market data under other raw/ prefixes is not scanned.
+  # object_prefixes is an in-place update. Deleting the plan would destroy it.
+  malware_document_prefixes = ["raw/company_ir/", "raw/fund_filings/"]
 }
 
 # ---------------------------------------------------------------------------
-# GuardDuty: threat detection on CloudTrail, S3 data events and Lambda network
-# activity (SI-4 system monitoring, IR-4 incident handling).
+# GuardDuty: the detector and Lambda network activity (SI-4, IR-4).
+# S3 data-event protection is a paid add-on and stays DISABLED in place.
 # ---------------------------------------------------------------------------
 resource "aws_guardduty_detector" "this" {
   #checkov:skip=CKV2_AWS_3:Single-account deployment; no AWS Organization to delegate GuardDuty to
@@ -48,7 +51,7 @@ resource "aws_guardduty_detector" "this" {
 resource "aws_guardduty_detector_feature" "s3" {
   detector_id = aws_guardduty_detector.this.id
   name        = "S3_DATA_EVENTS"
-  status      = "ENABLED"
+  status      = "DISABLED"
 }
 
 resource "aws_guardduty_detector_feature" "lambda" {
@@ -57,8 +60,10 @@ resource "aws_guardduty_detector_feature" "lambda" {
   status      = "ENABLED"
 }
 
-# Malware scanning of files pulled from the internet into raw/ (SI-3).
+# Malware scanning of downloaded documents only (company IR files and fund filings).
 # Permissions follow the AWS-documented policy for Malware Protection for S3.
+# List price is $0.09/GB scanned plus $0.215 per 1,000 objects evaluated, after
+# 1 GB and 1,000 objects free per month per Region.
 data "aws_iam_policy_document" "malware_trust" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -88,7 +93,7 @@ data "aws_iam_policy_document" "malware" {
   statement {
     sid       = "AllowPostScanTag"
     actions   = ["s3:PutObjectTagging", "s3:GetObjectTagging", "s3:PutObjectVersionTagging", "s3:GetObjectVersionTagging"]
-    resources = ["${local.lake_arn}/*"]
+    resources = [for prefix in local.malware_document_prefixes : "${local.lake_arn}/${prefix}*"]
   }
   statement {
     sid       = "AllowEnableS3EventBridgeEvents"
@@ -108,7 +113,7 @@ data "aws_iam_policy_document" "malware" {
   statement {
     sid       = "AllowMalwareScan"
     actions   = ["s3:GetObject", "s3:GetObjectVersion"]
-    resources = ["${local.lake_arn}/*"]
+    resources = [for prefix in local.malware_document_prefixes : "${local.lake_arn}/${prefix}*"]
   }
   statement {
     sid       = "AllowDecryptForMalwareScan"
@@ -143,7 +148,7 @@ resource "aws_guardduty_malware_protection_plan" "raw" {
   protected_resource {
     s3_bucket {
       bucket_name     = var.lake_bucket_name
-      object_prefixes = ["raw/"]
+      object_prefixes = local.malware_document_prefixes
     }
   }
 

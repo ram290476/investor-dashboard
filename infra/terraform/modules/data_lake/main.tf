@@ -83,8 +83,8 @@ data "aws_iam_policy_document" "tls_only" {
 # Primary data lake
 # ---------------------------------------------------------------------------
 resource "aws_s3_bucket" "lake" {
-  #checkov:skip=CKV_AWS_18:Object-level access is logged by CloudTrail S3 data events (AU-2/AU-12)
-  #checkov:skip=CKV2_AWS_62:Event notifications are set by GuardDuty Malware Protection for raw/; nothing else consumes them
+  #checkov:skip=CKV_AWS_18:Object-level writes are logged by CloudTrail S3 data events (AU-2/AU-12). Reads are not.
+  #checkov:skip=CKV2_AWS_62:Event notifications are set by GuardDuty Malware Protection for downloaded documents; nothing else consumes them
   bucket = "${var.name}-lake-${local.account_id}"
 }
 

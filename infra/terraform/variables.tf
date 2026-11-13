@@ -139,7 +139,7 @@ variable "monthly_budget_usd" {
 }
 
 variable "audit_retention_days" {
-  description = "Days to keep audit records (AU-11). 913 days = 12 months searchable + 18 months cold, which meets OMB M-21-31 and its 2026 successor M-26-14."
+  description = "Days to keep audit records (AU-11). Default 913. CloudTrail objects stay in Standard for 90 days, then Glacier until this expiration. Retention length meets OMB M-21-31 and its 2026 successor M-26-14."
   type        = number
   default     = 913
 }
@@ -219,7 +219,7 @@ variable "enable_cloudfront_alarms" {
 }
 
 variable "enable_malware_protection" {
-  description = "GuardDuty Malware Protection for S3 on the raw/ prefix (SI-3). About $1/month."
+  description = "Keep the GuardDuty Malware Protection plan for downloaded documents under raw/company_ir/ and raw/fund_filings/ (SI-3). List price is $0.09 per GB scanned plus $0.215 per 1,000 objects evaluated, after 1 GB and 1,000 objects free per month per Region. Setting this false deletes the plan, which is a destroy; leave it true."
   type        = bool
   default     = true
 }
@@ -508,8 +508,9 @@ variable "jobs" {
       reads_prefs = true
     }
     dashboard-build = {
-      handler  = "dashboard_build.handler"
-      schedule = ""
+      handler = "dashboard_build.handler"
+      # Weekday batch. Job Finished events only mark the dashboard pending; this schedule publishes when pending.
+      schedule = "cron(45 7,9,11,13,15,17,19,21 ? * MON-FRI *)"
       # Rebuild when a backfill ticker finishes (tickers_completed > 0), not after every batch.
       triggers = ["job:D4", "job:TREND", "job:Q1", "job:SHORT", "job:OPTIONS", "job:BACKFILL?tickers_completed>0", "job:RECONCILE", "job:H1", "job:H2", "job:H3", "job:D5", "job:M1", "job:SEC?partial", "job:FUND", "job:FUNDPROFILE"]
       memory   = 2048

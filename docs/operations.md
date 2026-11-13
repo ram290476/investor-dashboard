@@ -573,7 +573,7 @@ The default schedules are configured in `infra/terraform/variables.tf` and use
 | `trend-metrics` | D1, D4, M1, RECONCILE and non-idle BACKFILL events | Publishes shared series metrics plus per-ticker correlation/effect history. |
 | `regulatory-feeds` | Weekdays 06:25–22:25 ET | Form 4 insider rows, with share counts, for every watchlist ticker (capped at 25), plus the existing regulatory event feeds. A later submissions copy does not erase stored share counts. |
 | `sec-filings` | Weekdays 06:00 ET and `TickerAdded` | EDGAR filing metadata for every watchlist ticker. A new ticker, and a few incomplete names each morning, get five years. Others stay incremental. `no_sec_filer` and `failed` are explicit. |
-| `dashboard-build` | D4, trend, fundamentals, short-interest, options, backfill, reconcile, and SEC filing events | Publishes `serving/dashboard.json` and `serving/chart_data/<T>.json`, each with a gzip sibling, and records the dashboard document size. Recent filings come from `serving/filings/<T>.json`. |
+| `dashboard-build` | Weekdays 07:45, 09:45, 11:45, 13:45, 15:45, 17:45, 19:45 and 21:45 ET, and only when a job event has marked the dashboard pending. Job Finished events inside 2 hours of the last publish do not publish | Publishes `serving/dashboard.json` and `serving/chart_data/<T>.json`, each with a gzip sibling, and records the dashboard document size. Recent filings come from `serving/filings/<T>.json`. The event rules remain; the handler drops the per-job burst. |
 | `status-feed` | Any job-finished event | Publishes `serving/status.json`. |
 | `kalshi-fomc` | Not scheduled | Collector and status-feed id `KALSHI` exist. Live fetches stay off until the Kalshi terms are accepted. No next run is advertised. |
 
