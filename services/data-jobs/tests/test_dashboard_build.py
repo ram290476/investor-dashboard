@@ -1,5 +1,6 @@
 import gzip
 import json
+from datetime import UTC, datetime
 
 import boto3
 import polars as pl
@@ -1227,3 +1228,73 @@ def test_chart_data_carries_the_live_technical_summary():
     assert summary["horizons"][1]["macro"]["groups"][1]["effect"] == "headwind"
     bare = build_chart_data("ANYCO", [], [], [], [], price_rows=rows[:10])
     assert all("summary" not in h and "macro" not in h for h in bare["technical_summary"]["horizons"])
+
+
+def _finished(job: str, at: str) -> dict:
+    return {"detail-type": "Job Finished", "source": "invdash.jobs", "detail": {"job": job, "outcome": "success"}}
+
+
+def test_job_event_inside_the_window_skips_and_a_schedule_builds_only_when_pending():
+    now = datetime(2026, 11, 13, 15, 0, tzinfo=UTC)
+    recent = {"last_built_at": "2026-11-13T14:30:00+00:00", "pending": False}
+    action, state = dashboard_build.dashboard_action(_finished("H2", ""), recent, now)
+    assert action == "skip"
+    assert state["pending"] is True
+    assert state["last_trigger"] == "H2"
+    assert state["pending_since"] == "2026-11-13T15:00:00+00:00"
+
+    later = datetime(2026, 11, 13, 18, 0, tzinfo=UTC)
+    action, _ = dashboard_build.dashboard_action(_finished("D4", ""), recent, later)
+    assert action == "build"
+
+    idle, _ = dashboard_build.dashboard_action({"source": "schedule"}, {"pending": False}, now)
+    assert idle == "skip"
+    due, _ = dashboard_build.dashboard_action({"source": "schedule"}, {"pending": True}, now)
+    assert due == "build"
+    manual, _ = dashboard_build.dashboard_action({}, recent, now)
+    assert manual == "build"
+
+
+def test_a_trigger_that_arrives_during_publish_stays_pending():
+    started = datetime(2026, 11, 13, 15, 0, tzinfo=UTC)
+    finished = datetime(2026, 11, 13, 15, 2, tzinfo=UTC)
+    kept = dashboard_build.debounce_after_publish(
+        {"pending": True, "pending_since": "2026-11-13T15:01:00+00:00", "last_trigger": "H3"},
+        started,
+        finished,
+    )
+    assert kept["pending"] is True
+    assert kept["pending_since"] == "2026-11-13T15:01:00+00:00"
+    cleared = dashboard_build.debounce_after_publish(
+        {"pending": True, "pending_since": started.isoformat(), "last_trigger": "H2"},
+        started,
+        finished,
+    )
+    assert cleared["pending"] is False
+    assert cleared["pending_since"] is None
+    assert cleared["last_built_at"] == "2026-11-13T15:02:00+00:00"
+
+
+def test_debounced_job_event_does_not_read_parquet(monkeypatch):
+    writes = []
+
+    def read_json(key, bucket=None):
+        if key == dashboard_build.DEBOUNCE_KEY:
+            return {"last_built_at": datetime.now(UTC).isoformat(), "pending": False}
+        return None
+
+    def write_json(obj, key, bucket=None, cache_seconds=60):
+        writes.append((key, obj))
+        return key
+
+    def read_parquet_prefix(*args, **kwargs):
+        raise AssertionError("debounced dashboard build must not read the lake")
+
+    monkeypatch.setattr(lake, "read_json", read_json)
+    monkeypatch.setattr(lake, "write_json", write_json)
+    monkeypatch.setattr(lake, "read_parquet_prefix", read_parquet_prefix)
+    result = dashboard_build.handler(_finished("H2", ""), _Context())
+    assert result == {"status": "skipped", "reason": "debounced", "pending": True}
+    assert writes[-1][0] == dashboard_build.DEBOUNCE_KEY
+    assert writes[-1][1]["pending"] is True
+    assert writes[-1][1]["last_trigger"] == "H2"

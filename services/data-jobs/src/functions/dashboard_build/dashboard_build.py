@@ -1157,8 +1157,97 @@ def apply_fund_fields(snapshot: dict, fields: dict[str, dict]) -> None:
             row.update(extra)
 
 
+DEBOUNCE_KEY = "serving/dashboard-build/_debounce.json"
+DEBOUNCE_SECONDS = 2 * 60 * 60
+
+
+def invocation_kind(event) -> str:
+    """schedule batches a pending publish. Job Finished events coalesce. Anything else publishes."""
+    if not isinstance(event, dict):
+        return "manual"
+    if event.get("source") == "schedule":
+        return "schedule"
+    if event.get("detail-type") == "Job Finished":
+        return "job"
+    return "manual"
+
+
+def _parse_stamp(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp.astimezone(UTC)
+
+
+def dashboard_action(event, state, now: datetime, window_seconds: int = DEBOUNCE_SECONDS) -> tuple[str, dict]:
+    """Return ('build' or 'skip', state to store when skipping).
+
+    A schedule publishes only when a job event left the dashboard pending.
+    A job event inside the window records pending and skips the lake read.
+    A job event with no recent publish builds, so a missed schedule still catches up.
+    A direct invoke always builds.
+    """
+    state = dict(state) if isinstance(state, dict) else {}
+    kind = invocation_kind(event)
+    if kind == "manual":
+        return "build", state
+    if kind == "schedule":
+        return ("build", state) if state.get("pending") else ("skip", state)
+    now_utc = now.astimezone(UTC)
+    last = _parse_stamp(state.get("last_built_at"))
+    recent = last is not None and (now_utc - last).total_seconds() < window_seconds
+    detail = event.get("detail") if isinstance(event, dict) else None
+    trigger = str(detail.get("job") or "") if isinstance(detail, dict) else ""
+    if recent:
+        return "skip", {
+            **state,
+            "pending": True,
+            "pending_since": state.get("pending_since") or now_utc.isoformat(timespec="seconds"),
+            "last_trigger": trigger or state.get("last_trigger"),
+        }
+    return "build", {**state, "last_trigger": trigger or state.get("last_trigger")}
+
+
+def debounce_after_publish(state, started: datetime, finished: datetime) -> dict:
+    """Clear pending unless a newer trigger arrived after this publish started."""
+    state = dict(state) if isinstance(state, dict) else {}
+    pending_since = _parse_stamp(state.get("pending_since"))
+    still_pending = pending_since is not None and pending_since > started.astimezone(UTC)
+    return {
+        "pending": still_pending,
+        "pending_since": state.get("pending_since") if still_pending else None,
+        "last_built_at": finished.astimezone(UTC).isoformat(timespec="seconds"),
+        "last_trigger": state.get("last_trigger"),
+    }
+
+
 def handler(event, context):  # pragma: no cover - thin AWS wrapper
-    from lake import read_json, read_parquet_prefix, read_prices, write_json_and_gzip
+    from lake import read_json, write_json
+
+    now = datetime.now(UTC)
+    state = read_json(DEBOUNCE_KEY) or {}
+    action, new_state = dashboard_action(event, state, now)
+    if action == "skip":
+        if new_state != (state if isinstance(state, dict) else {}):
+            write_json(new_state, DEBOUNCE_KEY)
+        return {"status": "skipped", "reason": "debounced", "pending": bool(new_state.get("pending"))}
+    if invocation_kind(event) == "job":
+        # Record the trigger before the lease. A concurrent publish must not drop it.
+        write_json(
+            {
+                **new_state,
+                "pending": True,
+                "pending_since": now.isoformat(),
+            },
+            DEBOUNCE_KEY,
+        )
+
+    from lake import read_parquet_prefix, read_prices, write_json_and_gzip
     from observability import job_handler, logger
     from universe import collection_universe, user_ticker_union
 
@@ -1303,6 +1392,7 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
         apply_fund_fields(snapshot, fund_fields)
         size = write_json_and_gzip(snapshot, "serving/dashboard.json", cache_seconds=30)
         _emit_dashboard_size(size["raw_bytes"], size["gzip_bytes"])
+        write_json(debounce_after_publish(read_json(DEBOUNCE_KEY) or {}, now, datetime.now(UTC)), DEBOUNCE_KEY)
         logger.info(
             "dashboard_snapshot_published",
             extra={

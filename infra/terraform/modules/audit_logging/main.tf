@@ -48,7 +48,7 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
-# Audit bucket (CloudTrail): Object Lock + KMS + 12 months Standard, then Glacier,
+# Audit bucket (CloudTrail): Object Lock + KMS + 90 days Standard, then Glacier,
 # kept for retention_days in total (AU-9 protection, AU-11 retention).
 # AWS Config cannot deliver to a bucket with Object Lock default retention, so its
 # records go to the separate config bucket below.
@@ -109,11 +109,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "audit" {
   bucket = aws_s3_bucket.audit.id
 
   rule {
-    id     = "searchable-12-months-then-cold"
+    id     = "standard-90-days-then-glacier"
     status = "Enabled"
     filter {}
     transition {
-      days          = 365
+      days          = 90
       storage_class = "GLACIER"
     }
     expiration {
@@ -384,8 +384,10 @@ resource "aws_s3_bucket_policy" "config" {
 }
 
 # ---------------------------------------------------------------------------
-# CloudTrail: all management events, S3 data events on the lake, Lambda
-# invocations, log-file integrity validation, Insights (AU-2, AU-3, AU-6, AU-12).
+# CloudTrail: all management events, write-only S3 data events on the lake,
+# Lambda invocations, and log-file integrity validation (AU-2, AU-3, AU-6, AU-12).
+# Insights is a paid add-on and is left unset so PutInsightSelectors clears it.
+# The trail's own log bucket is never a data-event target.
 # ---------------------------------------------------------------------------
 resource "aws_cloudtrail" "this" {
   #checkov:skip=CKV2_AWS_10:Real-time detection uses free EventBridge rules on CloudTrail events instead of CloudWatch Logs delivery
@@ -406,7 +408,7 @@ resource "aws_cloudtrail" "this" {
   }
 
   advanced_event_selector {
-    name = "Data lake object access"
+    name = "Data lake object writes"
     field_selector {
       field  = "eventCategory"
       equals = ["Data"]
@@ -415,9 +417,23 @@ resource "aws_cloudtrail" "this" {
       field  = "resources.type"
       equals = ["AWS::S3::Object"]
     }
+    # readOnly=false is write-only. Lake reads are not data events.
+    field_selector {
+      field  = "readOnly"
+      equals = ["false"]
+    }
     field_selector {
       field       = "resources.ARN"
       starts_with = ["${var.lake_bucket_arn}/"]
+    }
+    # Never log data events for the CloudTrail or Config log buckets, even if the
+    # lake prefix above is later widened. Logging the trail bucket feeds itself.
+    field_selector {
+      field = "resources.ARN"
+      not_starts_with = [
+        "${aws_s3_bucket.audit.arn}/",
+        "${aws_s3_bucket.config.arn}/",
+      ]
     }
   }
 
@@ -431,14 +447,6 @@ resource "aws_cloudtrail" "this" {
       field  = "resources.type"
       equals = ["AWS::Lambda::Function"]
     }
-  }
-
-  insight_selector {
-    insight_type = "ApiCallRateInsight"
-  }
-
-  insight_selector {
-    insight_type = "ApiErrorRateInsight"
   }
 
   depends_on = [aws_s3_bucket_policy.audit]

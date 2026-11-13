@@ -542,8 +542,87 @@ def partition_articles(rows: list[dict], run_id: str) -> dict[str, list[dict]]:
     return {day: rows_for_day for day, rows_for_day in grouped.items() if rows_for_day and run_id}
 
 
-def article_key(day: str, run_id: str) -> str:
-    return f"curated/news_articles/date={day}/{run_id}.parquet"
+def article_key(day: str) -> str:
+    """One curated object per publish day. A run must not add another file."""
+    return f"curated/news_articles/date={day}/articles.parquet"
+
+
+def merge_day_articles(existing: list[dict], novel: list[dict]) -> list[dict] | None:
+    """Append url_hashes that are not already in the day's file.
+
+    None means the day object is unchanged and must not be put.
+    """
+    seen = {str(row.get("url_hash")) for row in existing if row.get("url_hash")}
+    fresh = [row for row in novel if row.get("url_hash") and str(row["url_hash"]) not in seen]
+    if not fresh:
+        return None
+    return [*existing, *fresh]
+
+
+_DAILY_FIELDS = ("ticker", "date", "articles", "mean_sentiment", "weighted_sentiment", "bullish", "bearish")
+
+
+def _daily_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    if isinstance(value, float):
+        rounded = round(value, 6)
+        if rounded == int(rounded):
+            return int(rounded)
+        return rounded
+    return value
+
+
+def normalize_daily_row(row: dict) -> tuple:
+    ticker = str(row.get("ticker") or "").upper()
+    day = str(row.get("date") or "")[:10]
+    values = [ticker, day]
+    for field in _DAILY_FIELDS[2:]:
+        values.append(_daily_number(row.get(field)))
+    return tuple(values)
+
+
+def _daily_index(rows: list[dict]) -> dict[tuple[str, str], tuple]:
+    indexed: dict[tuple[str, str], tuple] = {}
+    for row in rows:
+        norm = normalize_daily_row(row)
+        if norm[0] and len(str(norm[1])) == 10:
+            indexed[(norm[0], norm[1])] = norm
+    return indexed
+
+
+def daily_rows_unchanged(existing: list[dict], incoming: list[dict]) -> bool:
+    """True when an upsert would persist the same logical rows.
+
+    Incoming wins on (ticker, date). Dates that exist only in the stored object stay,
+    so they do not by themselves count as a change.
+    """
+    merged = _daily_index(existing)
+    before = tuple(sorted(merged.values()))
+    merged.update(_daily_index(incoming))
+    return tuple(sorted(merged.values())) == before
+
+
+def news_daily_key(ticker: str, year: int) -> str:
+    return f"curated/news_daily/ticker={ticker}/year={int(year)}/news.parquet"
+
+
+def changed_news_daily_partitions(rollup_rows: list[dict], existing_for) -> list[tuple[str, list[dict]]]:
+    """Partitions whose normalized rows differ from the object already stored."""
+    grouped: dict[tuple[str, int], list[dict]] = {}
+    for row in rollup_rows:
+        ticker = str(row.get("ticker") or "").upper()
+        day = str(row.get("date") or "")
+        if not ticker or len(day) < 4 or not day[:4].isdigit():
+            continue
+        grouped.setdefault((ticker, int(day[:4])), []).append(row)
+    writes: list[tuple[str, list[dict]]] = []
+    for ticker, year in sorted(grouped):
+        key = news_daily_key(ticker, year)
+        if daily_rows_unchanged(existing_for(key) or [], grouped[(ticker, year)]):
+            continue
+        writes.append((key, grouped[(ticker, year)]))
+    return writes
 
 
 def raw_key(source: str, day: date, run_id: str) -> str:
@@ -724,19 +803,22 @@ def handler(event, context):  # pragma: no cover - thin AWS wrapper
             write_json({"payload": payload}, raw_key(source, now.date(), run_id))
         stored = 0
         for day, rows_for_day in partition_articles(novel, run_id).items():
-            frame = pl.DataFrame(rows_for_day)
-            write_parquet(frame, article_key(day, run_id))
-            stored += frame.height
+            key = article_key(day)
+            current = read_parquet_prefix(key)
+            current_rows = current.to_dicts() if not current.is_empty() else []
+            merged = merge_day_articles(current_rows, rows_for_day)
+            if merged is None:
+                continue
+            write_parquet(pl.DataFrame(merged), key)
+            stored += len(rows_for_day)
         combined = existing.to_dicts() if not existing.is_empty() else []
-        rollup = pl.DataFrame(rollup_daily([*combined, *novel]))
-        if not rollup.is_empty():
-            for (ticker_name, year), part in (
-                rollup.with_columns(pl.col("date").str.slice(0, 4).alias("_year"))
-                .partition_by(["ticker", "_year"], as_dict=True)
-                .items()
-            ):
-                key = f"curated/news_daily/ticker={ticker_name}/year={int(year)}/news.parquet"
-                upsert_parquet(part.drop("_year"), key)
+
+        def existing_daily(key: str) -> list[dict]:
+            frame = read_parquet_prefix(key)
+            return frame.to_dicts() if not frame.is_empty() else []
+
+        for key, rows in changed_news_daily_partitions(rollup_daily([*combined, *novel]), existing_daily):
+            upsert_parquet(pl.DataFrame(rows), key)
         write_news_rollups(
             watchlist,
             [*combined, *novel],
