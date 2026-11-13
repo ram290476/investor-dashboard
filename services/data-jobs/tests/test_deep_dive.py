@@ -1443,3 +1443,93 @@ def test_new_quarter_changes_operating_income_pattern_flags():
     assert tile["approved"] is False
     assert [item["kind"] for item in tile["patterns"]] == ["inflection"]
     assert tile["patterns"][0]["forecast"] is False
+
+
+def _metric_rows(metric_id: str, values: list[tuple[str, float]]) -> list[dict]:
+    return [
+        {
+            "metric_id": metric_id,
+            "fiscal_period": period,
+            "value": value,
+            "unit": "USD",
+        }
+        for period, value in values
+    ]
+
+
+def test_alphabet_operating_income_card_shows_the_new_decline():
+    """Recorded quarters, no network. The consolidated series was not on the page."""
+    import pattern_recognition as patterns
+
+    before = [
+        ("2025Q3", 31_228_000_000.0),
+        ("2025Q4", 35_934_000_000.0),
+        ("2026Q1", 39_696_000_000.0),
+        ("2026Q2", 40_770_000_000.0),
+    ]
+    after = [*before, ("2026Q3", 40_576_000_000.0)]
+
+    def kinds(pairs: list[tuple[str, float]]) -> list[str]:
+        points = [{"period": period, "value": value, "reported": True} for period, value in pairs]
+        found = patterns.detect_patterns(points)
+        assert all(item["forecast"] is False and item["note"] == patterns.PATTERN_NOTE for item in found)
+        return [item["kind"] for item in found]
+
+    assert kinds(before) == ["growth_streak"]
+    assert kinds(after) == ["inflection", "deceleration"]
+    catalog = ir.load_catalog("GOOG")
+    assert ir.validate_catalog(catalog) == []
+    bare = dd.assemble_deep_dive(catalog, [])
+    assert "operating-income" not in [section["id"] for section in bare["sections"]]
+    one = dd.assemble_deep_dive(catalog, _income_rows([("2026Q3", 40_576_000_000.0)]))
+    one_tile = next(item for item in one["sections"] if item["id"] == "operating-income")["panels"][0]["kpis"][0]
+    assert one_tile["qoq"] is None
+    assert one_tile["yoy"] is None
+    assert one_tile["patterns"] == []
+    assert len(one_tile["sparkline"]) == 1
+    document = dd.assemble_deep_dive(catalog, _income_rows(after))
+    section = next(item for item in document["sections"] if item["id"] == "operating-income")
+    tile = section["panels"][0]["kpis"][0]
+    assert tile["value"] == 40_576_000_000.0
+    assert tile["approved"] is False
+    assert tile["approval_state"] == "proposed"
+    assert [item["kind"] for item in tile["patterns"]] == ["inflection", "deceleration"]
+    assert all(item["forecast"] is False for item in tile["patterns"])
+
+
+def test_evgo_gross_profit_card_shows_the_inflection_and_hides_when_empty():
+    """Gross profit is a second card. Operating income stays. An empty series is left out."""
+    gross = [
+        ("2025Q2", 13_908_000.0),
+        ("2025Q3", 12_560_000.0),
+        ("2025Q4", 44_986_000.0),
+        ("2026Q1", 12_957_000.0),
+        ("2026Q2", 7_342_000.0),
+        ("2026Q3", 13_608_000.0),
+    ]
+    income = [
+        ("2025Q2", -30_812_000.0),
+        ("2025Q3", -34_084_000.0),
+        ("2025Q4", -12_367_000.0),
+        ("2026Q1", -36_346_000.0),
+        ("2026Q2", -40_148_000.0),
+        ("2026Q3", -49_444_000.0),
+    ]
+    catalog = ir.load_catalog("EVGO")
+    assert ir.validate_catalog(catalog) == []
+    bare = dd.assemble_deep_dive(catalog, [])
+    assert "growth-margin" not in [section["id"] for section in bare["sections"]]
+    income_only = dd.assemble_deep_dive(catalog, _metric_rows("operating_income", income))
+    income_section = next(item for item in income_only["sections"] if item["id"] == "growth-margin")
+    assert [panel["kpis"][0]["metric_id"] for panel in income_section["panels"]] == ["operating_income"]
+    document = dd.assemble_deep_dive(
+        catalog,
+        _metric_rows("gross_profit", gross) + _metric_rows("operating_income", income),
+    )
+    section = next(item for item in document["sections"] if item["id"] == "growth-margin")
+    tiles = [panel["kpis"][0] for panel in section["panels"]]
+    assert [tile["metric_id"] for tile in tiles] == ["gross_profit", "operating_income"]
+    assert [item["kind"] for item in tiles[0]["patterns"]] == ["inflection"]
+    assert [item["kind"] for item in tiles[1]["patterns"]] == ["decline_streak"]
+    assert all(tile["approved"] is False and tile["approval_state"] == "proposed" for tile in tiles)
+    assert all(item["forecast"] is False for tile in tiles for item in tile["patterns"])
