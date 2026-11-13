@@ -21,6 +21,27 @@ def _resource(text: str, address: str) -> str:
     raise AssertionError(f"unterminated {address}")
 
 
+def _blocks(text: str, keyword: str) -> list[str]:
+    """Inner text of each `keyword { ... }` block, including nested braces."""
+    needle = f"{keyword} {{"
+    found = []
+    start = 0
+    while True:
+        index = text.find(needle, start)
+        if index < 0:
+            return found
+        brace = text.index("{", index)
+        depth = 0
+        for end, char in enumerate(text[brace:], brace):
+            depth += {"{": 1, "}": -1}.get(char, 0)
+            if depth == 0:
+                found.append(text[brace + 1 : end])
+                start = end + 1
+                break
+        else:
+            raise AssertionError(f"unterminated {keyword}")
+
+
 def test_cloudtrail_insights_are_off_and_lake_events_are_write_only():
     audit = (ROOT / "modules" / "audit_logging" / "main.tf").read_text()
     assert "insight_selector" not in audit
@@ -37,12 +58,38 @@ def test_cloudtrail_insights_are_off_and_lake_events_are_write_only():
     assert "not_starts_with" in selector
     assert "aws_s3_bucket.audit.arn" in selector
     assert "aws_s3_bucket.config.arn" in selector
+    arn_blocks = [
+        block for block in _blocks(selector, "field_selector") if re.search(r'field\s*=\s*"resources\.ARN"', block)
+    ]
+    assert len(arn_blocks) == 1
+    assert "starts_with" in arn_blocks[0] and "not_starts_with" in arn_blocks[0]
     lifecycle = _resource(audit, 'resource "aws_s3_bucket_lifecycle_configuration" "audit"')
     assert re.search(r"days\s*=\s*90\b", lifecycle)
     assert "GLACIER" in lifecycle
     assert "var.retention_days" in lifecycle
     config = _resource(audit, 'resource "aws_s3_bucket_lifecycle_configuration" "config"')
     assert re.search(r"days\s*=\s*365\b", config)
+
+
+def test_advanced_event_selectors_use_each_field_once():
+    """CloudTrail rejects two field selectors for the same field (deploy 43372765461)."""
+    audit = (ROOT / "modules" / "audit_logging" / "main.tf").read_text()
+    trail = _resource(audit, 'resource "aws_cloudtrail" "this"')
+    selectors = _blocks(trail, "advanced_event_selector")
+    assert selectors
+    for body in selectors:
+        fields = []
+        for block in _blocks(body, "field_selector"):
+            match = re.search(r'field\s*=\s*"([^"]+)"', block)
+            assert match, block
+            fields.append(match.group(1))
+        assert fields
+        assert len(fields) == len(set(fields)), fields
+    writes = next(body for body in selectors if "Data lake object writes" in body)
+    write_fields = [
+        re.search(r'field\s*=\s*"([^"]+)"', block).group(1) for block in _blocks(writes, "field_selector")
+    ]
+    assert write_fields == ["eventCategory", "resources.type", "readOnly", "resources.ARN"]
 
 
 def test_guardduty_addons_are_disabled_in_place_and_the_dollar_claim_is_gone():
