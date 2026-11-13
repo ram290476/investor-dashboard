@@ -1581,3 +1581,134 @@ test("operating income card shows the headline, QoQ, and pattern label, and hide
   assert.equal(byClass(hidden, "deep-dive-section").length, 0);
   assert.doesNotMatch(textOf(hidden), /Operating income/);
 });
+
+test("new pattern cards show the headline, QoQ, and pattern label", () => {
+  const view = renderDeepDive({
+    ticker: "abcd",
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "growth-margin",
+        title: "Gross profit and operating income",
+        archetype: "growth_margin",
+        panels: [
+          {
+            id: "growth-margin-gross_profit",
+            kind: "headline-card",
+            title: "Gross profit",
+            hide_when_empty: true,
+            kpis: [{
+              metric_id: "gross_profit",
+              label: "Gross profit",
+              unit: "USD",
+              value: 13608000,
+              period: "2026Q3",
+              qoq: 0.853,
+              yoy: 0.083,
+              sparkline: [13908, 12560, 44986, 12957, 7342, 13608],
+              approval_state: "proposed",
+              patterns: [{
+                kind: "inflection",
+                label: "Inflection to growth",
+                detail: "The change turned to growth after 2 periods of decline.",
+                detection: "pattern",
+                forecast: false,
+              }],
+            }],
+            series: [{
+              metric_id: "gross_profit",
+              points: [
+                { period: "2026Q2", value: 7342, reported: true },
+                { period: "2026Q3", value: 13608, reported: true },
+              ],
+            }],
+            table: {
+              columns: [{ id: "period", label: "Period" }, { id: "gross_profit", label: "Gross profit" }],
+              rows: [{ cells: ["2026Q3", 13608] }],
+            },
+          },
+          {
+            id: "growth-margin-operating_income",
+            kind: "headline-card",
+            title: "Operating income (loss)",
+            hide_when_empty: true,
+            kpis: [{
+              metric_id: "operating_income",
+              label: "Operating income (loss)",
+              unit: "USD",
+              value: 40576000000,
+              period: "2026Q3",
+              qoq: -0.0048,
+              yoy: 0.3,
+              sparkline: [31228, 35934, 39696, 40770, 40576],
+              approval_state: "proposed",
+              patterns: [
+                {
+                  kind: "inflection",
+                  label: "Inflection to decline",
+                  detail: "The change turned to decline after 3 periods of growth.",
+                  detection: "pattern",
+                  forecast: false,
+                },
+                {
+                  kind: "deceleration",
+                  label: "Sustained deceleration",
+                  detail: "The period change fell for 3 consecutive comparisons.",
+                  detection: "pattern",
+                  forecast: false,
+                },
+              ],
+            }],
+            series: [{
+              metric_id: "operating_income",
+              points: [
+                { period: "2026Q2", value: 40770, reported: true },
+                { period: "2026Q3", value: 40576, reported: true },
+              ],
+            }],
+            table: {
+              columns: [{ id: "period", label: "Period" }, { id: "operating_income", label: "Operating income" }],
+              rows: [{ cells: ["2026Q3", 40576] }],
+            },
+          },
+        ],
+      }],
+    },
+  }, fakeDocument(false));
+  const page = textOf(view);
+  assert.match(page, /Gross profit/);
+  assert.match(page, /Operating income/);
+  assert.match(page, /QoQ/);
+  assert.match(page, /YoY/);
+  assert.match(page, /Pattern detection/);
+  assert.match(page, /Not a forecast/);
+  assert.match(page, /Inflection to growth/);
+  assert.match(page, /Inflection to decline/);
+  assert.match(page, /Sustained deceleration/);
+  assert.match(page, /Pending review/);
+  assert.doesNotMatch(page, /Top tracked|top-track|Most notable/);
+  const details = byClass(view, "deep-dive-details");
+  assert.ok(details.length >= 1);
+  assert.ok(details.every((node) => node.tagName === "DETAILS" && node.getAttribute("open") == null));
+  const patterns = byClass(view, "deep-dive-patterns");
+  assert.equal(patterns.length, 2);
+  assert.ok(patterns.every((node) => node.parentElement.className.includes("deep-dive-tile")));
+
+  const hidden = renderDeepDive({
+    deep_dive: {
+      sections: [{
+        id: "growth-margin",
+        title: "Gross profit and operating income",
+        panels: [{
+          id: "empty-gross",
+          kind: "headline-card",
+          title: "Gross profit",
+          hide_when_empty: true,
+          kpis: [{ label: "Gross profit", value: null, empty_label: "Not yet disclosed" }],
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  assert.equal(byClass(hidden, "deep-dive-panel").length, 0);
+  assert.doesNotMatch(textOf(hidden), /Gross profit/);
+});

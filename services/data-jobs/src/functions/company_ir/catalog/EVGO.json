@@ -264,10 +264,12 @@
       },
       {
         "id": "growth-margin",
-        "title": "Operating income",
+        "title": "Gross profit and operating income",
         "archetype": "growth_margin",
         "placement": "primary",
+        "hide_when_empty": true,
         "metrics": [
+          "gross_profit",
           "operating_income"
         ],
         "source_note": "SEC companyfacts. Pending review."
