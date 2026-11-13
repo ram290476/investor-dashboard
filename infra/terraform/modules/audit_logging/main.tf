@@ -418,18 +418,18 @@ resource "aws_cloudtrail" "this" {
       equals = ["AWS::S3::Object"]
     }
     # readOnly=false is write-only. Lake reads are not data events.
+    # CloudTrail allows one selector per field. starts_with and not_starts_with
+    # for resources.ARN belong on that one selector. A second block for the same
+    # field is rejected as InvalidEventSelectorsException (deploy 43372765461).
     field_selector {
       field  = "readOnly"
       equals = ["false"]
     }
+    # The trail bucket and the Config bucket are never data-event targets.
+    # Logging the trail bucket would record the log writes themselves.
     field_selector {
       field       = "resources.ARN"
       starts_with = ["${var.lake_bucket_arn}/"]
-    }
-    # Never log data events for the CloudTrail or Config log buckets, even if the
-    # lake prefix above is later widened. Logging the trail bucket feeds itself.
-    field_selector {
-      field = "resources.ARN"
       not_starts_with = [
         "${aws_s3_bucket.audit.arn}/",
         "${aws_s3_bucket.config.arn}/",
