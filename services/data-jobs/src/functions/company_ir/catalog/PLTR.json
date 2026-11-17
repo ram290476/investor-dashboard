@@ -93,6 +93,18 @@
           "operating_income"
         ],
         "source_note": "SEC companyfacts. Pending review."
+      },
+      {
+        "id": "gross-profit-net-income",
+        "title": "Gross profit and net income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "hide_when_empty": true,
+        "metrics": [
+          "gross_profit",
+          "net_income_gaap"
+        ],
+        "source_note": "SEC companyfacts. Pending review."
       }
     ]
   }

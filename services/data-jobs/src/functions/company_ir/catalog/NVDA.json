@@ -314,6 +314,15 @@
         "placement": "primary",
         "metrics": ["operating_income_compute", "operating_income_graphics"],
         "source_note": "SEC FilingSummary segment report. Pending review."
+      },
+      {
+        "id": "consolidated-results",
+        "title": "Gross profit, operating income, and net income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "hide_when_empty": true,
+        "metrics": ["gross_profit", "operating_income", "net_income_gaap"],
+        "source_note": "SEC companyfacts. Pending review."
       }
     ]
   }

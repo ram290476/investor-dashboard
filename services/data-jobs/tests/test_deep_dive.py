@@ -1533,3 +1533,156 @@ def test_evgo_gross_profit_card_shows_the_inflection_and_hides_when_empty():
     assert [item["kind"] for item in tiles[1]["patterns"]] == ["decline_streak"]
     assert all(tile["approved"] is False and tile["approval_state"] == "proposed" for tile in tiles)
     assert all(item["forecast"] is False for tile in tiles for item in tile["patterns"])
+
+
+def _section_metric_ids(section: dict) -> list[str]:
+    found = []
+    for key in ("metrics", "detail_metrics"):
+        for item in section.get(key) or []:
+            if isinstance(item, str):
+                found.append(item)
+            elif isinstance(item, dict) and item.get("metric_id"):
+                found.append(item["metric_id"])
+    return found
+
+
+def _kinds(tile: dict) -> list[str]:
+    return [item["kind"] for item in tile["patterns"]]
+
+
+def test_catalog_collect_set_includes_every_packaged_ticker_and_stays_narrow():
+    """The directory is the list. A named event does not grow to the whole catalog."""
+    packaged = ir.packaged_catalog_tickers()
+    assert "EVGO" in packaged
+    chosen = ir.catalog_collect_tickers(["ZZZZ"])
+    assert chosen[: len(packaged)] == packaged
+    assert "ZZZZ" in chosen
+    crowded = ir.catalog_collect_tickers([f"U{index:02d}" for index in range(40)])
+    assert crowded[: len(packaged)] == packaged
+    assert len(crowded) == ir.COMPANY_IR_MAX_TICKERS
+    assert dd.collect_symbols(["TSLA"], ["NVDA"]) == ["NVDA"]
+    assert dd.collect_symbols([]) == packaged
+    handlers = Path(ir.__file__).read_text() + Path(dd.__file__).read_text()
+    assert "catalog_collect_tickers" in handlers
+
+
+def test_nov17_cards_hide_when_empty_and_keep_metrics_proposed():
+    """New companyfacts cards are catalog sections. Diluted EPS is not a card."""
+    expected = {
+        "AAPL": {"gross-profit": ["gross_profit"]},
+        "AMZN": {"net-income": ["net_income_gaap"]},
+        "GOOG": {"net-income": ["net_income_gaap"]},
+        "EVGO": {"net-income": ["net_income_gaap"]},
+        "QS": {"net-income": ["net_income_gaap"]},
+        "PLTR": {"gross-profit-net-income": ["gross_profit", "net_income_gaap"]},
+        "MRVL": {"gross-profit-net-income": ["gross_profit", "net_income_gaap"]},
+        "NVDA": {"consolidated-results": ["gross_profit", "operating_income", "net_income_gaap"]},
+    }
+    for ticker, sections in expected.items():
+        catalog = ir.load_catalog(ticker)
+        assert ir.validate_catalog(catalog) == [], ticker
+        bare = dd.assemble_deep_dive(catalog, [])
+        bare_ids = [section["id"] for section in bare["sections"]]
+        for section_id, metric_ids in sections.items():
+            assert section_id not in bare_ids
+            declared = next(section for section in catalog["deep_dive"]["sections"] if section["id"] == section_id)
+            assert _section_metric_ids(declared) == metric_ids
+            assert declared.get("hide_when_empty") is True
+        for section in catalog["deep_dive"]["sections"]:
+            assert "eps_diluted" not in _section_metric_ids(section)
+    amazon = ir.load_catalog("AMZN")
+    assert all("gross_profit" not in _section_metric_ids(section) for section in amazon["deep_dive"]["sections"])
+    spcx = [section["id"] for section in ir.load_catalog("SPCX")["deep_dive"]["sections"]]
+    assert "net-income" not in spcx and "gross-profit" not in spcx
+    one = dd.assemble_deep_dive(ir.load_catalog("AMZN"), _metric_rows("net_income_gaap", [("2026Q3", 1.0)]))
+    tile = next(item for item in one["sections"] if item["id"] == "net-income")["panels"][0]["kpis"][0]
+    assert tile["qoq"] is None and tile["yoy"] is None and tile["patterns"] == []
+    assert tile["approved"] is False and tile["approval_state"] == "proposed"
+
+
+def test_nov17_pattern_cards_use_the_recorded_quarters():
+    """Recorded quarters, no network. Flags describe those points and are not a forecast."""
+    amzn = [
+        ("2025Q3", 21_187_000_000.0),
+        ("2025Q4", 21_192_000_000.0),
+        ("2026Q1", 30_255_000_000.0),
+        ("2026Q2", 62_647_000_000.0),
+        ("2026Q3", 20_685_000_000.0),
+    ]
+    goog = [
+        ("2025Q3", 34_979_000_000.0),
+        ("2025Q4", 34_455_000_000.0),
+        ("2026Q1", 62_578_000_000.0),
+        ("2026Q2", 112_193_000_000.0),
+        ("2026Q3", 26_468_000_000.0),
+    ]
+    evgo = [
+        ("2025Q3", -12_385_000.0),
+        ("2025Q4", -4_829_000.0),
+        ("2026Q1", -16_420_000.0),
+        ("2026Q2", -20_773_000.0),
+        ("2026Q3", -20_263_000.0),
+    ]
+    qs_income = [
+        ("2025Q2", -123_586_000.0),
+        ("2025Q3", -114_993_000.0),
+        ("2025Q4", -110_450_000.0),
+        ("2026Q1", -109_179_000.0),
+        ("2026Q2", -106_127_000.0),
+        ("2026Q3", -92_424_000.0),
+    ]
+    bynd_income = [
+        ("2025Q4", -130_179_000.0),
+        ("2026Q1", -41_104_000.0),
+        ("2026Q2", -30_806_000.0),
+        ("2026Q3", -92_960_000.0),
+    ]
+    pltr_income = [
+        ("2024Q4", 11_043_000.0),
+        ("2025Q1", 176_048_000.0),
+        ("2025Q2", 269_317_000.0),
+        ("2025Q3", 393_256_000.0),
+        ("2025Q4", 575_394_000.0),
+        ("2026Q1", 753_998_000.0),
+        ("2026Q2", 912_004_000.0),
+        ("2026Q3", 1_084_840_000.0),
+    ]
+    apple_gross = [
+        ("2026Q1", 69_231_000_000.0),
+        ("2026Q2", 54_781_000_000.0),
+        ("2026Q3", 54_770_000_000.0),
+        ("2026Q4", 54_820_000_000.0),
+    ]
+
+    def tile_for(ticker: str, section_id: str, metric_id: str, rows: list[tuple[str, float]]) -> dict:
+        document = dd.assemble_deep_dive(ir.load_catalog(ticker), _metric_rows(metric_id, rows))
+        section = next(item for item in document["sections"] if item["id"] == section_id)
+        return next(panel["kpis"][0] for panel in section["panels"] if panel["kpis"][0]["metric_id"] == metric_id)
+
+    amazon = tile_for("AMZN", "net-income", "net_income_gaap", amzn)
+    alphabet = tile_for("GOOG", "net-income", "net_income_gaap", goog)
+    evgo_tile = tile_for("EVGO", "net-income", "net_income_gaap", evgo)
+    qs_tile = tile_for("QS", "growth-margin", "operating_income", qs_income)
+    bynd = tile_for("BYND", "growth-margin", "operating_income", bynd_income)
+    palantir = tile_for("PLTR", "growth-margin", "operating_income", pltr_income)
+    apple = tile_for("AAPL", "gross-profit", "gross_profit", apple_gross)
+    for tile in (amazon, alphabet, evgo_tile, qs_tile, bynd, palantir, apple):
+        assert tile["approved"] is False and tile["approval_state"] == "proposed"
+        assert all(item["forecast"] is False and "not a forecast" in item["note"].lower() for item in tile["patterns"])
+    assert "inflection" in _kinds(amazon) and amazon["value"] == 20_685_000_000.0
+    assert "inflection" in _kinds(alphabet) and alphabet["value"] == 26_468_000_000.0
+    assert _kinds(evgo_tile) == ["inflection"]
+    assert evgo_tile["patterns"][0]["label"] == "Inflection to a narrower loss"
+    assert "not a turn to profit" in evgo_tile["patterns"][0]["detail"]
+    assert "growth_streak" in _kinds(qs_tile)
+    narrower = next(item for item in qs_tile["patterns"] if item["kind"] == "growth_streak")
+    assert narrower["label"].startswith("Losses narrowed")
+    assert "not a turn to profit" in narrower["detail"]
+    qs_notes = next(
+        section for section in ir.load_catalog("QS")["deep_dive"]["sections"] if section["id"] == "growth-margin"
+    )["notes"]
+    assert any("not a profit" in note for note in qs_notes)
+    assert "inflection" in _kinds(bynd)
+    assert _kinds(palantir) == ["deceleration", "growth_streak"]
+    assert _kinds(apple) == ["inflection"]
+    assert apple["patterns"][0]["label"] == "Inflection to growth"
