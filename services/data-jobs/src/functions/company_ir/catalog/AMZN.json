@@ -358,6 +358,17 @@
           "operating_income_aws"
         ],
         "source_note": "SEC FilingSummary segment report. Pending review."
+      },
+      {
+        "id": "net-income",
+        "title": "Net income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "hide_when_empty": true,
+        "metrics": [
+          "net_income_gaap"
+        ],
+        "source_note": "SEC companyfacts. Pending review."
       }
     ]
   }

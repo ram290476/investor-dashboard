@@ -2356,3 +2356,115 @@ def test_header_label_splits_a_shared_member_and_an_unnamed_row_stays_unmapped()
     )
     assert _value(placed, "revenue_us_retail", "2026Q2") == 30_000_000
     assert _value(placed, "revenue_international_retail", "2026Q2") == 18_000_000
+
+
+def test_weekly_collect_targets_the_catalog_and_an_explicit_list_stays_narrow():
+    packaged = ir.catalog_collect_tickers([])
+
+    def fetch(url, headers):
+        return _Response(404, "")
+
+    weekly = ir.run_collect(
+        {"source": "weekly"},
+        date(2026, 11, 16),
+        fetch=fetch,
+        exists=lambda key: False,
+        put_bytes=lambda key, body, content_type: None,
+        put_json=lambda key, obj: None,
+        read_json=lambda key: None,
+        tickers=packaged,
+        pace=ir.Pace(0),
+    )
+    assert weekly["tickers"] == packaged
+    assert "EVGO" in weekly["tickers"]
+    named = ir.run_collect(
+        {"source": "weekly", "tickers": ["NVDA"]},
+        date(2026, 11, 16),
+        fetch=fetch,
+        exists=lambda key: False,
+        put_bytes=lambda key, body, content_type: None,
+        put_json=lambda key, obj: None,
+        read_json=lambda key: None,
+        tickers=packaged,
+        pace=ir.Pace(0),
+    )
+    assert named["tickers"] == ["NVDA"]
+
+
+def test_extract_and_serve_keep_a_catalog_ticker_from_collect():
+    written = {}
+    extracted = ir.run_extract(
+        {
+            "status": "ok",
+            "manifests": [{
+                "ticker": "EVGO",
+                "key": "raw/company_ir/EVGO/companyfacts/x.json",
+                "source_kind": "xbrl",
+                "source_url": "https://data.sec.gov/x",
+                "sha256": "a" * 64,
+                "fiscal_end_month": 12,
+            }],
+        },
+        read_bytes=lambda key: b'{"facts":{"us-gaap":{}}}',
+        read_json=lambda key: None,
+        write_parquet=lambda frame, key: None,
+        write_json=lambda key, obj: written.__setitem__(key, obj),
+        now=EXTRACTED,
+    )
+    assert extracted["tickers"] == ["EVGO"]
+    served = {}
+    result = ir.run_serve(
+        {"tickers": extracted["tickers"], "status": "ok", "run_status": "ok"},
+        read_json=lambda key: {},
+        write_json=lambda key, obj: served.__setitem__(key, obj),
+    )
+    assert result["tickers"] == ["EVGO"]
+    document = served["serving/stock/EVGO.json"]
+    assert document["deep_dive"]["sections"]
+    assert all(metric.get("approval_state") != "approved" for metric in document.get("metrics") or [])
+
+
+def test_restated_diluted_eps_uses_the_latest_filing_and_skips_a_derived_q4():
+    """2025-09-27 was restated from -1.44 to -37.96. A fiscal-year total is not a fourth quarter."""
+    def fact(start, end, value, filed, form="10-Q", fp="Q3", fy=2025):
+        return {
+            "start": start,
+            "end": end,
+            "val": value,
+            "form": form,
+            "filed": filed,
+            "fp": fp,
+            "fy": fy,
+            "accn": filed,
+        }
+
+    rows = _xbrl_rows(
+        {
+            "EarningsPerShareDiluted": {
+                "units": {
+                    "USD/shares": [
+                        fact("2025-06-29", "2025-09-27", -1.44, "2025-11-12"),
+                        fact("2025-06-29", "2025-09-27", -37.96, "2026-11-10"),
+                        fact("2025-01-01", "2025-09-27", -2.52, "2025-11-12"),
+                        fact("2025-01-01", "2025-12-31", -1.83, "2026-04-09", form="10-K", fp="FY", fy=2025),
+                    ]
+                }
+            }
+        },
+        "BYND",
+    )
+    assert _value(rows, "eps_diluted", "2025Q3") == pytest.approx(-37.96)
+    assert not any(row["metric_id"] == "eps_diluted" and row["fiscal_period"] == "2025Q4" for row in rows)
+    assert all(row["approved"] is False for row in rows if row["metric_id"] == "eps_diluted")
+
+
+def test_apple_gross_profit_q4_is_the_fiscal_year_minus_nine_months():
+    facts = [
+        _tagged_fact("2025-09-28", "2026-06-27", 178_782_000_000, "10q", "2026-07-31", form="10-Q", fp="Q3", fy=2026),
+        _tagged_fact("2025-09-28", "2026-09-26", 233_602_000_000, "10k", "2026-11-03", form="10-K", fp="FY", fy=2026),
+    ]
+    rows = _xbrl_rows({"GrossProfit": {"units": {"USD": facts}}}, "AAPL")
+    quarter = next(row for row in rows if row["metric_id"] == "gross_profit" and row["fiscal_period"] == "2026Q4")
+    assert quarter["value"] == pytest.approx(54_820_000_000)
+    assert quarter.get("derivation") != "stale_ytd"
+    assert quarter["approved"] is False

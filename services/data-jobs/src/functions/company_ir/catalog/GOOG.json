@@ -229,6 +229,15 @@
         "hide_when_empty": true,
         "metrics": ["operating_income"],
         "source_note": "SEC companyfacts. Pending review."
+      },
+      {
+        "id": "net-income",
+        "title": "Net income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "hide_when_empty": true,
+        "metrics": ["net_income_gaap"],
+        "source_note": "SEC companyfacts. Pending review."
       }
     ]
   }

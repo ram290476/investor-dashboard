@@ -564,8 +564,38 @@ def _tile(metric_id: str, series: dict | None, spec: dict) -> dict:
         "empty_label": "" if latest is not None else EMPTY_LABELS.get(disclosure, EMPTY_LABELS["not_disclosed"]),
         "source_kind": (series or {}).get("source_kind"),
         "source_url": (series or {}).get("source_url"),
-        "patterns": patterns.detect_patterns(reported),
+        "patterns": _loss_making_patterns(
+            patterns.detect_patterns(reported),
+            None if latest is None else latest.get("value"),
+        ),
     }
+
+
+def _loss_making_patterns(flags: list[dict], latest) -> list[dict]:
+    """A rise while the result is still negative is a narrower loss, not a profit.
+
+    The rule is the sign of the latest value. It does not name a ticker.
+    """
+    if isinstance(latest, bool) or not isinstance(latest, (int, float)) or latest >= 0:
+        return flags
+    clarified = []
+    for flag in flags:
+        if not isinstance(flag, dict):
+            clarified.append(flag)
+            continue
+        item = dict(flag)
+        kind = item.get("kind")
+        label = str(item.get("label") or "")
+        detail = str(item.get("detail") or "").rstrip()
+        note = " The result is still a loss. This is a narrower loss, not a turn to profit."
+        if kind == "growth_streak":
+            item["label"] = label.replace("Growth streak", "Losses narrowed", 1)
+            item["detail"] = f"{detail}{note}"
+        elif kind == "inflection" and "growth" in label.lower():
+            item["label"] = "Inflection to a narrower loss"
+            item["detail"] = f"{detail}{note}"
+        clarified.append(item)
+    return clarified
 
 
 def _chart_series(spec: dict, found: dict | None, color_index: int) -> dict:
@@ -601,7 +631,10 @@ def _chart_series(spec: dict, found: dict | None, color_index: int) -> dict:
             EMPTY_LABELS["not_disclosed"],
         ),
         "source_kind": (found or {}).get("source_kind"),
-        "patterns": patterns.detect_patterns(reported),
+        "patterns": _loss_making_patterns(
+            patterns.detect_patterns(reported),
+            None if not reported else reported[-1].get("value"),
+        ),
     }
 
 
@@ -1837,6 +1870,20 @@ def read_optional(read_json, key: str) -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def collect_symbols(user_tickers: list[str] | None = None, explicit: list[str] | None = None) -> list[str]:
+    """Catalog tickers first, unless the event names an explicit list."""
+    if explicit:
+        chosen = []
+        for item in explicit:
+            symbol = str(item or "").upper().strip()
+            if symbol and symbol not in chosen:
+                chosen.append(symbol)
+        return chosen
+    from company_ir import catalog_collect_tickers
+
+    return catalog_collect_tickers(list(user_tickers or []))
+
+
 def handler(event, context):
     import os
 
@@ -1865,10 +1912,9 @@ def handler(event, context):
             return read_optional(lambda item: lake_read_json(item, bucket), key)
 
         universe = watchlist_universe(user_ticker_union())
-        symbols = [str(item).upper() for item in (universe.get("tickers") or []) if item]
         flat = unwrap_job_event(event)
-        if isinstance(flat.get("tickers"), list) and flat.get("tickers"):
-            symbols = [str(item).upper() for item in flat["tickers"]]
+        explicit = flat.get("tickers") if isinstance(flat.get("tickers"), list) and flat.get("tickers") else None
+        symbols = collect_symbols(list(universe.get("tickers") or []), explicit)
         with get_client(headers={"User-Agent": "InvestorDashboardDeepDive"}) as http:
             return run_collect(
                 flat,

@@ -145,10 +145,12 @@ GAAP_XBRL_TAGS = {
         "tags": ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"],
         "mode": "ytd",
     },
+    # Per-share amounts are not differenced into a year-end quarter. A 10-K often
+    # files only the full year, and the fiscal year minus nine months is not an EPS quarter.
     "eps_diluted": {
         "kind": "duration",
         "tags": ["EarningsPerShareDiluted"],
-        "mode": "income",
+        "mode": "quarter",
         "unit": "USD/shares",
     },
     "deferred_revenue": {
@@ -3784,6 +3786,37 @@ def company_ir_tickers(tickers: list[str], cap: int = COMPANY_IR_MAX_TICKERS) ->
     return chosen
 
 
+def packaged_catalog_tickers() -> list[str]:
+    """Tickers that have a packaged catalog file. The directory is the list."""
+    root = Path(__file__).resolve().parent / "catalog"
+    found: list[str] = []
+    if not root.is_dir():
+        return found
+    for path in sorted(root.glob("*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        symbol = str(document.get("ticker") or path.stem).upper().strip()
+        if symbol and symbol not in found:
+            found.append(symbol)
+    return found
+
+
+def catalog_collect_tickers(user_tickers: list[str] | None = None, cap: int = COMPANY_IR_MAX_TICKERS) -> list[str]:
+    """Packaged catalog tickers first, then any extra watchlist names, capped.
+
+    A company with a catalog file stays in the collect set when no user has it
+    on a watchlist. Names are read from the catalog directory.
+    """
+    ordered: list[str] = []
+    for ticker in [*packaged_catalog_tickers(), *(user_tickers or [])]:
+        symbol = str(ticker or "").upper().strip()
+        if symbol and symbol not in ordered:
+            ordered.append(symbol)
+    return company_ir_tickers(ordered, cap=cap)
+
+
 def unwrap_job_event(event: dict | None) -> dict:
     """Accept a bare handler payload or an EventBridge envelope."""
     if not isinstance(event, dict):
@@ -4515,6 +4548,8 @@ def collect_handler(event, context):
             return http.get(url, headers=headers)
 
         universe = watchlist_universe(user_ticker_union())
+        # Catalog files lead. The user watchlist fills the remaining slots under the cap.
+        collect_tickers = catalog_collect_tickers(list(universe["tickers"] or []))
         remaining = getattr(context, "get_remaining_time_in_millis", None)
         budget_s = None
         if callable(remaining):
@@ -4530,7 +4565,7 @@ def collect_handler(event, context):
                 put_bytes=put_bytes,
                 put_json=put_json,
                 read_json=lambda key: read_json(key, bucket),
-                tickers=list(universe["tickers"] or []),
+                tickers=collect_tickers,
                 pace=Pace(),
                 budget_s=budget_s,
             )

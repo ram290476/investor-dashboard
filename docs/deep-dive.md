@@ -21,7 +21,7 @@ A second catalog, `catalog/SPCX.json`, uses the same block for the SpaceX page (
 | Rarely disclosed figures a person enters | `manual/deep_dive/{TICKER}.json`, written by `scripts/add_deep_dive_entry.py` | Always `proposed`. The script ignores any approval flag. |
 | AV permits held, and permitted vehicles when a public page states the count | Catalog `av_regulator` feeds. No API key. See the source survey below. | Always `proposed`. A failed fetch is not stored as zero. |
 
-`deep-dive-collect` runs Monday 08:00 America/New_York and when a ticker is added. It writes `curated/deep_dive/ticker={TICKER}/observations.json` and then the company-IR serve job republishes `serving/stock/{TICKER}.json`. The job is created by the GitHub deploy workflow from `infra/terraform/variables.tf`. Do not apply Terraform locally.
+`deep-dive-collect` runs Monday 08:00 America/New_York and when a ticker is added. It writes `curated/deep_dive/ticker={TICKER}/observations.json` and then the company-IR serve job republishes `serving/stock/{TICKER}.json`. Company-IR collect and deep-dive collect take every packaged catalog ticker first, then the user watchlist, capped at 25. The names come from the catalog files. Extract and serve follow that collect set. An event that names tickers stays on that list. The job is created by the GitHub deploy workflow from `infra/terraform/variables.tf`. Do not apply Terraform locally.
 
 ## Regulator records (#252)
 

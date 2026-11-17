@@ -616,7 +616,11 @@ test("deep dive section chips abbreviate catalog titles and keep the full label 
     "Energy projects & news": "Energy news",
     "FSD by region": "FSD regions",
     "Government obligations": "Gov. obligations",
+    "Gross profit": "GP",
+    "Gross profit and net income": "GP & net income",
     "Gross profit and operating income": "GP & op. income",
+    "Gross profit, operating income, and net income": "GP, op. income, NI",
+    "Net income": "Net income",
     "Launches": "Launches",
     "Manufacturing footprint": "Mfg. footprint",
     "Net sales by product": "Sales by product",
@@ -1711,4 +1715,86 @@ test("new pattern cards show the headline, QoQ, and pattern label", () => {
   }, fakeDocument(false));
   assert.equal(byClass(hidden, "deep-dive-panel").length, 0);
   assert.doesNotMatch(textOf(hidden), /Gross profit/);
+});
+
+test("net income card shows a narrower loss and hides when empty", () => {
+  const view = renderDeepDive({
+    ticker: "qs",
+    deep_dive: {
+      title: "Deep dive",
+      sections: [{
+        id: "net-income",
+        title: "Net income",
+        archetype: "growth_margin",
+        panels: [{
+          id: "net-income-net_income_gaap",
+          kind: "headline-card",
+          title: "Net income (loss)",
+          hide_when_empty: true,
+          source_note: "SEC companyfacts. Pending review.",
+          notes: ["An increase while net income is still negative is a narrower loss, not a turn to profit."],
+          kpis: [{
+            metric_id: "net_income_gaap",
+            label: "Net income (loss)",
+            unit: "USD",
+            value: -84477000,
+            period: "2026Q3",
+            qoq: 0.14,
+            yoy: 0.2,
+            sparkline: [-114423000, -105824000, -100799000, -98240000, -84477000],
+            approval_state: "proposed",
+            patterns: [{
+              kind: "inflection",
+              label: "Inflection to a narrower loss",
+              detail: "The result is still a loss. This is a narrower loss, not a turn to profit.",
+              detection: "pattern",
+              forecast: false,
+              note: "Pattern detection. Not a forecast.",
+            }],
+          }],
+          series: [{
+            metric_id: "net_income_gaap",
+            points: [
+              { period: "2026Q2", value: -98240000, reported: true },
+              { period: "2026Q3", value: -84477000, reported: true },
+            ],
+          }],
+          table: {
+            columns: [{ id: "period", label: "Period" }, { id: "net_income_gaap", label: "Net income" }],
+            rows: [{ cells: ["2026Q3", -84477000] }],
+          },
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  const page = textOf(view);
+  assert.match(page, /Net income/);
+  assert.match(page, /QoQ/);
+  assert.match(page, /YoY/);
+  assert.match(page, /Pattern detection/);
+  assert.match(page, /Not a forecast/);
+  assert.match(page, /Inflection to a narrower loss/);
+  assert.match(page, /not a turn to profit/);
+  assert.match(page, /Pending review/);
+  assert.doesNotMatch(page, /Diluted EPS/);
+  const details = byClass(view, "deep-dive-details")[0];
+  assert.equal(details.tagName, "DETAILS");
+  assert.equal(details.getAttribute("open"), undefined);
+
+  const hidden = renderDeepDive({
+    deep_dive: {
+      sections: [{
+        id: "net-income",
+        title: "Net income",
+        panels: [{
+          id: "empty",
+          kind: "headline-card",
+          title: "Net income (loss)",
+          hide_when_empty: true,
+          kpis: [{ label: "Net income (loss)", value: null }],
+        }],
+      }],
+    },
+  }, fakeDocument(false));
+  assert.equal(byClass(hidden, "deep-dive-panel").length, 0);
 });

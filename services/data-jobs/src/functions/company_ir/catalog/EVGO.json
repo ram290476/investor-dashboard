@@ -273,6 +273,20 @@
           "operating_income"
         ],
         "source_note": "SEC companyfacts. Pending review."
+      },
+      {
+        "id": "net-income",
+        "title": "Net income",
+        "archetype": "growth_margin",
+        "placement": "primary",
+        "hide_when_empty": true,
+        "metrics": [
+          "net_income_gaap"
+        ],
+        "source_note": "SEC companyfacts. Pending review.",
+        "notes": [
+          "An increase while net income is still negative is a narrower loss, not a turn to profit."
+        ]
       }
     ]
   }
